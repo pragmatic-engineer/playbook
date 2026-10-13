@@ -26,7 +26,9 @@ set -euo pipefail
 
 PLUGIN_REPO="pragmatic-engineer/playbook"
 MARKETPLACE="pragmatic-engineer/marketplace"
+MARKETPLACE_NAME="pragmatic-engineer"
 PLUGIN="playbook@pragmatic-engineer"
+PLUGIN_HOOKS="playbook-hooks@pragmatic-engineer"
 # Lowest claude CLI version that can install from the marketplace: the plugin
 # is served as a trimmed archive source, which older clients cannot fetch.
 CLAUDE_MIN_VERSION="2.1.224"
@@ -45,6 +47,8 @@ OPT_SYSTEM_PROMPT=0
 ASSUME_YES=0
 BINARY_ONLY=0
 PLUGIN_SKIPPED_FOR_VERSION=0
+PLUGIN_INSTALLED=0
+SKILLS_ONLY=0
 
 # Component dirs the plugin owns: never copied into ~/.claude directly, so the
 # plugin stays the single source and skills/commands/agents don't load twice.
@@ -130,6 +134,76 @@ trust_playbook_config_dir() {
     return 0
 }
 
+# Plugins: deliver the toolkit as two Claude Code plugins from one marketplace.
+# `playbook` holds the skills, commands and agents and has no hooks, so it costs
+# nothing on its own. `playbook-hooks` holds the worktree hooks and the
+# installer shim. Requires the claude CLI. The always-on safety guards are
+# wired by the seeded settings.json, so they do not depend on either plugin.
+run_plugin_step() {
+    if [ "$SKIP_PLUGIN" -eq 0 ]; then
+        if command -v claude >/dev/null 2>&1; then
+            # claude --version prints e.g. "2.1.269 (Claude Code)"; the first
+            # field of the FIRST line is the dotted version (NR==1 guards against
+            # a CLI that writes more than one line to stdout). A version claude
+            # doesn't understand (a dev build, a wrapper script) still parses to
+            # a non-empty string, which then fails the minimum check below via
+            # awk's numeric coercion (all-zero fields), the same skip path as
+            # too-old. A CLI that exits non-zero on --version (a broken shim, one
+            # that needs auth to answer it) leaves CLAUDE_VERSION genuinely empty
+            # instead, handled as its own case below rather than silently falling
+            # through to "proceed as if fine": not knowing the version at all is
+            # not evidence it meets the minimum. The `|| CLAUDE_VERSION=""` part
+            # matters under set -euo pipefail: without it, that same non-zero
+            # exit kills the whole installer right here, silently, since
+            # pipefail propagates the failure through the awk into the
+            # assignment itself, before any of this fallback logic ever runs.
+            CLAUDE_VERSION="$(claude --version 2>/dev/null | awk 'NR==1{print $1}')" || CLAUDE_VERSION=""
+            if [ -z "$CLAUDE_VERSION" ]; then
+                PLUGIN_SKIPPED_FOR_VERSION=1
+                warn "could not determine the installed claude CLI's version; skipping the plugin rather than assuming it meets the minimum ($CLAUDE_MIN_VERSION)."
+                warn "Upgrade or repair the claude CLI, then run: claude plugin marketplace add $MARKETPLACE && $PLUGIN_INSTALL_CMD"
+                warn "npm: npm install -g @anthropic-ai/claude-code@latest"
+                warn "Homebrew: the claude-code cask tracks a slower channel than npm; switch with: brew uninstall --cask claude-code && brew install --cask claude-code@latest"
+            elif ! version_ge "$CLAUDE_VERSION" "$CLAUDE_MIN_VERSION"; then
+                PLUGIN_SKIPPED_FOR_VERSION=1
+                warn "claude CLI $CLAUDE_VERSION is older than the minimum this plugin assumes ($CLAUDE_MIN_VERSION); skipping the plugin."
+                warn "Upgrade, then run: claude plugin marketplace add $MARKETPLACE && $PLUGIN_INSTALL_CMD"
+                warn "npm: npm install -g @anthropic-ai/claude-code@latest"
+                warn "Homebrew: the claude-code cask tracks a slower channel than npm; switch with: brew uninstall --cask claude-code && brew install --cask claude-code@latest"
+            elif ask "Add the playbook marketplace and install the plugins?" Y; then
+                log "Adding marketplace and installing the plugins"
+                # </dev/null keeps claude off the script's stdin under `curl | bash`.
+                claude plugin marketplace add "$MARKETPLACE" </dev/null \
+                    || warn "marketplace add failed; later: claude plugin marketplace add $MARKETPLACE"
+                # A marketplace added before the plugins were split may not list
+                # playbook-hooks yet. Best effort, never fatal.
+                claude plugin marketplace update "$MARKETPLACE_NAME" </dev/null >/dev/null 2>&1 || true
+                for _p in $PLUGIN_LIST; do
+                    if claude plugin install "$_p" </dev/null; then
+                        PLUGIN_INSTALLED=1
+                    else
+                        warn "plugin install failed; later: claude plugin install $_p"
+                    fi
+                    claude plugin enable "$_p" </dev/null >/dev/null 2>&1 || true
+                done
+                # Retire component dirs left by an older direct install so the plugin
+                # is the single source (no duplicate skills/commands/agents).
+                for _cd in $PLUGIN_DIRS; do
+                    if [ "$SKILLS_ONLY" -eq 0 ] && [ -e "$CLAUDE_HOME/$_cd" ]; then
+                        mkdir -p "$BACKUP"
+                        cp -R "${CLAUDE_HOME:?}/$_cd" "$BACKUP/" && rm -rf "${CLAUDE_HOME:?}/$_cd"
+                        backed_up=1
+                        log "Moved legacy $_cd/ into the backup (now provided by the plugin)"
+                    fi
+                done
+            fi
+        else
+            warn "claude CLI not found; skipping the plugin (the toolkit ships as a plugin)."
+            warn "Install it, then run: claude plugin marketplace add $MARKETPLACE && $PLUGIN_INSTALL_CMD"
+        fi
+    fi
+}
+
 print_help() {
     cat <<'EOF'
 Install pragmatic-engineer/playbook. Plugin based, interactive by default.
@@ -140,9 +214,9 @@ Usage:
   ./install.sh [flags]
 
 What it does:
-  - installs the toolkit as a Claude Code plugin (adds the marketplace, installs
-    and enables playbook), which provides the skills, commands, agents,
-    and functional hooks;
+  - installs the toolkit as two Claude Code plugins (adds the marketplace, installs
+    and enables playbook, which provides the skills, commands and agents, and
+    playbook-hooks, which provides the worktree hooks);
   - installs the always-on safety guards (rm, background-await, dash guards) and
     the other local configs (settings.json, statusline, deps);
   - optionally installs the shell launchers (a `playbook` shell function that follows `playbook cc` into a worktree) and the custom system prompt.
@@ -160,6 +234,8 @@ Flags:
   --aliases          add the `playbook` cd wrapper to your rc file without prompting
   --system-prompt    install the custom system prompt without prompting (implies --aliases)
   --binary-only      binary, PATH, guards and settings only: no plugin, no launcher, no system prompt, no prompts
+  --skills-only      install only the playbook plugin (skills, commands, agents): no binary,
+                     no hooks plugin, no changes to settings.json
   --no-setup         skip the plugin only: guards, settings, and shell wiring still run
   --ref <ref>        same as PLAYBOOK_REF
   -h, --help         show this help
@@ -176,6 +252,7 @@ while [ $# -gt 0 ]; do
         --system-prompt) OPT_SYSTEM_PROMPT=1; OPT_ALIASES=1 ;;
         --no-setup)      SKIP_PLUGIN=1 ;;
         --binary-only)   BINARY_ONLY=1; SKIP_PLUGIN=1 ;;
+        --skills-only)   SKILLS_ONLY=1 ;;
         --ref)           shift; REF="${1:-}" ;;
         --ref=*)         REF="${1#--ref=}" ;;
         -h|--help)       print_help; exit 0 ;;
@@ -185,6 +262,25 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$CLAUDE_HOME" ] || die "CLAUDE_HOME is empty"
+
+# The skills plugin alone, or both plugins.
+if [ "$SKILLS_ONLY" -eq 1 ]; then
+    [ "$BINARY_ONLY" -eq 0 ] || die "--skills-only and --binary-only cannot be combined"
+    PLUGIN_LIST="$PLUGIN"
+    PLUGIN_INSTALL_CMD="claude plugin install $PLUGIN"
+else
+    PLUGIN_LIST="$PLUGIN $PLUGIN_HOOKS"
+    PLUGIN_INSTALL_CMD="claude plugin install $PLUGIN && claude plugin install $PLUGIN_HOOKS"
+fi
+if [ "$SKILLS_ONLY" -eq 1 ]; then
+    [ "$SKIP_PLUGIN" -eq 0 ] || die "--skills-only cannot be combined with --skip-plugin or --no-setup"
+    run_plugin_step
+    if [ "$PLUGIN_INSTALLED" -eq 1 ]; then
+        log "Done. Installed the skills plugin only: no binary, no hooks, no settings.json changes."
+        printf 'Some commands call the playbook binary. Add it later with: curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash\n'
+    fi
+    exit 0
+fi
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v tar  >/dev/null 2>&1 || die "tar is required"
 # shasum ships on macOS, sha256sum on Linux (including a bare debian:stable-slim
@@ -560,6 +656,12 @@ for rel in $CONFIG_FILES; do
     cp "$src" "$dest"
 done
 
+# --- plugins ---------------------------------------------------------------
+
+# Before `playbook init`, so init sees the plugins this run installs and does
+# not tell the user to add by hand what the installer just added.
+run_plugin_step
+
 # Wire the always-on guards, seed/merge settings.json, and install the shell
 # launcher and statusline, via `playbook init`. IMPORTANT: this runs
 # unconditionally -- even with --no-setup. --no-setup means "no plugin, no
@@ -634,67 +736,6 @@ CLAUDE_PLUGIN_ROOT="$SRC" "$PLAYBOOK_BIN_DIR/playbook" init $_INIT_ARGS || \
 
 trust_playbook_config_dir
 
-# --- setup -----------------------------------------------------------------
-
-# Plugin: deliver the toolkit (skills, commands, agents, functional hooks) as a
-# Claude Code plugin. Requires the claude CLI. The always-on safety guards were
-# just installed into ~/.claude/hooks and are wired by the seeded settings.json,
-# so they do not depend on the plugin.
-if [ "$SKIP_PLUGIN" -eq 0 ]; then
-    if command -v claude >/dev/null 2>&1; then
-        # claude --version prints e.g. "2.1.269 (Claude Code)"; the first
-        # field of the FIRST line is the dotted version (NR==1 guards against
-        # a CLI that writes more than one line to stdout). A version claude
-        # doesn't understand (a dev build, a wrapper script) still parses to
-        # a non-empty string, which then fails the minimum check below via
-        # awk's numeric coercion (all-zero fields), the same skip path as
-        # too-old. A CLI that exits non-zero on --version (a broken shim, one
-        # that needs auth to answer it) leaves CLAUDE_VERSION genuinely empty
-        # instead, handled as its own case below rather than silently falling
-        # through to "proceed as if fine": not knowing the version at all is
-        # not evidence it meets the minimum. The `|| CLAUDE_VERSION=""` part
-        # matters under set -euo pipefail: without it, that same non-zero
-        # exit kills the whole installer right here, silently, since
-        # pipefail propagates the failure through the awk into the
-        # assignment itself, before any of this fallback logic ever runs.
-        CLAUDE_VERSION="$(claude --version 2>/dev/null | awk 'NR==1{print $1}')" || CLAUDE_VERSION=""
-        if [ -z "$CLAUDE_VERSION" ]; then
-            PLUGIN_SKIPPED_FOR_VERSION=1
-            warn "could not determine the installed claude CLI's version; skipping the plugin rather than assuming it meets the minimum ($CLAUDE_MIN_VERSION)."
-            warn "Upgrade or repair the claude CLI, then run: claude plugin marketplace add $MARKETPLACE && claude plugin install $PLUGIN"
-            warn "npm: npm install -g @anthropic-ai/claude-code@latest"
-            warn "Homebrew: the claude-code cask tracks a slower channel than npm; switch with: brew uninstall --cask claude-code && brew install --cask claude-code@latest"
-        elif ! version_ge "$CLAUDE_VERSION" "$CLAUDE_MIN_VERSION"; then
-            PLUGIN_SKIPPED_FOR_VERSION=1
-            warn "claude CLI $CLAUDE_VERSION is older than the minimum this plugin assumes ($CLAUDE_MIN_VERSION); skipping the plugin."
-            warn "Upgrade, then run: claude plugin marketplace add $MARKETPLACE && claude plugin install $PLUGIN"
-            warn "npm: npm install -g @anthropic-ai/claude-code@latest"
-            warn "Homebrew: the claude-code cask tracks a slower channel than npm; switch with: brew uninstall --cask claude-code && brew install --cask claude-code@latest"
-        elif ask "Add the playbook marketplace and install the plugin?" Y; then
-            log "Adding marketplace and installing the plugin"
-            # </dev/null keeps claude off the script's stdin under `curl | bash`.
-            claude plugin marketplace add "$MARKETPLACE" </dev/null \
-                || warn "marketplace add failed; later: claude plugin marketplace add $MARKETPLACE"
-            claude plugin install "$PLUGIN" </dev/null \
-                || warn "plugin install failed; later: claude plugin install $PLUGIN"
-            claude plugin enable "$PLUGIN" </dev/null >/dev/null 2>&1 || true
-            # Retire component dirs left by an older direct install so the plugin
-            # is the single source (no duplicate skills/commands/agents).
-            for _cd in $PLUGIN_DIRS; do
-                if [ -e "$CLAUDE_HOME/$_cd" ]; then
-                    mkdir -p "$BACKUP"
-                    cp -R "${CLAUDE_HOME:?}/$_cd" "$BACKUP/" && rm -rf "${CLAUDE_HOME:?}/$_cd"
-                    backed_up=1
-                    log "Moved legacy $_cd/ into the backup (now provided by the plugin)"
-                fi
-            done
-        fi
-    else
-        warn "claude CLI not found; skipping the plugin (the toolkit ships as a plugin)."
-        warn "Install it, then run: claude plugin marketplace add $MARKETPLACE && claude plugin install $PLUGIN"
-    fi
-fi
-
 # --- summary ---------------------------------------------------------------
 
 # Re-running install is the documented upgrade path and each run past the first
@@ -712,9 +753,9 @@ printf 'Installed to: %s\n' "$CLAUDE_HOME"
 printf '\nNext steps:\n'
 if ! command -v claude >/dev/null 2>&1; then
     printf '  - Install the claude CLI: npm i -g @anthropic-ai/claude-code (or the native installer)\n'
-    printf '  - Then: claude plugin marketplace add %s && claude plugin install %s\n' "$MARKETPLACE" "$PLUGIN"
+    printf '  - Then: claude plugin marketplace add %s && %s\n' "$MARKETPLACE" "$PLUGIN_INSTALL_CMD"
 elif [ "$PLUGIN_SKIPPED_FOR_VERSION" -eq 1 ]; then
-    printf '  - Plugin not installed: the claude CLI is older than this toolkit assumes. Upgrade, then: claude plugin marketplace add %s && claude plugin install %s\n' "$MARKETPLACE" "$PLUGIN"
+    printf '  - Plugin not installed: the claude CLI is older than this toolkit assumes. Upgrade, then: claude plugin marketplace add %s && %s\n' "$MARKETPLACE" "$PLUGIN_INSTALL_CMD"
 else
     printf '  - The toolkit is a plugin: manage it with `claude plugin list` / `enable` / `disable`.\n'
 fi

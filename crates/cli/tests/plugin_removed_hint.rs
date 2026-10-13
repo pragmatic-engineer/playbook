@@ -142,3 +142,69 @@ fn init_records_an_installed_plugin_and_never_edits_claude_plugin_files() {
         before
     );
 }
+
+const HOOKS_HINT: &str = "claude plugin install playbook-hooks@pragmatic-engineer";
+const BOTH: &str = r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"scope":"user"}],"playbook-hooks@pragmatic-engineer":[{"scope":"user"}]}}"#;
+
+fn init_report(home: &Path) -> String {
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["init", "--yes", "--no-path"])
+        .env("HOME", home)
+        .env("SHELL", "/bin/zsh")
+        .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
+        .current_dir(home)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn session_start_names_the_missing_hooks_plugin_once() {
+    let home = scratch_home("ss-hooks-missing");
+    set_installed(&home, LISTED);
+    let shown = context(&session_start(&home));
+    assert_eq!(shown.matches(HOOKS_HINT).count(), 1, "{shown}");
+}
+
+#[test]
+fn session_start_stays_quiet_when_both_plugins_are_installed() {
+    let home = scratch_home("ss-hooks-present");
+    set_installed(&home, BOTH);
+    assert!(!context(&session_start(&home)).contains("playbook-hooks"));
+}
+
+#[test]
+fn the_config_key_hides_the_hooks_plugin_hint_at_session_start() {
+    let home = scratch_home("ss-hooks-off");
+    set_installed(&home, LISTED);
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["config", "set", "--global", "hints.pluginRemoved", "false"])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(!context(&session_start(&home)).contains("playbook-hooks"));
+}
+
+#[test]
+fn init_names_the_missing_hooks_plugin_and_changes_no_claude_plugin_file() {
+    let home = scratch_home("init-hooks-missing");
+    set_installed(&home, LISTED);
+    let list = home.join(".claude/plugins/installed_plugins.json");
+    let before = fs::read_to_string(&list).unwrap();
+
+    let report = init_report(&home);
+
+    assert!(report.contains(HOOKS_HINT), "{report}");
+    assert_eq!(fs::read_to_string(&list).unwrap(), before);
+}
+
+#[test]
+fn init_says_nothing_about_the_hooks_plugin_when_it_is_installed_or_nothing_is() {
+    for (tag, body) in [("init-both", BOTH), ("init-none", EMPTY)] {
+        let home = scratch_home(tag);
+        set_installed(&home, body);
+        assert!(!init_report(&home).contains("playbook-hooks"), "{tag}");
+    }
+}

@@ -119,11 +119,14 @@ pub fn run(opts: &Options) -> Report {
 /// Code's own plugin state. Only the ones that still apply are listed.
 fn manual_steps(home: &Path, report: &mut Report) {
     use crate::common::plugin_state::{
-        installed_in, marketplace_known_in, MARKETPLACE, PLUGIN_KEY,
+        installed_in, listed_in, marketplace_known_in, HOOKS_PLUGIN_KEY, MARKETPLACE, PLUGIN_KEY,
     };
     let mut steps = Vec::new();
     if installed_in(home) == Some(true) {
         steps.push(format!("claude plugin uninstall {PLUGIN_KEY}"));
+    }
+    if listed_in(home, HOOKS_PLUGIN_KEY) == Some(true) {
+        steps.push(format!("claude plugin uninstall {HOOKS_PLUGIN_KEY}"));
     }
     if marketplace_known_in(home) {
         steps.push(format!("claude plugin marketplace remove {MARKETPLACE}"));

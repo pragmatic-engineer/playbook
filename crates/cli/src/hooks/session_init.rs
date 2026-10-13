@@ -110,7 +110,14 @@ pub fn run(payload: &Payload) {
         append_auto_learn_nudge(&mut extra_context, &repo_root);
         // Not on compaction, which is the same session again.
         if payload.field(".source") != "compact" {
-            if let Some(hint) = crate::common::plugin_state::removed_hint(&home_dir()) {
+            let home = home_dir();
+            for hint in [
+                crate::common::plugin_state::removed_hint(&home),
+                crate::common::plugin_state::hooks_missing_hint(&home),
+            ]
+            .into_iter()
+            .flatten()
+            {
                 push_context(&mut extra_context, hint);
             }
         }
