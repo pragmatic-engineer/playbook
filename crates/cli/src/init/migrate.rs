@@ -256,16 +256,16 @@ fn statusline_edited(ctx: &Ctx) -> Outcome {
 }
 
 /// `(key, path)` for every shipped skill file, keyed by plugin version dir.
-fn skill_files(self_root: &Path) -> Vec<(String, PathBuf)> {
+fn skill_files(skills_root: &Path) -> Vec<(String, PathBuf)> {
     // A dev checkout is edited on purpose; only cached plugin copies are tracked.
-    if self_root.join(".git").exists() {
+    if skills_root.join(".git").exists() {
         return Vec::new();
     }
-    let version = self_root
+    let version = skills_root
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let Ok(entries) = fs::read_dir(self_root.join("skills")) else {
+    let Ok(entries) = fs::read_dir(skills_root.join("skills")) else {
         return Vec::new();
     };
     let mut files: Vec<(String, PathBuf)> = entries
@@ -420,8 +420,8 @@ fn record_many(home: &Path, files: &[(String, PathBuf)], drop: Option<&dyn Fn(&s
 }
 
 /// Records shipped skill files, never an edited one, and drops other versions' records.
-pub fn record_skills(home: &Path, self_root: &Path) {
-    let files = skill_files(self_root);
+pub fn record_skills(home: &Path, skills_root: &Path) {
+    let files = skill_files(skills_root);
     let Some(version_prefix) = files
         .first()
         .and_then(|(key, _)| key.rsplit_once(':'))

@@ -268,12 +268,11 @@ jobs:
             dist/SHA256SUMS
 
   # Builds the two trimmed plugin archives the marketplace points at (the
-  # `archive` source, Claude Code 2.1.224+), so a marketplace install holds
-  # plugin files only, not src/, tests/ or docs/. `playbook` holds the skills,
+  # `archive` source, Claude Code 2.1.224+). `playbook` holds the skills,
   # commands and agents and has no hooks. `playbook-hooks` holds the hooks, the
-  # bin/ shim and the installer. Each file list is an explicit allowlist that
+  # bin/ shim and the installer. Each file list is an allowlist that
   # tests/plugin_archive.rs guards, and both zips are cut by the same script
-  # that test runs. Neither name can match the checksums job's
+  # that test runs. Neither name matches the checksums job's
   # `playbook-<version>-*` pattern, so that job still sees exactly five files.
   plugin-archive:
     needs: verify-version
@@ -334,9 +333,7 @@ jobs:
               echo "::error::the $name archive still holds hooks.plugin.json; it must be renamed to plugin.json." >&2
               exit 1
             fi
-            echo "$name files: $count"
-            echo "$name bytes: $(wc -c < "$asset" | tr -d ' ')"
-            echo "$name sha256: $(shasum -a 256 "$asset" | cut -d' ' -f1)"
+            echo "$name files: $count, sha256: $(shasum -a 256 "$asset" | cut -d' ' -f1)"
           }
           build playbook-plugin .claude-plugin/archive-files.txt
           build playbook-hooks-plugin .claude-plugin/archive-hooks-files.txt

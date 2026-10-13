@@ -30,7 +30,8 @@ if [ -z "$specs" ]; then
 fi
 
 stage="$(mktemp -d)"
-trap 'rm -rf "$stage"' EXIT
+tmp_zip=""
+trap 'rm -rf "$stage"; [ -z "$tmp_zip" ] || rm -f "$tmp_zip"' EXIT
 
 printf '%s\n' "$specs" | tr '\n' '\0' \
     | xargs -0 git archive --format=tar "$tree" -- \
@@ -50,5 +51,7 @@ find "$stage" -exec touch -t "$touch_time" {} +
 mkdir -p "$(dirname "$out")"
 out_abs="$(cd "$(dirname "$out")" && pwd)/$(basename "$out")"
 tmp_zip="${out_abs}.tmp"
+# zip adds to an archive that already exists, so never start from a stale one.
+rm -f "$tmp_zip"
 (cd "$stage" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | zip -X -q "$tmp_zip" -@)
 mv -f "$tmp_zip" "$out_abs"

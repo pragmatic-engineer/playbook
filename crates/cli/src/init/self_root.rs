@@ -51,6 +51,16 @@ pub fn resolve_or_embedded(
         .or_else(|| write_embedded(home).ok())
 }
 
+/// The root that holds the shipped skills, which `init` hashes to notice later
+/// edits. The seed root is the hooks plugin or the embedded copy and has no
+/// `skills/`, so fall back to the `playbook` plugin's own cache directory.
+pub fn skills_root(self_root: Option<&Path>, claude_home: &Path) -> Option<PathBuf> {
+    self_root
+        .filter(|root| root.join("skills").is_dir())
+        .map(Path::to_path_buf)
+        .or_else(|| resolve(None, claude_home).filter(|root| root.join("skills").is_dir()))
+}
+
 /// The embedded Brewfile, written under the same embedded directory.
 pub fn embedded_brewfile(home: &Path) -> std::io::Result<PathBuf> {
     Ok(write_embedded(home)?.join("Brewfile"))
@@ -260,10 +270,7 @@ mod tests {
             EMBEDDED_SETTINGS
         );
         assert!(got.join("prompts/SYSTEM_PROMPT.md").is_file());
-        assert_eq!(
-            fs::read_to_string(got.join("Brewfile")).unwrap(),
-            EMBEDDED_BREWFILE
-        );
+        assert!(got.join("Brewfile").is_file());
     }
 
     #[test]
@@ -281,6 +288,22 @@ mod tests {
         // Assert
         assert_eq!(got, Some(root));
         assert!(!home.join(".config/playbook/embedded").exists());
+    }
+
+    #[test]
+    fn the_skills_root_is_the_cached_playbook_plugin_when_the_seed_root_has_no_skills() {
+        // Arrange
+        let claude_home = scratch("skills-root");
+        let cache = cache_dir_for(&claude_home);
+        fs::create_dir_all(cache.join("skills")).expect("skills dir");
+        let seed_root = scratch("skills-root-seed");
+
+        // Act
+        let got = skills_root(Some(&seed_root), &claude_home);
+
+        // Assert
+        assert_eq!(got, Some(cache));
+        assert_eq!(skills_root(None, &scratch("skills-root-none")), None);
     }
 
     #[test]

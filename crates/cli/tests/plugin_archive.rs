@@ -107,6 +107,39 @@ fn pathspecs(kind: Kind) -> Vec<String> {
         .collect()
 }
 
+/// A throwaway commit of the current index with a fixed date, so the build
+/// script stamps entries from a commit time exactly as it does in the release.
+fn commit_from_index_copy(dir: &Path) -> String {
+    let tree = write_tree_from_index_copy(dir);
+    let out = Command::new("git")
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "commit-tree",
+            &tree,
+            "-m",
+            "archive test",
+        ])
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        .env("GIT_AUTHOR_DATE", "2026-01-02T03:04:05Z")
+        .env("GIT_COMMITTER_DATE", "2026-01-02T03:04:05Z")
+        .current_dir(repo())
+        .output()
+        .expect("git should spawn");
+    assert!(
+        out.status.success(),
+        "git commit-tree failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout)
+        .expect("utf8")
+        .trim()
+        .to_string()
+}
+
 struct Archive {
     zip: PathBuf,
     root: PathBuf,
@@ -127,7 +160,7 @@ fn hooks() -> &'static Archive {
 fn build(kind: Kind) -> Archive {
     let dir = scratch(&format!("build-{}", kind.tag()));
     let zip = dir.join(format!("playbook-{}-plugin-test.zip", kind.tag()));
-    let tree = write_tree_from_index_copy(&dir);
+    let tree = commit_from_index_copy(&dir);
     let out = Command::new("bash")
         .arg(repo().join(".github/scripts/build-plugin-archive.sh"))
         .arg(&tree)
@@ -211,6 +244,37 @@ fn archives_exclude_source_tests_docs_ci_and_cargo_files() {
 }
 
 #[test]
+fn the_same_commit_builds_the_same_bytes() {
+    // Arrange
+    let dir = scratch("determinism");
+    let commit = commit_from_index_copy(&dir);
+    let build_once = |name: &str| {
+        let zip = dir.join(name);
+        let out = Command::new("bash")
+            .arg(repo().join(".github/scripts/build-plugin-archive.sh"))
+            .arg(&commit)
+            .arg(repo().join(Kind::Hooks.list()))
+            .arg(&zip)
+            .current_dir(repo())
+            .output()
+            .expect("the build script should spawn");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        fs::read(zip).expect("zip")
+    };
+
+    // Act
+    let first = build_once("a.zip");
+    let second = build_once("b.zip");
+
+    // Assert
+    assert_eq!(first, second, "the same commit must give the same bytes");
+}
+
+#[test]
 fn the_skills_archive_has_no_hooks_and_no_binary_files() {
     // Arrange
     let a = skills();
@@ -243,10 +307,7 @@ fn the_skills_archive_has_no_hooks_and_no_binary_files() {
 
 #[test]
 fn manifests_are_named_apart_and_carry_one_version() {
-    // Arrange
     let (s, h) = (manifest(skills()), manifest(hooks()));
-
-    // Assert
     assert_eq!(
         s["name"], "playbook",
         "existing /playbook:* commands keep their name"
@@ -381,7 +442,7 @@ fn allowlist_entries_all_exist_and_are_tracked() {
 }
 
 #[test]
-fn every_tracked_plugin_content_file_is_in_exactly_one_archive() {
+fn every_tracked_plugin_content_file_is_in_an_archive() {
     // Arrange
     let plugin_dirs = [
         "commands",
@@ -534,46 +595,58 @@ fn non_test_part(text: &str) -> &str {
 #[test]
 fn every_plugin_root_read_in_src_is_in_an_archive() {
     // Arrange: `self_root.join("a").join("b")` and `plugin_root.join("a/b")`.
-    let chain = Regex::new(
-        r#"\b(?:self_root|plugin_root)\s*\.join\("([^"]+)"\)((?:\s*\.join\("[^"]+"\))*)"#,
-    )
-    .expect("regex");
     let part = Regex::new(r#"\.join\("([^"]+)"\)"#).expect("regex");
-    let mut found: BTreeSet<String> = BTreeSet::new();
-    for f in tracked(&["crates/cli/src"]) {
-        if !f.ends_with(".rs") {
-            continue;
-        }
-        let text = fs::read_to_string(repo().join(&f)).unwrap_or_default();
-        for cap in chain.captures_iter(non_test_part(&text)) {
-            let mut path = cap[1].to_string();
-            for p in part.captures_iter(&cap[2]) {
-                path = format!("{path}/{}", &p[1]);
+    // `self_root` reads the seed files, which only the hooks plugin ships (or
+    // the binary embeds); `plugin_root` reads skills, which only `playbook` ships.
+    let mut found: BTreeSet<(&str, String)> = BTreeSet::new();
+    for root_name in ["self_root", "plugin_root"] {
+        let chain = Regex::new(&format!(
+            r#"\b{root_name}\s*\.join\("([^"]+)"\)((?:\s*\.join\("[^"]+"\))*)"#
+        ))
+        .expect("regex");
+        for f in tracked(&["crates/cli/src"]) {
+            if !f.ends_with(".rs") {
+                continue;
             }
-            found.insert(path);
+            let text = fs::read_to_string(repo().join(&f)).unwrap_or_default();
+            for cap in chain.captures_iter(non_test_part(&text)) {
+                let mut path = cap[1].to_string();
+                for p in part.captures_iter(&cap[2]) {
+                    path = format!("{path}/{}", &p[1]);
+                }
+                found.insert((root_name, path));
+            }
         }
     }
-    let shipped: BTreeSet<&String> = skills().files.iter().chain(hooks().files.iter()).collect();
 
     // Act: a path counts when it is a shipped file or a directory holding one.
     // `.git` is only probed, never read.
-    let missing: Vec<&String> = found
+    let missing: Vec<&(&str, String)> = found
         .iter()
-        .filter(|p| p.as_str() != ".git")
-        .filter(|p| {
-            !shipped.contains(*p) && !shipped.iter().any(|f| f.starts_with(&format!("{p}/")))
+        .filter(|(_, p)| p.as_str() != ".git")
+        .filter(|(root, p)| {
+            let shipped = if *root == "self_root" {
+                hooks()
+            } else {
+                skills()
+            };
+            !shipped.files.contains(p)
+                && !shipped
+                    .files
+                    .iter()
+                    .any(|f| f.starts_with(&format!("{p}/")))
         })
         .collect();
 
     // Assert: the scan itself must still see the reads it exists to guard.
     for known in ["settings.shared.json", "prompts/SYSTEM_PROMPT.md"] {
         assert!(
-            found.contains(known),
+            found.contains(&("self_root", known.to_string())),
             "the scan no longer finds the read of {known}: {found:?}"
         );
     }
     assert!(
         missing.is_empty(),
-        "src/ reads these through the plugin root but no archive has them, add them to an allowlist in .claude-plugin/: {missing:?}"
+        "src/ reads these through a plugin root but its archive lacks them, add them to an allowlist in .claude-plugin/: {missing:?}"
     );
 }
