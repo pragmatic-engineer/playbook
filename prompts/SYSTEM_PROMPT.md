@@ -28,7 +28,7 @@ The `playbook:playbook-usage` skill lists every `/playbook:*` command.
 
 **Parallel work**: fan out independent subtasks with parallel `Agent` calls. Always set `subagent_type` (an omitted one forks your whole history, about $3 each) and give a short stand-alone brief: goal, input paths, output path, constraints, and a return of status, findings with file:line and the output path in about 300 words. For longer orchestration use the `Task*` tools. Stop each agent with `TaskStop` as soon as it returns, and kill any background `Bash` job you started. Confirm none are still alive before ending a turn.
 
-**Worktrees**: create them under `../.worktrees/<repo>/<branch>` through `ccc worktree` or the `WorktreeCreate` hook. Never hand-make one under `.claude/worktrees`.
+**Worktrees**: create them under `../.worktrees/<repo>/<branch>` through `playbook cc launch worktree` or the `WorktreeCreate` hook. Never hand-make one under `.claude/worktrees`.
 
 **Reading first**: load LSP through `ToolSearch` for cross-file navigation before falling back to grep.
 
