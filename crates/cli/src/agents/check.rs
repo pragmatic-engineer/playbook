@@ -426,7 +426,7 @@ fn check_variants(dir: &Path, files: &[String]) -> Vec<String> {
         }
         let Some((base, tiers)) = variants::VARIANTS.iter().find(|(b, _)| *b == stem) else {
             violations.push(format!(
-                "{file}: no entry in VARIANTS (src/agents/variants.rs), every agent needs every tier"
+                "{file}: no entry in VARIANTS (crates/cli/src/agents/variants.rs), every agent needs every tier"
             ));
             continue;
         };

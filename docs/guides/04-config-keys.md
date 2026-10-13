@@ -82,12 +82,12 @@ Older versions kept `config.json` files. The first run imports them and renames 
 `playbook effort suggest` lists the agents where a change to effort looks safe or needed. It reads your local usage store (the same one `playbook usage` fills) and prints, for each agent, how often it was dispatched, how often at a higher or lower variant than it ships at, repeats inside a session, and cost per effort level for its model. Add `--json` for scripts and `--range 30d|60d|90d|month|all` to change the window (default `30d`).
 
 - `suggest` only reads. It never writes your config, your memory or any Claude Code settings. To act on a suggestion, use the patch below, run the `playbook config set --global effort.agents.<name> <level>` command it prints, or ignore it.
-- It only proposes a lower level where a benchmark showed quality holds (the quality floor table in `src/effort/floor.rs`). Today every agent ships at its floor, so a clean report usually says no change. Agents where a missed finding is costly (the reviewer and the auditor) are never proposed for lowering.
+- It only proposes a lower level where a benchmark showed quality holds (the quality floor table in `crates/cli/src/effort/floor.rs`). Today every agent ships at its floor, so a clean report usually says no change. Agents where a missed finding is costly (the reviewer and the auditor) are never proposed for lowering.
 - It tells you when a ceiling you set sits below an agent's floor, which can make results worse.
 - With less than 7 days of history, or fewer than 20 dispatches over 5 sessions for an agent, it says there is not enough data and proposes nothing.
 - Cost is per model and effort level and includes the main session, because a usage row does not say which agent made it. Read it as a rough guide.
 
-The thresholds are constants in `src/effort/suggest.rs`.
+The thresholds are constants in `crates/cli/src/effort/suggest.rs`.
 
 ### Apply a patch, and undo it
 

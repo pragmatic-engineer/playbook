@@ -169,6 +169,10 @@ Start at the [docs index](docs/index.md).
 - **Authoring:** [commands, skills and hooks](docs/authoring/01-commands-skills-hooks.md), [agents](docs/authoring/02-authoring-agents.md).
 - **Internals:** [launcher and hooks](docs/internals/01-launcher-and-hooks.md), [model routing](docs/internals/02-model-routing-and-memory.md), [worktrees](docs/internals/03-worktree.md), [usage dashboard](docs/internals/04-usage-dashboard.md), [headless mode](docs/internals/05-headless-mode.md), [release channels](docs/internals/06-release-channels.md), [migrations](docs/internals/07-migrations.md), [state store](docs/internals/08-state-store.md), [sessions](docs/internals/09-sessions.md), [document conversion benchmark](docs/internals/10-document-conversion-benchmark.md).
 
+## Repository layout
+
+The plugin files are at the repository root. The Rust code is a Cargo workspace under `crates/`: `cli` (the `playbook` binary), `common`, `code`, `telemetry` (`playbook-telemetry` and `pbtop`) and `data`. See [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout).
+
 ## License
 
 Apache License 2.0. See `LICENSE`.

@@ -41,9 +41,9 @@ File delivery needs `Write` or `Bash`. The read-only agents have neither on purp
 | `cheap-checker` | `playbook:cheap-checker` | **Return value only** (Read, Grep, Glob, Skill) |
 | `review-triage` | `playbook:review-triage` | **Return value only** (Read, Grep, Glob, Skill) |
 
-**Always pass the `playbook:` prefix** from the second column. These are plugin agents, and a bare `subagent_type: critic` resolves to the wrong agent or none (fixed repo-wide in #284). Elsewhere, the bare name is only a label for talking about the agent. `tests/delegating_subagents_roster.rs` keeps this table in sync with `agents/*.md`.
+**Always pass the `playbook:` prefix** from the second column. These are plugin agents, and a bare `subagent_type: critic` resolves to the wrong agent or none (fixed repo-wide in #284). Elsewhere, the bare name is only a label for talking about the agent. `crates/cli/tests/delegating_subagents_roster.rs` keeps this table in sync with `agents/*.md`.
 
-Effort variants such as `reviewer-low` and `reviewer-xhigh` are not files and not in the table. `ccc` and `ccd` render them for one session into a throwaway plugin, with the base agent's `tools`, `model` and body and a different `effort`. Their `subagent_type` is `playbook-variants:<name>`: spawn the exact type `playbook effort resolve` returns. A session started without the launcher has the base agents only (rules in `src/agents/variants.rs`).
+Effort variants such as `reviewer-low` and `reviewer-xhigh` are not files and not in the table. `ccc` and `ccd` render them for one session into a throwaway plugin, with the base agent's `tools`, `model` and body and a different `effort`. Their `subagent_type` is `playbook-variants:<name>`: spawn the exact type `playbook effort resolve` returns. A session started without the launcher has the base agents only (rules in `crates/cli/src/agents/variants.rs`).
 
 **For the read-only agents, variants included:**
 
@@ -90,7 +90,7 @@ The `Agent` tool has no per-call effort setting, so effort is chosen by which ag
 |---|---|---|
 | At most 300 changed lines (the `dedup` trigger in `/playbook:deep-review`), and no security-sensitive path | the `-low` variant, if `allowed` has it | Little to reason about, so extra effort is spend with no extra findings. |
 | Anything between, or when unsure | the base agent | The default, tuned for ordinary diffs. |
-| Over 60 KB (`MAX_DIFF_BYTES` in `src/pr/triage.rs`, the size past which `review-triage` never calls a PR quick), or the lens is `security`, or the diff touches auth, secrets, crypto, or untrusted input | the `-xhigh` variant, if `allowed` has it | A missed finding here is expensive and the diff is big enough to hide one. |
+| Over 60 KB (`MAX_DIFF_BYTES` in `crates/cli/src/pr/triage.rs`, the size past which `review-triage` never calls a PR quick), or the lens is `security`, or the diff touches auth, secrets, crypto, or untrusted input | the `-xhigh` variant, if `allowed` has it | A missed finding here is expensive and the diff is big enough to hide one. |
 
 **3. Automatic choice (only when the user turned it on).** Run `playbook effort choose <name> --base <ref> --json` (the ref is the diff's base, or pass `--lines`, `--files` and `--path` when there is no git diff) when the key `effort.auto` is `suggest` or `on`. Do nothing extra while it is `off`, the default. Spawn the `dispatch` it returns: with `on` that is the chosen variant, inside the agent's quality floor and every ceiling, and with `suggest` it is still the default. When `note` is set, print it as one line to the user, since the choice deviates from the default. An error or an unexpected answer means the default: spawn what step 1 gave. The agent marked costly to miss (the reviewer, the auditor) is only raised, never lowered. Every choice is in `playbook effort log`. This replaces the table above for that spawn, and never overrides step 1.
 
