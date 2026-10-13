@@ -33,8 +33,8 @@ jobs:
   #
   # Docs-only means every changed path is a root policy file (README.md,
   # CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, CHANGELOG.md) or a *.md
-  # under docs/. commands/, skills/, agents/, prompts/, output-styles/ and
-  # .github/ are never docs-only: tests read them.
+  # under docs/. prompts/, hooks/ and .github/ are never docs-only: tests
+  # read them.
   changes:
     runs-on: ubuntu-latest
     permissions:

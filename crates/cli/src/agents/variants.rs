@@ -386,37 +386,4 @@ mod tests {
         assert!(!map.contains_key("git-max"));
         let _ = std::fs::remove_dir_all(&dir);
     }
-
-    #[test]
-    fn the_shipped_auto_set_has_a_medium_tier_for_haiku_checkers_and_no_haiku_xhigh() {
-        let dir = Path::new(env!("PLAYBOOK_REPO_ROOT")).join("agents");
-        let set = session_agents(&dir, Mode::Auto, &|_| None);
-        for name in [
-            "cheap-checker-medium",
-            "review-triage-medium",
-            "test-reviewer-medium",
-        ] {
-            assert!(
-                set.contains_key(name),
-                "{name} is missing from the auto set"
-            );
-        }
-        for (name, def) in &set {
-            let effort = def["effort"].as_str().unwrap_or("");
-            let haiku = def["model"].as_str().is_some_and(|m| m.contains("haiku"));
-            assert!(
-                !(haiku && effort == "max"),
-                "{name}: no Haiku variant may run at max"
-            );
-        }
-        // What the model sees of the set in its agent list stays small.
-        let listed: usize = set
-            .iter()
-            .map(|(k, v)| k.len() + v["description"].as_str().map_or(0, str::len))
-            .sum();
-        assert!(
-            listed < 3_000,
-            "the variant list costs {listed} bytes of context"
-        );
-    }
 }

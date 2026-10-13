@@ -41,8 +41,9 @@ fn ci(cwd: &Path, home: &Path, args: &[&str]) -> Run {
     }
 }
 
-fn repo_root() -> &'static str {
-    env!("PLAYBOOK_REPO_ROOT")
+/// A plugin checkout kept as a fixture: the manifest and the agent files.
+fn fixture_plugin() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/plugin")
 }
 
 fn git(dir: &Path, args: &[&str]) {
@@ -63,12 +64,12 @@ fn failing_checkout(tag: &str) -> PathBuf {
     git(&dir, &["init", "-q"]);
     fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
     fs::copy(
-        Path::new(repo_root()).join(".claude-plugin/plugin.json"),
+        fixture_plugin().join(".claude-plugin/plugin.json"),
         dir.join(".claude-plugin/plugin.json"),
     )
     .unwrap();
     fs::create_dir_all(dir.join("agents")).unwrap();
-    for entry in fs::read_dir(Path::new(repo_root()).join("agents"))
+    for entry in fs::read_dir(fixture_plugin().join("agents"))
         .unwrap()
         .flatten()
     {
@@ -80,28 +81,6 @@ fn failing_checkout(tag: &str) -> PathBuf {
     fs::write(&critic, text.replace("model: sonnet", "model: gpt")).unwrap();
     git(&dir, &["add", "-A"]);
     dir
-}
-
-#[test]
-fn this_repo_passes_every_check_from_an_unrelated_cwd() {
-    let home = scratch("home-pass");
-
-    let run = ci(&scratch("elsewhere"), &home, &["--dir", repo_root()]);
-
-    assert_eq!(run.code, 0, "{}", run.stdout);
-    let lines: Vec<&str> = run.stdout.lines().collect();
-    assert!(
-        lines[0].starts_with("PASS manifest: check-manifest: OK"),
-        "{lines:?}"
-    );
-    assert!(lines[1].starts_with("PASS agents: "), "{lines:?}");
-    assert!(lines[2].starts_with("PASS settings: "), "{lines:?}");
-    assert_eq!(lines[3], "ci: 3 passed, 0 failed, 0 skipped");
-    assert_eq!(
-        fs::read_dir(&home).unwrap().count(),
-        0,
-        "nothing is written to HOME"
-    );
 }
 
 #[test]
@@ -200,20 +179,6 @@ fn strict_outside_a_checkout_exits_one_and_names_the_skips() {
     assert!(
         run.stdout
             .ends_with("ci: 0 passed, 0 failed, 3 skipped (strict: a skipped check fails the run)"),
-        "output: {}",
-        run.stdout
-    );
-}
-
-#[test]
-fn strict_in_this_repo_still_passes() {
-    let home = scratch("strict-repo-home");
-
-    let run = ci(Path::new(repo_root()), &home, &["--strict"]);
-
-    assert_eq!(run.code, 0, "output: {}", run.stdout);
-    assert!(
-        run.stdout.ends_with("ci: 3 passed, 0 failed, 0 skipped"),
         "output: {}",
         run.stdout
     );

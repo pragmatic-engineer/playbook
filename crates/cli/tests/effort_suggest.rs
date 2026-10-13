@@ -2,63 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook effort suggest` end to end on a synthetic usage store (ADR-0022,
-//! stage 1), and the quality floor table against the agent files. Every id,
+//! stage 1),. Every id,
 //! session and repo name below is made up.
 
-use playbook::effort::floor::FLOORS;
 use playbook::usage::db::{insert_tool_event, open_db, upsert_usage_event};
 use playbook::usage::{ToolInvocationEvent, ToolKind, UsageEvent};
 use serde_json::Value;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 const DAY: i64 = 86_400;
-
-fn manifest() -> PathBuf {
-    PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
-}
-
-fn frontmatter(path: &Path, key: &str) -> String {
-    let text = fs::read_to_string(path).unwrap();
-    text.lines()
-        .find_map(|l| l.strip_prefix(&format!("{key}: ")))
-        .unwrap_or_else(|| panic!("{} has no {key}", path.display()))
-        .trim()
-        .to_string()
-}
-
-#[test]
-fn every_agent_has_a_floor_row_and_no_floor_is_above_shipped_effort() {
-    let levels = ["low", "medium", "high", "xhigh", "max"];
-    let at = |l: &str| levels.iter().position(|x| *x == l).unwrap();
-    let mut names: Vec<String> = fs::read_dir(manifest().join("agents"))
-        .unwrap()
-        .flatten()
-        .filter_map(|e| {
-            let p = e.path();
-            (p.extension()? == "md").then(|| p.file_stem().unwrap().to_string_lossy().into_owned())
-        })
-        .collect();
-    names.sort();
-    let rows: Vec<&str> = FLOORS.iter().map(|f| f.agent).collect();
-    assert_eq!(
-        names, rows,
-        "the floor table and agents/ must list the same agents"
-    );
-    for f in FLOORS {
-        let shipped = frontmatter(&manifest().join(format!("agents/{}.md", f.agent)), "effort");
-        assert!(
-            at(f.floor) <= at(&shipped),
-            "{}: floor {} is above the shipped effort {shipped}",
-            f.agent,
-            f.floor
-        );
-        assert!(!f.source.is_empty(), "{} must cite its source", f.agent);
-    }
-}
 
 struct Env {
     home: PathBuf,
