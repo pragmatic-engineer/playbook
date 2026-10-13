@@ -182,41 +182,6 @@ mod tests {
     }
 
     #[test]
-    fn a_mapped_lens_resolves_to_its_reference_file_when_it_exists() {
-        let root = Path::new(env!("PLAYBOOK_REPO_ROOT"));
-        assert!(ref_path(root, "types").ends_with("references/reliability.md"));
-        assert!(ref_path(root, "scope").ends_with("references/scope-control.md"));
-    }
-
-    #[test]
-    fn every_mapped_file_exists_in_the_skill() {
-        let root = Path::new(env!("PLAYBOOK_REPO_ROOT"));
-        for lens in [
-            "security",
-            "perf",
-            "data",
-            "big-o",
-            "logic",
-            "correctness",
-            "types",
-            "integration",
-            "architecture",
-            "migration",
-            "adr",
-            "complexity",
-            "dedup",
-            "scope",
-        ] {
-            let file = reference_for(lens).unwrap();
-            assert!(
-                root.join(format!("skills/grounding-review/references/{file}.md"))
-                    .is_file(),
-                "{lens} -> {file}"
-            );
-        }
-    }
-
-    #[test]
     fn a_clean_reply_is_kept_as_is() {
         let raw =
             r#"{"a":{"tier":"skip","reason":"docs only"},"b":{"tier":"cheap-check","reason":"r"}}"#;

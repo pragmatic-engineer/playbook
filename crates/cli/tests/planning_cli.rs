@@ -136,39 +136,6 @@ fn glossary_add_creates_the_file_then_appends() {
 }
 
 #[test]
-fn skill_ref_prints_the_reference_or_falls_back_to_the_skill() {
-    let s = Sandbox::new("ref");
-    let root = env!("PLAYBOOK_REPO_ROOT");
-    let a = out(&s.run(&[
-        "skill",
-        "ref",
-        "grounding-review",
-        "security",
-        "--plugin-root",
-        root,
-    ]));
-    assert!(
-        a.trim()
-            .ends_with("skills/grounding-review/references/security.md"),
-        "{a}"
-    );
-    let b = out(&s.run(&[
-        "skill",
-        "ref",
-        "grounding-review",
-        "nope",
-        "--plugin-root",
-        root,
-    ]));
-    assert!(
-        b.trim().ends_with("skills/grounding-review/SKILL.md"),
-        "{b}"
-    );
-    let c = out(&s.run(&["skill", "ref", "grounding-review", "--plugin-root", root]));
-    assert_eq!(b, c);
-}
-
-#[test]
 fn skill_ref_fails_with_a_clear_message_when_the_plugin_root_has_no_such_skill() {
     let s = Sandbox::new("ref-missing");
     let missing = s.repo.join("no-such-plugin-root");

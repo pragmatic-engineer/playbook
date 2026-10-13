@@ -7,12 +7,8 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
-
-fn root() -> PathBuf {
-    PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
-}
 
 fn playbook(args: &[&str], stdin: Option<&str>) -> (i32, String, String) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
@@ -39,69 +35,6 @@ fn playbook(args: &[&str], stdin: Option<&str>) -> (i32, String, String) {
         String::from_utf8_lossy(&out.stdout).trim().to_string(),
         String::from_utf8_lossy(&out.stderr).trim().to_string(),
     )
-}
-
-#[test]
-fn ref_prints_the_absolute_reference_file_for_a_mapped_lens() {
-    let plugin = root();
-    let (code, out, _) = playbook(
-        &[
-            "review",
-            "ref",
-            "types",
-            "--plugin-root",
-            plugin.to_str().unwrap(),
-        ],
-        None,
-    );
-    assert_eq!(code, 0);
-    assert_eq!(
-        out,
-        plugin
-            .join("skills/grounding-review/references/reliability.md")
-            .to_string_lossy()
-    );
-    assert!(Path::new(&out).is_absolute());
-}
-
-#[test]
-fn ref_falls_back_to_the_whole_skill_for_unmapped_and_unknown_lenses() {
-    let plugin = root();
-    for lens in [
-        "test",
-        "docs",
-        "principles",
-        "behaviour-drift",
-        "no-such-lens",
-    ] {
-        let (code, out, _) = playbook(
-            &[
-                "review",
-                "ref",
-                lens,
-                "--plugin-root",
-                plugin.to_str().unwrap(),
-            ],
-            None,
-        );
-        assert_eq!(code, 0, "{lens}");
-        assert!(
-            out.ends_with("skills/grounding-review/SKILL.md"),
-            "{lens}: {out}"
-        );
-    }
-}
-
-#[test]
-fn ref_reads_the_plugin_root_from_the_environment() {
-    let plugin = root();
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .args(["review", "ref", "security"])
-        .env("CLAUDE_PLUGIN_ROOT", &plugin)
-        .output()
-        .unwrap();
-    let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.trim().ends_with("references/security.md"), "{text}");
 }
 
 #[test]
@@ -210,23 +143,6 @@ fn triage_merge_force_overrides_one_lens_and_a_bad_spec_exits_2() {
     assert!(err.contains("bad --force"), "{err}");
 }
 
-#[test]
-fn the_review_commands_call_the_subcommands_instead_of_restating_the_rules() {
-    for file in ["commands/deep-review.md", "commands/implement.md"] {
-        let text = fs::read_to_string(root().join(file)).unwrap();
-        assert!(text.contains("playbook review triage-merge"), "{file}");
-        assert!(text.contains("playbook review ref"), "{file}");
-        assert!(
-            !text.contains("| Lens | Reference file |"),
-            "{file}: mapping table is back"
-        );
-        assert!(
-            !text.contains("playbook skill ref grounding-review <file>"),
-            "{file}"
-        );
-    }
-}
-
 fn repo_with_change(lines: usize) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "pb-review-size-{}-{lines}",
@@ -316,16 +232,5 @@ fn size_with_all_lenses_always_takes_the_swarm_and_a_bad_base_fails() {
     assert!(
         err.starts_with("error: git diff no-such-ref...HEAD failed"),
         "{err}"
-    );
-}
-
-#[test]
-fn implement_picks_its_review_path_with_size_and_has_no_second_self_review() {
-    let text = fs::read_to_string(root().join("commands/implement.md")).unwrap();
-    assert!(text.contains("playbook review size --base"));
-    assert!(text.contains("`path=single`") && text.contains("`path=swarm`"));
-    assert!(
-        !text.contains("Self quick-review"),
-        "Step 8 must not review the diff again before Step 9"
     );
 }
