@@ -16,7 +16,7 @@ Claude Code has its own memory: `CLAUDE.md` files you write and an auto memory i
 
 Playbook may read Claude Code's auto memory once, to bring useful notes across. `playbook memory import-claude [--dry-run]` copies the notes for the current project into playbook memory as facts (project memory under `<owner>/<repo>/`). It opens Claude Code's files read-only and never changes, moves or deletes anything there, and it keeps no marker in Claude Code's directories. What it already imported is tracked by content hash in a small state file under playbook's own state folder, so a second run copies nothing, a fact you deleted does not come back, and an existing playbook fact is never overwritten.
 
-`tests/memory_isolation.rs` enforces the first two rules, and that the code reading Claude Code's memory has no write calls.
+`crates/cli/tests/memory_isolation.rs` enforces the first two rules, and that the code reading Claude Code's memory has no write calls.
 
 ## Three Scopes
 

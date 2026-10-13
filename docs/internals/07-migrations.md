@@ -1,6 +1,6 @@
 # Internals: Migrations
 
-`playbook init` carries an existing install across breaking changes. The registry lives in `src/init/migrate.rs`, and the reasoning is in [ADR 0016](../adr/0016-migration-framework.md). This page says how it behaves, so you know what runs when you update.
+`playbook init` carries an existing install across breaking changes. The registry lives in `crates/cli/src/init/migrate.rs`, and the reasoning is in [ADR 0016](../adr/0016-migration-framework.md). This page says how it behaves, so you know what runs when you update.
 
 ## When it runs
 
@@ -45,7 +45,7 @@ Playbook does not overwrite a file you edited. It leaves it, prints a warning, a
 
 ## Add a migration
 
-1. Append an entry to `registry()` in `src/init/migrate.rs` with the next id. Never reorder or reuse an id.
+1. Append an entry to `registry()` in `crates/cli/src/init/migrate.rs` with the next id. Never reorder or reuse an id.
 2. Pick the kind: Auto for a one-time move, Idempotent for a self-healing repair, Manual for something only you can resolve.
 3. Add a test next to the existing ones in that file.
 

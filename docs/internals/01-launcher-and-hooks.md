@@ -4,7 +4,7 @@
 
 ## The `ccc` and `ccd` launcher
 
-The rc file holds one line: `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`. `playbook shell-init` prints two functions, `ccc` and `ccd`, that call `playbook cc launch` (`src/cc/launch.rs`). The same text works in bash and zsh. `ccd` is `ccc` with `--dangerously-skip-permissions` added. Nothing else differs.
+The rc file holds one line: `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`. `playbook shell-init` prints two functions, `ccc` and `ccd`, that call `playbook cc launch` (`crates/cli/src/cc/launch.rs`). The same text works in bash and zsh. `ccd` is `ccc` with `--dangerously-skip-permissions` added. Nothing else differs.
 
 A child process cannot change its parent's directory, so the functions create a temp file and pass its path in `PLAYBOOK_CC_CD_FILE`. When the launcher enters a worktree it writes the path there, and the function `cd`s to it after the session ends.
 
@@ -14,7 +14,7 @@ On every launch the launcher:
 - Passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` when it is installed.
 - Passes the model fallback chain with `--fallback-model`, and exports `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for any `models.*` override. See [Model tiers](02-model-routing-and-memory.md#model-tiers-and-the-55-rule).
 - Passes your effort ceiling with `--settings` when playbook's `maxEffortLevel` is the lower one. See [Effort policy](02-model-routing-and-memory.md#effort-policy).
-- Renders the agent effort variants into a throwaway session plugin and passes it with `--plugin-dir`. Nothing is committed. `agents.variants` (`auto`, `all`, `off`) picks which, and `playbook agents variants` shows them. `src/cc/agent_variants.rs`.
+- Renders the agent effort variants into a throwaway session plugin and passes it with `--plugin-dir`. Nothing is committed. `agents.variants` (`auto`, `all`, `off`) picks which, and `playbook agents variants` shows them. `crates/cli/src/cc/agent_variants.rs`.
 - Sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for that session when `memory.source` is `playbook`. It never edits Claude Code's settings or memory.
 - After `claude` exits, prunes to the newest `CCD_KEEP` transcripts per project (default 5, floor 2), with their sidecars and runtime state.
 
@@ -42,16 +42,16 @@ A session started without the launcher gets none of this except the hooks.
 
 ### Config-drift detection
 
-On a default resume, the launcher hashes `settings.json` and compares it to the hash stored at session start (`~/.config/playbook/cc-state/<project-slug>`). When they differ, it forks a new transcript so the fresh copy loads the current config. The `session-init` hook does the same check on `source=resume` and warns when a resumed session runs on old config. Edits to `settings.json` or hooks take effect on a fresh session, so use `ccc fresh` or `ccc clean` after editing them. The hash lives in `src/common/config_hash.rs`.
+On a default resume, the launcher hashes `settings.json` and compares it to the hash stored at session start (`~/.config/playbook/cc-state/<project-slug>`). When they differ, it forks a new transcript so the fresh copy loads the current config. The `session-init` hook does the same check on `source=resume` and warns when a resumed session runs on old config. Edits to `settings.json` or hooks take effect on a fresh session, so use `ccc fresh` or `ccc clean` after editing them. The hash lives in `crates/cli/src/common/config_hash.rs`.
 
 ## The hook lifecycle
 
-Every hook is a module under `src/hooks/`, run as `playbook hook <name>` (see ADR 0007). `dispatch` in `src/hooks/mod.rs` matches every `HookName` exhaustively, so a new hook cannot be forgotten. Per-session state lives in `~/.config/playbook/runtime/<session_id>/`: counters, an `edits.jsonl` log, a `seen-reads` list, a `read-state.jsonl` log of full Reads, timestamps and the config hash baseline.
+Every hook is a module under `crates/cli/src/hooks/`, run as `playbook hook <name>` (see ADR 0007). `dispatch` in `crates/cli/src/hooks/mod.rs` matches every `HookName` exhaustively, so a new hook cannot be forgotten. Per-session state lives in `~/.config/playbook/runtime/<session_id>/`: counters, an `edits.jsonl` log, a `seen-reads` list, a `read-state.jsonl` log of full Reads, timestamps and the config hash baseline.
 
 ### How hooks get registered
 
 - **6 always-on guards** (`rm-workspace-guard`, `bg-await-guard`, `no-slop-guard`, `precommit-check`, `commit-message-sanitizer`, `policy-guard`) are in `settings.shared.json`, which `playbook init` seeds or three-way merges into `settings.json`. All six are `PreToolUse` on `Bash`, and `no-slop-guard` and `policy-guard` are also on `Edit|Write`. `rm-workspace-guard` and `precommit-check` carry an `if` condition (`Bash(rm:*)`, `Bash(git commit:*)`).
-- **16 functional hooks** (`session-init`, `preread-edit-check`, `preread-size-check`, `search-counter`, `memory-anchors`, `post-edit-track`, `rebuild-memory-graph`, `auto-model-detect`, `auto-guard`, `auto-cost`, `precompact-warn`, `session-clean-exit`, `memory-capture`, `context-hygiene`, `doc-read-hint`, `usage-warm`) have no static JSON. `playbook init` runs a `wire` step (`src/init/wire.rs`) that upserts them from two tables, `PORTED_HOOK_SPECS` and `GUARD_SPECS`. The `PostToolUse` backstop of `commit-message-sanitizer` lives in `GUARD_SPECS` only, so `wire` adds it on every `init`.
+- **16 functional hooks** (`session-init`, `preread-edit-check`, `preread-size-check`, `search-counter`, `memory-anchors`, `post-edit-track`, `rebuild-memory-graph`, `auto-model-detect`, `auto-guard`, `auto-cost`, `precompact-warn`, `session-clean-exit`, `memory-capture`, `context-hygiene`, `doc-read-hint`, `usage-warm`) have no static JSON. `playbook init` runs a `wire` step (`crates/cli/src/init/wire.rs`) that upserts them from two tables, `PORTED_HOOK_SPECS` and `GUARD_SPECS`. The `PostToolUse` backstop of `commit-message-sanitizer` lives in `GUARD_SPECS` only, so `wire` adds it on every `init`.
 - **2 worktree hooks** (`worktree-create`, `worktree-remove`) are registered by the plugin's `hooks/hooks.json`, never by `wire`, so they cannot fire twice.
 - **1 plugin check**: the plugin's `SessionStart` entry runs `bin/playbook hook migration-check`. It warns when `settings.json` has no `playbook hook session-init`, which means a plugin update without an `init` re-run. It wires nothing.
 
@@ -59,7 +59,7 @@ Every hook is a module under `src/hooks/`, run as `playbook hook <name>` (see AD
 
 ### Pausing when the plugin is disabled
 
-`playbook init` writes the hook entries and `statusLine` into your user `settings.json`. Disabling the plugin in Claude Code sets `enabledPlugins["playbook@pragmatic-engineer"]` to `false` and leaves those entries, so playbook checks the key itself. `common::plugin_state::paused()` reads `~/.claude/settings.json` once per call, from the one place every hook (`run_hook` in `src/main.rs`) and `playbook statusline` go through. When the key is explicitly `false`, a hook exits 0 with no output and no side effects, and the status line prints nothing.
+`playbook init` writes the hook entries and `statusLine` into your user `settings.json`. Disabling the plugin in Claude Code sets `enabledPlugins["playbook@pragmatic-engineer"]` to `false` and leaves those entries, so playbook checks the key itself. `common::plugin_state::paused()` reads `~/.claude/settings.json` once per call, from the one place every hook (`run_hook` in `crates/cli/src/main.rs`) and `playbook statusline` go through. When the key is explicitly `false`, a hook exits 0 with no output and no side effects, and the status line prints nothing.
 
 Only an explicit `false` pauses. A missing key, `true`, a missing file and a file that cannot be read or parsed all count as enabled, so Homebrew-only users and broken settings keep their guards. The safety guards pause too, which is intended: a disabled plugin means no playbook behaviour. A skipped `WorktreeCreate` hook prints no path, so Claude Code falls back to its own error for that call.
 

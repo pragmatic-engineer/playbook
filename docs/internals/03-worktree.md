@@ -1,6 +1,6 @@
 # Worktree engine
 
-`ccc worktree <branch>` creates or enters a git worktree, rebases it onto the base branch, and starts a session there. The engine is Rust: `playbook cc worktree` (`src/cc/worktree_run.rs`, `src/cc/worktree.rs`). Slow upkeep runs afterward in a detached process, so the session starts at once.
+`ccc worktree <branch>` creates or enters a git worktree, rebases it onto the base branch, and starts a session there. The engine is Rust: `playbook cc worktree` (`crates/cli/src/cc/worktree_run.rs`, `crates/cli/src/cc/worktree.rs`). Slow upkeep runs afterward in a detached process, so the session starts at once.
 
 ## What it does
 
@@ -31,7 +31,7 @@ When `package-lock.json` hashes match between the base repo and the worktree, `n
 
 ## The daily sweep
 
-`maybe_sweep_worktrees` (`src/hooks/session_init.rs`) also runs the sweep on every Claude Code `SessionStart`, at most once per 24 hours per repo (a row under `worktree-sweep/<repo slug>` in the [state store](08-state-store.md)). So a repo is swept when you create a worktree and again the first time a session opens each day. Both call the same function. The overlap is deliberate.
+`maybe_sweep_worktrees` (`crates/cli/src/hooks/session_init.rs`) also runs the sweep on every Claude Code `SessionStart`, at most once per 24 hours per repo (a row under `worktree-sweep/<repo slug>` in the [state store](08-state-store.md)). So a repo is swept when you create a worktree and again the first time a session opens each day. Both call the same function. The overlap is deliberate.
 
 A repo nobody opens is swept by neither trigger. That is a known limit. Fixing it needs an OS scheduler, which nothing here uses.
 
@@ -49,7 +49,7 @@ If anything fails, the hook says why on stderr and falls back to `<repo>/.claude
 
 ## Delivery from a worktree
 
-`playbook deliver` (code in `src/deliver/`) never depends on the session's working directory. It runs `git` and `gh` with fixed argument vectors and the worktree as their directory, so a subagent that cannot change its cwd still delivers its own branch. The base is `--base`, then the open PR's base, then the nearest open PR branch that is an ancestor of HEAD (a stacked PR), then the default branch. The module imports only `common/` helpers and its own `sys` adapter. The pre-commit step relies on the repo's own git hooks, which always run.
+`playbook deliver` (code in `crates/cli/src/deliver/`) never depends on the session's working directory. It runs `git` and `gh` with fixed argument vectors and the worktree as their directory, so a subagent that cannot change its cwd still delivers its own branch. The base is `--base`, then the open PR's base, then the nearest open PR branch that is an ancestor of HEAD (a stacked PR), then the default branch. The module imports only `common/` helpers and its own `sys` adapter. The pre-commit step relies on the repo's own git hooks, which always run.
 
 ## See also
 

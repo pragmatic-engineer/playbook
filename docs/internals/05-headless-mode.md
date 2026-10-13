@@ -75,11 +75,11 @@ To see the worst case, a marker was created for a fixed `--session-id`. The hook
 | Safety guards (`preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) | Fire and stay quiet. They are the reason to run with hooks on. |
 | `search-counter`, `post-edit-track`, `session-clean-exit` | Write small files under `runtime/`. Harmless. |
 
-No hook reads a TTY or prompts. Only `src/main.rs` reads stdin, for the hook payload.
+No hook reads a TTY or prompts. Only `crates/cli/src/main.rs` reads stdin, for the hook payload.
 
 ## The headless switch
 
-One switch covers every row above. `PLAYBOOK_HEADLESS` set to `1`, `true`, `yes`, or `on` turns headless mode on, and `0`, `false`, `no`, or `off` forces it off. When `PLAYBOOK_HEADLESS` is unset, `CI=true` (or `CI=1`) turns it on, so a developer who runs with `CI=true` locally can opt out with `PLAYBOOK_HEADLESS=0`. The check lives in `src/common/headless.rs`.
+One switch covers every row above. `PLAYBOOK_HEADLESS` set to `1`, `true`, `yes`, or `on` turns headless mode on, and `0`, `false`, `no`, or `off` forces it off. When `PLAYBOOK_HEADLESS` is unset, `CI=true` (or `CI=1`) turns it on, so a developer who runs with `CI=true` locally can opt out with `PLAYBOOK_HEADLESS=0`. The check lives in `crates/cli/src/common/headless.rs`.
 
 When headless:
 

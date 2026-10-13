@@ -79,3 +79,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0024](adr/0024-session-management-view-and-lifecycle.md) | Session management view with a derived record and suggest first lifecycle | Proposed | 2026-10-11 |
 | [0025](adr/0025-self-improving-playbook.md) | A self improving playbook proposes config patches behind a staged trust ladder | Proposed | 2026-10-11 |
 | [0026](adr/0026-local-code-index-in-the-binary.md) | Ship a local code index in the binary, accepting about 5 MB of size | Accepted | 2026-10-12 |
+| [0029](adr/0029-cargo-workspace-monorepo.md) | Keep the Rust crates in one Cargo workspace | Accepted | 2026-10-13 |

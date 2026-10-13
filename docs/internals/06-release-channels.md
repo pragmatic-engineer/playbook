@@ -53,7 +53,7 @@ still comes from `install.sh`, Homebrew or `playbook update`.
 
 Edit `.claude-plugin/archive-files.txt`: one git pathspec per line, `#`
 comments allowed, `:(exclude)` lines allowed. It is an allowlist, so a new
-runtime file that is not listed is not shipped. `tests/plugin_archive.rs`
+runtime file that is not listed is not shipped. `crates/cli/tests/plugin_archive.rs`
 guards this. It builds the archive the way the workflow does and fails when a
 tracked file under `commands/`, `skills/`, `agents/`, `output-styles/`,
 `prompts/` or `hooks/` is missing, when a file the code reads through the plugin
