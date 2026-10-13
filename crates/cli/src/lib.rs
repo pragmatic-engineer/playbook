@@ -986,6 +986,19 @@ pub enum MemoryCommand {
     /// Memory is rebuilt on its own when a fact is saved, so you only need
     /// this after editing fact files by hand.
     Rebuild,
+    /// Print the memory graph as JSON
+    ///
+    /// The graph lives in `~/.config/playbook/data/memory.db`, rebuilt from
+    /// the fact files. This prints the same document `memory.graph.json`
+    /// holds, for tools that read that shape. A missing database is rebuilt
+    /// first.
+    ///
+    /// Example: `playbook memory export --json`
+    Export {
+        /// Print JSON (the only format)
+        #[arg(long)]
+        json: bool,
+    },
     /// Copy notes from Claude Code's auto memory into playbook memory
     ///
     /// One way and opt in. It only reads Claude Code's memory for this
