@@ -87,7 +87,7 @@ Skills load on demand from `skills/`: review and research discipline, engineerin
 
 ## Settings
 
-Everything lives in one SQLite store, `~/.config/playbook/playbook.db`. Settings resolve from repo, then org, then global, then the default.
+Settings live in one SQLite store, `~/.config/playbook/data/config.db`, next to every other database playbook keeps (see [the data folder](docs/internals/11-data-folder.md)). Settings resolve from repo, then org, then global, then the default.
 
 ```bash
 playbook config list                                  # every key, value and source tier

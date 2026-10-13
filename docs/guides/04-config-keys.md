@@ -17,7 +17,7 @@ The command rejects an unknown key, a value of the wrong type, and a number out 
 
 ## Where the values are stored
 
-All tiers live in one SQLite database, `~/.config/playbook/playbook.db`, not in files you edit by hand. Change values with `playbook config set`. Use `playbook config export` to print every stored value as JSON, and `playbook config import <file>` to load such a document back (it checks every key and value first, and stores nothing if one is invalid).
+All tiers live in one SQLite database, `~/.config/playbook/data/config.db`, not in files you edit by hand. Earlier versions called it `playbook.db`; the first run moves it and renames the old file to `playbook.db.migrated`. Besides the global, org and repo tiers it has an `app` tier per tool (`playbook`, `playbook-telemetry`, `playbook-code`) that the standalone tools read. See the [data folder](../internals/11-data-folder.md). Change values with `playbook config set`. Use `playbook config export` to print every stored value as JSON, and `playbook config import <file>` to load such a document back (it checks every key and value first, and stores nothing if one is invalid).
 
 Older versions kept `config.json` files. The first run imports them and renames each to `config.json.migrated`. `playbook init` and `playbook config` adopt a later `config.json` when its values agree with the stored ones. When a value differs, or the file is not valid JSON, the file stays and `playbook config` warns with its path. Auto mode blocks the model from running `playbook config import` and from touching the database. See the [state store](../internals/08-state-store.md).
 

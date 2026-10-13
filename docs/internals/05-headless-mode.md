@@ -27,7 +27,7 @@ All run with `CI=true`, stdin from `/dev/null`, and an empty `HOME`.
 | `pr prepare --help` | yes | exit 0, so a caller can detect support |
 | `init` | yes | no prompt; second run changes nothing; with no plugin root it wires hooks and skips the rest |
 
-Nothing needed anything from `~/.claude` except `init`, which writes `~/.claude/settings.json`. The state directories created under an empty `HOME` are `usage.db` in `~/.config/playbook`, `runtime/` (handoffs, session folders, `session-start.log`), `memory/`, and `repos/<owner>/<repo>/<worktree>/state.db` for the gate.
+Nothing needed anything from `~/.claude` except `init`, which writes `~/.claude/settings.json`. The state directories created under an empty `HOME` are the `data/` folder (`config.db`, `usage.db`), `runtime/` (handoffs, session folders, `session-start.log`), `memory/`, and `data/gate/<owner>/<repo>/<worktree>.db` for the gate.
 
 ## Running Claude headless
 
@@ -147,7 +147,7 @@ jobs:
       - run: playbook ci
 ```
 
-`playbook ci` prints `PASS`, `FAIL`, or `SKIP` with a reason for each check, then `ci: N passed, M failed, K skipped`. Add `--strict` to fail the run when any check is skipped, so a job pointed at the wrong directory cannot pass by checking nothing. A check whose inputs are missing is skipped, so the step is safe in any repository. State between runs: these checks create nothing. A gate check needs the `state.db` under `~/.config/playbook/repos/...`, so cache that directory if a pipeline records gates in one job and checks them in another.
+`playbook ci` prints `PASS`, `FAIL`, or `SKIP` with a reason for each check, then `ci: N passed, M failed, K skipped`. Add `--strict` to fail the run when any check is skipped, so a job pointed at the wrong directory cannot pass by checking nothing. A check whose inputs are missing is skipped, so the step is safe in any repository. State between runs: these checks create nothing. A gate check needs the gate database under `~/.config/playbook/data/gate/...`, so cache that directory if a pipeline records gates in one job and checks them in another.
 
 ## Running commands under `claude -p`
 
