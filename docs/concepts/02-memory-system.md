@@ -24,9 +24,9 @@ All three scopes use the same file format and the same index structure. The only
 
 **Global** at `~/.config/playbook/memory/`: cross-project facts. Your preferences, corrections, and pointers to external resources. These apply in every repo. The index is read on demand, not at session start.
 
-**Org** under `~/.config/playbook/memory/<owner>/`: facts shared across every repo under one owner (e.g. every `acme/*` repo), but not universal. Namespaced by the first segment of the repo's git remote. These facts are indexed, like every other scope, in the shared `memory.graph.json`.
+**Org** under `~/.config/playbook/memory/<owner>/`: facts shared across every repo under one owner (e.g. every `acme/*` repo), but not universal. Namespaced by the first segment of the repo's git remote. These facts are indexed, like every other scope, in the shared `memory.db`.
 
-**Project** under `~/.config/playbook/memory/<owner>/<repo>/`: facts true only inside one repo, namespaced by the repo's git remote (`<owner>/<repo>` from `git remote get-url origin`). These facts are indexed the same way, in `memory.graph.json`. The whole `~/.config/playbook/memory/` store lives outside any repo checkout, so these files stay on your machine and never get committed.
+**Project** under `~/.config/playbook/memory/<owner>/<repo>/`: facts true only inside one repo, namespaced by the repo's git remote (`<owner>/<repo>` from `git remote get-url origin`). These facts are indexed the same way, in `memory.db`. The whole `~/.config/playbook/memory/` store lives outside any repo checkout, so these files stay on your machine and never get committed.
 
 The split exists because the three categories are genuinely different. A preference for a coding style applies everywhere. A team convention applies across every repo your org owns but says nothing about a different org's codebase. The auth layer's token flow is meaningless outside one service. Namespacing org and project facts by owner (and repo) also keeps them from polluting the global root, so the global index stays small enough to load efficiently.
 
@@ -49,7 +49,7 @@ anchors:
 
 `type` is one of `user`, `feedback`, `project`, or `reference`. `description` is a one-line trigger hint: "use when..." For `feedback` and `project` type facts, the body follows a fixed structure: the rule first, then a `**Why:**` section and a `**How to apply:**` section. The optional `anchors:` field lists repo-relative code locations the fact describes: a directory, a file, or a `file#symbol`. It maps a fact to concrete code so the graph knows where a fact lives.
 
-`memory.graph.json` is the sole index, built automatically from every fact file's frontmatter across all three scopes. Commands query it through `playbook memory context`, or by reading the graph file directly with the `Read` tool when the `playbook` binary isn't reachable; `session-init`'s SessionStart injection renders the same slice in process. See [memory.graph.json](#memorygraphjson) below for the node shape, and [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md) for the format mechanics.
+`memory.db` is the sole index, built automatically from every fact file's frontmatter across all three scopes. Commands query it through `playbook memory context`, and `playbook memory export --json` prints the whole graph as JSON; `session-init`'s SessionStart injection renders the same slice in process. See [memory.db](#memorydb) below for the node shape, and [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md) for the format mechanics.
 
 An install that predates this design may still have a leftover `MEMORY.md` file on disk from before the graph became the index. It is no longer read by anything; it is safe to ignore or delete.
 
@@ -82,7 +82,7 @@ Both paths produce the same file format and land in the right scope of the store
 
 Facts reach context three ways, described in full in [ADR 0004](../adr/0004-graph-first-memory.md) and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md).
 
-**At session start**, the `session-init` hook injects one small ranked block from `memory.graph.json`: the global and repo-scoped facts that are pinned, most used (hit counts in `memory.signals.json`), or most linked (edges and anchors), as names and one-line descriptions. It is capped near 2,500 characters, so it does not grow with the store, and it only reads the store. Facts with no pin, use or link are left to prompt and edit recall. With no graph file, it injects nothing.
+**At session start**, the `session-init` hook injects one small ranked block from `memory.db`: the global and repo-scoped facts that are pinned, most used (hit counts in `memory.signals.json`), or most linked (edges and anchors), as names and one-line descriptions. It is capped near 2,500 characters, so it does not grow with the store, and it only reads the store. Facts with no pin, use or link are left to prompt and edit recall. With no graph, it injects nothing.
 
 **Editing or writing a file** surfaces the facts anchored to it: the `memory-anchors` hook matches the edited path against the graph's anchor index and injects the matching facts' names, descriptions, and `depends_on`/`contradicts` neighbours.
 
@@ -94,11 +94,11 @@ The planning and execution commands (`/playbook:plan`, `/playbook:adr`, `/playbo
 
 **Across a session boundary**, `/playbook:session-handoff` saves a handoff document with `playbook handoff save`; `session-init` loads it automatically at the next `SessionStart`, including after `/clear`, and moves it to `handoff/used/` for 14 days, so `/clear` no longer discards what the session had figured out. If the automatic load does not appear, run `/playbook:session-start` to read it on demand, and `playbook handoff status` shows whether the hook fired at all. The `memory-capture` hook also fires once per context-usage threshold crossing during a session (a `Stop` hook, not a `SessionEnd` one), prompting you to write down durable facts and, since ADR 0008, to run a handoff too, in case the session runs long enough to approach compaction.
 
-## memory.graph.json
+## memory.db
 
-A single `memory.graph.json` lives at `~/.config/playbook/memory/memory.graph.json` and covers every fact, global, org, and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global`, `org`, or `project`) and, for org facts, the `project` (`owner`), or for project facts, the `project` (`owner/repo`). It is the primary retrieval path, not just a navigation aid: every mechanism in "How Facts Are Loaded" above, the SessionStart slice, the edit-time anchor lookup, and prompt-time recall, reads this file. See [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision, and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md) for what was added on top of it.
+A single `memory.db` lives at `~/.config/playbook/data/memory.db` and covers every fact, global, org, and project. Nodes are facts and referenced code locations. Edges are `links:` between facts, plus `anchors:` pointing facts to code. Each node carries a `scope` (`global`, `org`, or `project`) and, for org facts, the `project` (`owner`), or for project facts, the `project` (`owner/repo`). It is the primary retrieval path, not just a navigation aid: every mechanism in "How Facts Are Loaded" above, the SessionStart slice, the edit-time anchor lookup, and prompt-time recall, reads this database. See [ADR 0004: Graph-first memory retrieval and triggered capture](../adr/0004-graph-first-memory.md) for the decision, and [ADR 0008](../adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md) for what was added on top of it.
 
-The graph rebuilds automatically. The `rebuild-memory-graph` hook fires whenever a file under `~/.config/playbook/memory/` is saved, so writing or editing any fact keeps the graph current without a manual step.
+The graph rebuilds automatically. The `rebuild-memory-graph` hook fires whenever a file under `~/.config/playbook/memory/` is saved, so writing or editing any fact keeps the graph current without a manual step. The fact files stay the source of truth, so the database is safe to delete: the next rebuild makes it again. Older versions kept the graph in `~/.config/playbook/memory/memory.graph.json`. The first run of this version builds the database from the facts and renames that file to `memory.graph.json.migrated`; nothing is deleted.
 
 ## The Auto-Learn Loop
 

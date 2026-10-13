@@ -58,9 +58,9 @@ The usage store is filled by `playbook usage` itself, by the `usage-warm` hook i
 
 | Event | Matcher | Command | What it does | Can block or change | Reads and writes | Turn off |
 | :- | :- | :- | :- | :- | :- | :- |
-| `PreToolUse` | `Edit\|Write` | `playbook hook memory-anchors` | Shows the memory facts anchored to the file you are about to edit. | Adds context. Never blocks. | Reads `memory/memory.graph.json`. Writes an anchor index file in the session directory. | Entry only. |
+| `PreToolUse` | `Edit\|Write` | `playbook hook memory-anchors` | Shows the memory facts anchored to the file you are about to edit. | Adds context. Never blocks. | Reads `data/memory.db`. Writes an anchor index file in the session directory. | Entry only. |
 | `UserPromptSubmit` | none | `playbook hook memory-anchors` | Adds the memory facts that match your prompt or the files touched this session. | Adds context. Never blocks. | Same as above. | Entry only. |
-| `PostToolUse` | `Edit\|Write\|NotebookEdit` | `playbook hook rebuild-memory-graph` | Rebuilds the memory graph after a fact file is saved. Does nothing for any other file. | Never blocks. Prints nothing. | Reads the memory tree. Writes `memory/memory.graph.json` atomically. | Entry only. |
+| `PostToolUse` | `Edit\|Write\|NotebookEdit` | `playbook hook rebuild-memory-graph` | Rebuilds the memory graph after a fact file is saved. Does nothing for any other file. | Never blocks. Prints nothing. | Reads the memory tree. Writes `data/memory.db` in one transaction. | Entry only. |
 | `Stop` | none | `playbook hook memory-capture` | Once per context threshold crossing, asks the model to write down durable facts before it continues. | Can block the stop (up to two re-blocks), then releases. | Reads `edits.jsonl` and the memory graph. Writes `capture-attempts` in the session directory. Also runs the one-time memory move described in [What init installs](../guides/06-what-init-installs.md#memory-migration). | Entry only. |
 
 ## Hygiene

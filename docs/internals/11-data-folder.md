@@ -7,11 +7,12 @@ Every database a playbook tool creates lives in one folder, `~/.config/playbook/
 | File | Holds | Safe to delete |
 |---|---|---|
 | `config.db` | All settings: the global, org, repo and per-app tiers, plus the internal `state` table | No: it is your configuration |
+| `memory.db` | The memory graph: one row per fact and per link, built from the fact files | Yes: `playbook memory rebuild` makes it again |
 | `usage.db` | Token and cost events from the usage view | No: events outlive Claude Code's own history |
 | `gate/<owner>/<repo>/<worktree-id>.db` | Gate records of one worktree (`gate record`, `gate check`) | Only when the worktree is gone |
 | `code/<owner>/<repo>/<worktree-id>.db` | The code index of one worktree | Yes: `playbook code index` rebuilds it |
 
-The per-worktree files keep two worktrees of the same repo apart, as the old `repos/<owner>/<repo>/<worktree-id>/` folders did. Memory facts stay Markdown files under `~/.config/playbook/memory`. Plans, implement notes and worktree folders stay under `repos/`.
+The per-worktree files keep two worktrees of the same repo apart, as the old `repos/<owner>/<repo>/<worktree-id>/` folders did. Memory facts stay Markdown files under `~/.config/playbook/memory`, and they are the source of truth for `memory.db`. Plans, implement notes and worktree folders stay under `repos/`.
 
 ## How databases got here
 
@@ -20,6 +21,7 @@ Earlier versions kept these files elsewhere:
 | Now | Before |
 |---|---|
 | `data/config.db` | `~/.config/playbook/playbook.db` |
+| `data/memory.db` | `~/.config/playbook/memory/memory.graph.json` |
 | `data/gate/<owner>/<repo>/<worktree-id>.db` | `~/.config/playbook/repos/<owner>/<repo>/<worktree-id>/state.db` |
 | `data/code/<owner>/<repo>/<worktree-id>.db` | `~/.config/playbook/repos/<owner>/<repo>/<worktree-id>/code/index.sqlite3` |
 
@@ -37,6 +39,8 @@ If both files exist, because an older playbook recreated the old path, the rows 
 - `config.db`: the row with the later `updated_at` wins. Values imported from a leftover `config.json` count as oldest.
 - Gate phase rows: the later `recorded_at` wins. The rounds of one plan and phase come whole from one file, never mixed.
 - Rows the old file has and the new one lacks are added.
+
+The graph is the one exception to copying. `memory.graph.json` is derived from the fact files, so `memory.db` is rebuilt from them and the file is renamed to `memory.graph.json.migrated`. An older playbook that writes the file again gets it folded in the same way the next time a tool reads the graph. `playbook memory export --json` prints the graph in the shape the file had.
 
 A file that is not a database is left where it is, or renamed to `.migrated` for the settings database, and the notice names it. Older playbook versions (0.25.0 and earlier) keep working but read and write the old paths, so upgrade every installed copy.
 
