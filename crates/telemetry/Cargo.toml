@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "playbook-telemetry"
+version = "0.1.7"
+edition.workspace = true
+description = "Token and cost usage dashboard for Claude Code sessions: a terminal view, reports and an optional telemetry receiver"
+license.workspace = true
+repository = "https://github.com/pragmatic-engineer/playbook"
+publish = false
+
+[lib]
+name = "playbook_telemetry"
+path = "src/lib.rs"
+
+[[bin]]
+name = "playbook-telemetry"
+path = "src/main.rs"
+
+[[bin]]
+name = "pbtop"
+path = "src/bin/pbtop.rs"
+
+[dependencies]
+chrono = { version = "=0.4.41", default-features = false, features = ["clock", "std"] }
+clap = { version = "=4.6.6", features = ["derive"] }
+libc = "=0.2.189"
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["preserve_order"] }
+
+[lints]
+workspace = true

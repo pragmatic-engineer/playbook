@@ -12,8 +12,8 @@ fn run(args: &[&str]) -> (bool, String) {
         std::env::temp_dir().join(format!("playbook-sessions-{}", playbook::testing::run_id()));
     let project = home.join(".claude/projects/proj-one");
     fs::create_dir_all(&project).unwrap();
-    let fixtures =
-        std::path::Path::new(env!("PLAYBOOK_REPO_ROOT")).join("crates/cli/tests/fixtures/usage");
+    let fixtures = std::path::Path::new(env!("PLAYBOOK_REPO_ROOT"))
+        .join("crates/telemetry/tests/fixtures/usage");
     fs::copy(
         fixtures.join("usage/proj-one/s1.jsonl"),
         project.join("s1.jsonl"),
