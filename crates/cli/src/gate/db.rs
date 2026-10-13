@@ -119,6 +119,55 @@ fn ensure_stuck_verdict(conn: &rusqlite::Connection) -> Result<(), String> {
     }
 }
 
+/// How the move merges the two gate tables when an older playbook wrote the
+/// old file again: a phase row with the later `recorded_at` wins, and a round
+/// series for one plan and phase is taken whole from one file.
+const GATE_RULES: &[(&str, crate::common::data::migrate::Rule)] = &[
+    (
+        "gate_phases",
+        crate::common::data::migrate::Rule::Newer("recorded_at"),
+    ),
+    (
+        "gate_rounds",
+        crate::common::data::migrate::Rule::Series(&["plan_slug", "phase"]),
+    ),
+];
+
+/// The gate database of the current worktree, inside the data folder. First
+/// completes the legacy repo-local move into `dest_base`, then moves
+/// `dest_base/state.db` (where earlier versions kept it) to
+/// `data/gate/<owner>/<repo>/<worktree-id>.db`.
+///
+/// While the old file cannot be moved (another process holds it, a lock is
+/// pending, the move failed) the old path is returned for this call, so a
+/// verdict recorded earlier is never hidden behind an empty new file. A
+/// corrupt old file is left in place and the new path is used. A repo whose
+/// name has no safe data folder path keeps using the old path.
+pub fn resolve_db_path(repo_root: &Path, dest_base: &Path) -> Result<PathBuf, String> {
+    use crate::common::data::migrate::{self, Outcome};
+    migrate_legacy_repo_local(repo_root, dest_base)?;
+    let old = dest_base.join("state.db");
+    let Some(new) = crate::common::data::scoped_db("gate") else {
+        return Ok(old);
+    };
+    let step = migrate::Move {
+        old: old.clone(),
+        new: new.clone(),
+        policy: migrate::Policy::Merge(GATE_RULES),
+    };
+    match migrate::migrate_with_notice(&step, "gate") {
+        Ok(Outcome::Corrupt(_)) => Ok(new),
+        Ok(_) if !old.is_file() => Ok(new),
+        Ok(_) => Ok(old),
+        Err(e) => {
+            migrate::notice(&format!(
+                "playbook: the gate database move is deferred ({e})"
+            ));
+            Ok(old)
+        }
+    }
+}
+
 /// Open (creating if missing) the SQLite database at `path`, ensuring the
 /// `gate_phases` schema and pragmas are in place.
 pub fn open_db(path: &Path) -> Result<rusqlite::Connection, String> {
