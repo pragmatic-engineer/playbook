@@ -19,19 +19,23 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 /// A fresh scratch directory, unique per call.
 fn scratch_dir(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "playbook-wu4-{}-{tag}-{n}",
-        playbook::testing::run_id()
-    ));
+    // Nested, because the graph database sits in a `data` folder beside the
+    // memory folder, and each test needs a folder of its own for it.
+    let dir = std::env::temp_dir()
+        .join(format!(
+            "playbook-wu4-{}-{tag}-{n}",
+            playbook::testing::run_id()
+        ))
+        .join("memory");
     fs::create_dir_all(&dir).unwrap();
     dir
 }
 
-/// Writes a minimal `memory.graph.json` into `mem_dir`, returning its mtime
-/// as Unix epoch seconds: the fact-touched reference.
+/// Stores a minimal graph in the `memory.db` beside `mem_dir`, returning its
+/// mtime as Unix epoch seconds: the fact-touched reference.
 fn seed_graph(mem_dir: &Path) -> i64 {
-    let path = mem_dir.join("memory.graph.json");
-    fs::write(&path, r#"{"nodes":[],"edges":[]}"#).unwrap();
+    playbook::testing::write_graph_fixture(mem_dir, r#"{"nodes":[],"edges":[]}"#);
+    let path = mem_dir.parent().unwrap().join("data").join("memory.db");
     let modified = fs::metadata(&path).unwrap().modified().unwrap();
     modified.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
 }

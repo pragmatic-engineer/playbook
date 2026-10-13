@@ -79,7 +79,7 @@ fn graph_path(home: &Path) -> PathBuf {
 }
 
 fn write_graph(home: &Path, content: &str) {
-    fs::write(graph_path(home), content).unwrap();
+    playbook::testing::write_graph_fixture(graph_path(home).parent().unwrap(), content);
 }
 
 fn run_playbook(home: &Path, args: &[&str], hook_input: &str) -> Output {

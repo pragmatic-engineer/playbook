@@ -806,9 +806,18 @@ mod memory_capture {
         home.join(".config").join("playbook").join("memory")
     }
 
+    /// The graph database beside the memory folder `mem_dir`: its file time is
+    /// the "graph last written" signal.
+    fn graph_db_for(mem_dir: &Path) -> PathBuf {
+        mem_dir.parent().unwrap().join("data").join("memory.db")
+    }
+
     /// Write `older_path`, sleep briefly, write `newer_path`, then poll up
     /// to 500ms confirming the mtime ordering actually holds.
     fn write_with_older_then_newer_mtime(older_path: &Path, newer_path: &Path) {
+        for path in [older_path, newer_path] {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+        }
         fs::write(older_path, "").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         fs::write(newer_path, "{}").unwrap();
@@ -833,7 +842,7 @@ mod memory_capture {
 
     #[test]
     fn marker_present_fires_once_and_clears_the_marker() {
-        // Arrange: graph.json mtime newer than the marker's, so this hits
+        // Arrange: memory.db mtime newer than the marker's, so this hits
         // the write-detected release path, not the retain-and-reblock path.
         let home = scratch_home("mc-fires");
         let dir = session_dir_for(&home, SID);
@@ -841,7 +850,7 @@ mod memory_capture {
         let marker = dir.join("capture-due");
         let mem_dir = memory_dir_for(&home);
         fs::create_dir_all(&mem_dir).unwrap();
-        let graph = mem_dir.join("memory.graph.json");
+        let graph = graph_db_for(&mem_dir);
         write_with_older_then_newer_mtime(&marker, &graph);
 
         // Act
@@ -1010,7 +1019,7 @@ mod memory_capture {
         let marker = dir.join("capture-due");
         let mem_dir = memory_dir_for(&home);
         fs::create_dir_all(&mem_dir).unwrap();
-        let graph = mem_dir.join("memory.graph.json");
+        let graph = graph_db_for(&mem_dir);
         write_with_older_then_newer_mtime(&marker, &graph);
         run_hook("memory-capture", &home, &payload());
 
@@ -1252,7 +1261,7 @@ mod memory_capture {
         fs::write(&attempts, "1").unwrap();
         let mem_dir = memory_dir_for(&home);
         fs::create_dir_all(&mem_dir).unwrap();
-        let graph = mem_dir.join("memory.graph.json");
+        let graph = graph_db_for(&mem_dir);
         write_with_older_then_newer_mtime(&marker, &graph);
 
         // Act
@@ -1267,7 +1276,7 @@ mod memory_capture {
 
     #[test]
     fn no_graph_file_present_retains_marker_and_reblocks() {
-        // Arrange: no memory.graph.json at all.
+        // Arrange: no memory.db at all.
         let home = scratch_home("mc-no-graph");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
@@ -1301,7 +1310,7 @@ mod memory_capture {
         fs::create_dir_all(&dir).unwrap();
         let mem_dir = memory_dir_for(&home);
         fs::create_dir_all(&mem_dir).unwrap();
-        let graph = mem_dir.join("memory.graph.json");
+        let graph = graph_db_for(&mem_dir);
         let marker = dir.join("capture-due");
         write_with_older_then_newer_mtime(&graph, &marker);
 
@@ -1322,6 +1331,31 @@ mod memory_capture {
                 .trim(),
             "1"
         );
+    }
+
+    #[test]
+    fn a_legacy_graph_file_older_than_the_marker_retains_marker_and_reblocks() {
+        // Arrange: an older playbook's graph file from before this crossing.
+        // Asking when it changed must not fold it into the database, which
+        // would make it look like a fact was just saved.
+        let home = scratch_home("mc-stale-legacy-graph");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let mem_dir = memory_dir_for(&home);
+        fs::create_dir_all(&mem_dir).unwrap();
+        let legacy = mem_dir.join("memory.graph.json");
+        let marker = dir.join("capture-due");
+        write_with_older_then_newer_mtime(&legacy, &marker);
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        assert_eq!(value["decision"], "block");
+        assert!(marker.exists());
     }
 
     #[test]
@@ -1432,8 +1466,8 @@ mod memory_capture {
         use std::io::ErrorKind;
         use std::os::unix::fs::PermissionsExt;
 
-        // Arrange: the marker reads fine; only the memory dir is
-        // restricted, so stat'ing memory.graph.json fails.
+        // Arrange: the marker reads fine; only the data folder is
+        // restricted, so stat'ing memory.db fails.
         let home = scratch_home("mc-unreadable-graph");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
@@ -1441,14 +1475,17 @@ mod memory_capture {
         let mem_dir = memory_dir_for(&home);
         fs::create_dir_all(&mem_dir).unwrap();
 
-        let original_mode = fs::metadata(&mem_dir).unwrap().permissions().mode() & 0o777;
-        fs::set_permissions(&mem_dir, fs::Permissions::from_mode(0o000)).unwrap();
+        let graph = graph_db_for(&mem_dir);
+        let data_dir = graph.parent().unwrap().to_path_buf();
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(&graph, "{}").unwrap();
+        let original_mode = fs::metadata(&data_dir).unwrap().permissions().mode() & 0o777;
+        fs::set_permissions(&data_dir, fs::Permissions::from_mode(0o000)).unwrap();
         let _guard = RestorePerms {
-            path: mem_dir.clone(),
+            path: data_dir.clone(),
             mode: original_mode,
         };
 
-        let graph = mem_dir.join("memory.graph.json");
         match fs::metadata(&graph) {
             Ok(_) => {
                 eprintln!("skipping: chmod 000 was bypassed (root or CAP_DAC_OVERRIDE)");
@@ -1467,7 +1504,7 @@ mod memory_capture {
         assert_eq!(code, 0);
         assert_eq!(
             stdout, "",
-            "an unreadable memory.graph.json must fail open, not block"
+            "an unreadable memory.db must fail open, not block"
         );
     }
 
@@ -1553,7 +1590,7 @@ mod memory_capture {
 
     #[test]
     fn handoff_nudge_appears_when_crossings_at_threshold_and_no_handoff_written() {
-        // Arrange: no memory.graph.json (the no-write precondition),
+        // Arrange: no memory.db (the no-write precondition),
         // crossings at the escalation threshold, no handoff file at all.
         let home = scratch_home("mc-nudge-at-threshold");
         let cwd = scratch_home("mc-nudge-at-threshold-cwd");
@@ -1689,7 +1726,7 @@ mod memory_capture {
         let marker = dir.join("capture-due");
         let mem_dir = memory_dir_for(&home);
         fs::create_dir_all(&mem_dir).unwrap();
-        let graph = mem_dir.join("memory.graph.json");
+        let graph = graph_db_for(&mem_dir);
         write_with_older_then_newer_mtime(&marker, &graph);
         fs::write(dir.join("capture-crossings"), "5").unwrap();
         write_start_ts(&dir, 1);
@@ -1761,11 +1798,7 @@ mod memory_capture {
             })
             .collect();
         let graph = serde_json::json!({"nodes": nodes, "edges": edges, "version": 1});
-        fs::write(
-            mem_dir.join("memory.graph.json"),
-            serde_json::to_string(&graph).unwrap(),
-        )
-        .unwrap();
+        playbook::testing::write_graph_fixture(mem_dir, &serde_json::to_string(&graph).unwrap());
         for id in node_ids {
             fs::write(mem_dir.join(format!("{id}.md")), "a".repeat(body_bytes)).unwrap();
         }

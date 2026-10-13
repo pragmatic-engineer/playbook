@@ -112,11 +112,12 @@ pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<()
         playbook_common::sqlite::OPEN_BUDGET,
     )
     .map_err(|e| e.to_string())?;
-    playbook_common::sqlite::retry_busy(|| init(&conn), playbook_common::sqlite::OPEN_BUDGET)
-        .map_err(|e| e.to_string())?;
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
+    // The schema is made inside the same transaction as the rows, so a reader
+    // sees no tables at all or the whole first graph, never empty tables.
+    init(&tx).map_err(|e| e.to_string())?;
     tx.execute_batch("DELETE FROM edges; DELETE FROM nodes;")
         .map_err(|e| e.to_string())?;
     {
@@ -150,29 +151,60 @@ pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<()
                 .map_err(|e| e.to_string())?;
         }
     }
+    let (secs, millis) = now();
     tx.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES ('rebuilt_at', ?1)",
-        [now_secs().to_string()],
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('rebuilt_at', ?1), ('rebuilt_at_ms', ?2)",
+        [secs.to_string(), millis.to_string()],
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())
 }
 
-/// Removes the database file and its journal files, so a reader finds no
-/// graph rather than a stale one. Errors are ignored: a missing file is the
-/// goal, and a file that cannot be removed is no worse than before.
-pub fn remove_db(db: &Path) {
-    for suffix in ["-wal", "-shm", ""] {
-        let mut name = db.as_os_str().to_os_string();
-        name.push(suffix);
-        let _ = std::fs::remove_file(PathBuf::from(name));
-    }
+/// When the graph in `db` was last written: the time the writer recorded in
+/// the database, or the file time when that cannot be read. A reader never
+/// changes either, so reading is not mistaken for a write. `Ok(None)` when
+/// the database does not exist, and an error when it cannot be inspected.
+pub fn touched_at(db: &Path) -> std::io::Result<Option<std::time::SystemTime>> {
+    let meta = match std::fs::metadata(db) {
+        Ok(m) if m.is_file() => m,
+        Ok(_) => return Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let file_time = meta.modified()?;
+    Ok(Some(recorded_at(db).unwrap_or(file_time)))
 }
 
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
+fn recorded_at(db: &Path) -> Option<std::time::SystemTime> {
+    let conn = Connection::open_with_flags(
+        db,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    conn.busy_timeout(BUSY).ok()?;
+    let ms: String = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'rebuilt_at_ms'",
+            [],
+            |r| r.get(0),
+        )
+        .ok()?;
+    let ms: u64 = ms.parse().ok()?;
+    Some(std::time::UNIX_EPOCH + Duration::from_millis(ms))
+}
+
+/// Whether `error` (from [`write_graph`]) says the file is not a usable
+/// database, as opposed to being busy or read only.
+pub fn is_corrupt(error: &str) -> bool {
+    let e = error.to_lowercase();
+    e.contains("not a database") || e.contains("malformed") || e.contains("corrupt")
+}
+
+fn now() -> (u64, u128) {
+    let d = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+        .unwrap_or_default();
+    (d.as_secs(), d.as_millis())
 }
 
 /// The graph stored in the database at `db`, nodes by id and edges by
@@ -190,11 +222,14 @@ pub fn read_graph(db: &Path) -> Result<Option<Graph>, String> {
     // One read transaction for both tables, so a rebuild between the two
     // queries cannot hand back nodes of one graph with edges of the next.
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-    let mut ns = tx
-        .prepare(
-            "SELECT id, file, scope, project, type, name, description, pinned FROM nodes ORDER BY id",
-        )
-        .map_err(|e| e.to_string())?;
+    let mut ns = match tx.prepare(
+        "SELECT id, file, scope, project, type, name, description, pinned FROM nodes ORDER BY id",
+    ) {
+        Ok(stmt) => stmt,
+        // A file made but not yet filled by its first writer holds no graph.
+        Err(e) if e.to_string().contains("no such table") => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
     let nodes = ns
         .query_map([], |r| {
             Ok(NodeRow {
@@ -366,14 +401,38 @@ mod tests {
     }
 
     #[test]
-    fn remove_db_takes_the_file_and_its_journal_files() {
-        let d = scratch_dir("mem-remove");
+    fn a_file_that_is_not_a_database_is_reported_as_corrupt() {
+        let d = scratch_dir("mem-corrupt");
         let db = db_in(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(&db, b"this is not a sqlite file at all, just text padding").unwrap();
+
+        let error = write_graph(&db, &[node("a")], &[]).unwrap_err();
+
+        assert!(is_corrupt(&error), "{error}");
+    }
+
+    #[test]
+    fn a_database_without_tables_reads_as_no_graph() {
+        let d = scratch_dir("mem-no-tables");
+        let db = db_in(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        Connection::open(&db)
+            .unwrap()
+            .execute_batch("CREATE TABLE x (a);")
+            .unwrap();
+
+        assert!(read_graph(&db).unwrap().is_none());
+    }
+
+    #[test]
+    fn touched_at_follows_the_database() {
+        let d = scratch_dir("mem-touched");
+        let db = db_in(&d);
+        assert!(touched_at(&db).unwrap().is_none());
+
         write_graph(&db, &[node("a")], &[]).unwrap();
 
-        remove_db(&db);
-
-        assert!(!db.exists());
-        assert!(read_graph(&db).unwrap().is_none());
+        assert!(touched_at(&db).unwrap().is_some());
     }
 }

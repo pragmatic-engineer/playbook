@@ -55,7 +55,7 @@ fn world(tag: &str) -> World {
     let graph = format!(
         r#"{{"nodes":[{{"id":"g1","name":"{MEMORY_FACT}","description":"stripes","scope":"global","type":"user","pinned":true}}],"edges":[]}}"#
     );
-    fs::write(mem.join("memory.graph.json"), graph).unwrap();
+    playbook::testing::write_graph_fixture(&mem, &graph);
     World { home, repo }
 }
 

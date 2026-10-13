@@ -37,7 +37,7 @@ pub fn check_staleness(
     Staleness { stale }
 }
 
-/// Same-repo: compares the anchor's git-log date to `memory.graph.json`'s
+/// Same-repo: compares the anchor's git-log date to `memory.db`'s
 /// mtime. Non-repo: never stale on first sight, hashed only for later use.
 fn compute_verdict(
     mem_dir: &Path,
@@ -65,12 +65,11 @@ fn is_same_repo_anchor(anchor_path: &Path) -> bool {
     false
 }
 
-/// `memory.graph.json`'s own mtime: the fact's "last touched" reference.
+/// When `memory.db` last changed: the fact's "last touched" reference.
 fn fact_touched_at(mem_dir: &Path) -> Option<DateTime> {
-    let modified = fs::metadata(mem_dir.join("memory.graph.json"))
-        .ok()?
-        .modified()
-        .ok()?;
+    let modified = crate::hooks::rebuild_memory_graph::graph_touched_at(mem_dir)
+        .ok()
+        .flatten()?;
     let secs = modified.duration_since(UNIX_EPOCH).ok()?.as_secs();
     DateTime::try_from(secs).ok()
 }

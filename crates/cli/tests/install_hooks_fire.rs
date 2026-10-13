@@ -197,8 +197,8 @@ fn fires(f: &Fire, name: &str) -> bool {
             let home = scratch(f, "h-anchors");
             let mem = home.join(".config/playbook/memory");
             fs::create_dir_all(&mem).unwrap();
-            fs::write(
-                mem.join("memory.graph.json"),
+            playbook::testing::write_graph_fixture(
+                &mem,
                 r#"{
   "nodes": [
     {"id": "global/fire-anchor-fact", "file": "fire-anchor-fact.md", "scope": "global", "type": "project", "name": "fire-anchor-fact", "description": "fixture fact"},
@@ -208,8 +208,7 @@ fn fires(f: &Fire, name: &str) -> bool {
     {"from": "global/fire-anchor-fact", "to": "code:Cargo.toml", "relation": "anchors"}
   ]
 }"#,
-            )
-            .unwrap();
+            );
             let target = repo_root().join("Cargo.toml");
             let payload = format!(
                 "{{\"session_id\":\"fire-memory-anchors\",\"tool_name\":\"Edit\",\"tool_input\":{{\"file_path\":{}}}}}",
@@ -244,8 +243,7 @@ fn fires(f: &Fire, name: &str) -> bool {
                 json_str(&fact.display().to_string())
             );
             run_hook(&f.playbook, name, &payload, &home, &home, &[], &[]);
-            fs::read_to_string(mem.join("memory.graph.json"))
-                .ok()
+            playbook::hooks::rebuild_memory_graph::graph_text(&mem)
                 .and_then(|t| serde_json::from_str::<Value>(&t).ok())
                 .is_some_and(|g| g["edges"].as_array().is_some_and(|e| e.len() == 1))
         }
