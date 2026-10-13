@@ -1,11 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The one place `crates/code` touches the host program. Everything the code
-//! index needs from playbook (its name, where it keeps state, repo identity,
-//! file privacy and, in later Segments, config values and process policy)
-//! goes through this module, so the code index can move to its own crate by
-//! replacing this one file.
+//! The bridge from the code index to the playbook program. What the index
+//! needs from playbook (its name, where it keeps state, repo identity, file
+//! privacy and, in later Segments, config values and process policy) goes
+//! through this module. Shared helpers come from `playbook_common`.
 
 use std::path::{Path, PathBuf};
 
