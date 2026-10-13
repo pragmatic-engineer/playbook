@@ -26,6 +26,7 @@ set -euo pipefail
 
 PLUGIN_REPO="pragmatic-engineer/playbook"
 MARKETPLACE="pragmatic-engineer/marketplace"
+MARKETPLACE_NAME="pragmatic-engineer"
 PLUGIN="playbook@pragmatic-engineer"
 PLUGIN_HOOKS="playbook-hooks@pragmatic-engineer"
 # Lowest claude CLI version that can install from the marketplace: the plugin
@@ -46,6 +47,7 @@ OPT_SYSTEM_PROMPT=0
 ASSUME_YES=0
 BINARY_ONLY=0
 PLUGIN_SKIPPED_FOR_VERSION=0
+PLUGIN_INSTALLED=0
 SKILLS_ONLY=0
 
 # Component dirs the plugin owns: never copied into ~/.claude directly, so the
@@ -173,9 +175,15 @@ run_plugin_step() {
                 # </dev/null keeps claude off the script's stdin under `curl | bash`.
                 claude plugin marketplace add "$MARKETPLACE" </dev/null \
                     || warn "marketplace add failed; later: claude plugin marketplace add $MARKETPLACE"
+                # A marketplace added before the plugins were split may not list
+                # playbook-hooks yet. Best effort, never fatal.
+                claude plugin marketplace update "$MARKETPLACE_NAME" </dev/null >/dev/null 2>&1 || true
                 for _p in $PLUGIN_LIST; do
-                    claude plugin install "$_p" </dev/null \
-                        || warn "plugin install failed; later: claude plugin install $_p"
+                    if claude plugin install "$_p" </dev/null; then
+                        PLUGIN_INSTALLED=1
+                    else
+                        warn "plugin install failed; later: claude plugin install $_p"
+                    fi
                     claude plugin enable "$_p" </dev/null >/dev/null 2>&1 || true
                 done
                 # Retire component dirs left by an older direct install so the plugin
@@ -265,9 +273,9 @@ else
     PLUGIN_INSTALL_CMD="claude plugin install $PLUGIN && claude plugin install $PLUGIN_HOOKS"
 fi
 if [ "$SKILLS_ONLY" -eq 1 ]; then
-    SKIP_PLUGIN=0
+    [ "$SKIP_PLUGIN" -eq 0 ] || die "--skills-only cannot be combined with --skip-plugin or --no-setup"
     run_plugin_step
-    if command -v claude >/dev/null 2>&1 && [ "$PLUGIN_SKIPPED_FOR_VERSION" -eq 0 ]; then
+    if [ "$PLUGIN_INSTALLED" -eq 1 ]; then
         log "Done. Installed the skills plugin only: no binary, no hooks, no settings.json changes."
         printf 'Some commands call the playbook binary. Add it later with: curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash\n'
     fi
@@ -648,6 +656,12 @@ for rel in $CONFIG_FILES; do
     cp "$src" "$dest"
 done
 
+# --- plugins ---------------------------------------------------------------
+
+# Before `playbook init`, so init sees the plugins this run installs and does
+# not tell the user to add by hand what the installer just added.
+run_plugin_step
+
 # Wire the always-on guards, seed/merge settings.json, and install the shell
 # launcher and statusline, via `playbook init`. IMPORTANT: this runs
 # unconditionally -- even with --no-setup. --no-setup means "no plugin, no
@@ -721,10 +735,6 @@ CLAUDE_PLUGIN_ROOT="$SRC" "$PLAYBOOK_BIN_DIR/playbook" init $_INIT_ARGS || \
     die "playbook init failed; see the step report above"
 
 trust_playbook_config_dir
-
-# --- setup -----------------------------------------------------------------
-
-run_plugin_step
 
 # --- summary ---------------------------------------------------------------
 

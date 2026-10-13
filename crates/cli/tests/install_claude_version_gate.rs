@@ -194,3 +194,35 @@ fn skills_only_and_binary_only_cannot_be_combined() {
     assert!(!r.out.status.success());
     assert!(r.log().contains("cannot be combined"), "{}", r.log());
 }
+
+#[test]
+fn a_declined_or_failed_skills_only_install_does_not_claim_success() {
+    let r = run_with("skills-only-fail", "exit 1", &["--skills-only"]);
+    assert!(r.out.status.success(), "{}", r.log());
+    assert!(!r.log().contains("no binary, no hooks"), "{}", r.log());
+}
+
+#[test]
+fn skills_only_refuses_to_combine_with_skip_plugin() {
+    let r = run_with(
+        "skills-skip",
+        &version("2.1.269"),
+        &["--skills-only", "--skip-plugin"],
+    );
+    assert!(!r.out.status.success());
+    assert!(r.log().contains("cannot be combined"), "{}", r.log());
+}
+
+#[test]
+fn the_marketplace_is_refreshed_before_the_plugins_are_installed() {
+    let r = run("market-update", &version("2.1.269"));
+    let update = r
+        .calls
+        .find("marketplace update pragmatic-engineer")
+        .expect("update call");
+    let install = r
+        .calls
+        .find("install playbook-hooks")
+        .expect("install call");
+    assert!(update < install, "{}", r.calls);
+}

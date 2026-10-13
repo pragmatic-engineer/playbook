@@ -611,17 +611,15 @@ fn both_plugins_at_one_version_say_nothing() {
 }
 
 #[test]
-fn plugins_at_different_versions_are_a_warning() {
+fn plugins_at_different_versions_are_not_a_problem() {
+    // The two plugins are versioned apart, so equal versions are not required.
     let b = Box::new("plugin-versions");
     installed_plugins(
         &b,
         r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"version":"0.25.0"}],"playbook-hooks@pragmatic-engineer":[{"version":"0.26.0"}]}}"#,
     );
 
-    let rows = split_rows(&b.run(&[], "/bin/bash", None));
-
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert!(rows[0].contains("0.25.0") && rows[0].contains("0.26.0"));
+    assert!(split_rows(&b.run(&[], "/bin/bash", None)).is_empty());
 }
 
 #[test]

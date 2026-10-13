@@ -69,7 +69,7 @@ pub const HOOKS_PLUGIN_KEY: &str = "playbook-hooks@pragmatic-engineer";
 
 /// The hint shown to someone who has the `playbook` plugin but not the hooks
 /// plugin, which is how every install looked before the two were split.
-pub const HOOKS_MISSING_HINT: &str = "the playbook-hooks plugin is not installed, so the worktree hooks are off. Add it with: claude plugin install playbook-hooks@pragmatic-engineer";
+pub const HOOKS_MISSING_HINT: &str = "the playbook-hooks plugin is not installed, so the worktree hooks are off. Add it with: claude plugin marketplace update pragmatic-engineer && claude plugin install playbook-hooks@pragmatic-engineer";
 
 fn installed_entry(home: &Path, key: &str) -> Option<Option<serde_json::Value>> {
     let path = home.join(".claude/plugins/installed_plugins.json");
@@ -85,16 +85,6 @@ pub fn listed_in(home: &Path, key: &str) -> Option<bool> {
     installed_entry(home, key).map(|entry| entry.is_some())
 }
 
-/// The version Claude Code recorded for `key`, when it lists one.
-pub fn version_in(home: &Path, key: &str) -> Option<String> {
-    let entry = installed_entry(home, key)??;
-    let first = entry.as_array().and_then(|a| a.first()).unwrap_or(&entry);
-    first
-        .get("version")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-}
-
 /// Whether Claude Code lists the plugin as installed, or `None` when
 /// `installed_plugins.json` is missing or cannot be parsed.
 pub fn installed_in(home: &Path) -> Option<bool> {
@@ -103,9 +93,12 @@ pub fn installed_in(home: &Path) -> Option<bool> {
 
 /// True when the `playbook` plugin is installed and the hooks plugin is not.
 /// A machine with neither (a Homebrew-only install) is not told anything: its
-/// hooks come from `settings.json`.
+/// hooks come from `settings.json`. A user who switched the `playbook` plugin
+/// off is not nagged either.
 pub fn hooks_plugin_missing(home: &Path) -> bool {
-    installed_in(home) == Some(true) && listed_in(home, HOOKS_PLUGIN_KEY) == Some(false)
+    installed_in(home) == Some(true)
+        && listed_in(home, HOOKS_PLUGIN_KEY) == Some(false)
+        && !is_disabled_in(home)
 }
 
 /// `HOOKS_MISSING_HINT` when it applies and the user has not turned plugin
@@ -297,15 +290,18 @@ mod tests {
     }
 
     #[test]
-    fn versions_come_from_the_first_recorded_entry() {
-        let home = home_with(None);
-        write_installed(&home, BOTH);
-        assert_eq!(version_in(&home, PLUGIN_KEY).as_deref(), Some("0.25.0"));
-        assert_eq!(
-            version_in(&home, HOOKS_PLUGIN_KEY).as_deref(),
-            Some("0.25.1")
+    fn the_older_object_shape_and_a_disabled_plugin_are_handled() {
+        let old_shape = home_with(None);
+        write_installed(
+            &old_shape,
+            r#"{"version":1,"plugins":{"playbook@pragmatic-engineer":{"version":"0.25.0"}}}"#,
         );
-        assert_eq!(version_in(&home, "other@x"), None);
+        assert!(hooks_plugin_missing(&old_shape));
+        let disabled = home_with(Some(
+            r#"{"enabledPlugins":{"playbook@pragmatic-engineer":false}}"#,
+        ));
+        write_installed(&disabled, LISTED);
+        assert!(!hooks_plugin_missing(&disabled));
     }
 
     #[test]

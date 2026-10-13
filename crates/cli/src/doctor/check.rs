@@ -642,12 +642,12 @@ fn plugin_only_rows(env: &Env) -> Vec<Row> {
 }
 
 /// The two plugins: `playbook` (skills, commands, agents) and `playbook-hooks`
-/// (hooks, shim, installer). Reads Claude Code's `installed_plugins.json` and
+/// (hooks, shim, installer), which are versioned apart. Reads Claude Code's `installed_plugins.json` and
 /// stays silent when it is missing, as on a Homebrew-only machine. Neither
 /// plugin is required by the seven layers, so none of these rows fails.
 fn plugin_split_rows(env: &Env) -> Vec<Row> {
     use crate::common::plugin_state::{
-        hooks_plugin_missing, installed_in, listed_in, version_in, HOOKS_PLUGIN_KEY, PLUGIN_KEY,
+        hooks_plugin_missing, installed_in, listed_in, HOOKS_PLUGIN_KEY,
     };
     let mut rows = Vec::new();
     if hooks_plugin_missing(&env.home) {
@@ -657,7 +657,7 @@ fn plugin_split_rows(env: &Env) -> Vec<Row> {
                 Level::Warn,
                 "playbook-hooks plugin not installed: the worktree hooks are off",
             )
-            .hint("run: claude plugin install playbook-hooks@pragmatic-engineer"),
+            .hint("run: claude plugin marketplace update pragmatic-engineer && claude plugin install playbook-hooks@pragmatic-engineer"),
         );
     }
     if listed_in(&env.home, HOOKS_PLUGIN_KEY) == Some(true)
@@ -671,21 +671,6 @@ fn plugin_split_rows(env: &Env) -> Vec<Row> {
             )
             .hint("run: claude plugin install playbook@pragmatic-engineer"),
         );
-    }
-    if let (Some(skills), Some(hooks)) = (
-        version_in(&env.home, PLUGIN_KEY),
-        version_in(&env.home, HOOKS_PLUGIN_KEY),
-    ) {
-        if skills != hooks {
-            rows.push(
-                Row::new(
-                    "-",
-                    Level::Warn,
-                    format!("playbook {skills} and playbook-hooks {hooks} are different versions"),
-                )
-                .hint("run: claude plugin update playbook@pragmatic-engineer && claude plugin update playbook-hooks@pragmatic-engineer"),
-            );
-        }
     }
     rows
 }
