@@ -30,6 +30,24 @@ fn scratch() -> PathBuf {
     dir
 }
 
+/// A git checkout holding the fixture agent files, so a case that names
+/// `agents/<role>.md` finds it the way it does in a plugin checkout.
+fn agents_checkout() -> PathBuf {
+    let dir = scratch();
+    let git = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&dir)
+        .status()
+        .unwrap();
+    assert!(git.success());
+    let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/plugin/agents");
+    fs::create_dir_all(dir.join("agents")).unwrap();
+    for e in fs::read_dir(from).unwrap().flatten() {
+        fs::copy(e.path(), dir.join("agents").join(e.file_name())).unwrap();
+    }
+    dir
+}
+
 fn stub(dir: &Path, name: &str, body: &str) {
     let path = dir.join(name);
     fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -154,7 +172,9 @@ fn claims_are_scored_per_claim() {
 #[test]
 fn the_shipped_fixtures_load_and_cover_every_role() {
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .args(["eval", "bench", "--list"])
+        .args(["eval", "bench", "--list", "--cases"])
+        .arg(Path::new(env!("PLAYBOOK_REPO_ROOT")).join("crates/cli/tests/fixtures/bench"))
+        .current_dir(agents_checkout())
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
@@ -178,6 +198,7 @@ fn the_lens_split_fixture_pairs_one_single_reviewer_with_five_lens_reviewers_per
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["eval", "bench", "--list", "--cases"])
         .arg(Path::new(env!("PLAYBOOK_REPO_ROOT")).join("crates/cli/tests/fixtures/bench-extra"))
+        .current_dir(agents_checkout())
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);

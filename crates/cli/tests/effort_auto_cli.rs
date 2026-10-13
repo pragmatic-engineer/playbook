@@ -32,7 +32,10 @@ impl Home {
             .args(args)
             .current_dir(&self.0)
             .env("HOME", &self.0)
-            .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
+            .env(
+                "CLAUDE_PLUGIN_ROOT",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/plugin"),
+            )
             .env(
                 "PLAYBOOK_AGENT_VARIANTS",
                 "reviewer-low,reviewer-high,reviewer-xhigh",
