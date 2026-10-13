@@ -82,7 +82,7 @@ jobs:
           esac
           if [ -n "$base" ] && [ "${base#0000000}" = "$base" ] \
               && git fetch --no-tags --depth=1 origin "$base" 2>/dev/null \
-              && files="$(git diff --name-only "$base" HEAD)" \
+              && files="$(git diff --name-only --no-renames "$base" HEAD)" \
               && [ -n "$files" ]; then
             echo "$files"
             if ! echo "$files" | grep -qvE '^(docs/.+\.md|(README|CONTRIBUTING|SECURITY|CODE_OF_CONDUCT|CHANGELOG)\.md)$'; then
@@ -211,7 +211,7 @@ jobs:
 
       - name: cargo nextest run
         if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
-        run: cargo nextest run ${{ needs.changes.outputs.pkgs || '--workspace' }} --config-file .github/nextest.toml --profile ci
+        run: cargo nextest run ${{ needs.changes.outputs.pkgs || '--workspace' }} --no-tests=pass --config-file .github/nextest.toml --profile ci
 
       # nextest does not run doctests.
       - name: cargo test --workspace --doc

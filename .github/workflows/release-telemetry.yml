@@ -4,7 +4,9 @@
 # Attaches verified playbook-telemetry binaries to a release that already exists:
 # a release is cut by pushing a signed annotated tag `telemetry-vX.Y.Z` and then
 # running `gh release create telemetry-vX.Y.Z --target main --latest=false`. The
-# `--latest=false` keeps GitHub's "latest release" on the playbook `vX.Y.Z` line. This workflow does NOT create the
+# `--latest=false` keeps GitHub's "latest release" on the playbook `vX.Y.Z` line,
+# which install.sh and the marketplace read. Push the first telemetry-v tag only
+# after crates/telemetry is a workspace member that playbook depends on by path. This workflow does NOT create the
 # release, it builds, ad hoc codesigns and uploads the binaries plus
 # SHA256SUMS, then attests their build provenance. It is adapted from the
 # release workflow of pragmatic-engineer/playbook and builds the same five
@@ -195,7 +197,7 @@ jobs:
           # header. A missing release is a procedure error, not a build error,
           # so say so rather than failing on an opaque upload error.
           gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || {
-            echo "::error::release ${GITHUB_REF_NAME} does not exist. Create it first with: gh release create ${GITHUB_REF_NAME} --target main" >&2
+            echo "::error::release ${GITHUB_REF_NAME} does not exist. Create it first with: gh release create ${GITHUB_REF_NAME} --target main --latest=false" >&2
             exit 1
           }
           gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
