@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The data folder, `~/.config/playbook/data`, where every database playbook
-//! creates lives. This module also holds the small migration framework that
-//! moves a database from its old path into the folder.
+//! The migration framework that moves a database from its old path into the
+//! data folder.
 //!
 //! A step is a [`Move`]: an old file, a new file and a [`Policy`]. Running it
 //! is idempotent and safe against concurrent processes:
@@ -20,31 +19,12 @@
 //! * The old file's write lock is held from the copy to the rename, and
 //!   merged tables must have a primary key, so a repeat cannot double count.
 
-use crate::common::atomic::{acquire_dir_lock_aged, ensure_private_dir, LONG_LOCK_STALE_AGE};
-use crate::common::paths::playbook_root_from;
-use crate::common::session::home_dir;
+use playbook_common::atomic::{acquire_dir_lock_aged, ensure_private_dir, LONG_LOCK_STALE_AGE};
 use rusqlite::{Connection, OpenFlags};
 use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-
-/// `$HOME/.config/playbook/data`.
-pub fn data_dir() -> PathBuf {
-    data_dir_from(&home_dir())
-}
-
-/// Core of [`data_dir`], taking `home` explicitly for tests.
-pub fn data_dir_from(home: &Path) -> PathBuf {
-    playbook_root_from(home).join("data")
-}
-
-/// [`data_dir`], created owner only when missing.
-pub fn ensure_data_dir() -> std::io::Result<PathBuf> {
-    let dir = data_dir();
-    ensure_private_dir(&dir)?;
-    Ok(dir)
-}
 
 /// How a step treats a new file that already exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -214,7 +194,7 @@ fn copy_then_verify(step: &Move, old_conn: &Connection) -> Result<(), String> {
             return Err("row counts differ after the copy".to_string());
         }
         drop(copy);
-        crate::common::atomic::make_db_file_private(&tmp)?;
+        playbook_common::atomic::make_db_file_private(&tmp)?;
         // A hard link fails when the target exists, unlike rename, which
         // would silently replace a file another process just created.
         fs::hard_link(&tmp, &step.new).map_err(|e| {
@@ -486,7 +466,7 @@ pub fn is_migrated_leftover(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use playbook_common::test_support::scratch_dir;
 
     const T: &[&str] = &["t"];
 
@@ -519,14 +499,6 @@ mod tests {
             policy,
         };
         (m, dir)
-    }
-
-    #[test]
-    fn data_dir_sits_under_the_playbook_root() {
-        assert_eq!(
-            data_dir_from(Path::new("/h")),
-            PathBuf::from("/h/.config/playbook/data")
-        );
     }
 
     #[test]

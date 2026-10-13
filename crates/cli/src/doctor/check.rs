@@ -536,7 +536,7 @@ fn worktree_rows(env: &Env) -> Vec<Row> {
 /// leftovers from a finished migration.
 fn data_rows(env: &Env) -> Vec<Row> {
     let dir = crate::common::data::data_dir_from(&env.home);
-    let files = crate::common::data::list_files(&dir);
+    let files = crate::common::data::migrate::list_files(&dir);
     if files.is_empty() {
         return vec![Row::new(
             "-",
@@ -547,7 +547,7 @@ fn data_rows(env: &Env) -> Vec<Row> {
     let total: u64 = files.iter().map(|f| f.bytes).sum();
     let left: Vec<String> = files
         .iter()
-        .filter(|f| crate::common::data::is_migrated_leftover(&f.path))
+        .filter(|f| crate::common::data::migrate::is_migrated_leftover(&f.path))
         .map(|f| f.path.display().to_string())
         .collect();
     let mut msg = format!(

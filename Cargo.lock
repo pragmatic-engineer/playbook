@@ -715,6 +715,7 @@ dependencies = [
  "libc",
  "playbook-code",
  "playbook-common",
+ "playbook-data",
  "playbook-telemetry",
  "ratatui",
  "regex",
@@ -756,6 +757,7 @@ name = "playbook-data"
 version = "0.1.0"
 dependencies = [
  "playbook-common",
+ "rusqlite",
 ]
 
 [[package]]
