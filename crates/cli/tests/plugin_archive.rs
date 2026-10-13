@@ -29,8 +29,10 @@ fn repo() -> PathBuf {
 
 fn scratch(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "playbook-archive-{}-{tag}",
-        playbook::testing::run_id()
+        "playbook-archive-{}-{}-{tag}",
+        playbook::testing::run_id(),
+        // nextest runs each test in its own process, so a shared name races.
+        std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("scratch dir");
