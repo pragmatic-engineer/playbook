@@ -3,9 +3,11 @@
 
 //! The `usage.*` settings: the keys, their defaults and the values they accept.
 //! This module is the source of truth for them. playbook-telemetry reads them
-//! from playbook's own config store, `~/.config/playbook/playbook.db` (the
-//! global tier), so the standalone tool and playbook always see the same
-//! settings. A playbook that predates that store keeps them in
+//! from playbook's own config store, `~/.config/playbook/data/config.db` (the
+//! global tier, overridden by this tool's own `playbook-telemetry` app tier),
+//! so the standalone tool and playbook always see the same settings. Before
+//! playbook has moved that store, `~/.config/playbook/playbook.db` is read.
+//! A playbook that predates it keeps them in
 //! `~/.config/playbook/config.json` as a nested JSON object, which is read
 //! when the store does not exist. This module only reads; settings are changed
 //! with `playbook config set`.
@@ -95,7 +97,31 @@ pub fn root(home: &Path) -> PathBuf {
 /// source prints a warning once).
 fn stored(home: &Path, key: &str) -> Option<Value> {
     let dir = root(home);
-    let db = dir.join("playbook.db");
+    // The shared store: `data/config.db`, with this tool's own `app` tier
+    // overriding the global one.
+    let shared = playbook_data::config::db_in(&dir.join("data"));
+    if shared.is_file() {
+        return match playbook_data::config::get_in(
+            &shared,
+            key,
+            None,
+            Some(playbook_data::config::APP_TELEMETRY),
+        ) {
+            Ok(raw) => raw.and_then(|text| serde_json::from_str(&text).ok()),
+            Err(e) => {
+                warn_once(
+                    &WARNED_STORE,
+                    &format!(
+                        "cannot read {}: {e}; using default settings",
+                        shared.display()
+                    ),
+                );
+                None
+            }
+        };
+    }
+    // Before playbook has moved its store: `playbook.db` next to the data folder.
+    let db = playbook_data::config::legacy_db_in(&dir);
     if db.is_file() {
         return match read_store(&db, key) {
             Ok(v) => v,
@@ -231,6 +257,29 @@ mod tests {
             Some(Value::from(200))
         );
         assert_eq!(resolve(&h, "usage.weekStart"), Some(Value::from("monday")));
+    }
+
+    #[test]
+    fn config_db_wins_over_playbook_db_and_the_app_tier_wins_over_global() {
+        let h = home("cfg-shared");
+        put_store(&h, "usage.theme", "\"light\"");
+        let data = root(&h).join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let conn = rusqlite::Connection::open(playbook_data::config::db_in(&data)).unwrap();
+        conn.execute_batch(playbook_data::config::SCHEMA_SQL)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO config VALUES ('global','','usage.theme','\"dark\"',1);
+             INSERT INTO config VALUES ('global','','usage.weekStart','\"sunday\"',1);
+             INSERT INTO config VALUES ('app','playbook-telemetry','usage.weekStart','\"saturday\"',1);
+             INSERT INTO config VALUES ('app','pbtop','usage.theme','\"mono\"',1);",
+        )
+        .unwrap();
+        assert_eq!(resolve(&h, "usage.theme"), Some(Value::from("dark")));
+        assert_eq!(
+            resolve(&h, "usage.weekStart"),
+            Some(Value::from("saturday"))
+        );
     }
 
     #[test]

@@ -177,7 +177,7 @@ fn table_counts(conn: &Connection) -> Result<Vec<(String, i64)>, String> {
 /// Rename the old file and its sidecars to `*.migrated`; when that name is
 /// taken (an older binary recreated the old path and it was merged again) the
 /// name gets a numeric suffix. Nothing is overwritten.
-fn set_aside(old: &Path) -> Result<(), String> {
+pub fn set_aside(old: &Path) -> Result<(), String> {
     let mut n = 0u32;
     let suffix = loop {
         let s = if n == 0 {

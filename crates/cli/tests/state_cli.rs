@@ -113,11 +113,11 @@ fn init_imports_the_old_files_once_and_keeps_them_renamed() {
 
 #[test]
 fn the_auto_guard_still_protects_the_database_that_holds_the_state() {
-    // The state table lives in playbook.db, which the auto mode guard already
+    // The state table lives in config.db, which the auto mode guard already
     // blocks the model from touching (src/hooks/auto_cost.rs).
     let src = include_str!("../src/hooks/auto_cost.rs");
     assert!(
-        src.contains("playbook.db-wal"),
+        src.contains("config.db-wal"),
         "the guard must name the db files"
     );
 }

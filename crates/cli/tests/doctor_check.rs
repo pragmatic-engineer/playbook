@@ -491,10 +491,22 @@ fn the_probes_run_side_by_side_but_the_table_keeps_its_order() {
     let b = Box::new("order");
     b.settings("{}");
     let dir = b.stub("bin", "1.2.3", true);
-    let first = b.run(&[&dir], "/bin/zsh", None);
+    // The data folder row lists files and sizes, which settings reads change
+    // (the config store and its write-ahead log), so it is not part of the
+    // comparison of order.
+    let stable = |rows: Vec<Value>| -> Vec<Value> {
+        rows.into_iter()
+            .filter(|r| {
+                !r["message"]
+                    .as_str()
+                    .is_some_and(|m| m.starts_with("data folder"))
+            })
+            .collect()
+    };
+    let first = stable(b.run(&[&dir], "/bin/zsh", None));
     assert!(!first.is_empty());
     for _ in 0..5 {
-        assert_eq!(b.run(&[&dir], "/bin/zsh", None), first);
+        assert_eq!(stable(b.run(&[&dir], "/bin/zsh", None)), first);
     }
 }
 

@@ -210,6 +210,9 @@ pub fn clear_config(home: &Path) {
         "playbook.db-wal",
         "playbook.db-shm",
         "config.json",
+        "data/config.db",
+        "data/config.db-wal",
+        "data/config.db-shm",
     ] {
         let _ = fs::remove_file(dir.join(name));
     }

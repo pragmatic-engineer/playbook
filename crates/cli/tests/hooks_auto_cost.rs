@@ -1801,7 +1801,7 @@ impl Session {
         session
     }
 
-    fn tier_files(&self) -> [(&'static str, PathBuf); 6] {
+    fn tier_files(&self) -> [(&'static str, PathBuf); 9] {
         let root = self.s.home.join(".config/playbook");
         [
             ("global", root.join("config.json")),
@@ -1810,6 +1810,9 @@ impl Session {
             ("database", root.join("playbook.db")),
             ("database wal", root.join("playbook.db-wal")),
             ("database shm", root.join("playbook.db-shm")),
+            ("config database", root.join("data/config.db")),
+            ("config database wal", root.join("data/config.db-wal")),
+            ("memory database", root.join("data/memory.db")),
         ]
     }
 }
@@ -1832,6 +1835,8 @@ fn mode_switches_and_guarded_config_writes_are_denied_in_auto_under_the_cap() {
         "playbook config set mode ask",
         "playbook config import saved.json",
         "sqlite3 ~/.config/playbook/playbook.db 'update config set value_json=1'",
+        "sqlite3 ~/.config/playbook/data/config.db 'update config set value_json=1'",
+        "sqlite3 ~/.config/playbook/data/memory.db 'delete from nodes'",
         "playbook config set mode auto",
         "playbook config set --global mode ask",
         "playbook config set mode ask --org",

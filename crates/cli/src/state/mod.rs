@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Small key-value bookkeeping in the `state` table of `playbook.db`: the
+//! Small key-value bookkeeping in the `state` table of `config.db`: the
 //! migration record and the worktree sweep rate-limit markers used to be loose
 //! files under the playbook root.
 //!

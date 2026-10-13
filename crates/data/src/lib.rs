@@ -9,6 +9,7 @@
 //! * [`migrate`] moves a database from its old path into the folder without
 //!   ever deleting it.
 
+pub mod config;
 pub mod migrate;
 
 use playbook_common::atomic::ensure_private_dir;

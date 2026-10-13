@@ -236,6 +236,8 @@ fn the_rm_guard_allowance_cannot_be_changed_by_the_model() {
     }
     for path in [
         "/Users/tester/.config/playbook/playbook.db",
+        "/Users/tester/.config/playbook/data/config.db",
+        "/Users/tester/.config/playbook/data/memory.db",
         "/Users/tester/.config/playbook/config.json",
     ] {
         assert!(reason_of(write_to(path)).is_some(), "{path}");

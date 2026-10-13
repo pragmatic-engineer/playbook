@@ -412,7 +412,7 @@ pub enum Command {
     },
     /// Inspect playbook's own bookkeeping (migration record, sweep markers)
     ///
-    /// `list` prints the rows of the `state` table in `playbook.db`, sorted by
+    /// `list` prints the rows of the `state` table in `config.db`, sorted by
     /// key, optionally only those under a prefix. Read only: use `playbook
     /// init` to repair and `playbook config export` to back up the config.
     ///
