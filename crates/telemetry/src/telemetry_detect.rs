@@ -128,6 +128,42 @@ pub fn configured(home: &Path, cwd: &Path, ours: Option<u16>) -> Configured {
     }
 }
 
+/// The merged telemetry variables, `None` when a settings file cannot be
+/// parsed. `with_process` includes the process environment.
+pub fn merged_vars(
+    home: &Path,
+    cwd: &Path,
+    with_process: bool,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    let process: Vec<(String, String)> = if with_process {
+        std::env::vars_os()
+            .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    collect_vars(process.into_iter(), &settings_files(home, cwd)).ok()
+}
+
+/// Whether any settings file other than `except` names a telemetry variable
+/// (an unreadable file counts as naming one).
+pub fn files_configured_except(home: &Path, cwd: &Path, except: &Path) -> bool {
+    let files: Vec<PathBuf> = settings_files(home, cwd)
+        .into_iter()
+        .filter(|f| f != except)
+        .collect();
+    configured_in_files(&files)
+}
+
+/// Like [`configured`] but reading only the settings files, not the process
+/// environment.
+pub fn configured_from_files(home: &Path, cwd: &Path, ours: Option<u16>) -> Configured {
+    match collect_vars(std::iter::empty(), &settings_files(home, cwd)) {
+        Ok(vars) => classify(&vars, ours),
+        Err(()) => Configured::Other,
+    }
+}
+
 /// Whether the process environment names a telemetry variable.
 pub fn process_configured() -> bool {
     std::env::vars_os()

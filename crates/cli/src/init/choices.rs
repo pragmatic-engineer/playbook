@@ -47,7 +47,7 @@ pub struct Flags {
     /// Do not install the system prompt
     #[arg(long, overrides_with = "system_prompt")]
     pub no_system_prompt: bool,
-    /// Write the OpenTelemetry variables for the local usage collector into settings.json (only when you have no telemetry set up)
+    /// Write the OpenTelemetry variables for the local usage collector into settings.json (asked only when telemetry is off or not set)
     #[arg(long, overrides_with = "no_telemetry")]
     pub telemetry: bool,
     /// Do not write telemetry variables into settings.json

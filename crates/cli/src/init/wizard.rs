@@ -140,6 +140,15 @@ pub fn items(flags: &Flags, security_on: bool) -> Vec<Item> {
     list
 }
 
+/// [`items`] without the telemetry question when `skip_telemetry` is true.
+pub fn items_for(flags: &Flags, security_on: bool, skip_telemetry: bool) -> Vec<Item> {
+    let mut list = items(flags, security_on);
+    if skip_telemetry {
+        list.retain(|i| i.choice.id != "telemetry");
+    }
+    list
+}
+
 /// The wizard's answer for the part a question belongs to, else `default`.
 pub fn guided_answer(guided: &[(&str, bool)], question: &str, default: bool) -> bool {
     catalog::PARTS
@@ -313,6 +322,18 @@ mod tests {
         });
         assert!(!c.hooks && !c.statusline && !c.path);
         assert!(c.aliases && c.system_prompt && c.telemetry && c.claude_override && c.short_name);
+    }
+
+    #[test]
+    fn the_telemetry_question_is_left_out_when_it_is_skipped() {
+        let flags = Flags::default();
+
+        let skipped = items_for(&flags, false, true);
+        let asked = items_for(&flags, false, false);
+
+        assert!(!skipped.iter().any(|i| i.choice.id == "telemetry"));
+        assert!(asked.iter().any(|i| i.choice.id == "telemetry"));
+        assert_eq!(skipped.len() + 1, asked.len());
     }
 
     #[test]

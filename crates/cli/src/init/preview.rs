@@ -90,7 +90,12 @@ pub fn settings_changes(before: &Value, after: &Value) -> Vec<(&'static str, Str
                 let old_env = old_env.and_then(Value::as_object).unwrap_or(&no_env);
                 for (k, v) in new.as_object().into_iter().flatten() {
                     if old_env.get(k) != Some(v) {
-                        out.push(("telemetry", format!("add env.{k}")));
+                        let verb = if old_env.contains_key(k) {
+                            "change"
+                        } else {
+                            "add"
+                        };
+                        out.push(("telemetry", format!("{verb} env.{k}")));
                     }
                 }
             }
