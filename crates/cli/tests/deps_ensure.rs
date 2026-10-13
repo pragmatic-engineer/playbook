@@ -187,3 +187,15 @@ fn a_missing_brewfile_is_a_clean_no_op() {
     assert!(out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("no Brewfile at"));
 }
+
+#[test]
+fn builtin_and_an_explicit_brewfile_are_mutually_exclusive() {
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["deps", "ensure", "--builtin", "Brewfile"])
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot be used with"));
+}

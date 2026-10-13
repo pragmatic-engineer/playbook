@@ -26,10 +26,19 @@ pub fn resolve(claude_plugin_root_env: Option<&str>, claude_home: &Path) -> Opti
 
 const EMBEDDED_SETTINGS: &str = include_str!("../../../../settings.shared.json");
 const EMBEDDED_PROMPT: &str = include_str!("../../../../prompts/SYSTEM_PROMPT.md");
+const EMBEDDED_BREWFILE: &str = include_str!("../../../../Brewfile");
+
+/// True when `root` holds the two files `init` seeds from. The skills plugin
+/// does not ship them (the hooks plugin and this binary do), so a plugin root
+/// that lacks them is not a source for `init`.
+pub fn has_seed_files(root: &Path) -> bool {
+    root.join("settings.shared.json").is_file() && root.join("prompts/SYSTEM_PROMPT.md").is_file()
+}
 
 /// `resolve`, then the copies of the settings template and system prompt
-/// compiled into this binary. A Homebrew install ships only the binary, so
-/// without a plugin cache nothing else would exist for `init` to seed from.
+/// compiled into this binary. A Homebrew install ships only the binary, and a
+/// skills-only plugin install ships neither file, so without a root that holds
+/// them nothing else would exist for `init` to seed from.
 /// The embedded copies are written under `$HOME/.config/playbook/embedded/`
 /// (playbook's own state, never Claude Code's) and that directory is returned.
 pub fn resolve_or_embedded(
@@ -37,7 +46,14 @@ pub fn resolve_or_embedded(
     claude_home: &Path,
     home: &Path,
 ) -> Option<PathBuf> {
-    resolve(claude_plugin_root_env, claude_home).or_else(|| write_embedded(home).ok())
+    resolve(claude_plugin_root_env, claude_home)
+        .filter(|root| has_seed_files(root))
+        .or_else(|| write_embedded(home).ok())
+}
+
+/// The embedded Brewfile, written under the same embedded directory.
+pub fn embedded_brewfile(home: &Path) -> std::io::Result<PathBuf> {
+    Ok(write_embedded(home)?.join("Brewfile"))
 }
 
 fn write_embedded(home: &Path) -> std::io::Result<PathBuf> {
@@ -47,6 +63,7 @@ fn write_embedded(home: &Path) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(root.join("prompts"))?;
     std::fs::write(root.join("settings.shared.json"), EMBEDDED_SETTINGS)?;
     std::fs::write(root.join("prompts/SYSTEM_PROMPT.md"), EMBEDDED_PROMPT)?;
+    std::fs::write(root.join("Brewfile"), EMBEDDED_BREWFILE)?;
     Ok(root)
 }
 
@@ -243,18 +260,42 @@ mod tests {
             EMBEDDED_SETTINGS
         );
         assert!(got.join("prompts/SYSTEM_PROMPT.md").is_file());
+        assert_eq!(
+            fs::read_to_string(got.join("Brewfile")).unwrap(),
+            EMBEDDED_BREWFILE
+        );
     }
 
     #[test]
     fn a_found_plugin_root_is_preferred_over_the_embedded_files() {
         // Arrange
         let home = scratch("embedded-not-needed");
+        let root = home.join("plugin-root");
+        fs::create_dir_all(root.join("prompts")).expect("prompts dir");
+        fs::write(root.join("settings.shared.json"), "{}").expect("settings");
+        fs::write(root.join("prompts/SYSTEM_PROMPT.md"), "p").expect("prompt");
 
         // Act
-        let got = resolve_or_embedded(Some("/explicit"), &home.join(".claude"), &home);
+        let got = resolve_or_embedded(root.to_str(), &home.join(".claude"), &home);
 
         // Assert
-        assert_eq!(got, Some(PathBuf::from("/explicit")));
+        assert_eq!(got, Some(root));
         assert!(!home.join(".config/playbook/embedded").exists());
+    }
+
+    #[test]
+    fn a_plugin_root_without_the_seed_files_falls_back_to_the_embedded_files() {
+        // Arrange: the skills plugin ships neither file.
+        let home = scratch("skills-only-root");
+        let root = home.join("skills-plugin");
+        fs::create_dir_all(root.join("skills")).expect("skills dir");
+
+        // Act
+        let got =
+            resolve_or_embedded(root.to_str(), &home.join(".claude"), &home).expect("embedded");
+
+        // Assert
+        assert!(got.starts_with(home.join(".config/playbook/embedded")));
+        assert!(has_seed_files(&got));
     }
 }

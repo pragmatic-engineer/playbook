@@ -466,6 +466,7 @@ fn main() {
             let self_root = if flags.dry_run {
                 // A dry run must not write the embedded copies.
                 init::self_root::resolve(plugin_root.as_deref(), &claude_home)
+                    .filter(|root| init::self_root::has_seed_files(root))
             } else {
                 init::self_root::resolve_or_embedded(plugin_root.as_deref(), &claude_home, &home)
             };
@@ -1810,8 +1811,20 @@ fn main() {
             }
         }
         Command::Deps { sub } => match sub {
-            DepsCommand::Ensure { brewfile } => {
-                let file = brewfile.unwrap_or_else(|| std::path::PathBuf::from("Brewfile"));
+            DepsCommand::Ensure { brewfile, builtin } => {
+                // `--builtin` reads the copy compiled into this binary, so
+                // /playbook:setup needs no plugin file.
+                let file = if builtin {
+                    match init::self_root::embedded_brewfile(&common::home_dir()) {
+                        Ok(path) => path,
+                        Err(err) => {
+                            eprintln!("ensure-deps: cannot write the built-in Brewfile: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    brewfile.unwrap_or_else(|| std::path::PathBuf::from("Brewfile"))
+                };
                 if !deps::ensure_all(&file) {
                     std::process::exit(1);
                 }

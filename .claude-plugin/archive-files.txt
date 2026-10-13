@@ -1,31 +1,17 @@
-# Files shipped in playbook-plugin-<version>.zip, one git pathspec per line.
+# Files shipped in playbook-plugin-<version>.zip, the `playbook` plugin: the
+# skills, commands, agents and output styles. It has no hooks and no binary,
+# so it costs nothing to install on its own. One git pathspec per line.
 # An explicit allowlist: a file that is not listed here is NOT in the
 # marketplace install. tests/plugin_archive.rs keeps this list honest.
+#
+# The hooks, the bin/ shim, the installer and the files `playbook init` seeds
+# ship in the other plugin, .claude-plugin/archive-hooks-files.txt.
 
-# Plugin content Claude Code loads itself
 .claude-plugin/plugin.json
 agents
 commands
 skills
 output-styles
-hooks/hooks.json
 LICENSE
 NOTICE
 README.md
-
-# Bootstrap shim: Claude Code puts a plugin's bin/ on the Bash tool's PATH, so
-# `playbook` resolves with only the plugin installed. It runs install.sh when
-# the binary is missing, so the installer ships too.
-bin/playbook
-install.sh
-
-# SessionStart hook script (hooks/hooks.json runs it through CLAUDE_PLUGIN_ROOT)
-
-# Read by `playbook init` and the hooks through CLAUDE_PLUGIN_ROOT
-# (src/init/run.rs, system_prompt.rs, shim.rs, hooks/session_init.rs)
-settings.shared.json
-prompts/SYSTEM_PROMPT.md
-
-# Run by slash commands through CLAUDE_PLUGIN_ROOT
-# (/playbook:setup, quick-review, deep-review, plan, adr, implement, learn-project)
-Brewfile
