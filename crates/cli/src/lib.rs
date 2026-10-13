@@ -939,6 +939,8 @@ pub enum PathKind {
     Plans,
     Implement,
     Worktrees,
+    /// The shared data folder holding every database (not worktree scoped)
+    Data,
 }
 
 impl PathKind {
@@ -948,6 +950,7 @@ impl PathKind {
             PathKind::Plans => "plans",
             PathKind::Implement => "implement",
             PathKind::Worktrees => "worktrees",
+            PathKind::Data => "data",
         }
     }
 }
