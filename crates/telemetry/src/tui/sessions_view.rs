@@ -407,11 +407,13 @@ mod tests {
     }
 
     fn screen(view: &SessionsView, width: u16, height: u16) -> String {
+        screen_with(view, width, height, Icon::Off)
+    }
+
+    fn screen_with(view: &SessionsView, width: u16, height: u16, icon: Icon) -> String {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         let pal = Theme::default().palette(ColorDepth::detect(None, None));
-        terminal
-            .draw(|f| render(f, view, &pal, NOW, Icon::Off))
-            .unwrap();
+        terminal.draw(|f| render(f, view, &pal, NOW, icon)).unwrap();
         let buffer = terminal.backend().buffer().clone();
         (0..height)
             .map(|y| {
@@ -534,5 +536,20 @@ mod tests {
         for width in [40, 80, 100] {
             screen(&loaded(), width, 12);
         }
+    }
+
+    #[test]
+    fn the_sessions_title_carries_the_icon_unless_it_is_off() {
+        let first = |icon| {
+            screen_with(&loaded(), 80, 12, icon)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert!(first(Icon::Wide).contains("\u{2524}\u{1F4FA}  Sessions"));
+        assert!(first(Icon::Narrow).contains("\u{2524}\u{1F4FA}   Sessions"));
+        let off = first(Icon::Off);
+        assert!(off.contains("\u{2524}Sessions") && !off.contains('\u{1F4FA}'));
     }
 }
