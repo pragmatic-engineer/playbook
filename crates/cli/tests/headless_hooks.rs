@@ -387,3 +387,18 @@ fn interactive_stop_ignores_stop_hook_active_so_the_bounded_reblock_still_escala
         "the cap releases after two blocks: {third}"
     );
 }
+
+#[test]
+fn headless_session_start_still_injects_the_tool_map() {
+    let w = world("headless-map");
+
+    for env in [("PLAYBOOK_HEADLESS", "1"), ("CI", "true")] {
+        let (out, code) = run_hook(&w, "session-init", &start_payload(), &[env]);
+
+        assert_eq!(code, 0);
+        assert!(
+            out.contains("playbook tools: when an intent is covered here"),
+            "{env:?}: tool map missing: {out}"
+        );
+    }
+}
