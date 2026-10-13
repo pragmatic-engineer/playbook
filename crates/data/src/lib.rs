@@ -44,13 +44,18 @@ pub fn scoped_db_in(data: &Path, kind: &str, owner: &str, repo: &str, worktree: 
         .join(format!("{worktree}.db"))
 }
 
+/// A path part that cannot climb out of its folder or merge two kinds.
+fn safe_segment(s: &str) -> bool {
+    !s.is_empty() && s != "." && s != ".." && !s.contains(['/', '\\'])
+}
+
 /// [`scoped_db_in`] for the current repo and worktree under [`data_dir`].
 /// `None` when the repo has no `origin` remote or no resolvable worktree.
 pub fn scoped_db(kind: &str) -> Option<PathBuf> {
     let slug = repo_slug();
     let (owner, repo) = slug.split_once('/')?;
     let id = worktree_id();
-    if id.is_empty() {
+    if id.is_empty() || ![owner, repo].iter().all(|p| safe_segment(p)) {
         return None;
     }
     Some(scoped_db_in(&data_dir(), kind, owner, repo, &id))
@@ -66,6 +71,14 @@ mod tests {
             data_dir_from(Path::new("/h")),
             PathBuf::from("/h/.config/playbook/data")
         );
+    }
+
+    #[test]
+    fn dot_segments_are_not_safe_path_parts() {
+        for bad in ["", ".", "..", "a/b", "a\\b"] {
+            assert!(!safe_segment(bad), "{bad:?}");
+        }
+        assert!(safe_segment("pragmatic-engineer"));
     }
 
     #[test]
