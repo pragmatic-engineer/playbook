@@ -257,6 +257,11 @@ fn walk(dir: &Path, map: &mut BTreeMap<PathBuf, u64>) {
         } else if kind.is_dir() {
             map.insert(p.clone(), 0);
             walk(&p, map);
+        } else if e.file_name() == "config.db" {
+            // The settings database stamps a time on every write, so a second
+            // run that sets the same value changes its bytes. Presence is
+            // what the check needs.
+            map.insert(p, 2);
         } else {
             let bytes = fs::read(&p).unwrap_or_default();
             // FNV-1a: enough to notice a changed file, no dependency needed.
