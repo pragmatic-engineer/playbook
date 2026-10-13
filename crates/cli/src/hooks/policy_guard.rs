@@ -251,10 +251,17 @@ fn changes_rm_guard_config_at(
 /// Whether `word` names one of playbook's databases: the settings store (now
 /// `config.db`, earlier `playbook.db`), the memory index or the data folder.
 pub(crate) fn names_database(word: &str) -> bool {
+    let last = word.rsplit('/').next().unwrap_or(word);
+    let db_file =
+        |name: &str| last == name || last == format!("{name}-wal") || last == format!("{name}-shm");
     word.contains("playbook.db")
-        || word.contains("config.db")
-        || word.contains("memory.db")
-        || word.contains("playbook/data")
+        || db_file("config.db")
+        || db_file("memory.db")
+        || word
+            .split('/')
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|w| w == ["playbook", "data"])
 }
 
 /// Whether `word` names playbook's config database or one of its config
@@ -271,7 +278,10 @@ fn names_config_store(word: &str, home: &str) -> bool {
     super::auto_cost::is_config_file(Path::new(&expanded), &root)
         || (expanded.contains(['*', '?'])
             && Path::new(&expanded).starts_with(&root)
-            && Path::new(&expanded).components().count() == root.components().count() + 1)
+            && matches!(
+                Path::new(&expanded).components().count() - root.components().count(),
+                1 | 2
+            ))
 }
 
 /// The reason to deny `command`, or `None` to allow it.
@@ -539,6 +549,10 @@ mod tests {
             "python3 -c 'x' ~/.config/playbook/playbook.db",
             "cp evil.db ~/.config/playbook/playbook.db",
             "sed -i s/a/b/ ~/.config/playbook/*.db",
+            "sqlite3 ~/.config/playbook/data/config.db 'update x'",
+            "cp evil.db ~/.config/playbook/data/memory.db",
+            "cd ~/.config/playbook/data && sqlite3 config.db 'update x'",
+            "sed -i s/a/b/ ~/.config/playbook/d*/c*.db",
         ] {
             assert_eq!(deny(command), Some(RM_GUARD_CONFIG_REASON), "{command}");
         }
@@ -560,6 +574,10 @@ mod tests {
             "cat ~/.config/playbook/config.json",
             "playbook config set --global commit.signOff true",
             "xargs echo playbook",
+            "cd /work/.worktrees/playbook/data-config && cargo test",
+            "git commit -m 'move the settings to config.db'",
+            "cat src/config.db.ts",
+            "cp a /work/.worktrees/playbook/data-config/b",
         ] {
             assert_eq!(deny(command), None, "{command}");
         }

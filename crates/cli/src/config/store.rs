@@ -51,7 +51,17 @@ fn move_legacy_db(root: &Path) {
         new: db_path(root),
         policy: playbook_data::migrate::Policy::Merge(MOVE_RULES),
     };
-    let _ = playbook_data::migrate::migrate_with_notice(&step, "settings");
+    if let Ok(playbook_data::migrate::Outcome::Corrupt(_)) =
+        playbook_data::migrate::migrate_with_notice(&step, "settings")
+    {
+        // Park it, so later opens do not repeat the check, and say so once.
+        if playbook_data::migrate::set_aside(&step.old).is_ok() {
+            playbook_data::migrate::notice(
+                "playbook: the old settings database is unreadable and was renamed to \
+                 playbook.db.migrated; settings start from their defaults",
+            );
+        }
+    }
 }
 
 /// Whether there is anything to read: a database, or legacy JSON files that
@@ -97,7 +107,14 @@ pub fn open(root: &Path) -> Result<Connection, ConfigError> {
 /// without waiting, so that one error is retried for a short while.
 fn init_connection(root: &Path) -> rusqlite::Result<Connection> {
     let attempt = || -> rusqlite::Result<Connection> {
-        let conn = Connection::open(db_path(root))?;
+        // While the move is deferred (a lock is held, a writer is busy) the
+        // old file is used as it is, instead of starting an empty new one.
+        let path = if !db_path(root).exists() && legacy_db_path(root).is_file() {
+            legacy_db_path(root)
+        } else {
+            db_path(root)
+        };
+        let conn = Connection::open(path)?;
         // Before any statement that can contend for the write lock: the
         // default busy timeout is 0.
         conn.busy_timeout(Duration::from_millis(5000))?;
@@ -229,11 +246,32 @@ fn upsert(
     key: &str,
     value: &Value,
 ) -> rusqlite::Result<()> {
+    upsert_at(
+        conn,
+        tier,
+        scope,
+        key,
+        value,
+        crate::common::time::now_secs(),
+    )
+}
+
+/// [`upsert`] with an explicit `updated_at`. Values read from a leftover
+/// `config.json` get 0, so the newer-write-wins merge of the old settings file
+/// never ranks them above a real setting.
+fn upsert_at(
+    conn: &Connection,
+    tier: &str,
+    scope: &str,
+    key: &str,
+    value: &Value,
+    updated_at: i64,
+) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO config (tier, scope, key, value_json, updated_at) VALUES (?1, ?2, ?3, ?4, ?5) \
          ON CONFLICT (tier, scope, key) DO UPDATE SET \
          value_json = excluded.value_json, updated_at = excluded.updated_at",
-        params![tier, scope, key, value.to_string(), crate::common::time::now_secs()],
+        params![tier, scope, key, value.to_string(), updated_at],
     )
     .map(|_| ())
 }
@@ -480,7 +518,7 @@ pub fn adopt_late_files(root: &Path) -> Result<LateReport, ConfigError> {
             continue;
         }
         for (key, value) in &leaves {
-            upsert(&conn, file.tier, &file.scope, key, value).map_err(broken(root))?;
+            upsert_at(&conn, file.tier, &file.scope, key, value, 0).map_err(broken(root))?;
         }
         let _ = fs::rename(&file.path, file.path.with_extension("json.migrated"));
         report.imported.push(file.path);
@@ -527,7 +565,8 @@ fn import_legacy_once(conn: &Connection, root: &Path) -> Result<(), ConfigError>
                 // Known keys and `effort.<kind>.<name>` keys; stale or future
                 // keys stay in the `.migrated` file.
                 if keys::default_value(&key).is_some() {
-                    upsert(conn, file.tier, &file.scope, &key, &value).map_err(broken(root))?;
+                    upsert_at(conn, file.tier, &file.scope, &key, &value, 0)
+                        .map_err(broken(root))?;
                 }
             }
             done.push(file.path);
@@ -835,12 +874,45 @@ mod tests {
     }
 
     #[test]
-    fn a_corrupt_old_file_is_left_in_place_and_settings_still_work() {
+    fn settings_still_work_next_to_a_corrupt_old_file() {
         let r = root("store-old-corrupt");
         fs::write(legacy_db_path(&r), vec![b'x'; 4096]).unwrap();
         put(&r, Tier::Global, None, "mode", &json!("auto")).unwrap();
         assert_eq!(global(&r, "mode"), Some(json!("auto")));
+        assert!(r.join("playbook.db.migrated").exists(), "kept, not deleted");
+    }
+
+    #[test]
+    fn a_deferred_move_reads_the_old_file_instead_of_starting_an_empty_one() {
+        let r = root("store-deferred");
+        old_db(&r, "mode", "\"auto\"", 10);
+        fs::create_dir_all(r.join("data").join("config.db.migrate.lock")).unwrap();
+
+        assert_eq!(global(&r, "mode"), Some(json!("auto")));
+
+        assert!(!db_path(&r).exists(), "no empty config.db was created");
         assert!(legacy_db_path(&r).exists());
+    }
+
+    #[test]
+    fn a_corrupt_old_file_is_parked_once() {
+        let r = root("store-park");
+        fs::write(legacy_db_path(&r), vec![b'x'; 4096]).unwrap();
+        assert_eq!(global(&r, "mode"), None);
+        assert!(!legacy_db_path(&r).exists());
+        assert!(r.join("playbook.db.migrated").exists());
+    }
+
+    #[test]
+    fn a_leftover_config_json_never_outranks_a_real_setting_in_the_merge() {
+        let r = root("store-stale-json");
+        put(&r, Tier::Global, None, "mode", &json!("real")).unwrap();
+        // An old binary imported a stale config.json into a recreated playbook.db.
+        let conn = Connection::open(legacy_db_path(&r)).unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        upsert_at(&conn, "global", "", "mode", &json!("stale-json"), 0).unwrap();
+        drop(conn);
+        assert_eq!(global(&r, "mode"), Some(json!("real")));
     }
 
     #[test]
