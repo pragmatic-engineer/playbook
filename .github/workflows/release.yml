@@ -171,7 +171,7 @@ jobs:
             tc="$(echo '${{ matrix.target }}' | tr '-' '_')"
             export "CC_${tc}=${RELEASE_CC}"
           fi
-          cargo build --release --target ${{ matrix.target }}
+          cargo build --release -p playbook --target ${{ matrix.target }}
 
       - name: Ad-hoc sign the macOS binaries
         if: runner.os == 'macOS'
@@ -322,9 +322,9 @@ jobs:
             echo "::error::the plugin archive is empty. Check .claude-plugin/archive-files.txt." >&2
             exit 1
           fi
-          if grep -qE '^(src|tests|docs|\.github)/|^Cargo\.|\.test\.sh$' dist/files.txt; then
+          if grep -qE '^(src|tests|crates|docs|\.github)/|^Cargo\.|\.test\.sh$' dist/files.txt; then
             echo "::error::the plugin archive holds source, tests, docs, CI or Cargo files:" >&2
-            grep -E '^(src|tests|docs|\.github)/|^Cargo\.|\.test\.sh$' dist/files.txt >&2
+            grep -E '^(src|tests|crates|docs|\.github)/|^Cargo\.|\.test\.sh$' dist/files.txt >&2
             exit 1
           fi
           if ! grep -qx '.claude-plugin/plugin.json' dist/files.txt; then

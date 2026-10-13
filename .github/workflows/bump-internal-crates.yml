@@ -89,7 +89,7 @@ jobs:
             items=$(jq -c --arg c "$1" --arg r "$2" --arg t "$3" '. + [{crate:$c,repo:$r,tag:$t}]' <<<"$items")
           }
           pinned() { # prints the pinned tag, empty when there is no such dependency
-            grep -E "^$1[[:space:]]*=.*git[[:space:]]*=" Cargo.toml \
+            grep -E "^$1[[:space:]]*=.*git[[:space:]]*=" crates/cli/Cargo.toml \
               | sed -nE 's/.*tag[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' || true
           }
           if [ "$EVENT" = schedule ]; then
@@ -237,7 +237,7 @@ jobs:
           jq -n \
             --arg repo "$REPO" --arg branch "$BRANCH" --arg oid "$base" \
             --arg head "$title" --arg body "$body_text"$'\n\n'"$signoff" \
-            --arg toml "$(base64 < Cargo.toml | tr -d '\n')" \
+            --arg toml "$(base64 < crates/cli/Cargo.toml | tr -d '\n')" \
             --arg lock "$(base64 < Cargo.lock | tr -d '\n')" \
             '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
               variables: {input: {
@@ -245,7 +245,7 @@ jobs:
                 expectedHeadOid: $oid,
                 message: {headline: $head, body: $body},
                 fileChanges: {additions: [
-                  {path: "Cargo.toml", contents: $toml},
+                  {path: "crates/cli/Cargo.toml", contents: $toml},
                   {path: "Cargo.lock", contents: $lock}]}}}}' \
             | gh api graphql --input - --jq .data.createCommitOnBranch.commit.oid > head_sha.txt
           sha=$(cat head_sha.txt)

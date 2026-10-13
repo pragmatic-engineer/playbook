@@ -37,8 +37,7 @@
 !/Cargo.lock
 !/rust-toolchain.toml
 !/.cargo/
-!/src/
-!/tests/
+!/crates/
 
 # Override the global excludesfile (~/.gitignore.global), which ignores
 # docs/superpowers/ (we want our specs tracked here).

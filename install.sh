@@ -33,7 +33,7 @@ CLAUDE_MIN_VERSION="2.1.224"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 # Root for every directory playbook itself writes (memory, runtime state,
 # the statusline script); mirrors playbook_root_from() in
-# src/common/paths.rs. Not currently overridable by env var, unlike
+# crates/cli/src/common/paths.rs. Not currently overridable by env var, unlike
 # CLAUDE_HOME: nothing downstream of this script reads a PLAYBOOK_CONFIG_DIR
 # override yet, so introducing one here would be a knob with no effect.
 PLAYBOOK_CONFIG_DIR="$HOME/.config/playbook"
