@@ -104,7 +104,7 @@ fn convention_label(c: crate::worktree::Convention) -> &'static str {
     match c {
         Wu => "wu",
         AgentTool => "agent",
-        CcLauncher => "ccc",
+        CcLauncher => "cc",
         Review => "review",
         Unmanaged => "",
     }

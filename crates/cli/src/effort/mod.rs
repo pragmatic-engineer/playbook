@@ -10,7 +10,7 @@
 //! Code's key and never writes to its settings files.
 //!
 //! The effective ceiling is the lower of the two. When playbook's is lower,
-//! the launcher (`ccc`, `ccd`) passes it to that one session with `--settings`,
+//! the launcher (`playbook cc`, `playbook ccd`) passes it to that one session with `--settings`,
 //! which Claude Code applies to command, skill and agent effort alike. When
 //! Claude Code's is as low or lower, or playbook is `auto` or `max`, the launcher adds
 //! nothing. A session started without the launcher gets no playbook ceiling.
@@ -170,7 +170,7 @@ pub fn run_set(home: &Path, level: &str) -> Result<String, String> {
         format!("maxEffortLevel set to {level}, playbook sets no ceiling and Claude Code's applies")
     } else {
         format!(
-            "playbook maxEffortLevel set to {level}. Sessions started with ccc or ccd stay at or below it, \
+            "playbook maxEffortLevel set to {level}. Sessions started with playbook cc or playbook ccd stay at or below it, \
              and never above your Claude Code maxEffortLevel. Claude Code's settings are not changed."
         )
     })

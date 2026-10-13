@@ -75,7 +75,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -107,7 +107,7 @@ Exits 0 when all pass and 1 otherwise.
 
 Show the effort-tier variants a session would get
 
-Variants such as `reviewer-low` are not files. `ccc` and `ccd` render them from the base agents and pass them to Claude Code with `--agents`. This prints the same set, so you can see what a session would hold and its size. Use `--json` for the full definitions.
+Variants such as `reviewer-low` are not files. `playbook cc` and `playbook ccd` render them from the base agents and pass them to Claude Code with `--agents`. This prints the same set, so you can see what a session would hold and its size. Use `--json` for the full definitions.
 
 Example: `playbook agents variants --ceiling medium`
 
@@ -130,11 +130,13 @@ Prints one line for `acli` (`ok`, `too old` with the `brew upgrade atlassian/acl
 
 ### `playbook cc`
 
-Launcher helpers behind the `ccc` shell shortcut
+Start a Claude Code session, or manage sessions and worktrees
 
-Sessions are started by the `ccc` shell shortcut (install it with `playbook init --aliases`). These subcommands do its housekeeping: list sessions, prune state, clear caches, and create worktrees.
+With no subcommand, starts a session with the playbook prompt and model chain (this replaces the old `ccc` shell function). Any other arguments go to claude as they are. The subcommands do the housekeeping: list sessions, prune state, clear caches, and create worktrees. `pb` is an alias for `playbook`, so `pb cc` works too.
 
-Example: `playbook cc worktree my-branch`
+Example: `playbook cc --model sonnet`
+
+- `<ARGS>`: Arguments passed through to claude
 
 Subcommands: `bust-cache`, `clean`, `fresh`, `launch`, `list`, `prune`, `raw`, `worktree`
 
@@ -144,17 +146,21 @@ Clear caches that would freeze old settings into a session
 
 ### `playbook cc clean`
 
-Mode of the `ccc` shortcut: clean up and resume (no action by itself)
+Mode of the `playbook cc` launcher: clean up and resume (no action by itself)
+
+- `<ARGS>`: Arguments passed through to claude
 
 ### `playbook cc fresh`
 
-Mode of the `ccc` shortcut: start a fresh session (no action by itself)
+Mode of the `playbook cc` launcher: start a fresh session (no action by itself)
+
+- `<ARGS>`: Arguments passed through to claude
 
 ### `playbook cc launch`
 
-Run the launcher the `ccc` and `ccd` shell functions call
+Run the launcher (`playbook cc` and `playbook ccd` call it)
 
-- `--skip-permissions`: Pass `--dangerously-skip-permissions` to claude (the `ccd` form)
+- `--skip-permissions`: Pass `--dangerously-skip-permissions` to claude (the `playbook ccd` form)
 - `<ARGS>`: Subcommand and arguments, passed through to claude
 
 ### `playbook cc list`
@@ -167,11 +173,11 @@ Remove stale runtime state
 
 ### `playbook cc raw`
 
-Mode of the `ccc` shortcut: resume a session as it was (no action by itself)
+Mode of the `playbook cc` launcher: resume a session as it was (no action by itself)
 
-The `ccc` shortcut handles these modes. Running this command directly does nothing and exits 0.
+The launcher handles these modes. Running this command directly does nothing and exits 0.
 
-- `<SID>`: Session id to resume (default: the most recent)
+- `<ARGS>`: Session id to resume (default: the most recent), then arguments for claude
 
 ### `playbook cc worktree`
 
@@ -186,7 +192,7 @@ Prints only the path, so a shell can run `cd "$(playbook cc worktree my-branch)"
 
 Start a session with permission prompts skipped
 
-The same launcher as `playbook cc launch`, with `--dangerously-skip-permissions` added. The `ccd` shortcut calls it. Run it directly to skip the shell shortcuts.
+The same launcher as `playbook cc`, with `--dangerously-skip-permissions` added. It replaces the old `ccd` shortcut. `pb ccd` works too.
 
 Example: `playbook ccd fresh`
 
@@ -535,7 +541,7 @@ Set playbook's own ceiling on effort, or inspect one component's
 
 `playbook effort list` shows every command, skill and agent with its shipped effort and effective level. `playbook effort resolve agents reviewer` says which agent file to dispatch under the ceilings. Set a per-component ceiling with `playbook config set --global effort.agents.reviewer medium`. `playbook effort suggest` reads your usage and lists agents where a change looks safe or needed.
 
-`auto` (the default) sets no ceiling, so Claude Code's own `maxEffortLevel` decides how high effort may go. Each skill, command and agent still keeps the effort it ships with. `low`, `medium`, `high`, `xhigh` or `max` set playbook's own ceiling. The key is `maxEffortLevel`, named like Claude Code's. The effective ceiling is the lower of this and Claude Code's own `maxEffortLevel`, which playbook only reads and never changes. Sessions started with `ccc` or `ccd` get the ceiling. With no level, shows both values and the one that wins.
+`auto` (the default) sets no ceiling, so Claude Code's own `maxEffortLevel` decides how high effort may go. Each skill, command and agent still keeps the effort it ships with. `low`, `medium`, `high`, `xhigh` or `max` set playbook's own ceiling. The key is `maxEffortLevel`, named like Claude Code's. The effective ceiling is the lower of this and Claude Code's own `maxEffortLevel`, which playbook only reads and never changes. Sessions started with `playbook cc` or `playbook ccd` get the ceiling. With no level, shows both values and the one that wins.
 
 Example: `playbook effort xhigh`
 
@@ -781,7 +787,7 @@ Lists the hooks init adds to settings.json, grouped by purpose, and the ones the
 
 Install or repair your local Claude Code setup
 
-Safe to run again: it only touches what is missing or out of date. In a terminal it asks about each optional part (hooks, status line, PATH, the `ccc` launcher, the system prompt) unless you answer with a flag. Each part has `--x` and `--no-x`. Without a terminal, or with `--yes`, unanswered parts use their defaults: hooks, the status line and PATH on, the launcher and system prompt off.
+Safe to run again: it only touches what is missing or out of date. In a terminal it asks about each optional part (hooks, status line, PATH, the `playbook cc` launcher, the system prompt) unless you answer with a flag. Each part has `--x` and `--no-x`. Without a terminal, or with `--yes`, unanswered parts use their defaults: hooks, the status line and PATH on, the launcher and system prompt off.
 
 The security defaults (permissions rules) are never asked about and stay off unless you pass `--security` or set `security.defaults` to true. Without them, `init` leaves any permissions you already have untouched.
 
@@ -797,7 +803,7 @@ Example: `playbook init --no-hooks --aliases`
 - `--no-security`: Do not apply the security defaults, even when `security.defaults` is true
 - `--path`: Put the playbook binary on PATH for every shell start
 - `--no-path`: Do not edit shell files for PATH
-- `--aliases`: Install the `ccc` and `ccd` launcher shortcuts and wire your rc file
+- `--aliases`: Add the `playbook` cd wrapper (follows `playbook cc` into a worktree) to your rc file
 - `--no-aliases`: Do not install the launcher
 - `--system-prompt`: Install the playbook system prompt (an existing copy is refreshed either way)
 - `--no-system-prompt`: Do not install the system prompt
@@ -1290,9 +1296,9 @@ Create the shared settings template from a live settings.json
 
 ### `playbook shell-init`
 
-Print the shell functions `ccc` and `ccd`
+Print the shell function that lets `playbook cc` and `playbook ccd` change directory
 
-`ccc` starts a session (named so it does not shadow the C compiler, `cc`), and `ccd` does the same with permission prompts skipped. Load them from your rc file with `eval "$(playbook shell-init)"`.
+A program cannot change its parent shell's directory, so this wraps `playbook` to `cd` into a worktree that `playbook cc launch worktree <branch>` creates (the old `ccc worktree <branch>`). Load it from your rc file with `eval "$(playbook shell-init)"`.
 
 - `--shell <SHELL>`: Target shell (default: the one named by `$SHELL`) (one of `bash`, `zsh`)
 
@@ -1335,11 +1341,24 @@ Print the Claude Code status line
 
 Claude Code runs this to draw the line at the bottom of a session.
 
+### `playbook tools`
+
+List the commands a session can use for each task
+
+Subcommands: `map`
+
+### `playbook tools map`
+
+Print the map from each task to the command that does it. The session start hook injects this text, so skills can ask for a task by name
+
+- `--json`: Print `[{"intent", "command"}]` as JSON
+- `--check`: Exit 1 when the map costs more than its token budget
+
 ### `playbook trust`
 
 Mark a directory as trusted in Claude Code
 
-Writes to `~/.claude.json` so Claude Code's first-launch trust prompt does not block `ccc` or `ccd`. Always exits 0, even on failure, so a script can call it without checking.
+Writes to `~/.claude.json` so Claude Code's first-launch trust prompt does not block `playbook cc` or `playbook ccd`. Always exits 0, even on failure, so a script can call it without checking.
 
 - `<PATH>`: Absolute path of the directory to trust
 

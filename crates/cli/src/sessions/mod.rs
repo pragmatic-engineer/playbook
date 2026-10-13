@@ -441,7 +441,7 @@ mod tests {
                 Place {
                     cwd: Some("/w/playbook/536".into()),
                     worktree: Some("/w/playbook/536".into()),
-                    convention: "ccc",
+                    convention: "cc",
                     dirty: Some(false),
                     ..Place::default()
                 },
@@ -458,7 +458,7 @@ mod tests {
             "abcdef12",
             "playbook",
             "feat/536-x",
-            "536 (ccc)",
+            "536 (cc)",
             "PR #540 merged",
             "2h",
             "1k",

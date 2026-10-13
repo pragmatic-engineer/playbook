@@ -25,7 +25,7 @@ _playbook_pb_taken() {
     esac
   fi
 }
-_PLAYBOOK_PB_DEF='pb() { command playbook "$@"; }'
+_PLAYBOOK_PB_DEF='pb() { playbook "$@"; }'
 if ! _playbook_pb_taken; then
   eval "$_PLAYBOOK_PB_DEF"
   _PLAYBOOK_PB=1

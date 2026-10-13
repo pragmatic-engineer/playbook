@@ -35,7 +35,7 @@ pub struct Flags {
     /// Do not edit shell files for PATH
     #[arg(long, overrides_with = "path")]
     pub no_path: bool,
-    /// Install the `ccc` and `ccd` launcher shortcuts and wire your rc file
+    /// Add the `playbook` cd wrapper (follows `playbook cc` into a worktree) to your rc file
     #[arg(long, overrides_with = "no_aliases")]
     pub aliases: bool,
     /// Do not install the launcher
@@ -287,7 +287,7 @@ mod tests {
         assert_eq!(asked.len(), 6, "{asked:?}");
         assert!(asked
             .iter()
-            .all(|q| !q.contains("hooks") && !q.contains("ccc")));
+            .all(|q| !q.contains("hooks") && !q.contains("cd wrapper")));
     }
 
     #[test]

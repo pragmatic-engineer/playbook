@@ -598,6 +598,7 @@ fn table() -> Vec<Case> {
         case("glossary add", &["glossary", "add", "term: a definition"]).grows(),
         case("skill ref", &["skill", "ref", "foo"]).code(1).err("not found"),
         case("adr next", &["adr", "next"]).out("Next number: 0001").writes(),
+        case("tools map", &["tools", "map"]).out("playbook tools:"),
         case("atlassian check", &["atlassian", "check"]).code(1).out("acli: missing"),
         case("learn preflight", &["learn", "preflight"]).plain().code(1).err("not in a git repo"),
         case("learn collect git", &["learn", "collect", "git"]).out("{"),

@@ -8,13 +8,13 @@ use playbook::init::shim::ShellKind;
 use playbook::{
     adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor,
     effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
-    plan_cleanup, planning, pr, review, sanitize, settings, statusline, trust, update, usage,
-    worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli, Command, CommitCommand,
-    ConfigCommand, DepsCommand, DocCommand, DoctorCommand, EvalCommand, GateCommand,
+    plan_cleanup, planning, pr, review, sanitize, settings, statusline, tools_map, trust, update,
+    usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli, Command,
+    CommitCommand, ConfigCommand, DepsCommand, DocCommand, DoctorCommand, EvalCommand, GateCommand,
     GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand, MemoryCommand,
     ModeArg, ModeCommand, PlanCommand, PrCommand, ReviewCommand, ReviewWorktreeCommand,
     SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand, SettingsCommand,
-    SkillCommand, WorktreeCommand,
+    SkillCommand, ToolsCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -43,6 +43,13 @@ fn run_hook(name: playbook::HookName) {
         std::process::exit(hooks::worktree_create::execute(&payload));
     }
     hooks::dispatch(name, &payload);
+}
+
+/// The launcher arguments for a mode word followed by what the user typed.
+fn mode_args(mode: &str, rest: Vec<String>) -> Vec<String> {
+    let mut args = vec![mode.to_string()];
+    args.extend(rest);
+    args
 }
 
 fn main() {
@@ -78,7 +85,7 @@ fn main() {
     match cli.command {
         Command::Hook { name } => run_hook(name),
         // Launcher subcommands land in a later Work Unit; stub for now.
-        Command::Cc { sub } => match sub {
+        Command::Cc { sub, args } => match sub {
             Some(CcCommand::Prune) => cc::retention::prune(&cc::logical_cwd()),
             Some(CcCommand::BustCache) => cc::bust_cache::bust(),
             Some(CcCommand::List) => {
@@ -107,14 +114,16 @@ fn main() {
                 no_push,
             )
             .run(),
-            Some(CcCommand::Clean) => std::process::exit(cc::launch::run(false, &["clean".into()])),
-            Some(CcCommand::Fresh) => std::process::exit(cc::launch::run(false, &["fresh".into()])),
-            Some(CcCommand::Raw { sid }) => {
-                let mut args = vec!["raw".to_string()];
-                args.extend(sid);
-                std::process::exit(cc::launch::run(false, &args));
+            Some(CcCommand::Clean { args }) => {
+                std::process::exit(cc::launch::run(false, &mode_args("clean", args)))
             }
-            None => std::process::exit(cc::launch::run(false, &[])),
+            Some(CcCommand::Fresh { args }) => {
+                std::process::exit(cc::launch::run(false, &mode_args("fresh", args)))
+            }
+            Some(CcCommand::Raw { args }) => {
+                std::process::exit(cc::launch::run(false, &mode_args("raw", args)))
+            }
+            None => std::process::exit(cc::launch::run(false, &args)),
         },
         Command::Ccd { args } => std::process::exit(cc::launch::run(true, &args)),
         Command::Effort { sub: Some(sub), .. } => {
@@ -1420,6 +1429,25 @@ fn main() {
                 std::process::exit(1);
             }
             println!("{}", path.display());
+        }
+        Command::Tools {
+            sub: ToolsCommand::Map { json, check },
+        } => {
+            if json {
+                println!("{}", tools_map::render_json());
+            } else if check {
+                let text = tools_map::render();
+                let cost = tools_map::tokens(&text);
+                println!(
+                    "tool map: about {cost} tokens, budget {}",
+                    tools_map::TOKEN_BUDGET
+                );
+                if cost > tools_map::TOKEN_BUDGET {
+                    std::process::exit(1);
+                }
+            } else {
+                print!("{}", tools_map::render());
+            }
         }
         Command::Adr {
             sub: AdrCommand::Next,
