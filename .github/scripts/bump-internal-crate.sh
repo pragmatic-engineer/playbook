@@ -29,7 +29,8 @@ tag=$3
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "tag must look like v1.2.3: $tag" 2
 
 root=${BUMP_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
-manifest="$root/Cargo.toml"
+manifest="$root/crates/cli/Cargo.toml"
+[ -f "$manifest" ] || manifest="$root/Cargo.toml"
 [ -f "$manifest" ] || die "no Cargo.toml in $root"
 
 line=$(grep -E "^${crate}[[:space:]]*=[[:space:]]*\{.*git[[:space:]]*=" "$manifest" || true)

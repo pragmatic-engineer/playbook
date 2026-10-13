@@ -54,8 +54,11 @@ fn comments_do_not_cite_paths_that_are_not_tracked() {
     let mut stale = Vec::new();
     for file in tracked
         .iter()
-        .filter(|f| f.ends_with(".rs") && (f.starts_with("src/") || f.starts_with("tests/")))
-        .filter(|f| f.as_str() != "tests/comment_refs.rs")
+        .filter(|f| {
+            f.ends_with(".rs")
+                && (f.starts_with("crates/cli/src/") || f.starts_with("crates/cli/tests/"))
+        })
+        .filter(|f| f.as_str() != "crates/cli/tests/comment_refs.rs")
     {
         let text = fs::read_to_string(root.join(file)).expect("read tracked source");
         for (i, line) in text.lines().enumerate() {

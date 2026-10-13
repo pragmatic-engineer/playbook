@@ -30,7 +30,14 @@ fn files_under(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
 fn shipped_files() -> Vec<PathBuf> {
     let root = Path::new(env!("PLAYBOOK_REPO_ROOT"));
     let mut out = Vec::new();
-    for dir in ["src", "commands", "skills", "agents", "prompts", "hooks"] {
+    for dir in [
+        "crates/cli/src",
+        "commands",
+        "skills",
+        "agents",
+        "prompts",
+        "hooks",
+    ] {
         files_under(&root.join(dir), &["rs", "md", "json", "sh"], &mut out);
     }
     out.push(root.join("settings.shared.json"));
