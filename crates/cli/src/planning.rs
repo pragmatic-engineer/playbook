@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Helpers for `/playbook:plan` and the review commands: the plan checkpoint,
-//! the glossary append, and the grounding-review reference lookup.
+//! and the glossary append.
 
 use std::fs;
 use std::io;

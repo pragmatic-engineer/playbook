@@ -22,7 +22,7 @@ The prose is also useful without the binary. A person who installs only the plug
 
 ## Limits that remain
 
-- The binary still reads some plugin files at run time through the plugin root (`playbook pr rules`, `playbook skill ref`, `playbook agents check`, `playbook cc` variants). With two plugins, the plugin root a command sees may be the hooks plugin. Those reads are being removed by the work that makes the skills independent of the binary.
+- The binary still reads some skills plugin files at run time (`playbook pr rules`, the effort commands and the `playbook cc` variants). It finds them through the installed skills plugin and not through the hooks plugin root, and each command works with no plugin files at all: `pr rules` prints an error the skills treat as a cue to read the files themselves, and the effort commands report a component as unknown. `playbook skill ref` and `playbook review ref` are gone.
 - The authoring guides and the policy table moved with the prose, and the pages that link across the two repositories use absolute URLs.
 - Commit hashes of the moved paths changed with the history rewrite, and the rewritten commits are not signed.
 
