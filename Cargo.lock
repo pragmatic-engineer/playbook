@@ -713,6 +713,7 @@ version = "0.25.0"
 dependencies = [
  "clap",
  "libc",
+ "playbook-common",
  "playbook-telemetry",
  "ratatui",
  "regex",
@@ -726,6 +727,15 @@ dependencies = [
  "tree-sitter-rust",
  "tree-sitter-typescript",
  "ureq",
+]
+
+[[package]]
+name = "playbook-common"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rusqlite",
+ "serde_json",
 ]
 
 [[package]]

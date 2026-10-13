@@ -32,6 +32,7 @@ fn shipped_files() -> Vec<PathBuf> {
     let mut out = Vec::new();
     for dir in [
         "crates/cli/src",
+        "crates/common/src",
         "commands",
         "skills",
         "agents",
@@ -72,9 +73,14 @@ fn nothing_shipped_sets_claude_codes_memory_settings() {
 
 #[test]
 fn no_rust_code_builds_a_path_into_claude_codes_project_memory() {
-    let root = Path::new(env!("PLAYBOOK_REPO_ROOT")).join("crates/cli/src");
     let mut files = Vec::new();
-    files_under(&root, &["rs"], &mut files);
+    for dir in ["crates/cli/src", "crates/common/src"] {
+        files_under(
+            &Path::new(env!("PLAYBOOK_REPO_ROOT")).join(dir),
+            &["rs"],
+            &mut files,
+        );
+    }
     for file in files {
         // The one exception: `policy-guard` names those directories only to
         // deny writes into them, and never touches them.
