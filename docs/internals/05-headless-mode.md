@@ -69,7 +69,7 @@ To see the worst case, a marker was created for a fixed `--session-id`. The hook
 
 | Hook | Behavior |
 |---|---|
-| `session-init` | Writes `session-start.log`. Under `PLAYBOOK_HEADLESS` it skips every nudge, the worktree sweep and memory injection (opt in with `PLAYBOOK_HEADLESS_MEMORY=1`). |
+| `session-init` | Writes `session-start.log`. Under `PLAYBOOK_HEADLESS` it skips every nudge, the worktree sweep and memory injection (opt in with `PLAYBOOK_HEADLESS_MEMORY=1`). It still injects the tool map. |
 | `memory-capture` (Stop) | Never blocks headless. |
 | `auto-model-detect` | Silent headless. |
 | Safety guards (`preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) | Fire and stay quiet. They are the reason to run with hooks on. |
@@ -83,7 +83,7 @@ One switch covers every row above. `PLAYBOOK_HEADLESS` set to `1`, `true`, `yes`
 
 When headless:
 
-- `session-init` skips the worktree sweep, the handoff load, and the auto-learn nudge (the same effect as `AUTO_LEARN_NUDGE=0`). It injects no memory either, unless `PLAYBOOK_HEADLESS_MEMORY=1` opts memory in. It still writes `session-start.log`.
+- `session-init` skips the worktree sweep, the handoff load, and the auto-learn nudge (the same effect as `AUTO_LEARN_NUDGE=0`). It injects no memory either, unless `PLAYBOOK_HEADLESS_MEMORY=1` opts memory in. It still injects the tool map (see `playbook tools map`) and writes `session-start.log`.
 - `memory-capture` (Stop) never blocks, even if a `capture-due` marker exists.
 - `auto-model-detect` stays silent.
 - The safety guards (`preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) behave exactly as they do interactively.
