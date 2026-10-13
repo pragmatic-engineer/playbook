@@ -130,6 +130,8 @@ When there is nothing to chart, the body says why instead of showing empty panel
 
 The theme comes from the `usage.theme` config key (`default`, `dark`, `light`, `mono`; see [config keys](../guides/04-config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
 
+A small TV icon shows before the title in the top-left corner of the dashboard and the Sessions screen. It sits in a fixed three-cell block, so columns hold at emoji width 1 or 2. Set `PBTOP_ICON_WIDTH=1` if your terminal draws it one cell wide. The icon is left out, with plain text only, when the locale is not UTF-8, `NO_COLOR` is set, or `TERM` is `dumb`.
+
 Colors follow the terminal. With `COLORTERM=truecolor` or `24bit` the `default` values are drawn exactly. Otherwise, when `TERM` names `256color`, each value goes to the nearest of the 256 color cube and gray ramp, and with neither it goes to the nearest of the 16 basic colors. The values are adapted from a third party theme under the Apache License 2.0, like playbook, and the attribution is in `NOTICE`.
 
 The usage code lives in `crates/telemetry` (package `playbook-telemetry`), which playbook depends on by path; the paths below are relative to that folder.

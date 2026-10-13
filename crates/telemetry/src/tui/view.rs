@@ -152,14 +152,6 @@ pub fn render(frame: &mut Frame, app: &App) {
         );
     }
     frame.render_widget(Paragraph::new(footer(app, &pal, area.width)), p.footer);
-    if app.egg.visible(std::time::Instant::now()) {
-        let dim = Style::default().fg(pal.color(pal.graph_text));
-        frame.render_widget(ratatui::widgets::Clear, p.footer);
-        frame.render_widget(
-            Paragraph::new(Line::styled(format!(" {}", super::egg::BANNER), dim)),
-            p.footer,
-        );
-    }
     if let Some(scroll) = app.help {
         render_help(frame, area, scroll, &pal);
     }
@@ -565,6 +557,8 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
         .border_style(edge)
         .title(Line::from(vec![
             Span::styled("\u{2500}\u{2524}", edge),
+            // To my friend Joshua. The first beta tester.
+            Span::styled(app.icon.prefix(), edge),
             Span::styled(
                 "playbook usage",
                 Style::default()

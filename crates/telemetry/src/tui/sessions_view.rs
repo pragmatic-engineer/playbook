@@ -196,7 +196,13 @@ fn state_ink(pal: &Palette, r: &Record) -> ratatui::style::Color {
 
 /// Draws the whole screen: a table, the suggestion for the selected session,
 /// and the footer with the keys.
-pub fn render(frame: &mut Frame, view: &SessionsView, pal: &Palette, now: i64) {
+pub fn render(
+    frame: &mut Frame,
+    view: &SessionsView,
+    pal: &Palette,
+    now: i64,
+    icon: super::icon::Icon,
+) {
     let area = frame.area();
     let base = Style::default().fg(pal.color(pal.fg)).bg(pal.color(pal.bg));
     frame.buffer_mut().set_style(area, base);
@@ -210,6 +216,7 @@ pub fn render(frame: &mut Frame, view: &SessionsView, pal: &Palette, now: i64) {
     let box_ink = Style::default().fg(pal.color(pal.box_proc));
     let title = Line::from(vec![
         Span::styled("\u{256d}\u{2500}\u{2524}", box_ink),
+        Span::styled(icon.prefix(), box_ink),
         Span::styled(
             "Sessions",
             Style::default()
@@ -356,6 +363,7 @@ fn footer_line(view: &SessionsView, pal: &Palette, now: i64) -> Line<'static> {
 mod tests {
     use super::*;
     use crate::session_view::{Place, Pr, PrKind};
+    use crate::tui::icon::Icon;
     use crate::tui::theme::{ColorDepth, Theme};
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::KeyEventKind;
@@ -405,9 +413,13 @@ mod tests {
     }
 
     fn screen(view: &SessionsView, width: u16, height: u16) -> String {
+        screen_with(view, width, height, Icon::Off)
+    }
+
+    fn screen_with(view: &SessionsView, width: u16, height: u16, icon: Icon) -> String {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         let pal = Theme::default().palette(ColorDepth::detect(None, None));
-        terminal.draw(|f| render(f, view, &pal, NOW)).unwrap();
+        terminal.draw(|f| render(f, view, &pal, NOW, icon)).unwrap();
         let buffer = terminal.backend().buffer().clone();
         (0..height)
             .map(|y| {
@@ -530,5 +542,20 @@ mod tests {
         for width in [40, 80, 100] {
             screen(&loaded(), width, 12);
         }
+    }
+
+    #[test]
+    fn the_sessions_title_carries_the_icon_unless_it_is_off() {
+        let first = |icon| {
+            screen_with(&loaded(), 80, 12, icon)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert!(first(Icon::Wide).contains("\u{2524}\u{1F4FA}  Sessions"));
+        assert!(first(Icon::Narrow).contains("\u{2524}\u{1F4FA}   Sessions"));
+        let off = first(Icon::Off);
+        assert!(off.contains("\u{2524}Sessions") && !off.contains('\u{1F4FA}'));
     }
 }
