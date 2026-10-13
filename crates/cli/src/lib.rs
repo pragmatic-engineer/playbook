@@ -1165,12 +1165,13 @@ pub enum PrCommand {
     },
     /// Cut the skill rules a PR title and body need
     ///
-    /// Reads the writing-style and engineering-standards skills under
-    /// `CLAUDE_PLUGIN_ROOT`, writes four files under `/tmp`, checks each, and
+    /// Reads the writing-style and engineering-standards skills from the
+    /// plugin root (`CLAUDE_PLUGIN_ROOT` when it holds the skills, else the
+    /// installed playbook skills plugin), writes four files under `/tmp`, checks each, and
     /// prints their paths. A failed check prints `ERROR: ...` and exits 1.
     /// With `--commit` it writes only the commit-message slice of writing-style.
     Rules {
-        /// Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
+        /// Plugin root (default: the installed skills plugin)
         #[arg(long)]
         plugin_root: Option<PathBuf>,
         /// Write only the slice a commit message needs

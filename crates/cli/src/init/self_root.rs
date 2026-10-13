@@ -75,9 +75,17 @@ pub fn skills_root_from_env(
             .iter()
             .any(|dir| root.join(dir).is_dir())
     };
-    resolve(claude_plugin_root_env, claude_home)
+    // The env root wins when it holds components. The cache is searched by
+    // newest version, not by the binary's version, because the skills plugin
+    // has its own version line.
+    claude_plugin_root_env
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
         .filter(|root| has_components(root))
-        .or_else(|| resolve(None, claude_home).filter(|root| has_components(root)))
+        .or_else(|| {
+            newest_cached(&claude_home.join("plugins/cache/pragmatic-engineer/playbook"))
+                .filter(|root| has_components(root))
+        })
 }
 
 /// The embedded Brewfile, written under the same embedded directory.
@@ -368,5 +376,20 @@ mod tests {
             None
         );
         assert_eq!(skills_root_from_env(None, &claude_home), None);
+    }
+
+    #[test]
+    fn an_env_root_with_components_beats_the_cached_skills_plugin() {
+        // Arrange: a dev checkout and a cached plugin are both present.
+        let claude_home = scratch("skills-env-wins");
+        fs::create_dir_all(cache_dir_for(&claude_home).join("skills")).expect("cache skills");
+        let checkout = scratch("skills-env-wins-checkout");
+        fs::create_dir_all(checkout.join("skills")).expect("checkout skills");
+
+        // Act
+        let got = skills_root_from_env(checkout.to_str(), &claude_home);
+
+        // Assert
+        assert_eq!(got, Some(checkout));
     }
 }

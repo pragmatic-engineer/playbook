@@ -1916,7 +1916,7 @@ fn main() {
             DoctorCommand::PendingMigrations => {
                 let home = common::home_dir();
                 let claude_home = home.join(".claude");
-                let self_root = init::self_root::resolve(
+                let self_root = init::self_root::skills_root_from_env(
                     std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
                     &claude_home,
                 );
