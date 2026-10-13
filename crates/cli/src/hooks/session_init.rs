@@ -4,7 +4,7 @@
 //! SessionStart hook (ports the retired shell original). Prepares the per-session
 //! runtime directory and zeroes its counters, warns on a resumed session
 //! whose config has drifted since it was created, and injects SessionStart
-//! additionalContext: an auto-learn nudge, a handoff, and one small ranked
+//! additionalContext: the tool map, an auto-learn nudge, a handoff, and one small ranked
 //! memory block, in that order. The harness caps a hook's context string at
 //! 10,000 characters and replaces the whole string with a 2,000 character
 //! preview past that, so the total is held under `CONTEXT_CAP_CHARS` and the
@@ -101,6 +101,9 @@ pub fn run(payload: &Payload) {
 
     let (system_message, mut extra_context) = check_config_drift(payload, &dir, &home);
     append_auto_mode_note(&mut extra_context);
+    // Always on, headless included: skills ask for a task by name, and this map
+    // is how the session learns which tasks this binary can do mechanically.
+    push_context(&mut extra_context, crate::tools_map::render().trim_end());
 
     if !headless {
         append_auto_learn_nudge(&mut extra_context, &repo_root);
