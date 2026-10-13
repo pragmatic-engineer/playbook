@@ -154,7 +154,7 @@ pub fn run(payload: &Payload) {
 
 Wire it in by adding a `pub mod` line and a match arm in `crates/cli/src/hooks/mod.rs`'s `dispatch`, plus a variant on `HookName` in `crates/cli/src/lib.rs`. Both are exhaustive, so a missing arm fails the build rather than the hook silently doing nothing.
 
-Hook and settings changes take effect on a fresh session, not a resumed one. After editing `settings.json` or rebuilding the binary, run `ccc fresh` (or plain `claude`). Resumed sessions run the config snapshot from their original startup; `ccc` warns you when the config has drifted.
+Hook and settings changes take effect on a fresh session, not a resumed one. After editing `settings.json` or rebuilding the binary, run `playbook cc fresh` (or plain `claude`). Resumed sessions run the config snapshot from their original startup; `playbook cc` warns you when the config has drifted.
 
 ## See also
 
