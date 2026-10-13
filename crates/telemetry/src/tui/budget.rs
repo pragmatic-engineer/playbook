@@ -135,7 +135,7 @@ fn limit_line(pal: &Palette, l: &Limit, now: i64, stale: bool, width: usize) -> 
                 name(l).to_string(),
                 fg(pal, pal.title).add_modifier(ratatui::style::Modifier::BOLD),
             ),
-            Span::styled(format!(" [{tag}]"), fg(pal, pal.graph_text)),
+            Span::styled(format!(" [{tag}]"), fg(pal, pal.fg)),
         ],
     }];
     let pct = if l.limit > 0.0 {
@@ -200,7 +200,7 @@ fn limit_line(pal: &Palette, l: &Limit, now: i64, stale: bool, width: usize) -> 
     segs.push(Seg::text(
         7,
         format!("resets {} {}", stamp(l.end), crate::tz::label()),
-        fg(pal, pal.graph_text),
+        fg(pal, pal.fg),
     ));
     join(segs, width)
 }
@@ -221,7 +221,7 @@ fn burn_line(pal: &Palette, v: &LimitsView, width: usize) -> Line<'static> {
                     format!("{} spend", v.period.label()),
                     fg(pal, pal.title).add_modifier(ratatui::style::Modifier::BOLD),
                 ),
-                Span::styled(" [local history]", fg(pal, pal.graph_text)),
+                Span::styled(" [local history]", fg(pal, pal.fg)),
             ],
         },
         Seg::text(
@@ -233,7 +233,7 @@ fn burn_line(pal: &Palette, v: &LimitsView, width: usize) -> Line<'static> {
         Seg::text(
             3,
             format!("{} {}", v.period.previous_label(), burn_text(&v.previous)),
-            fg(pal, pal.graph_text),
+            fg(pal, pal.fg),
         ),
     ];
     join(segs, width)

@@ -206,7 +206,7 @@ pub fn render(frame: &mut Frame, view: &SessionsView, pal: &Palette, now: i64) {
         Constraint::Length(1),
     ])
     .areas(area);
-    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let dim = Style::default().fg(pal.color(pal.fg));
     let box_ink = Style::default().fg(pal.color(pal.box_proc));
     let title = Line::from(vec![
         Span::styled("\u{256d}\u{2500}\u{2524}", box_ink),
@@ -312,7 +312,7 @@ pub fn render(frame: &mut Frame, view: &SessionsView, pal: &Palette, now: i64) {
 }
 
 fn footer_line(view: &SessionsView, pal: &Palette, now: i64) -> Line<'static> {
-    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let dim = Style::default().fg(pal.color(pal.fg));
     let keys = Style::default()
         .fg(pal.color(pal.hi))
         .add_modifier(Modifier::BOLD);

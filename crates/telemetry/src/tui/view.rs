@@ -177,7 +177,7 @@ fn render_help(frame: &mut Frame, area: Rect, scroll: usize, pal: &Palette) {
     let accent = Style::default()
         .fg(pal.color(pal.hi))
         .add_modifier(Modifier::BOLD);
-    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let dim = Style::default().fg(pal.color(pal.fg));
     let lines: Vec<Line> = keys::help_lines()
         .into_iter()
         .map(|l| match l {
@@ -235,7 +235,7 @@ fn render_notice(frame: &mut Frame, area: Rect, n: &Notice, pal: &Palette) {
 /// The key hints: each key in the accent color, its meaning in the text color,
 /// and at the right when the view was last refreshed.
 fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
-    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let dim = Style::default().fg(pal.color(pal.fg));
     if app.editing {
         return Line::styled(
             format!(" filter: {}_   enter apply   esc cancel", app.draft),
@@ -295,7 +295,7 @@ fn refresh_status(app: &App, pal: &Palette, area_width: u16) -> (String, Style) 
         let text = fit(&format!("refresh failed: {e} "), room);
         return (text, Style::default().fg(pal.color(pal.error)));
     }
-    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let dim = Style::default().fg(pal.color(pal.fg));
     if let Some((done, total)) = app.indexing {
         return (format!("indexing {done}/{total} files "), dim);
     }
@@ -499,7 +499,7 @@ fn header_lines(d: &Data, pal: &Palette, room: usize) -> Vec<Line<'static>> {
     let accent = Style::default()
         .fg(pal.color(pal.hi))
         .add_modifier(Modifier::BOLD);
-    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let dim = Style::default().fg(pal.color(pal.fg));
     let (now, rest) = context_line(d, room);
     let mut lines = vec![Line::from(vec![
         Span::styled(now, accent),
@@ -511,7 +511,7 @@ fn header_lines(d: &Data, pal: &Palette, room: usize) -> Vec<Line<'static>> {
         } else if m.change < 0.0 {
             pal.live
         } else {
-            pal.graph_text
+            pal.fg
         };
         let mut spans = vec![
             Span::styled(format!("{:<9}", m.name), dim),
@@ -567,10 +567,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
         ]))
         .title(Line::from(vec![
             Span::styled("\u{2500}\u{2524}", edge),
-            Span::styled(
-                zone_note(app),
-                Style::default().fg(pal.color(pal.graph_text)),
-            ),
+            Span::styled(zone_note(app), Style::default().fg(pal.color(pal.fg))),
             Span::styled("\u{251c}", edge),
         ]));
     if !app.filter.is_empty() {

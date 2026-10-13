@@ -138,7 +138,7 @@ fn view_block(
     block.title(Line::from(vec![
         Span::styled("\u{2524}", edge),
         Span::styled("v", fg(pal, pal.hi).add_modifier(Modifier::BOLD)),
-        Span::styled(text, fg(pal, pal.graph_text)),
+        Span::styled(text, fg(pal, pal.fg)),
         Span::styled("\u{251c}", edge),
     ]))
 }
@@ -297,7 +297,7 @@ fn gradient_legend(pal: &Palette, fill: Fill, what: &str, box_ink: Ink) -> Optio
     let edge = fg(pal, box_ink);
     let mut spans = vec![
         Span::styled("\u{2524}", edge),
-        Span::styled(format!("{what} low "), fg(pal, pal.graph_text)),
+        Span::styled(format!("{what} low "), fg(pal, pal.fg)),
     ];
     for pct in [10.0, 30.0, 50.0, 70.0, 90.0] {
         spans.push(Span::styled(
@@ -305,7 +305,7 @@ fn gradient_legend(pal: &Palette, fill: Fill, what: &str, box_ink: Ink) -> Optio
             Style::default().fg(pal.graded(fill, pct)),
         ));
     }
-    spans.push(Span::styled(" high", fg(pal, pal.graph_text)));
+    spans.push(Span::styled(" high", fg(pal, pal.fg)));
     spans.push(Span::styled("\u{251c}\u{2500}", edge));
     Some(Line::from(spans))
 }
@@ -336,10 +336,7 @@ fn model_legend(pal: &Palette, slots: &Slots, width: usize, box_ink: Ink) -> Lin
         let reserve = if left > 1 { more.chars().count() } else { 0 };
         if used + need + reserve > room {
             let space = if i > 0 { " " } else { "" };
-            spans.push(Span::styled(
-                format!("{space}+{left}"),
-                fg(pal, pal.graph_text),
-            ));
+            spans.push(Span::styled(format!("{space}+{left}"), fg(pal, pal.fg)));
             break;
         }
         if i > 0 {
@@ -537,7 +534,7 @@ fn change_style(pal: &Palette, amount: f64) -> Style {
     } else if amount < 0.0 {
         fg(pal, pal.live)
     } else {
-        fg(pal, pal.graph_text)
+        fg(pal, pal.fg)
     }
 }
 
@@ -617,7 +614,7 @@ pub fn models(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palet
                         let delta = cost_change(p);
                         let percent = Change::of(p.current.cost_usd, p.previous.cost_usd).percent;
                         cells.extend([
-                            num(money(p.previous.cost_usd)).style(fg(pal, pal.graph_text)),
+                            num(money(p.previous.cost_usd)).style(fg(pal, pal.fg)),
                             change_cell(pal, signed_money(delta), delta),
                             change_cell(
                                 pal,
@@ -853,11 +850,7 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
                 .tools
                 .iter()
                 .map(|t| {
-                    let rate_color = if t.failures > 0 {
-                        pal.warn
-                    } else {
-                        pal.graph_text
-                    };
+                    let rate_color = if t.failures > 0 { pal.warn } else { pal.fg };
                     let mut cells = vec![
                         Cell::from(fit(&t.name, w[0])),
                         num(t.calls.to_string()),
@@ -869,11 +862,11 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
                         Some(p) => {
                             let delta = t.avg_ms() - p.avg_ms();
                             let pct = Change::of(t.avg_ms(), p.avg_ms()).percent;
-                            cells.push(num(duration_ms(p.avg_ms())).style(fg(pal, pal.graph_text)));
+                            cells.push(num(duration_ms(p.avg_ms())).style(fg(pal, pal.fg)));
                             cells.push(change_cell(pal, signed_percent(pct, t.calls > 0), delta));
                         }
                         None => {
-                            cells.push(num("-").style(fg(pal, pal.graph_text)));
+                            cells.push(num("-").style(fg(pal, pal.fg)));
                             cells.push(change_cell(pal, "new".to_string(), 0.0));
                         }
                     }
@@ -1011,7 +1004,7 @@ fn health(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) 
                         let pct = Change::of(f.now, b).percent;
                         // A rise reads as a warning unless a rise is the good news.
                         let tone = if f.better_up { -delta } else { delta };
-                        cells.push(num(text.clone()).style(fg(pal, pal.graph_text)));
+                        cells.push(num(text.clone()).style(fg(pal, pal.fg)));
                         cells.push(change_cell(pal, signed_percent(pct, f.now > 0.0), tone));
                     }
                     cells
