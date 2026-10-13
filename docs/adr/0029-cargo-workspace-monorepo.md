@@ -35,5 +35,5 @@ The binary grew a code index and a usage dashboard that other tools should reuse
 ## Consequences
 
 - Cross-crate changes land in one pull request.
-- Three release workflows share one repository, told apart by tag prefix.
+- One release workflow, `release.yml`, serves every tool in the repository. Its first job maps the tag prefix to the package, binaries and archive shape, and fails on an unknown prefix.
 - Tools that read the repository layout (the tap, the marketplace, scripts) must know the prefixes.
