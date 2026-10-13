@@ -1042,7 +1042,79 @@ fn write_graph_atomically(mem_dir: &Path, graph: &Graph) -> Result<(), RebuildEr
     let rendered = serde_json::to_string_pretty(graph)
         .map_err(|e| RebuildError(format!("serialize graph: {e}")))?;
     crate::common::atomic::write_atomic(&mem_dir.join("memory.graph.json"), rendered)
-        .map_err(|e| RebuildError(format!("write memory.graph.json: {e}")))
+        .map_err(|e| RebuildError(format!("write memory.graph.json: {e}")))?;
+    // The same graph goes into `data/memory.db`, the derived index every
+    // playbook tool can read. The JSON file stays for readers not yet moved.
+    if let Some(root) = mem_dir.parent() {
+        let nodes: Vec<playbook_data::memory::NodeRow> = graph
+            .nodes
+            .iter()
+            .map(|n| playbook_data::memory::NodeRow {
+                id: n.id.clone(),
+                file: n.file.clone(),
+                scope: n.scope.clone(),
+                project: n.project.clone(),
+                kind: n.kind.clone(),
+                name: n.name.clone(),
+                description: n.description.clone(),
+                pinned: n.pinned.unwrap_or(false),
+            })
+            .collect();
+        let edges: Vec<playbook_data::memory::EdgeRow> = graph
+            .edges
+            .iter()
+            .map(|e| playbook_data::memory::EdgeRow {
+                from: e.from.clone(),
+                to: e.to.clone(),
+                relation: e.relation.clone(),
+                signals: e.signals.clone(),
+            })
+            .collect();
+        let db = playbook_data::memory::db_in(&root.join("data"));
+        playbook_data::memory::write_graph(&db, &nodes, &edges)
+            .map_err(|e| RebuildError(format!("write memory.db: {e}")))?;
+    }
+    Ok(())
+}
+
+/// The graph stored in `memory.db`, as the JSON document `memory.graph.json`
+/// holds (`{"nodes": [...], "edges": [...], "version": 1}`), for tools that
+/// read the JSON shape. `Ok(None)` when there is no database yet.
+pub fn export_json(root: &Path) -> Result<Option<String>, RebuildError> {
+    let db = playbook_data::memory::db_in(&root.join("data"));
+    let Some((nodes, edges)) = playbook_data::memory::read_graph(&db)
+        .map_err(|e| RebuildError(format!("read memory.db: {e}")))?
+    else {
+        return Ok(None);
+    };
+    let graph = Graph {
+        nodes: nodes
+            .into_iter()
+            .map(|n| Node {
+                id: n.id,
+                file: n.file,
+                scope: n.scope,
+                kind: n.kind,
+                name: n.name,
+                description: n.description,
+                project: n.project,
+                pinned: n.pinned.then_some(true),
+            })
+            .collect(),
+        edges: edges
+            .into_iter()
+            .map(|e| Edge {
+                from: e.from,
+                to: e.to,
+                relation: e.relation,
+                signals: e.signals,
+            })
+            .collect(),
+        version: 1,
+    };
+    serde_json::to_string_pretty(&graph)
+        .map(Some)
+        .map_err(|e| RebuildError(format!("serialize graph: {e}")))
 }
 
 #[cfg(test)]

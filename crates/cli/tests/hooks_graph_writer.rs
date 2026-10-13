@@ -2106,3 +2106,90 @@ fn a_large_store_takes_the_threaded_path_and_still_finds_the_similar_pair() {
     assert!(run_rebuild_for(&home, "twin-a.md").status.success());
     assert_eq!(fs::read(graph_path(&home)).unwrap(), first);
 }
+
+// --- memory.db: the derived index beside the JSON -----------------------
+
+fn memory_db(home: &Path) -> PathBuf {
+    home.join(".config")
+        .join("playbook")
+        .join("data")
+        .join("memory.db")
+}
+
+const PINNED_FACT: &str = "---\nname: a-fact\ndescription: d\ntype: feedback\npinned: true\nanchors:\n  - code:~/.zshrc\n---\nbody\n";
+
+#[test]
+fn a_rebuild_also_writes_the_same_graph_into_memory_db() {
+    let home = scratch_home("memdb-same");
+    write_fact(&home, "global/a-fact.md", PINNED_FACT);
+
+    let out = run_rebuild_for(&home, "global/a-fact.md");
+
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json = read_graph(&home);
+    let exported = run_playbook(&home, &["memory", "export", "--json"], "");
+    assert!(
+        exported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let from_db: Value = serde_json::from_slice(&exported.stdout).expect("export is JSON");
+    let sorted = |doc: &Value, key: &str| {
+        let mut rows = doc[key].as_array().cloned().unwrap_or_default();
+        rows.sort_by_key(|r| r.to_string());
+        rows
+    };
+    for key in ["nodes", "edges"] {
+        assert_eq!(
+            sorted(&from_db, key),
+            sorted(&json, key),
+            "memory.db and memory.graph.json hold one graph ({key})"
+        );
+    }
+    assert_eq!(from_db["version"], json["version"]);
+    assert!(memory_db(&home).is_file());
+}
+
+#[test]
+fn export_builds_the_database_when_it_is_missing() {
+    let home = scratch_home("memdb-missing");
+    write_fact(&home, "global/a-fact.md", PINNED_FACT);
+
+    let exported = run_playbook(&home, &["memory", "export", "--json"], "");
+
+    assert!(
+        exported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    assert!(memory_db(&home).is_file());
+    let doc: Value = serde_json::from_slice(&exported.stdout).unwrap();
+    assert!(has_node(&doc, "global/a-fact"));
+}
+
+#[test]
+fn a_second_rebuild_replaces_the_rows_and_does_not_add_to_them() {
+    let home = scratch_home("memdb-twice");
+    write_fact(&home, "global/a-fact.md", PINNED_FACT);
+    run_rebuild_for(&home, "global/a-fact.md");
+    fs::remove_file(home.join(".config/playbook/memory/global/a-fact.md")).unwrap();
+    write_fact(
+        &home,
+        "global/b-fact.md",
+        PINNED_FACT.replace("a-fact", "b-fact").as_str(),
+    );
+
+    run_rebuild_for(&home, "global/b-fact.md");
+
+    let exported = run_playbook(&home, &["memory", "export", "--json"], "");
+    let doc: Value = serde_json::from_slice(&exported.stdout).unwrap();
+    assert!(has_node(&doc, "global/b-fact"));
+    assert!(
+        !has_node(&doc, "global/a-fact"),
+        "the removed fact is gone from the db"
+    );
+}

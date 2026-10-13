@@ -554,6 +554,24 @@ fn main() {
                     std::process::exit(1);
                 }
             },
+            MemoryCommand::Export { json: _ } => {
+                let root = common::paths::playbook_root();
+                let rendered = match hooks::rebuild_memory_graph::export_json(&root) {
+                    Ok(Some(text)) => Ok(text),
+                    Ok(None) => hooks::rebuild_memory_graph::rebuild_now().and_then(|()| {
+                        hooks::rebuild_memory_graph::export_json(&root)
+                            .map(|t| t.unwrap_or_default())
+                    }),
+                    Err(err) => Err(err),
+                };
+                match rendered {
+                    Ok(text) => println!("{text}"),
+                    Err(err) => {
+                        eprintln!("memory export: {err}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             MemoryCommand::ImportClaude { dry_run, from } => {
                 let root = manifest::check::toplevel()
                     .unwrap_or_else(|| std::path::PathBuf::from(cc::logical_cwd()));

@@ -848,7 +848,7 @@ Exits 0 when all pass and 1 otherwise.
 
 Manage the memory graph that sessions read from
 
-Subcommands: `context`, `import-claude`, `rebuild`
+Subcommands: `context`, `export`, `import-claude`, `rebuild`
 
 ### `playbook memory context`
 
@@ -856,6 +856,16 @@ Print the repo-scoped markdown slice of the memory graph (facts in scope, typed 
 
 - `--repo <REPO>`: Repo slug (`owner/name`); defaults to the origin remote's slug
 - `--graph <GRAPH>`: Graph file; defaults to `~/.config/playbook/memory/memory.graph.json`
+
+### `playbook memory export`
+
+Print the memory graph as JSON
+
+The graph lives in `~/.config/playbook/data/memory.db`, rebuilt from the fact files. This prints the same document `memory.graph.json` holds, for tools that read that shape. A missing database is rebuilt first.
+
+Example: `playbook memory export --json`
+
+- `--json`: Print JSON (the only format)
 
 ### `playbook memory import-claude`
 

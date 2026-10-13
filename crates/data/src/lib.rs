@@ -10,6 +10,7 @@
 //!   ever deleting it.
 
 pub mod config;
+pub mod memory;
 pub mod migrate;
 
 use playbook_common::atomic::ensure_private_dir;
