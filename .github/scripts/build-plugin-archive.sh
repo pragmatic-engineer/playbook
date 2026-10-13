@@ -31,11 +31,13 @@ fi
 
 stage="$(mktemp -d)"
 tmp_zip=""
-trap 'rm -rf "$stage"; [ -z "$tmp_zip" ] || rm -f "$tmp_zip"' EXIT
+trap 'rm -rf "$stage" "$stage.tar"; [ -z "$tmp_zip" ] || rm -f "$tmp_zip"' EXIT
 
+# Write the tar to a file first. A pipe into `tar -x` can close early once tar
+# sees the end marker, and git then dies of SIGPIPE under `pipefail`.
 printf '%s\n' "$specs" | tr '\n' '\0' \
-    | xargs -0 git archive --format=tar "$tree" -- \
-    | tar -x -C "$stage"
+    | xargs -0 git archive --format=tar -o "$stage.tar" "$tree" --
+tar -x -C "$stage" -f "$stage.tar"
 
 if [ -f "$stage/.claude-plugin/hooks.plugin.json" ]; then
     mv "$stage/.claude-plugin/hooks.plugin.json" "$stage/.claude-plugin/plugin.json"
