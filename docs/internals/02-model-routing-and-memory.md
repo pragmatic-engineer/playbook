@@ -210,7 +210,7 @@ Edge values are bare basenames with no path and no extension. For `feedback` and
 
 ### Index
 
-`memory.graph.json` is the index. Each fact becomes one node:
+`memory.db` is the index. Each fact becomes one node, shown here in the JSON form `playbook memory export --json` prints:
 
 ```json
 {
@@ -238,9 +238,9 @@ Each edge is stored once on the authoring node. Reverse links are inferred by sc
 
 Traversal depth is 1 for all edge types except `supersedes`, which is followed fully (chain head wins). A project fact that contradicts a global fact wins for that repo. Dangling basenames (the target isn't in the store) are surfaced, not dropped.
 
-### memory.graph.json
+### memory.db
 
-`~/.config/playbook/memory/memory.graph.json` is the single navigable export of the full memory graph: nodes are facts and referenced code locations, edges are `links:` between facts plus `anchors:` from facts to code. It covers all scopes: global, org, and project. The `rebuild-memory-graph` PostToolUse hook rebuilds it automatically after any fact file is saved. See [Decisions and Memory](../guides/03-decisions-and-memory.md) for how to query and use it day-to-day.
+`~/.config/playbook/data/memory.db` is the single navigable store of the full memory graph: nodes are facts and referenced code locations, edges are `links:` between facts plus `anchors:` from facts to code. It covers all scopes: global, org, and project. The `rebuild-memory-graph` PostToolUse hook rebuilds it automatically after any fact file is saved. The database is derived from the fact files and safe to delete. See [Decisions and Memory](../guides/03-decisions-and-memory.md) for how to query and use it day-to-day.
 
 ## See also
 
