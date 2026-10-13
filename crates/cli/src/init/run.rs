@@ -154,10 +154,13 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     // One stamp for every backup of this run, so a second boundary cannot split them.
     let epoch = crate::common::time::now_epoch_secs();
 
+    // The skills live in the `playbook` plugin, not in the root the seed files
+    // come from, so the skill-edit tracking looks for them separately.
+    let skills_root = crate::init::self_root::skills_root(self_root, &paths.claude_home);
     let ctx = migrate::Ctx {
         home: paths.home.clone(),
         claude_home: paths.claude_home.clone(),
-        self_root: paths.self_root.clone(),
+        self_root: skills_root.clone(),
         repo: paths.repo.clone(),
     };
     // Remember that the plugin is installed, so a later removal can be noticed.
@@ -168,7 +171,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     if step_confirmed(&system_prompt_step) {
         migrate::record_system_prompt(&paths.home);
     }
-    if let Some(root) = self_root {
+    if let Some(root) = &skills_root {
         migrate::record_skills(&paths.home, root);
     }
 

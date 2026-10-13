@@ -2,7 +2,7 @@
   "name": "playbook",
   "displayName": "Playbook",
   "version": "0.25.0",
-  "description": "A pragmatic Claude Code toolkit: opinionated skills, slash commands, subagents, and safety and state hooks for planning, review, memory, and guarded editing.",
+  "description": "A pragmatic Claude Code toolkit: opinionated skills, slash commands and subagents for planning, review, memory, and guarded editing. Pairs with the playbook-hooks plugin, which carries the hooks and installs the playbook binary these commands call.",
   "author": {
     "name": "Igor Santos",
     "email": "2278164+igorjs@users.noreply.github.com"
@@ -14,7 +14,6 @@
     "skills",
     "commands",
     "agents",
-    "hooks",
     "code-review",
     "planning",
     "memory",

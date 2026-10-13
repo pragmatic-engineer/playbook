@@ -1,0 +1,19 @@
+{
+  "name": "playbook-hooks",
+  "displayName": "Playbook Hooks",
+  "version": "0.25.0",
+  "description": "The playbook binary's hooks for Claude Code: session context, worktree creation and removal, and the installer shim. Pairs with the playbook plugin.",
+  "author": {
+    "name": "Igor Santos",
+    "email": "2278164+igorjs@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/pragmatic-engineer/playbook",
+  "repository": "https://github.com/pragmatic-engineer/playbook",
+  "license": "Apache-2.0",
+  "keywords": [
+    "hooks",
+    "worktrees",
+    "safety",
+    "memory"
+  ]
+}

@@ -73,7 +73,7 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Tag, Cargo.toml and plugin.json must agree
+      - name: Tag, Cargo.toml and both plugin manifests must agree
         id: check
         run: |
           set -euo pipefail
@@ -81,13 +81,15 @@ jobs:
           tag_version="${tag#v}"
           cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
           plugin_version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' .claude-plugin/plugin.json | head -1)"
+          hooks_version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' .claude-plugin/hooks.plugin.json | head -1)"
 
           echo "tag:         $tag (version $tag_version)"
           echo "Cargo.toml:  $cargo_version"
           echo "plugin.json: $plugin_version"
+          echo "hooks.plugin.json: $hooks_version"
 
-          if [ "$tag_version" != "$cargo_version" ] || [ "$tag_version" != "$plugin_version" ]; then
-            echo "::error::version mismatch: tag=$tag_version Cargo.toml=$cargo_version plugin.json=$plugin_version. All three must agree before publishing." >&2
+          if [ "$tag_version" != "$cargo_version" ] || [ "$tag_version" != "$plugin_version" ] || [ "$tag_version" != "$hooks_version" ]; then
+            echo "::error::version mismatch: tag=$tag_version Cargo.toml=$cargo_version plugin.json=$plugin_version hooks.plugin.json=$hooks_version. All four must agree before publishing." >&2
             exit 1
           fi
           echo "version=$tag_version" >> "$GITHUB_OUTPUT"
@@ -265,11 +267,12 @@ jobs:
             dist/playbook-*
             dist/SHA256SUMS
 
-  # Builds the trimmed plugin archive the marketplace points at (the `archive`
-  # source, Claude Code 2.1.224+), so a marketplace install holds plugin files
-  # only, not src/, tests/ or docs/. The file list is the explicit allowlist
-  # .claude-plugin/archive-files.txt, which tests/plugin_archive.rs guards.
-  # The name playbook-plugin-<version>.zip cannot match the checksums job's
+  # Builds the two trimmed plugin archives the marketplace points at (the
+  # `archive` source, Claude Code 2.1.224+). `playbook` holds the skills,
+  # commands and agents and has no hooks. `playbook-hooks` holds the hooks, the
+  # bin/ shim and the installer. Each file list is an allowlist that
+  # tests/plugin_archive.rs guards, and both zips are cut by the same script
+  # that test runs. Neither name matches the checksums job's
   # `playbook-<version>-*` pattern, so that job still sees exactly five files.
   plugin-archive:
     needs: verify-version
@@ -299,45 +302,49 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build the archive from the allowlist
+      - name: Build both archives from their allowlists
         id: build
         env:
           VERSION: ${{ needs.verify-version.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p dist
-          asset="dist/playbook-plugin-${VERSION}.zip"
-          # git archive only sees tracked files and stamps every entry with the
-          # commit time, so the same commit always yields the same bytes.
-          specs="$(sed -e 's/\r$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' .claude-plugin/archive-files.txt | grep -v '^\(#\|$\)' || true)"
-          if [ -z "$specs" ]; then
-            echo "::error::.claude-plugin/archive-files.txt lists no paths." >&2
+          build() {
+            name="$1"
+            list="$2"
+            asset="dist/${name}-${VERSION}.zip"
+            .github/scripts/build-plugin-archive.sh HEAD "$list" "$asset"
+            unzip -Z1 "$asset" | grep -v '/$' | sort > "dist/${name}.files.txt"
+            count="$(wc -l < "dist/${name}.files.txt" | tr -d ' ')"
+            if [ "$count" -eq 0 ]; then
+              echo "::error::the $name archive is empty. Check $list." >&2
+              exit 1
+            fi
+            if grep -qE '^(src|tests|crates|docs|\.github)/|^Cargo\.|\.test\.sh$' "dist/${name}.files.txt"; then
+              echo "::error::the $name archive holds source, tests, docs, CI or Cargo files:" >&2
+              grep -E '^(src|tests|crates|docs|\.github)/|^Cargo\.|\.test\.sh$' "dist/${name}.files.txt" >&2
+              exit 1
+            fi
+            if ! grep -qx '.claude-plugin/plugin.json' "dist/${name}.files.txt"; then
+              echo "::error::the $name archive has no .claude-plugin/plugin.json." >&2
+              exit 1
+            fi
+            if grep -q 'hooks.plugin.json' "dist/${name}.files.txt"; then
+              echo "::error::the $name archive still holds hooks.plugin.json; it must be renamed to plugin.json." >&2
+              exit 1
+            fi
+            echo "$name files: $count, sha256: $(shasum -a 256 "$asset" | cut -d' ' -f1)"
+          }
+          build playbook-plugin .claude-plugin/archive-files.txt
+          build playbook-hooks-plugin .claude-plugin/archive-hooks-files.txt
+          # The skills plugin must stay free of hooks and of the binary.
+          if grep -qE '(^|/)hooks\.json$|^bin/|^install\.sh$' dist/playbook-plugin.files.txt; then
+            echo "::error::the playbook archive holds hooks or the binary shim:" >&2
+            grep -E '(^|/)hooks\.json$|^bin/|^install\.sh$' dist/playbook-plugin.files.txt >&2
             exit 1
           fi
-          printf '%s\n' "$specs" | tr '\n' '\0' \
-            | xargs -0 git archive --format=zip --output="$asset" HEAD --
-          unzip -Z1 "$asset" | grep -v '/$' | sort > dist/files.txt
-          count="$(wc -l < dist/files.txt | tr -d ' ')"
-          if [ "$count" -eq 0 ]; then
-            echo "::error::the plugin archive is empty. Check .claude-plugin/archive-files.txt." >&2
-            exit 1
-          fi
-          if grep -qE '^(src|tests|crates|docs|\.github)/|^Cargo\.|\.test\.sh$' dist/files.txt; then
-            echo "::error::the plugin archive holds source, tests, docs, CI or Cargo files:" >&2
-            grep -E '^(src|tests|crates|docs|\.github)/|^Cargo\.|\.test\.sh$' dist/files.txt >&2
-            exit 1
-          fi
-          if ! grep -qx '.claude-plugin/plugin.json' dist/files.txt; then
-            echo "::error::the plugin archive has no .claude-plugin/plugin.json." >&2
-            exit 1
-          fi
-          sha="$(shasum -a 256 "$asset" | cut -d' ' -f1)"
-          echo "files: $count"
-          echo "bytes: $(wc -c < "$asset" | tr -d ' ')"
-          echo "sha256: $sha"
-          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
 
-      - name: Upload the archive to the release
+      - name: Upload the archives to the release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.verify-version.outputs.version }}
@@ -347,12 +354,16 @@ jobs:
             echo "::error::release ${GITHUB_REF_NAME} does not exist. Create it first with: gh release create ${GITHUB_REF_NAME} --target main" >&2
             exit 1
           }
-          gh release upload "${GITHUB_REF_NAME}" "dist/playbook-plugin-${VERSION}.zip" --clobber
+          gh release upload "${GITHUB_REF_NAME}" \
+            "dist/playbook-plugin-${VERSION}.zip" \
+            "dist/playbook-hooks-plugin-${VERSION}.zip" --clobber
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/playbook-plugin-*.zip
+          subject-path: |
+            dist/playbook-plugin-*.zip
+            dist/playbook-hooks-plugin-*.zip
 
   # Fast path to Homebrew: tell the tap a release exists so the formula is
   # bumped within minutes. The tap also checks daily, so this is only a speed
