@@ -4,7 +4,7 @@
 //! Session identity and per-session state paths. Ports `session_id`
 //! (the retired shell original), `session_dir` (:86), and `abspath` (:110).
 
-use crate::common::payload::Payload;
+use crate::payload::Payload;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -38,7 +38,7 @@ pub fn home_error(home: &Path) -> Option<&'static str> {
 /// Return the per-session state directory under the playbook runtime root,
 /// creating it on demand with mode 0700. Empty when no session id is present.
 pub fn session_dir(payload: &Payload) -> String {
-    session_dir_in(&crate::common::paths::runtime_root(), payload)
+    session_dir_in(&crate::paths::runtime_root(), payload)
 }
 
 /// Core of `session_dir`, taking the runtime root explicitly so tests can
@@ -111,7 +111,7 @@ mod tests {
     }
 
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use crate::test_support::scratch_dir;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 

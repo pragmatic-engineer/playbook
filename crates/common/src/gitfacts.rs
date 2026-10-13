@@ -417,7 +417,7 @@ fn plain_file(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::{lock_cwd, scratch_dir};
+    use crate::test_support::{lock_cwd, scratch_dir};
     use std::process::Command;
 
     fn git(dir: &Path, args: &[&str]) -> String {

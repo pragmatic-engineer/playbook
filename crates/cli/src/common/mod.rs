@@ -5,27 +5,20 @@
 //! Every hook in `src/hooks` uses this module instead of re-deriving these
 //! primitives, so there is exactly one implementation to keep correct.
 
-pub mod atomic;
 pub mod attribution;
 pub mod cli_opts;
 pub mod config_hash;
 pub mod counter;
 pub mod emit;
-pub mod git;
-pub mod gitfacts;
 pub mod headless;
 pub mod mode;
 pub mod par;
 pub mod paths;
-pub mod payload;
+pub use playbook_common::{atomic, git, gitfacts, payload, proc, repo, session, sqlite};
 pub mod plugin_state;
-pub mod proc;
 pub mod prose;
 pub mod re;
-pub mod repo;
-pub mod session;
 pub mod shell;
-pub mod sqlite;
 pub mod stdin;
 pub mod time;
 
@@ -44,28 +37,5 @@ pub use proc::{run_with_input, run_with_timeout};
 pub use repo::repo_slug;
 pub use session::{abspath, home_dir, home_error, session_dir, session_id};
 
-/// Test-only filesystem scratch space, shared by every `common` submodule's
-/// tests that need a real directory on disk. Not created by this call;
-/// callers create what they need inside it. Unique per call so parallel test
-/// threads never collide on the same path.
 #[cfg(test)]
-pub(crate) mod test_support {
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    /// Serialises tests that change the process-global cwd.
-    pub(crate) fn lock_cwd() -> std::sync::MutexGuard<'static, ()> {
-        CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    pub(crate) fn scratch_dir(tag: &str) -> PathBuf {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!(
-            "playbook-test-{}-{tag}-{n}",
-            crate::testing::run_id()
-        ))
-    }
-}
+pub(crate) use playbook_common::test_support;

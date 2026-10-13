@@ -5,7 +5,7 @@
 //! is bounded by a timeout, so a wedged repo never hangs a hook, and every
 //! failure (git missing, timeout, non-zero exit) reads as `None` or `false`.
 
-use crate::common::proc::run_with_timeout;
+use crate::proc::run_with_timeout;
 use std::path::Path;
 use std::process::{Command, Output};
 use std::time::Duration;

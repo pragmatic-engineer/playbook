@@ -50,7 +50,7 @@ use std::time::Duration;
 /// than [`STALE_LOCK_AGE`], so no caller waits out its retry budget and then
 /// runs unguarded forever. Use [`with_dir_lock_aged`] when the critical
 /// section can legitimately run longer than that.
-pub(crate) fn with_dir_lock<T>(
+pub fn with_dir_lock<T>(
     lock_path: &Path,
     retries: u32,
     delay: Duration,
@@ -61,7 +61,7 @@ pub(crate) fn with_dir_lock<T>(
 
 /// [`with_dir_lock`] with a caller-chosen `stale_age`, for a critical section
 /// (copying a store) that outlives [`STALE_LOCK_AGE`].
-pub(crate) fn with_dir_lock_aged<T>(
+pub fn with_dir_lock_aged<T>(
     lock_path: &Path,
     retries: u32,
     delay: Duration,
@@ -75,16 +75,16 @@ pub(crate) fn with_dir_lock_aged<T>(
 /// Stale age for a lock held across a long copy (a store or a checkout). Every
 /// taker of such a lock must use the same age, or the shortest one steals a
 /// live holder's lock.
-pub(crate) const LONG_LOCK_STALE_AGE: Duration = Duration::from_secs(300);
+pub const LONG_LOCK_STALE_AGE: Duration = Duration::from_secs(300);
 
 /// A lock directory older than this belongs to a holder that died inside its
 /// critical section, which takes well under a second.
-pub(crate) const STALE_LOCK_AGE: Duration = Duration::from_secs(10);
+pub const STALE_LOCK_AGE: Duration = Duration::from_secs(10);
 
 /// Removes the lock directory at `lock_path` when it is older than `max_age`.
 /// A killed holder leaves its directory behind, and every later caller would
 /// otherwise wait out the retry budget and then run unguarded forever.
-pub(crate) fn remove_stale_lock_dir(lock_path: &Path, max_age: Duration) {
+pub fn remove_stale_lock_dir(lock_path: &Path, max_age: Duration) {
     let age = fs::metadata(lock_path)
         .and_then(|meta| meta.modified())
         .ok()
@@ -116,7 +116,7 @@ pub(crate) fn remove_stale_lock_dir(lock_path: &Path, max_age: Duration) {
 
 /// Creates `dir` (and any missing parents) and makes the leaf owner-only on
 /// unix, for state that holds account or repo names.
-pub(crate) fn ensure_private_dir(dir: &Path) -> std::io::Result<()> {
+pub fn ensure_private_dir(dir: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dir)?;
     #[cfg(unix)]
     {
@@ -128,13 +128,13 @@ pub(crate) fn ensure_private_dir(dir: &Path) -> std::io::Result<()> {
 
 /// Try to `mkdir` `lock_path`, retrying up to `retries` times with `delay`
 /// between attempts. Returns whether this call created the directory.
-pub(crate) fn acquire_dir_lock(lock_path: &Path, retries: u32, delay: Duration) -> bool {
+pub fn acquire_dir_lock(lock_path: &Path, retries: u32, delay: Duration) -> bool {
     acquire_dir_lock_aged(lock_path, retries, delay, STALE_LOCK_AGE)
 }
 
 /// [`acquire_dir_lock`] that treats a lock older than `stale_age` as left by a
 /// dead holder, for a critical section longer than [`STALE_LOCK_AGE`].
-pub(crate) fn acquire_dir_lock_aged(
+pub fn acquire_dir_lock_aged(
     lock_path: &Path,
     retries: u32,
     delay: Duration,
@@ -268,7 +268,7 @@ pub fn make_db_file_private(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use crate::test_support::scratch_dir;
 
     #[cfg(unix)]
     #[test]

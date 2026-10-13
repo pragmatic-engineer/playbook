@@ -7,7 +7,7 @@
 //! derive it identically or facts silently fail to resolve (see
 //! the retired shell original).
 
-use crate::common::git;
+use crate::git;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -38,7 +38,7 @@ fn spawn_slug() -> String {
     // through to `git`, which also applies URL rewrites.
     if let Some(url) = std::env::current_dir()
         .ok()
-        .and_then(|cwd| crate::common::gitfacts::origin_url(&cwd))
+        .and_then(|cwd| crate::gitfacts::origin_url(&cwd))
     {
         return normalize_remote_url(&url);
     }
@@ -155,7 +155,7 @@ mod tests {
     }
 
     fn repo_with_origin(tag: &str, url: &str) -> PathBuf {
-        let dir = crate::common::test_support::scratch_dir(tag);
+        let dir = crate::test_support::scratch_dir(tag);
         std::fs::create_dir_all(&dir).expect("create repo dir");
         git_in(&dir, &["init", "-q", "-b", "main"]);
         git_in(&dir, &["remote", "add", "origin", url]);
@@ -165,7 +165,7 @@ mod tests {
     #[test]
     fn two_calls_in_one_directory_read_the_disk_and_spawn_nothing() {
         // Arrange
-        let _guard = crate::common::test_support::lock_cwd();
+        let _guard = crate::test_support::lock_cwd();
         let repo = repo_with_origin("slug-memo", "git@github.com:acme/widgets.git");
         let previous = std::env::current_dir().expect("read cwd");
         std::env::set_current_dir(&repo).expect("cd into repo");
@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn a_rewrite_rule_falls_back_to_one_git_spawn_that_applies_it() {
         // Arrange
-        let _guard = crate::common::test_support::lock_cwd();
+        let _guard = crate::test_support::lock_cwd();
         let repo = repo_with_origin("slug-instead", "gh:acme/widgets");
         git_in(
             &repo,
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn a_different_directory_gets_its_own_slug_not_the_cached_one() {
         // Arrange
-        let _guard = crate::common::test_support::lock_cwd();
+        let _guard = crate::test_support::lock_cwd();
         let one = repo_with_origin("slug-one", "git@github.com:acme/one.git");
         let two = repo_with_origin("slug-two", "git@github.com:acme/two.git");
         let previous = std::env::current_dir().expect("read cwd");
