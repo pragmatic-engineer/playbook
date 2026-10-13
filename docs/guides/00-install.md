@@ -43,7 +43,7 @@ Pass `--yes` to accept every default. Flags go after `-s --` when piping:
 | `--skip-plugin`, `--no-setup` | Skip the plugin. Guards, settings and shell wiring still run. |
 | `--aliases` | Add the `playbook` cd wrapper to your rc file without asking. |
 | `--claude-override` | Make a plain `claude` load the playbook system prompt (needs the launcher line from `--aliases`). |
-| `--short-name` | Add `pb` as a short name for `playbook`, only when `pb` is free (needs the launcher line from `--aliases`). |
+| `--short-name` (`playbook init`) | Define a `pb` shell function for `playbook`, only when `pb` is free. install.sh also links `pb` to `playbook` when the name is free. |
 | `--system-prompt` | Install the system prompt without asking (implies `--aliases`). |
 | `--binary-only` | Binary, `PATH`, guards and settings only. No plugin, launcher, system prompt or prompts. |
 | `--ref <ref>` | Source ref, same as `PLAYBOOK_REF`. |

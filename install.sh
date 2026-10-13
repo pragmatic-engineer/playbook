@@ -433,8 +433,8 @@ warn_if_shadowed() {
 }
 
 # Links `pb` to `playbook` as a short alias. Never replaces a different `pb`:
-# a file we did not make, or another `pb` earlier on PATH, is left alone and
-# one line says so. A `pb` link we made before is refreshed.
+# a file we did not make, or any `pb` already on PATH, is left alone and one
+# line says so. An existing `pb` link to `playbook` is kept as it is.
 install_pb_alias() {
     local link="$PLAYBOOK_BIN_DIR/pb" other
     if [ -L "$link" ] && [ "$(readlink "$link")" = "playbook" ]; then

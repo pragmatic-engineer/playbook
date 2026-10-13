@@ -9,7 +9,7 @@ effort: low
 # Setup
 
 Wire the always-on safety guards and seed or merge settings.json. Optionally
-install the shell launchers (`playbook cc` and `playbook ccd`) and the custom system prompt. Each step
+add the `playbook` shell wrapper (it follows `playbook cc` into a new worktree) and install the custom system prompt. Each step
 is idempotent; re-running /playbook:setup is safe and only changes what is missing.
 
 ## Step 0: Read the run mode
@@ -51,7 +51,7 @@ with these two questions:
   - label: "Yes (Recommended)"
     description: "Adds a playbook shell function so playbook cc can leave you in a new worktree. Bash and zsh both supported."
   - label: "No"
-    description: "Skip the launchers; run claude directly. Skills, commands, and hooks still work."
+    description: "Skip the wrapper. `playbook cc` still works, it just will not cd into a new worktree. Skills, commands, and hooks still work."
 
 **Question 2**
 

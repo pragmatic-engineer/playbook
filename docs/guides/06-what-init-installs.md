@@ -115,7 +115,7 @@ Init adds a block that starts with `# playbook binary` to your shell startup fil
 
 ### Launcher shortcuts and shell-init
 
-`--aliases` adds one line to your `.zshrc` or `.bashrc`: `eval "$(playbook shell-init)"`. That command prints one small `playbook` shell function and nothing else. For `playbook cc` and `playbook ccd` it calls `playbook cc launch`, which starts Claude Code with the playbook system prompt, the model chain and your effort ceiling. `playbook ccd` also skips permission prompts, so use it only where you would use `--dangerously-skip-permissions`. The functions use a temp file to move your shell into a worktree after a session. Older installs that sourced a script from the rc file get that line replaced with the `eval` line. See [the launcher](../internals/01-launcher-and-hooks.md).
+`--aliases` adds one line to your `.zshrc` or `.bashrc`: `eval "$(playbook shell-init)"`. That command prints one small `playbook` shell function, a few helpers it uses, and `ccc` and `ccd` stubs that tell you to run `playbook cc` and `playbook ccd`. For `playbook cc` and `playbook ccd` it calls `playbook cc launch`, which starts Claude Code with the playbook system prompt, the model chain and your effort ceiling. `playbook ccd` also skips permission prompts, so use it only where you would use `--dangerously-skip-permissions`. The functions use a temp file to move your shell into a worktree after a session. Older installs that sourced a script from the rc file get that line replaced with the `eval` line. See [the launcher](../internals/01-launcher-and-hooks.md).
 
 ### System prompt
 
