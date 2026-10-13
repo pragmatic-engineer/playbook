@@ -14,7 +14,7 @@ use playbook::{
     GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand, MemoryCommand,
     ModeArg, ModeCommand, PlanCommand, PrCommand, ReviewCommand, ReviewWorktreeCommand,
     SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand, SettingsCommand,
-    SkillCommand, ToolsCommand, WorktreeCommand,
+    ToolsCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -131,7 +131,7 @@ fn main() {
             let claude_home = home.join(".claude");
             let cwd = std::env::current_dir().unwrap_or_default();
             let claude = effort::claude_cap(&claude_home, &cwd);
-            let root = init::self_root::resolve(
+            let root = init::self_root::skills_root_from_env(
                 std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
                 &claude_home,
             );
@@ -290,7 +290,7 @@ fn main() {
                 let claude_home = home.join(".claude");
                 let cwd = std::env::current_dir().unwrap_or_default();
                 let claude = effort::claude_cap(&claude_home, &cwd);
-                let root = init::self_root::resolve(
+                let root = init::self_root::skills_root_from_env(
                     std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
                     &claude_home,
                 );
@@ -1053,7 +1053,13 @@ fn main() {
                     commit,
                 } => {
                     let root = plugin_root
-                        .or_else(|| std::env::var_os("CLAUDE_PLUGIN_ROOT").map(Into::into))
+                        .or_else(|| {
+                            let home = common::home_dir();
+                            init::self_root::skills_root_from_env(
+                                std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
+                                &home.join(".claude"),
+                            )
+                        })
                         .unwrap_or_default();
                     let dir = std::env::temp_dir()
                         .join(format!("create-pr-step0-{}", std::process::id()));
@@ -1408,27 +1414,6 @@ fn main() {
             };
             println!("{}", planning::glossary_add(&root, &entry).display());
         }
-        Command::Skill {
-            sub:
-                SkillCommand::Ref {
-                    skill,
-                    name,
-                    plugin_root,
-                },
-        } => {
-            let root = plugin_root
-                .or_else(|| std::env::var_os("CLAUDE_PLUGIN_ROOT").map(std::path::PathBuf::from))
-                .unwrap_or_default();
-            let path = planning::skill_ref(&root, &skill, name.as_deref());
-            if !path.is_file() {
-                eprintln!(
-                    "playbook: skill reference not found at {}; set CLAUDE_PLUGIN_ROOT or pass --plugin-root",
-                    path.display()
-                );
-                std::process::exit(1);
-            }
-            println!("{}", path.display());
-        }
         Command::Tools {
             sub: ToolsCommand::Map { json, check },
         } => {
@@ -1701,14 +1686,6 @@ fn main() {
                     }
                 }
             }
-            ReviewCommand::Ref { lens, plugin_root } => {
-                let root = plugin_root
-                    .or_else(|| {
-                        std::env::var_os("CLAUDE_PLUGIN_ROOT").map(std::path::PathBuf::from)
-                    })
-                    .unwrap_or_default();
-                println!("{}", review::lens::ref_path(&root, &lens).display());
-            }
             ReviewCommand::TriageMerge {
                 lenses,
                 tiers,
@@ -1939,7 +1916,7 @@ fn main() {
             DoctorCommand::PendingMigrations => {
                 let home = common::home_dir();
                 let claude_home = home.join(".claude");
-                let self_root = init::self_root::resolve(
+                let self_root = init::self_root::skills_root_from_env(
                     std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
                     &claude_home,
                 );

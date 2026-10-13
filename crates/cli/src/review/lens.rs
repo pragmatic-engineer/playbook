@@ -2,40 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Lens helpers shared by `/playbook:deep-review` and `/playbook:implement`
-//! Step 9. They hold the two things those commands used to spell out in
-//! prose: which grounding-review reference file a lens reads, and how a
+//! Step 9. They hold what those commands used to spell out in prose: how a
 //! review-triage tier map is completed so a missing or malformed answer
 //! always fails open to `full-lens`.
 
 use serde_json::{json, Map, Value};
-use std::path::{Path, PathBuf};
-
-/// The grounding-review reference file for a lens, or `None` when no file
-/// matches (the caller then reads the full `SKILL.md`). Covers deep-review's
-/// lenses and implement Step 9's five; the names do not collide.
-///
-/// `types` reads `reliability.md`, not `correctness.md`: its "cast with `as`
-/// instead of a runtime validator" bullet is the one that matches the lens.
-/// `principles` and `behaviour-drift` have no file because no reference covers
-/// speculative code or behaviour changes, so they read the whole skill.
-pub fn reference_for(lens: &str) -> Option<&'static str> {
-    match lens {
-        "security" => Some("security"),
-        "perf" | "data" | "big-o" => Some("performance"),
-        "logic" | "correctness" => Some("correctness"),
-        "types" | "integration" => Some("reliability"),
-        "architecture" | "migration" | "adr" => Some("architecture"),
-        "complexity" | "dedup" => Some("maintainability"),
-        "scope" => Some("scope-control"),
-        _ => None,
-    }
-}
-
-/// The absolute path a `cheap-checker` should read for `lens`: the mapped
-/// reference file when it exists, else the skill's `SKILL.md`.
-pub fn ref_path(plugin_root: &Path, lens: &str) -> PathBuf {
-    crate::planning::skill_ref(plugin_root, "grounding-review", reference_for(lens))
-}
 
 const TIERS: [&str; 3] = ["skip", "cheap-check", "full-lens"];
 
@@ -142,43 +113,6 @@ mod tests {
 
     fn lenses(names: &[&str]) -> Vec<String> {
         names.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn every_documented_lens_maps_as_the_old_tables_did() {
-        let cases = [
-            ("security", Some("security")),
-            ("perf", Some("performance")),
-            ("data", Some("performance")),
-            ("big-o", Some("performance")),
-            ("logic", Some("correctness")),
-            ("correctness", Some("correctness")),
-            ("types", Some("reliability")),
-            ("integration", Some("reliability")),
-            ("architecture", Some("architecture")),
-            ("migration", Some("architecture")),
-            ("adr", Some("architecture")),
-            ("complexity", Some("maintainability")),
-            ("dedup", Some("maintainability")),
-            ("scope", Some("scope-control")),
-            ("test", None),
-            ("tests", None),
-            ("docs", None),
-            ("principles", None),
-            ("behaviour-drift", None),
-            ("unknown", None),
-        ];
-        for (lens, want) in cases {
-            assert_eq!(reference_for(lens), want, "{lens}");
-        }
-    }
-
-    #[test]
-    fn a_lens_with_no_file_resolves_to_the_whole_skill() {
-        let root = Path::new("/plugin");
-        assert!(ref_path(root, "docs").ends_with("grounding-review/SKILL.md"));
-        // The file is absent under /plugin, so even a mapped lens falls back.
-        assert!(ref_path(root, "security").ends_with("grounding-review/SKILL.md"));
     }
 
     #[test]

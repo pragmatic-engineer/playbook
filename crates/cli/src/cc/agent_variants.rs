@@ -56,7 +56,7 @@ pub fn session(
     if mode == Mode::Off {
         return None;
     }
-    let root = crate::init::self_root::resolve(plugin_root_env, claude_home)?;
+    let root = crate::init::self_root::skills_root_from_env(plugin_root_env, claude_home)?;
     let claude = effort::claude_cap(claude_home, cwd);
     let ceiling_of = |name: &str| {
         component::resolve_with(

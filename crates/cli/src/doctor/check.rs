@@ -614,7 +614,7 @@ fn migration_rows(env: &Env) -> Vec<Row> {
     let ctx = crate::init::migrate::Ctx {
         home: env.home.clone(),
         claude_home: env.claude_home.clone(),
-        self_root: crate::init::self_root::resolve(
+        self_root: crate::init::self_root::skills_root_from_env(
             env.plugin_root.as_ref().and_then(|p| p.to_str()),
             &env.claude_home,
         ),
