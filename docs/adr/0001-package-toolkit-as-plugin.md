@@ -1,6 +1,6 @@
 # ADR 0001: Package the toolkit as an opt-in Claude Code plugin
 
-- **Status:** Accepted, amended by ADR 0002, ADR 0006 and ADR 0007
+- **Status:** Accepted, amended by ADR 0002, ADR 0006, ADR 0007 and ADR 0030
 - **Date created:** 2026-07-23
 - **Date modified:** 2026-07-23
 
