@@ -55,7 +55,7 @@ pub fn scoped_db(kind: &str) -> Option<PathBuf> {
     let slug = repo_slug();
     let (owner, repo) = slug.split_once('/')?;
     let id = worktree_id();
-    if id.is_empty() || ![owner, repo].iter().all(|p| safe_segment(p)) {
+    if id.is_empty() || !slug.split('/').all(safe_segment) {
         return None;
     }
     Some(scoped_db_in(&data_dir(), kind, owner, repo, &id))
@@ -79,6 +79,9 @@ mod tests {
             assert!(!safe_segment(bad), "{bad:?}");
         }
         assert!(safe_segment("pragmatic-engineer"));
+        // A subgroup slug is several safe segments.
+        assert!("group/sub/repo".split('/').all(safe_segment));
+        assert!(!"group/../repo".split('/').all(safe_segment));
     }
 
     #[test]

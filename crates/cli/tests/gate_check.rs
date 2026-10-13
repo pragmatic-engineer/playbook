@@ -83,11 +83,11 @@ impl Fixture {
         self.home
             .join(".config")
             .join("playbook")
-            .join("repos")
+            .join("data")
+            .join("gate")
             .join("test-owner")
             .join("test-repo")
-            .join(worktree_id(&self.repo))
-            .join("state.db")
+            .join(format!("{}.db", worktree_id(&self.repo)))
     }
 
     /// Seed a phase row directly through the library, bypassing `gate
