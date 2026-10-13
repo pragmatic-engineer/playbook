@@ -338,20 +338,18 @@ fn archives_are_under_the_size_budget() {
 
 #[test]
 fn allowlist_entries_all_exist_and_are_tracked() {
-    for kind in [Kind::Hooks] {
-        // Act
-        let dead: Vec<String> = pathspecs(kind)
-            .into_iter()
-            .filter(|s| tracked(&[s.as_str()]).is_empty())
-            .collect();
+    // Act
+    let dead: Vec<String> = pathspecs(Kind::Hooks)
+        .into_iter()
+        .filter(|s| tracked(&[s.as_str()]).is_empty())
+        .collect();
 
-        // Assert
-        assert!(
-            dead.is_empty(),
-            "{} entries that match no tracked file: {dead:?}",
-            kind.list()
-        );
-    }
+    // Assert
+    assert!(
+        dead.is_empty(),
+        "{} entries that match no tracked file: {dead:?}",
+        Kind::Hooks.list()
+    );
 }
 
 #[test]
@@ -472,40 +470,35 @@ fn non_test_part(text: &str) -> &str {
 
 #[test]
 fn every_plugin_root_read_in_src_is_in_an_archive() {
-    // Arrange: `self_root.join("a").join("b")` and `plugin_root.join("a/b")`.
+    // Arrange: `self_root.join("a").join("b")`.
     let part = Regex::new(r#"\.join\("([^"]+)"\)"#).expect("regex");
+    let chain = Regex::new(r#"\bself_root\s*\.join\("([^"]+)"\)((?:\s*\.join\("[^"]+"\))*)"#)
+        .expect("regex");
     // `self_root` reads the seed files, which only the hooks plugin ships (or
     // the binary embeds).
-    let mut found: BTreeSet<(&str, String)> = BTreeSet::new();
-    for root_name in ["self_root"] {
-        let chain = Regex::new(&format!(
-            r#"\b{root_name}\s*\.join\("([^"]+)"\)((?:\s*\.join\("[^"]+"\))*)"#
-        ))
-        .expect("regex");
-        for f in tracked(&["crates/cli/src"]) {
-            if !f.ends_with(".rs") {
-                continue;
+    let mut found: BTreeSet<String> = BTreeSet::new();
+    for f in tracked(&["crates/cli/src"]) {
+        if !f.ends_with(".rs") {
+            continue;
+        }
+        let text = fs::read_to_string(repo().join(&f)).unwrap_or_default();
+        for cap in chain.captures_iter(non_test_part(&text)) {
+            let mut path = cap[1].to_string();
+            for p in part.captures_iter(&cap[2]) {
+                path = format!("{path}/{}", &p[1]);
             }
-            let text = fs::read_to_string(repo().join(&f)).unwrap_or_default();
-            for cap in chain.captures_iter(non_test_part(&text)) {
-                let mut path = cap[1].to_string();
-                for p in part.captures_iter(&cap[2]) {
-                    path = format!("{path}/{}", &p[1]);
-                }
-                found.insert((root_name, path));
-            }
+            found.insert(path);
         }
     }
 
     // Act: a path counts when it is a shipped file or a directory holding one.
     // `.git` is only probed, never read.
-    let missing: Vec<&(&str, String)> = found
+    let shipped = hooks();
+    let missing: Vec<&String> = found
         .iter()
-        .filter(|(_, p)| p.as_str() != ".git")
-        .filter(|(root, p)| {
-            let _ = root;
-            let shipped = hooks();
-            !shipped.files.contains(p)
+        .filter(|p| p.as_str() != ".git")
+        .filter(|p| {
+            !shipped.files.contains(*p)
                 && !shipped
                     .files
                     .iter()
@@ -516,12 +509,12 @@ fn every_plugin_root_read_in_src_is_in_an_archive() {
     // Assert: the scan itself must still see the reads it exists to guard.
     for known in ["settings.shared.json", "prompts/SYSTEM_PROMPT.md"] {
         assert!(
-            found.contains(&("self_root", known.to_string())),
+            found.contains(known),
             "the scan no longer finds the read of {known}: {found:?}"
         );
     }
     assert!(
         missing.is_empty(),
-        "src/ reads these through a plugin root but its archive lacks them, add them to an allowlist in .claude-plugin/: {missing:?}"
+        "src/ reads these through the plugin root but its archive lacks them, add them to the allowlist in .claude-plugin/: {missing:?}"
     );
 }
