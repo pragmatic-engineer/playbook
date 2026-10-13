@@ -9,6 +9,7 @@ pub mod attribution;
 pub mod cli_opts;
 pub mod config_hash;
 pub mod counter;
+pub mod data;
 pub mod emit;
 pub mod headless;
 pub mod mode;

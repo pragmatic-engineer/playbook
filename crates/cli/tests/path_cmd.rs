@@ -180,3 +180,24 @@ fn rejects_designs_as_an_unknown_kind() {
         stderr_of(&out)
     );
 }
+
+#[test]
+fn data_kind_prints_the_data_folder_without_an_origin_remote() {
+    // Arrange
+    let f = Fixture::new_without_origin("data-kind");
+
+    // Act
+    let out = f.run("data");
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    assert_eq!(
+        stdout_of(&out).trim(),
+        f.home
+            .join(".config")
+            .join("playbook")
+            .join("data")
+            .display()
+            .to_string()
+    );
+}

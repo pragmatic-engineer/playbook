@@ -1670,6 +1670,17 @@ fn main() {
             }
         }
         Command::Path { kind, create } => {
+            if matches!(kind, playbook::PathKind::Data) {
+                let dir = common::data::data_dir();
+                if create {
+                    if let Err(err) = common::data::ensure_data_dir() {
+                        eprintln!("playbook path: could not create {}: {err}", dir.display());
+                        std::process::exit(1);
+                    }
+                }
+                println!("{}", dir.display());
+                return;
+            }
             match common::repo_scoped_dir(common::RepoScope::Worktree) {
                 Some(base) => {
                     if let Some(repo_root) = playbook::manifest::check::toplevel() {

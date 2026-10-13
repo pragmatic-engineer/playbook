@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 12] = [
+const PROBES: [Probe; 13] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -106,6 +106,7 @@ const PROBES: [Probe; 12] = [
     config_rows,
     worktree_rows,
     migration_rows,
+    data_rows,
     plugin_only_rows,
     atlassian_rows,
 ];
@@ -529,6 +530,36 @@ fn worktree_rows(env: &Env) -> Vec<Row> {
             format!("worktree check failed: {err}"),
         )],
     }
+}
+
+/// One row for the data folder: path, files, sizes and any `*.migrated`
+/// leftovers from a finished migration.
+fn data_rows(env: &Env) -> Vec<Row> {
+    let dir = crate::common::data::data_dir_from(&env.home);
+    let files = crate::common::data::list_files(&dir);
+    if files.is_empty() {
+        return vec![Row::new(
+            "-",
+            Level::Info,
+            format!("data folder {} is empty or missing", dir.display()),
+        )];
+    }
+    let total: u64 = files.iter().map(|f| f.bytes).sum();
+    let left: Vec<String> = files
+        .iter()
+        .filter(|f| crate::common::data::is_migrated_leftover(&f.path))
+        .map(|f| f.path.display().to_string())
+        .collect();
+    let mut msg = format!(
+        "data folder {}: {} files, {} KB",
+        dir.display(),
+        files.len(),
+        total / 1024
+    );
+    if !left.is_empty() {
+        msg.push_str(&format!(", migrated leftovers: {}", left.join(", ")));
+    }
+    vec![Row::new("-", Level::Info, msg)]
 }
 
 fn migration_rows(env: &Env) -> Vec<Row> {
