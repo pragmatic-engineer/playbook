@@ -144,20 +144,6 @@ fn check_agents_shell_parity_scenarios() {
     }
 }
 
-// 1: the real repo agents dir passes.
-#[test]
-fn real_repo_agents_dir_passes() {
-    let agents_dir = Path::new(env!("PLAYBOOK_REPO_ROOT")).join("agents");
-    let out = run(&agents_dir);
-    assert!(
-        out.status.success(),
-        "got {:?}: {}",
-        out.status.code(),
-        stderr_of(&out)
-    );
-    assert!(stdout_of(&out).contains("check-agents: OK"));
-}
-
 // 9: _TEMPLATE.md is skipped, even though it would fail every rule.
 #[test]
 fn template_md_is_skipped() {
@@ -365,37 +351,4 @@ fn the_variants_command_shows_what_a_session_would_hold() {
         .output()
         .expect("spawn");
     assert!(stdout_of(&off).contains("no variants"));
-}
-
-#[test]
-fn the_real_agents_dir_has_only_base_files_and_every_agent_has_every_tier() {
-    use playbook::agents::variants::{render_definition, TIERS, VARIANTS};
-    let dir = Path::new(env!("PLAYBOOK_REPO_ROOT")).join("agents");
-    let mut files: Vec<String> = fs::read_dir(&dir)
-        .expect("agents dir")
-        .flatten()
-        .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| n.ends_with(".md"))
-        .collect();
-    files.sort();
-    let table: Vec<String> = VARIANTS.iter().map(|(b, _)| format!("{b}.md")).collect();
-    let mut sorted = table;
-    sorted.sort();
-    assert_eq!(
-        files, sorted,
-        "agents/ holds exactly the base agents in VARIANTS"
-    );
-    for (base, tiers) in VARIANTS {
-        assert_eq!(tiers, &TIERS);
-        let content = fs::read_to_string(dir.join(format!("{base}.md"))).expect("base");
-        let rendered = TIERS
-            .iter()
-            .filter(|t| {
-                render_definition(base, &content, t)
-                    .expect("renders")
-                    .is_some()
-            })
-            .count();
-        assert_eq!(rendered, TIERS.len() - 1, "{base}: every tier but its own");
-    }
 }

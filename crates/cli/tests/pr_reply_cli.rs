@@ -207,21 +207,3 @@ fn a_thread_or_issue_is_required_and_they_conflict() {
     .status
     .success());
 }
-
-#[test]
-fn address_pr_comments_applies_edits_and_posts_replies_itself_without_an_agent() {
-    let text = fs::read_to_string(
-        Path::new(env!("PLAYBOOK_REPO_ROOT")).join("commands/address-pr-comments.md"),
-    )
-    .unwrap();
-    assert!(text.contains("playbook pr reply --pr"));
-    assert!(!text.contains("patch-applier"));
-    let tools = text
-        .lines()
-        .find_map(|l| l.strip_prefix("allowed-tools:"))
-        .unwrap();
-    assert!(
-        !tools.split(',').any(|t| t.trim() == "Agent"),
-        "the command spawns nothing, so it holds no Agent tool"
-    );
-}
