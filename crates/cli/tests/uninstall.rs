@@ -527,3 +527,27 @@ fn init_telemetry_then_uninstall_removes_exactly_the_variables_init_wrote() {
     assert!(!after.contains("CLAUDE_CODE_ENABLE_TELEMETRY"), "{after}");
     assert!(after.contains("MY_OWN"), "{after}");
 }
+
+#[cfg(unix)]
+#[test]
+fn remove_binary_removes_our_pb_link_and_leaves_any_other_pb() {
+    // Arrange
+    let ours = Sandbox::new("pb-ours");
+    fs::write(ours.bin_dir.join("playbook"), "bin").unwrap();
+    std::os::unix::fs::symlink("playbook", ours.bin_dir.join("pb")).unwrap();
+    let theirs = Sandbox::new("pb-theirs");
+    fs::write(theirs.bin_dir.join("playbook"), "bin").unwrap();
+    fs::write(theirs.bin_dir.join("pb"), "someone else's tool").unwrap();
+
+    // Act
+    let a = ours.run(&["uninstall", "--yes", "--remove-binary"]);
+    let b = theirs.run(&["uninstall", "--yes", "--remove-binary"]);
+
+    // Assert
+    assert!(a.status.success() && b.status.success());
+    assert!(fs::symlink_metadata(ours.bin_dir.join("pb")).is_err());
+    assert_eq!(
+        fs::read_to_string(theirs.bin_dir.join("pb")).unwrap(),
+        "someone else's tool"
+    );
+}

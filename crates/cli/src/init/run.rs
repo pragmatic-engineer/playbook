@@ -285,7 +285,11 @@ pub(crate) fn short_name_step(home: &Path, requested: bool, path: &std::ffi::OsS
     if !requested {
         return StepReport::skipped("short-name", "not requested; pass --short-name to opt in");
     }
-    if let Some(found) = super::shell_init::command_on_path("pb", path) {
+    let ours = |p: &Path| {
+        let me = super::shell_init::command_on_path("playbook", path);
+        matches!((fs::canonicalize(p), me.and_then(|m| fs::canonicalize(m).ok())), (Ok(a), Some(b)) if a == b)
+    };
+    if let Some(found) = super::shell_init::command_on_path("pb", path).filter(|f| !ours(f)) {
         return StepReport::skipped(
             "short-name",
             format!(

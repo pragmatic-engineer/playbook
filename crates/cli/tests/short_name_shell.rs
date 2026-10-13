@@ -149,3 +149,20 @@ fn golden_text_of_the_short_name_snippet() {
     assert!(tail.contains("_PLAYBOOK_PB_DEF='pb() { playbook \"$@\"; }'"));
     assert!(tail.ends_with("unset _PLAYBOOK_PB_DEF\n"));
 }
+
+#[test]
+fn our_own_pb_link_to_playbook_does_not_block_the_pb_function() {
+    for shell in shells() {
+        // Arrange
+        let sb = Sandbox::new();
+        std::os::unix::fs::symlink("playbook", sb.root.join("bin/pb")).unwrap();
+
+        // Act
+        let log = sb.run(shell, "", "pb doctor");
+
+        // Assert
+        assert_eq!(log, vec!["PLAYBOOK doctor".to_string()], "{shell}");
+        let type_of = sb.run(shell, "", "type pb > \"$LOG\" 2>&1");
+        assert!(type_of[0].contains("function"), "{shell}: {type_of:?}");
+    }
+}

@@ -253,6 +253,12 @@ fn binary_step(opts: &Options, verb: &str, report: &mut Report) {
     if binary.is_file() {
         remove_file(&binary, verb, opts.dry_run, report);
     }
+    // The `pb` alias is ours only when it is a link straight to `playbook`;
+    // any other `pb` is somebody else's and stays.
+    let alias = opts.bin_dir.join("pb");
+    if fs::read_link(&alias).is_ok_and(|t| t == Path::new("playbook")) {
+        remove_file(&alias, verb, opts.dry_run, report);
+    }
     let Ok(entries) = fs::read_dir(&opts.bin_dir) else {
         return;
     };
