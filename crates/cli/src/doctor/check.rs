@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 13] = [
+const PROBES: [Probe; 14] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -109,6 +109,7 @@ const PROBES: [Probe; 13] = [
     data_rows,
     plugin_only_rows,
     atlassian_rows,
+    old_launcher_rows,
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -428,6 +429,18 @@ fn atlassian_rows(env: &Env) -> Vec<Row> {
     };
     let twg = twg_status(&env.path_var);
     vec![acli_row, Row::new("-", Level::Info, twg_line(&twg))]
+}
+
+/// Reports the old `ccc` and `ccd` launchers, which `playbook cc` and
+/// `playbook ccd` replace. Informational: it never changes a file.
+fn old_launcher_rows(env: &Env) -> Vec<Row> {
+    super::launchers::find(&env.home, &env.path_var)
+        .iter()
+        .map(|f| {
+            Row::new("-", Level::Info, super::launchers::describe(f))
+                .hint("`pb cc` and `pb ccd` work too when `pb` is installed")
+        })
+        .collect()
 }
 
 fn layer7(env: &Env) -> Vec<Row> {

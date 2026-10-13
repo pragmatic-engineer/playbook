@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook shell-init`: the shell functions `ccc` and `ccd`, printed for the
-//! rc file to `eval`. The launcher is `ccc`, not `cc`, because `cc` is the C
-//! compiler on most systems.
+//! `playbook shell-init`: a `playbook` shell function, printed for the rc file
+//! to `eval`. It only adds the `cd` into a worktree after `playbook cc` and
+//! `playbook ccd`; every other call runs the binary untouched. There is no
+//! `cc`, `ccc` or `ccd` function, so nothing shadows the C compiler.
 //!
 //! With `launcher.claudeOverride` on, the output also defines a `claude`
 //! function that calls the launcher only for a plain interactive session
@@ -12,7 +13,7 @@
 //! With `launcher.shortName` on, the output also defines `pb` as a short name
 //! for `playbook`, but only when nothing else uses that name (see `short_name.sh`).
 //!
-//! The launcher itself is `playbook cc launch`. A child process cannot change
+//! The launcher itself is `playbook cc` (`playbook cc launch`). A child process cannot change
 //! its parent's directory, so the function hands the binary a temp file in
 //! `$PLAYBOOK_CC_CD_FILE`; when the launcher enters a worktree it writes the
 //! path there, and the function `cd`s to it after the session. One line, no
@@ -113,8 +114,20 @@ _playbook_cc() {{
   fi
   return $_pb_rc
 }}
-ccc() {{ _playbook_cc -- "$@"; }}
-ccd() {{ _playbook_cc --skip-permissions -- "$@"; }}
+playbook() {{
+  case "${{1-}}" in
+    ccd) shift; _playbook_cc --skip-permissions -- "$@" ;;
+    cc)
+      shift
+      case "${{1-}}" in
+        launch) shift; _playbook_cc -- "$@" ;;
+        worktree|new|housekeep|help|-h|--help) command playbook cc "$@" ;;
+        *) _playbook_cc -- "$@" ;;
+      esac
+      ;;
+    *) command playbook "$@" ;;
+  esac
+}}
 "#
     )
 }
@@ -124,13 +137,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn both_shells_define_ccc_and_ccd_and_never_cc() {
+    fn both_shells_define_a_playbook_wrapper_and_no_old_launchers() {
         for kind in [ShellKind::Bash, ShellKind::Zsh] {
+            // Arrange and act
             let text = script(kind);
-            assert!(text.contains("\nccc() {"));
-            assert!(text.contains("\nccd() {"));
+
+            // Assert
+            assert!(text.contains("\nplaybook() {"));
+            assert!(!text.contains("\nccc() {"));
+            assert!(!text.contains("\nccd() {"));
             assert!(!text.contains("\ncc() {"));
-            assert!(!text.contains("pb()") && !text.contains("\npbd() {"));
+            assert!(!text.contains("pb()"));
         }
+    }
+
+    #[test]
+    fn wrapper_routes_ccd_with_skip_permissions() {
+        // Arrange and act
+        let text = script(ShellKind::Zsh);
+
+        // Assert
+        assert!(text.contains("ccd) shift; _playbook_cc --skip-permissions -- \"$@\""));
     }
 }

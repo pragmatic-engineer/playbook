@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Puts the directory holding the `playbook` binary on PATH for every shell
-//! start, so hooks and the `ccc` launcher find it whichever route installed it
+//! start, so hooks and the `playbook cc` launcher find it whichever route installed it
 //! (installer, Homebrew, or the Claude Code marketplace plus the first run of
 //! `playbook init`).
 //!

@@ -92,8 +92,9 @@ pub use usage::command::UsageCommand;
 #[derive(Parser, Debug)]
 #[command(
     name = "playbook",
+    bin_name = "playbook",
     version,
-    after_help = "Run `playbook <command> --help` for details on one command.\n\
+    after_help = "Run `playbook <command> --help` for details on one command. `pb` is a short alias for `playbook`.\n\
 Check your setup with `/playbook:doctor` inside Claude Code (`playbook doctor --help` lists its helpers).\n\
 Docs: https://github.com/pragmatic-engineer/playbook"
 )]
@@ -258,7 +259,7 @@ pub enum Command {
     ///
     /// Safe to run again: it only touches what is missing or out of date.
     /// In a terminal it asks about each optional part (hooks, status line,
-    /// PATH, the `ccc` launcher, the system prompt) unless you answer with a flag.
+    /// PATH, the `playbook cc` launcher, the system prompt) unless you answer with a flag.
     /// Each part has `--x` and `--no-x`. Without a terminal, or with `--yes`,
     /// unanswered parts use their defaults: hooks, the status line and PATH on, the
     /// launcher and system prompt off.
@@ -305,11 +306,12 @@ pub enum Command {
         #[arg(long)]
         remove_binary: bool,
     },
-    /// Print the shell functions `ccc` and `ccd`
+    /// Print the shell function that lets `playbook cc` and `playbook ccd` change directory
     ///
-    /// `ccc` starts a session (named so it does not shadow the C compiler,
-    /// `cc`), and `ccd` does the same with permission prompts skipped. Load
-    /// them from your rc file with `eval "$(playbook shell-init)"`.
+    /// A program cannot change its parent shell's directory, so this wraps
+    /// `playbook` to `cd` into a worktree that `playbook cc worktree` style
+    /// launches create. Load it from your rc file with
+    /// `eval "$(playbook shell-init)"`.
     ShellInit {
         /// Target shell (default: the one named by `$SHELL`)
         #[arg(long, value_parser = ["bash", "zsh"])]
@@ -436,7 +438,7 @@ pub enum Command {
     /// `xhigh` or `max` set playbook's own ceiling. The key is
     /// `maxEffortLevel`, named like Claude Code's. The effective ceiling is the lower of this and Claude Code's own
     /// `maxEffortLevel`, which playbook only reads and never changes. Sessions
-    /// started with `ccc` or `ccd` get the ceiling. With no level, shows both
+    /// started with `playbook cc` or `playbook ccd` get the ceiling. With no level, shows both
     /// values and the one that wins.
     ///
     /// Example: `playbook effort xhigh`
@@ -475,22 +477,28 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Launcher helpers behind the `ccc` shell shortcut
+    /// Start a Claude Code session, or manage sessions and worktrees
     ///
-    /// Sessions are started by the `ccc` shell shortcut (install it with
-    /// `playbook init --aliases`). These subcommands do its housekeeping:
-    /// list sessions, prune state, clear caches, and create worktrees.
+    /// With no subcommand, starts a session with the playbook prompt and model
+    /// chain (this replaces the old `playbook cc` launcher). Any other arguments go to
+    /// claude as they are. The subcommands do the housekeeping: list sessions,
+    /// prune state, clear caches, and create worktrees. `pb` is an alias for
+    /// `playbook`, so `pb cc` works too.
     ///
-    /// Example: `playbook cc worktree my-branch`
+    /// Example: `playbook cc --model sonnet`
+    #[command(args_conflicts_with_subcommands = true)]
     Cc {
         #[command(subcommand)]
         sub: Option<CcCommand>,
+        /// Arguments passed through to claude
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Start a session with permission prompts skipped
     ///
-    /// The same launcher as `playbook cc launch`, with
-    /// `--dangerously-skip-permissions` added. The `ccd` shortcut calls it.
-    /// Run it directly to skip the shell shortcuts.
+    /// The same launcher as `playbook cc`, with
+    /// `--dangerously-skip-permissions` added. It replaces the old `ccd`
+    /// shortcut. `pb ccd` works too.
     ///
     /// Example: `playbook ccd fresh`
     Ccd {
@@ -796,7 +804,7 @@ pub enum Command {
     /// Mark a directory as trusted in Claude Code
     ///
     /// Writes to `~/.claude.json` so Claude Code's first-launch trust prompt
-    /// does not block `ccc` or `ccd`. Always exits 0, even on failure, so a
+    /// does not block `playbook cc` or `playbook ccd`. Always exits 0, even on failure, so a
     /// script can call it without checking.
     Trust {
         /// Absolute path of the directory to trust
@@ -1057,7 +1065,7 @@ pub enum AgentsCommand {
     },
     /// Show the effort-tier variants a session would get
     ///
-    /// Variants such as `reviewer-low` are not files. `ccc` and `ccd` render
+    /// Variants such as `reviewer-low` are not files. `playbook cc` and `playbook ccd` render
     /// them from the base agents and pass them to Claude Code with `--agents`.
     /// This prints the same set, so you can see what a session would hold and
     /// its size. Use `--json` for the full definitions.
@@ -1962,13 +1970,13 @@ pub enum HooksCommand {
 /// `playbook cc` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum CcCommand {
-    /// Mode of the `ccc` shortcut: clean up and resume (no action by itself)
+    /// Mode of the `playbook cc` launcher: clean up and resume (no action by itself)
     Clean,
-    /// Mode of the `ccc` shortcut: start a fresh session (no action by itself)
+    /// Mode of the `playbook cc` launcher: start a fresh session (no action by itself)
     Fresh,
-    /// Mode of the `ccc` shortcut: resume a session as it was (no action by itself)
+    /// Mode of the `playbook cc` launcher: resume a session as it was (no action by itself)
     ///
-    /// The `ccc` shortcut handles these modes. Running this command directly
+    /// The launcher handles these modes. Running this command directly
     /// does nothing and exits 0.
     Raw {
         /// Session id to resume (default: the most recent)
@@ -1982,16 +1990,16 @@ pub enum CcCommand {
     /// Clear caches that would freeze old settings into a session
     #[command(name = "bust-cache")]
     BustCache,
-    /// Run the launcher the `ccc` and `ccd` shell functions call
+    /// Run the launcher (`playbook cc` and `playbook ccd` call it)
     Launch {
-        /// Pass `--dangerously-skip-permissions` to claude (the `ccd` form)
+        /// Pass `--dangerously-skip-permissions` to claude (the `playbook ccd` form)
         #[arg(long)]
         skip_permissions: bool,
         /// Subcommand and arguments, passed through to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Background half of `ccc worktree`, spawned by the launcher
+    /// Background half of the worktree launch, spawned by the launcher
     #[command(hide = true)]
     Housekeep {
         #[arg(long)]

@@ -236,7 +236,7 @@ fn clean_resumes_a_clone_and_leaves_the_original() {
         "{call}"
     );
     assert!(!call.contains(SID));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("ccc clean: cloned"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("cc clean: cloned"));
     assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
 }
 
@@ -412,7 +412,10 @@ fn shell_init_defines_working_functions_in_every_available_shell() {
                 target.display()
             ),
         );
-        let script = format!("{}\nccd one two; echo \"rc=$?\"; pwd -P", shell_init(shell));
+        let script = format!(
+            "{}\nplaybook ccd one two; echo \"rc=$?\"; pwd -P",
+            shell_init(shell)
+        );
 
         let out = Command::new(shell)
             .arg("-c")

@@ -78,7 +78,7 @@ fn main() {
     match cli.command {
         Command::Hook { name } => run_hook(name),
         // Launcher subcommands land in a later Work Unit; stub for now.
-        Command::Cc { sub } => match sub {
+        Command::Cc { sub, args } => match sub {
             Some(CcCommand::Prune) => cc::retention::prune(&cc::logical_cwd()),
             Some(CcCommand::BustCache) => cc::bust_cache::bust(),
             Some(CcCommand::List) => {
@@ -114,7 +114,7 @@ fn main() {
                 args.extend(sid);
                 std::process::exit(cc::launch::run(false, &args));
             }
-            None => std::process::exit(cc::launch::run(false, &[])),
+            None => std::process::exit(cc::launch::run(false, &args)),
         },
         Command::Ccd { args } => std::process::exit(cc::launch::run(true, &args)),
         Command::Effort { sub: Some(sub), .. } => {
