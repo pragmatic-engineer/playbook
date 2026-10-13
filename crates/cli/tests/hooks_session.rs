@@ -342,12 +342,11 @@ fn session_init_native_fallback_malformed_graph_emits_no_memory_block() {
     );
 }
 
-/// Distinct from the invalid-JSON scenario above: the file parses fine but
-/// has no `nodes` key at all, so the fallback's `.get("nodes")` lookup
-/// itself returns `None` rather than `serde_json::from_str` failing.
+/// Distinct from the unreadable-database scenario above: the graph is stored
+/// but holds no nodes.
 #[test]
-fn session_init_native_fallback_no_nodes_array_emits_no_memory_block() {
-    // Arrange: valid JSON with no `nodes` key.
+fn session_init_native_fallback_empty_graph_emits_no_memory_block() {
+    // Arrange: a stored graph with no nodes.
     let work = scratch_dir("native-fallback-no-nodes");
     let repo_slug = "acme/widget";
     let repo_dir = work.join("repo");

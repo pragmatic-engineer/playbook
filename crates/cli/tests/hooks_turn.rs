@@ -888,8 +888,8 @@ mod memory_capture {
             "marker should be cleared once the migrated write is detected"
         );
         assert!(
-            graph_db_for(&memory_dir_for(&home)).is_file(),
-            "the graph should now live in the data folder"
+            memory_dir_for(&home).join("memory.graph.json").is_file(),
+            "the graph should now live at the new location"
         );
         assert!(
             !home.join(".claude").join("memory").exists(),
@@ -936,9 +936,8 @@ mod memory_capture {
             "the Stop hook should now repair a stray new-root graph.json, not just SessionStart"
         );
         assert_eq!(
-            fs::read_to_string(mem_dir.join("memory.graph.json.migrated")).unwrap(),
-            "{}",
-            "the repaired graph file is folded into memory.db and kept"
+            fs::read_to_string(mem_dir.join("memory.graph.json")).unwrap(),
+            "{}"
         );
     }
 
@@ -1332,6 +1331,31 @@ mod memory_capture {
                 .trim(),
             "1"
         );
+    }
+
+    #[test]
+    fn a_legacy_graph_file_older_than_the_marker_retains_marker_and_reblocks() {
+        // Arrange: an older playbook's graph file from before this crossing.
+        // Asking when it changed must not fold it into the database, which
+        // would make it look like a fact was just saved.
+        let home = scratch_home("mc-stale-legacy-graph");
+        let dir = session_dir_for(&home, SID);
+        fs::create_dir_all(&dir).unwrap();
+        let mem_dir = memory_dir_for(&home);
+        fs::create_dir_all(&mem_dir).unwrap();
+        let legacy = mem_dir.join("memory.graph.json");
+        let marker = dir.join("capture-due");
+        write_with_older_then_newer_mtime(&legacy, &marker);
+
+        // Act
+        let (stdout, code) = run_hook("memory-capture", &home, &payload());
+
+        // Assert
+        assert_eq!(code, 0);
+        let value: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
+        assert_eq!(value["decision"], "block");
+        assert!(marker.exists());
     }
 
     #[test]

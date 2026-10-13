@@ -1,16 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! PostToolUse hook: rebuild `~/.config/playbook/memory/memory.graph.json` after any
-//! fact-file save. Ports the retired shell original. No-op unless the
+//! PostToolUse hook: rebuild the memory graph in `~/.config/playbook/data/memory.db`
+//! after any fact-file save. Ports the retired shell original. No-op unless the
 //! edited file is inside `~/.config/playbook/memory`. Walks the whole memory tree
-//! (not incremental), writes atomically (temp file plus rename), and emits
-//! nothing on stdout.
-//!
-//! `memory-anchors.rs` (the sole reader of the file this hook writes) must
-//! change in lockstep with this one; they ship in the same commit on purpose.
+//! (not incremental), replaces the graph in one transaction, and emits nothing
+//! on stdout. The fact files stay the source of truth. Older versions wrote
+//! `memory.graph.json`; [`migrate_json_graph`] folds such a file in.
 
-use crate::common::atomic::{with_dir_lock_aged, LONG_LOCK_STALE_AGE};
+use crate::common::atomic::{acquire_dir_lock_aged, with_dir_lock_aged, LONG_LOCK_STALE_AGE};
 use crate::common::home_dir;
 use crate::common::paths::memory_dir;
 use crate::common::payload::Payload;
@@ -22,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Everything that can stop a rebuild before it produces a new
-/// `memory.graph.json`, one variant's worth of detail flattened into a single
+/// graph, one variant's worth of detail flattened into a single
 /// string. Mirrors `settings::gen::GenError`'s struct-plus-`Display` shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RebuildError(pub String);
@@ -1117,33 +1115,54 @@ fn store_db(mem_dir: &Path) -> Result<PathBuf, RebuildError> {
 /// Puts a `memory.graph.json` left by an older playbook into `memory.db`.
 ///
 /// The file is derived from the fact files, so the database is rebuilt from
-/// them rather than copied, and the file is then renamed to
-/// `memory.graph.json.migrated` (never deleted). An older binary that keeps
+/// them rather than copied (skipped when the database is already at least as
+/// new as the file), and the file is then renamed to
+/// `memory.graph.json.migrated`. A copy left by an earlier move is replaced,
+/// because both are regenerable from the facts. An older binary that keeps
 /// writing the file brings it back, and the next call folds it in again.
-/// Returns `false` when the file is still there because the rebuild failed,
-/// so a caller can read the file instead.
+/// Returns `false` when the file is still there, because the rebuild lock was
+/// busy or the rebuild failed, so a caller can read the file instead.
 pub fn migrate_json_graph(mem_dir: &Path) -> bool {
     let json = mem_dir.join("memory.graph.json");
     if !json.is_file() {
         return true;
     }
-    // Under the rebuild lock, so two readers do not set the file aside
-    // twice, and the one that waits finds it already gone.
-    with_rebuild_lock(mem_dir, || {
+    // Under the rebuild lock, so two readers do not move the file twice, and
+    // never without it: the memory move holds this lock across a copy.
+    let lock_path = mem_dir.join("memory.graph.json.lock");
+    if !acquire_dir_lock_aged(
+        &lock_path,
+        50,
+        Duration::from_millis(10),
+        LONG_LOCK_STALE_AGE,
+    ) {
+        return false;
+    }
+    let moved = (|| {
         if !json.is_file() {
             return true;
         }
-        if rebuild_locked(mem_dir).is_err() {
+        let touched = |p: Option<PathBuf>| {
+            p.and_then(|p| playbook_data::memory::touched_at(&p).ok().flatten())
+        };
+        let db_time = touched(store_db(mem_dir).ok());
+        let json_time = fs::metadata(&json).and_then(|m| m.modified()).ok();
+        let current = matches!((db_time, json_time), (Some(d), Some(j)) if d >= j);
+        if !current && rebuild_locked(mem_dir).is_err() {
             return false;
         }
-        let moved = playbook_data::migrate::set_aside(&json).is_ok();
-        if moved {
-            playbook_data::migrate::notice(
-                "playbook: moved the memory graph into data/memory.db; the old memory.graph.json was renamed to memory.graph.json.migrated",
-            );
+        let mut kept = json.clone().into_os_string();
+        kept.push(".migrated");
+        if fs::rename(&json, kept).is_err() {
+            return false;
         }
-        moved
-    })
+        playbook_data::migrate::notice(
+            "playbook: moved the memory graph into data/memory.db; the old memory.graph.json was renamed to memory.graph.json.migrated",
+        );
+        true
+    })();
+    let _ = fs::remove_dir(&lock_path);
+    moved
 }
 
 /// The memory graph as the JSON document readers parse
@@ -1158,13 +1177,20 @@ pub fn graph_text(mem_dir: &Path) -> Option<String> {
     export_json(mem_dir.parent()?).ok().flatten()
 }
 
-/// When the graph in `memory.db` last changed, from the file time of the
-/// database. `Ok(None)` when there is no graph, and
-/// an error when the database cannot be inspected.
+/// When the graph last changed: the later of `memory.db` and a
+/// `memory.graph.json` an older playbook wrote. It never folds the file in,
+/// so asking does not count as a write. `Ok(None)` when there is no graph,
+/// and an error when either cannot be inspected.
 pub fn graph_touched_at(mem_dir: &Path) -> io::Result<Option<std::time::SystemTime>> {
-    migrate_json_graph(mem_dir);
     let db = store_db(mem_dir).map_err(|e| io::Error::other(e.0))?;
-    playbook_data::memory::touched_at(&db)
+    let db_time = playbook_data::memory::touched_at(&db)?;
+    let json_time = match fs::metadata(mem_dir.join("memory.graph.json")).and_then(|m| m.modified())
+    {
+        Ok(t) => Some(t),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    Ok(db_time.into_iter().chain(json_time).max())
 }
 
 /// Writes the graph in `json` (the document shape above) into `memory.db`

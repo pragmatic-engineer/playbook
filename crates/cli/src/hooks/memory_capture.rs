@@ -107,8 +107,8 @@ pub fn run(payload: &Payload) {
         Err(_) => return release(&marker, &attempts_path),
     };
 
-    // Must run before the mtime comparison below: it's what puts
-    // memory.graph.json at the location that comparison reads.
+    // Must run before the time comparison below: it's what puts the
+    // memory folder (and any graph file in it) where that comparison reads.
     let home = home_dir();
     let migration = crate::init::memory_migrate::migrate_memory(&home, &home.join(".claude"));
     if migration.status == StepStatus::Failed {
