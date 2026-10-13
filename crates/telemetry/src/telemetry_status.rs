@@ -53,7 +53,7 @@ impl Mode {
             Mode::OnCollectorDown => Some("start it with `playbook usage collect`; `cc` starts it for you"),
             Mode::OffByConfig => Some("run `playbook config set usage.telemetry auto`"),
             Mode::OffDisabled => Some(
-                "to turn it on, remove CLAUDE_CODE_ENABLE_TELEMETRY from the env block of your Claude Code settings, then run `playbook init --telemetry`",
+                "to turn it on, run `playbook init --telemetry` (it replaces an off switch that stands alone in ~/.claude/settings.json), or remove CLAUDE_CODE_ENABLE_TELEMETRY from the env block of your Claude Code settings yourself",
             ),
             Mode::OffNotConfigured => Some("run `playbook init --telemetry`, or start sessions with `cc`"),
         }

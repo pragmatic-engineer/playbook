@@ -32,8 +32,19 @@ impl Sandbox {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_playbook"))
-            .args(args)
+        self.run_with_env(args, &[])
+    }
+
+    /// Like `run`, with extra environment. Telemetry variables from the
+    /// machine running the tests are always removed first.
+    fn run_with_env(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+        cmd.env_remove("CLAUDE_CODE_ENABLE_TELEMETRY")
+            .env_remove("OTEL_LOGS_EXPORTER")
+            .env_remove("OTEL_METRICS_EXPORTER")
+            .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
+            .envs(env.iter().copied());
+        cmd.args(args)
             .env("HOME", &self.home)
             .env("SHELL", "/bin/zsh")
             .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
@@ -246,4 +257,49 @@ fn a_second_run_prints_no_undo_summary() {
     let text = stdout(&sb.run(&["init", "--yes"]));
 
     assert!(!text.contains("What changed and how to undo it:"), "{text}");
+}
+
+#[test]
+fn init_says_telemetry_is_already_on_and_does_not_ask() {
+    let sandbox = Sandbox::new("telemetry-on");
+
+    let out = sandbox.run_with_env(
+        &["init", "--dry-run"],
+        &[("CLAUDE_CODE_ENABLE_TELEMETRY", "1")],
+    );
+
+    assert!(
+        stdout(&out).contains("telemetry: already enabled"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn init_stays_quiet_about_telemetry_when_it_is_not_set() {
+    let sandbox = Sandbox::new("telemetry-unset");
+
+    let out = sandbox.run(&["init", "--dry-run"]);
+
+    assert!(
+        !stdout(&out).contains("telemetry: already"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn an_explicit_telemetry_flag_still_wins_over_the_already_on_line() {
+    let sandbox = Sandbox::new("telemetry-flag");
+
+    let out = sandbox.run_with_env(
+        &["init", "--dry-run", "--no-telemetry"],
+        &[("CLAUDE_CODE_ENABLE_TELEMETRY", "1")],
+    );
+
+    assert!(
+        !stdout(&out).contains("telemetry: already"),
+        "{}",
+        stdout(&out)
+    );
 }

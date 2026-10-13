@@ -394,17 +394,22 @@ fn main() {
                 .map(|(value, _)| value.as_bool().unwrap_or(false))
                 .unwrap_or(false);
             let asking = init::choices::stdio_is_interactive() && !flags.yes && !flags.dry_run;
-            // Telemetry already on: say so in one line and do not ask. An
-            // explicit --telemetry or --no-telemetry flag is still honoured.
-            let telemetry_on = !flags.telemetry
-                && !flags.no_telemetry
-                && init::telemetry::state(
-                    &common::home_dir(),
-                    &std::env::current_dir().unwrap_or_else(|_| common::home_dir()),
-                    true,
-                ) == init::telemetry::State::Enabled;
-            if telemetry_on {
-                println!("{}", init::telemetry::ENABLED_LINE);
+            // Telemetry already on, set up by you, or off for a reason init will
+            // not override: say so in one line and do not ask. An explicit
+            // --telemetry or --no-telemetry flag is still honoured.
+            let home_dir = common::home_dir();
+            let skip_telemetry_question = if flags.telemetry || flags.no_telemetry {
+                None
+            } else {
+                init::telemetry::skip_line(
+                    &home_dir,
+                    &home_dir.join(".claude"),
+                    &std::env::current_dir().unwrap_or_else(|_| home_dir.clone()),
+                    crate::cc::telemetry::process_configured(),
+                )
+            };
+            if let Some(line) = skip_telemetry_question {
+                println!("{line}");
             }
             if let Some(notice) = init::choices::defaults_notice(
                 std::io::stdin().is_terminal(),
@@ -417,10 +422,8 @@ fn main() {
             let mut guided: Vec<(&'static str, bool)> = Vec::new();
             if asking {
                 let security_on = flags.security || (!flags.no_security && security_config);
-                let mut items = init::wizard::items(&flags, security_on);
-                if telemetry_on {
-                    items.retain(|i| i.choice.id != "telemetry");
-                }
+                let items =
+                    init::wizard::items_for(&flags, security_on, skip_telemetry_question.is_some());
                 print!("{}", init::wizard::welcome(&caps));
                 let stdin = std::io::stdin();
                 let mut input = stdin.lock();
