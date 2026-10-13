@@ -117,13 +117,9 @@ pub fn run(payload: &Payload) {
 
     let mem_dir = memory_dir();
     let _ = fs::create_dir_all(&mem_dir);
-    let graph_path = mem_dir.join("memory.graph.json");
-    let write_detected = match fs::metadata(&graph_path) {
-        Ok(meta) => match meta.modified() {
-            Ok(graph_mtime) => graph_mtime > marker_mtime,
-            Err(_) => return release(&marker, &attempts_path),
-        },
-        Err(e) if e.kind() == io::ErrorKind::NotFound => false,
+    let write_detected = match crate::hooks::rebuild_memory_graph::graph_touched_at(&mem_dir) {
+        Ok(Some(graph_mtime)) => graph_mtime > marker_mtime,
+        Ok(None) => false,
         Err(_) => return release(&marker, &attempts_path),
     };
     if write_detected {
@@ -254,7 +250,7 @@ fn freshest_handoff_mtime() -> Option<SystemTime> {
 /// Scans facts touched since `memory.signals.json`'s cursor for
 /// consolidation candidates, once the store is at or above `CONSOLIDATION_NODE_THRESHOLD`.
 fn consolidation_mention(mem_dir: &Path) -> Option<String> {
-    let content = fs::read_to_string(mem_dir.join("memory.graph.json")).ok()?;
+    let content = crate::hooks::rebuild_memory_graph::graph_text(mem_dir)?;
     let graph: Value = serde_json::from_str(&content).ok()?;
     let nodes = graph.get("nodes").and_then(Value::as_array)?;
     if nodes.len() < CONSOLIDATION_NODE_THRESHOLD {

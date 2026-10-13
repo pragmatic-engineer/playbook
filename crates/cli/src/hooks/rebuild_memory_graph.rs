@@ -10,11 +10,11 @@
 //! `memory-anchors.rs` (the sole reader of the file this hook writes) must
 //! change in lockstep with this one; they ship in the same commit on purpose.
 
-use crate::common::atomic::{acquire_dir_lock_aged, LONG_LOCK_STALE_AGE};
+use crate::common::atomic::{with_dir_lock_aged, LONG_LOCK_STALE_AGE};
 use crate::common::home_dir;
 use crate::common::paths::memory_dir;
 use crate::common::payload::Payload;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -485,14 +485,16 @@ fn node_id(rel: &str, scope: Scope, project: Option<&str>) -> String {
 
 // `version` and `pinned` (below) have no reader yet; both are written for a
 // future consumer described in ADR-0011.
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 struct Graph {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
     version: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 struct Node {
     id: String,
     file: String,
@@ -509,7 +511,8 @@ struct Node {
     pinned: Option<bool>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 struct Edge {
     from: String,
     to: String,
@@ -785,27 +788,33 @@ pub fn rebuild_now() -> Result<(), RebuildError> {
 /// open after the retry budget, same as every other lock in this codebase:
 /// a hook must never hang waiting on contention.
 fn rebuild() -> Result<(), RebuildError> {
-    let mem_dir = memory_dir();
+    rebuild_in(&memory_dir())
+}
+
+/// [`rebuild`] for the store at `mem_dir`.
+fn rebuild_in(mem_dir: &Path) -> Result<(), RebuildError> {
+    with_rebuild_lock(mem_dir, || rebuild_locked(mem_dir))
+}
+
+/// Runs `f` holding the rebuild lock, or without it after the retry budget.
+fn with_rebuild_lock<T>(mem_dir: &Path, f: impl FnOnce() -> T) -> T {
     let lock_path = mem_dir.join("memory.graph.json.lock");
     // The memory migration holds this same lock across a copy, so a rebuild
     // must use its stale age or it would steal a live migration's lock.
-    let acquired = acquire_dir_lock_aged(
+    let (acquired, result) = with_dir_lock_aged(
         &lock_path,
         50,
         Duration::from_millis(10),
         LONG_LOCK_STALE_AGE,
+        f,
     );
-    let result = rebuild_locked(&mem_dir, acquired);
     if acquired {
         let _ = fs::remove_dir(&lock_path);
     }
     result
 }
 
-/// Without the lock the JSON still gets written (as before), but `memory.db`
-/// is left alone: two unlocked writers could leave it at a different graph
-/// than the file, and the next locked rebuild fixes both.
-fn rebuild_locked(mem_dir: &Path, locked: bool) -> Result<(), RebuildError> {
+fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
     let mut nodes: Vec<Node> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
     let mut seen_code: HashSet<String> = HashSet::new();
@@ -997,14 +1006,13 @@ fn rebuild_locked(mem_dir: &Path, locked: bool) -> Result<(), RebuildError> {
     let mut seen_edges: HashSet<(String, String, String)> = HashSet::new();
     edges.retain(|e| seen_edges.insert((e.from.clone(), e.to.clone(), e.relation.clone())));
 
-    write_graph_atomically(
+    write_graph_store(
         mem_dir,
         &Graph {
             nodes,
             edges,
             version: 1,
         },
-        locked,
     )
 }
 
@@ -1045,57 +1053,128 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()
     Ok(())
 }
 
-/// Write `graph` to `memory.graph.json` inside `mem_dir` via a temp file in
-/// the same directory plus a rename, so a reader (or a crash mid-write) never
-/// observes a partially written file, and a failed write leaves the
-/// previous `memory.graph.json` untouched. Mirrors
-/// `tempfile.mkstemp(dir=MEMORY_DIR, ...)` plus `os.replace`.
-fn write_graph_atomically(
-    mem_dir: &Path,
-    graph: &Graph,
-    write_db: bool,
-) -> Result<(), RebuildError> {
-    let rendered = serde_json::to_string_pretty(graph)
-        .map_err(|e| RebuildError(format!("serialize graph: {e}")))?;
-    crate::common::atomic::write_atomic(&mem_dir.join("memory.graph.json"), rendered)
-        .map_err(|e| RebuildError(format!("write memory.graph.json: {e}")))?;
-    // The same graph goes into `data/memory.db`, the derived index every
-    // playbook tool can read. The JSON file stays for readers not yet moved.
-    if let (true, Some(root)) = (write_db, mem_dir.parent()) {
-        let nodes: Vec<playbook_data::memory::NodeRow> = graph
-            .nodes
-            .iter()
-            .map(|n| playbook_data::memory::NodeRow {
-                id: n.id.clone(),
-                file: n.file.clone(),
-                scope: n.scope.clone(),
-                project: n.project.clone(),
-                kind: n.kind.clone(),
-                name: n.name.clone(),
-                description: n.description.clone(),
-                pinned: n.pinned.unwrap_or(false),
-            })
-            .collect();
-        let edges: Vec<playbook_data::memory::EdgeRow> = graph
-            .edges
-            .iter()
-            .map(|e| playbook_data::memory::EdgeRow {
-                from: e.from.clone(),
-                to: e.to.clone(),
-                relation: e.relation.clone(),
-                signals: e.signals.clone(),
-            })
-            .collect();
-        let db = playbook_data::memory::db_in(&root.join("data"));
-        if let Err(e) = playbook_data::memory::write_graph(&db, &nodes, &edges) {
-            // The JSON file is new and the database is not, so a reader of
-            // the database would serve the old graph as current. Without the
-            // file, the next export or rebuild builds it again.
-            playbook_data::memory::remove_db(&db);
-            return Err(RebuildError(format!("write memory.db: {e}")));
-        }
+/// Writes `graph` into `data/memory.db` beside `mem_dir`, in one transaction,
+/// so a reader sees the old graph or the new one and a failed write leaves
+/// the old one. A file that is not a database is derived data: it is set
+/// aside (never deleted) and the write runs once more on a fresh file.
+fn write_graph_store(mem_dir: &Path, graph: &Graph) -> Result<(), RebuildError> {
+    let db = store_db(mem_dir)?;
+    let (nodes, edges) = rows_of(graph);
+    let mut result = playbook_data::memory::write_graph(&db, &nodes, &edges);
+    if result
+        .as_ref()
+        .err()
+        .is_some_and(|e| playbook_data::memory::is_corrupt(e))
+        && playbook_data::migrate::set_aside(&db).is_ok()
+    {
+        result = playbook_data::memory::write_graph(&db, &nodes, &edges);
     }
-    Ok(())
+    result.map_err(|e| RebuildError(format!("write memory.db: {e}")))
+}
+
+/// The rows of `memory.db` that hold `graph`.
+fn rows_of(
+    graph: &Graph,
+) -> (
+    Vec<playbook_data::memory::NodeRow>,
+    Vec<playbook_data::memory::EdgeRow>,
+) {
+    let nodes = graph
+        .nodes
+        .iter()
+        .map(|n| playbook_data::memory::NodeRow {
+            id: n.id.clone(),
+            file: n.file.clone(),
+            scope: n.scope.clone(),
+            project: n.project.clone(),
+            kind: n.kind.clone(),
+            name: n.name.clone(),
+            description: n.description.clone(),
+            pinned: n.pinned.unwrap_or(false),
+        })
+        .collect();
+    let edges = graph
+        .edges
+        .iter()
+        .map(|e| playbook_data::memory::EdgeRow {
+            from: e.from.clone(),
+            to: e.to.clone(),
+            relation: e.relation.clone(),
+            signals: e.signals.clone(),
+        })
+        .collect();
+    (nodes, edges)
+}
+
+/// `data/memory.db` of the store at `mem_dir` (`<root>/memory`).
+fn store_db(mem_dir: &Path) -> Result<PathBuf, RebuildError> {
+    let root = mem_dir
+        .parent()
+        .ok_or_else(|| RebuildError(format!("no data folder beside {}", mem_dir.display())))?;
+    Ok(playbook_data::memory::db_in(&root.join("data")))
+}
+
+/// Puts a `memory.graph.json` left by an older playbook into `memory.db`.
+///
+/// The file is derived from the fact files, so the database is rebuilt from
+/// them rather than copied, and the file is then renamed to
+/// `memory.graph.json.migrated` (never deleted). An older binary that keeps
+/// writing the file brings it back, and the next call folds it in again.
+/// Returns `false` when the file is still there because the rebuild failed,
+/// so a caller can read the file instead.
+pub fn migrate_json_graph(mem_dir: &Path) -> bool {
+    let json = mem_dir.join("memory.graph.json");
+    if !json.is_file() {
+        return true;
+    }
+    // Under the rebuild lock, so two readers do not set the file aside
+    // twice, and the one that waits finds it already gone.
+    with_rebuild_lock(mem_dir, || {
+        if !json.is_file() {
+            return true;
+        }
+        if rebuild_locked(mem_dir).is_err() {
+            return false;
+        }
+        let moved = playbook_data::migrate::set_aside(&json).is_ok();
+        if moved {
+            playbook_data::migrate::notice(
+                "playbook: moved the memory graph into data/memory.db; the old memory.graph.json was renamed to memory.graph.json.migrated",
+            );
+        }
+        moved
+    })
+}
+
+/// The memory graph as the JSON document readers parse
+/// (`{"nodes": [...], "edges": [...], "version": 1}`), from `memory.db`.
+/// `None` when there is no graph. A `memory.graph.json` from an older
+/// playbook is folded into the database first, and is read as it is only
+/// when that fails.
+pub fn graph_text(mem_dir: &Path) -> Option<String> {
+    if !migrate_json_graph(mem_dir) {
+        return fs::read_to_string(mem_dir.join("memory.graph.json")).ok();
+    }
+    export_json(mem_dir.parent()?).ok().flatten()
+}
+
+/// When the graph in `memory.db` last changed, from the file time of the
+/// database. `Ok(None)` when there is no graph, and
+/// an error when the database cannot be inspected.
+pub fn graph_touched_at(mem_dir: &Path) -> io::Result<Option<std::time::SystemTime>> {
+    migrate_json_graph(mem_dir);
+    let db = store_db(mem_dir).map_err(|e| io::Error::other(e.0))?;
+    playbook_data::memory::touched_at(&db)
+}
+
+/// Writes the graph in `json` (the document shape above) into `memory.db`
+/// beside `mem_dir`. For tests and tools that start from a graph document.
+pub fn import_json(mem_dir: &Path, json: &str) -> Result<(), RebuildError> {
+    let graph: Graph =
+        serde_json::from_str(json).map_err(|e| RebuildError(format!("parse graph: {e}")))?;
+    let (nodes, edges) = rows_of(&graph);
+    playbook_data::memory::write_graph(&store_db(mem_dir)?, &nodes, &edges)
+        .map_err(|e| RebuildError(format!("write memory.db: {e}")))
 }
 
 /// The graph stored in `memory.db`, as the JSON document `memory.graph.json`

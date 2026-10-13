@@ -216,9 +216,7 @@ fn a_missing_default_graph_is_rebuilt_from_the_fact_files() {
         .unwrap();
 
     let text = String::from_utf8_lossy(&out.stdout).to_string();
-    assert!(home
-        .join(".config/playbook/memory/memory.graph.json")
-        .exists());
+    assert!(home.join(".config/playbook/data/memory.db").exists());
     assert!(text.contains("rebuilt-fact"), "{text}");
 }
 
@@ -227,11 +225,10 @@ fn the_default_graph_path_and_repo_come_from_home_and_origin() {
     let home = scratch("home");
     let mem = home.join(".config/playbook/memory");
     fs::create_dir_all(&mem).unwrap();
-    fs::write(
-        mem.join("memory.graph.json"),
-        graph(&[fact("g1", "global", "default-path-fact", None)], &[]),
-    )
-    .unwrap();
+    playbook::testing::write_graph_fixture(
+        &mem,
+        &graph(&[fact("g1", "global", "default-path-fact", None)], &[]),
+    );
 
     let git = |args: &[&str]| {
         let st = Command::new("git")
@@ -244,9 +241,9 @@ fn the_default_graph_path_and_repo_come_from_home_and_origin() {
     };
     git(&["init", "-q"]);
     git(&["remote", "add", "origin", "git@github.com:acme/widget.git"]);
-    fs::write(
-        mem.join("memory.graph.json"),
-        graph(
+    playbook::testing::write_graph_fixture(
+        &mem,
+        &graph(
             &[
                 fact("g1", "global", "default-path-fact", None),
                 fact("p1", "project", "origin-repo-fact", Some("acme/widget")),
@@ -254,8 +251,7 @@ fn the_default_graph_path_and_repo_come_from_home_and_origin() {
             ],
             &[],
         ),
-    )
-    .unwrap();
+    );
 
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["memory", "context"])
@@ -274,9 +270,9 @@ fn an_empty_repo_flag_falls_back_to_the_origin_slug() {
     let home = scratch("emptyrepo");
     let mem = home.join(".config/playbook/memory");
     fs::create_dir_all(&mem).unwrap();
-    fs::write(
-        mem.join("memory.graph.json"),
-        graph(
+    playbook::testing::write_graph_fixture(
+        &mem,
+        &graph(
             &[fact(
                 "p1",
                 "project",
@@ -285,8 +281,7 @@ fn an_empty_repo_flag_falls_back_to_the_origin_slug() {
             )],
             &[],
         ),
-    )
-    .unwrap();
+    );
     for args in [
         vec!["init", "-q"],
         vec!["remote", "add", "origin", "git@github.com:acme/widget.git"],

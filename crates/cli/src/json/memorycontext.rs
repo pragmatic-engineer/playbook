@@ -326,19 +326,29 @@ pub fn render_for_graph_file(graph: &std::path::Path, repo: &str) -> String {
 /// a missing graph, a corrupt graph and an empty scope apart without reading
 /// the file itself.
 pub fn render_with_source(graph: &std::path::Path, repo: &str) -> String {
-    let Ok(json) = std::fs::read_to_string(graph) else {
-        return format!(
-            "Memory context: none (no graph file at {})",
-            graph.display()
-        );
+    render_text_with_source(
+        std::fs::read_to_string(graph).ok().as_deref(),
+        &format!("no graph file at {}", graph.display()),
+        &format!("graph file {} is unreadable", graph.display()),
+        repo,
+    )
+}
+
+/// [`render_with_source`] for a graph already read: `json` is `None` when
+/// there is no graph, and `missing` and `unreadable` say which graph it was.
+pub fn render_text_with_source(
+    json: Option<&str>,
+    missing: &str,
+    unreadable: &str,
+    repo: &str,
+) -> String {
+    let Some(json) = json else {
+        return format!("Memory context: none ({missing})");
     };
-    if parse_graph(&json).is_none() {
-        return format!(
-            "Memory context: none (graph file {} is unreadable)",
-            graph.display()
-        );
+    if parse_graph(json).is_none() {
+        return format!("Memory context: none ({unreadable})");
     }
-    let out = render_memory_context(&json, repo);
+    let out = render_memory_context(json, repo);
     if out.is_empty() {
         format!("Memory context: none (no facts in scope for {repo})")
     } else {

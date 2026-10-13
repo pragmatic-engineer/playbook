@@ -195,10 +195,9 @@ fn main() {
                             paths,
                         }),
                     };
-                    let graph = std::fs::read_to_string(
-                        common::paths::playbook_root_from(&home).join("memory/memory.graph.json"),
+                    let graph = hooks::rebuild_memory_graph::graph_text(
+                        &common::paths::playbook_root_from(&home).join("memory"),
                     )
-                    .ok()
                     .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
                     let evidence = || {
                         let report = effort_report(&home, claude.as_deref(), root.as_deref())?;
@@ -548,7 +547,7 @@ fn main() {
         },
         Command::Memory { sub } => match sub {
             MemoryCommand::Rebuild => match hooks::rebuild_memory_graph::rebuild_now() {
-                Ok(()) => println!("memory: memory.graph.json rebuilt"),
+                Ok(()) => println!("memory: memory.db rebuilt"),
                 Err(err) => {
                     eprintln!("memory rebuild: {err}");
                     std::process::exit(1);
@@ -556,6 +555,8 @@ fn main() {
             },
             MemoryCommand::Export { json: _ } => {
                 let root = common::paths::playbook_root();
+                // Folds an older memory.graph.json into the database first.
+                hooks::rebuild_memory_graph::migrate_json_graph(&root.join("memory"));
                 let rendered = match hooks::rebuild_memory_graph::export_json(&root) {
                     Ok(Some(text)) => Ok(text),
                     Ok(None) => hooks::rebuild_memory_graph::rebuild_now().and_then(|()| {
@@ -611,15 +612,25 @@ fn main() {
                 let repo = repo
                     .filter(|r| !r.is_empty())
                     .unwrap_or_else(common::repo_slug);
-                // The default graph is derived state: rebuild it from the fact
-                // files when it is missing, so a fresh store still answers.
-                let default_graph = graph.is_none();
-                let graph =
-                    graph.unwrap_or_else(|| common::paths::memory_dir().join("memory.graph.json"));
-                if default_graph && !graph.exists() {
-                    let _ = hooks::rebuild_memory_graph::rebuild_now();
-                }
-                println!("{}", json::memorycontext::render_with_source(&graph, &repo));
+                let rendered = if let Some(graph) = graph {
+                    json::memorycontext::render_with_source(&graph, &repo)
+                } else {
+                    // The default graph is derived state: rebuild it from the
+                    // fact files when it is missing, so a fresh store still
+                    // answers.
+                    let mem_dir = common::paths::memory_dir();
+                    let mut text = hooks::rebuild_memory_graph::graph_text(&mem_dir);
+                    if text.is_none() && hooks::rebuild_memory_graph::rebuild_now().is_ok() {
+                        text = hooks::rebuild_memory_graph::graph_text(&mem_dir);
+                    }
+                    json::memorycontext::render_text_with_source(
+                        text.as_deref(),
+                        "no memory graph in data/memory.db",
+                        "the graph in data/memory.db is unreadable",
+                        &repo,
+                    )
+                };
+                println!("{rendered}");
             }
         },
         Command::Manifest { sub } => match sub {
@@ -1245,9 +1256,10 @@ fn main() {
             let repo = repo
                 .filter(|r| !r.is_empty())
                 .unwrap_or_else(common::repo_slug);
-            let graph =
-                graph.unwrap_or_else(|| common::paths::memory_dir().join("memory.graph.json"));
-            let graph_json = std::fs::read_to_string(graph).ok();
+            let graph_json = match graph {
+                Some(graph) => std::fs::read_to_string(graph).ok(),
+                None => hooks::rebuild_memory_graph::graph_text(&common::paths::memory_dir()),
+            };
             let plan_path = plan.display().to_string();
             let ctx = brief::Context {
                 plan_path: &plan_path,

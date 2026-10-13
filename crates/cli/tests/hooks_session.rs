@@ -158,13 +158,12 @@ fn session_init_injects_the_graph_backed_slice() {
     let home = work.join("home-graph");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
-        format!(
+    playbook::testing::write_graph_fixture(
+        &memory_dir,
+        &format!(
             r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"widget-fact-one","description":"The widget module talks to the sprocket service.","project":"{repo_slug}","pinned":true}}],"edges":[]}}"#
         ),
-    )
-    .unwrap();
+    );
 
     // Act
     let outcome = run_hook(
@@ -214,11 +213,10 @@ fn session_init_caps_the_ranked_memory_block() {
             )
         })
         .collect();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
-        format!(r#"{{"nodes":[{}],"edges":[]}}"#, nodes.join(",")),
-    )
-    .unwrap();
+    playbook::testing::write_graph_fixture(
+        &memory_dir,
+        &format!(r#"{{"nodes":[{}],"edges":[]}}"#, nodes.join(",")),
+    );
 
     // Act
     let outcome = run_hook(
@@ -259,13 +257,12 @@ fn session_init_falls_back_to_a_native_graph_read() {
     let home = work.join("home-native");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
-        format!(
+    playbook::testing::write_graph_fixture(
+        &memory_dir,
+        &format!(
             r#"{{"nodes":[{{"id":"{repo_slug}/f1","file":"{repo_slug}/f1.md","scope":"project","type":"project","name":"native-fact-one","description":"parsed straight from the graph file, no script involved","project":"{repo_slug}","pinned":true}}],"edges":[]}}"#
         ),
-    )
-    .unwrap();
+    );
 
     // Act: no CLAUDE_PLUGIN_ROOT; the slice never needed it.
     let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
@@ -312,7 +309,7 @@ fn session_init_native_fallback_absent_graph_emits_no_memory_block() {
 
 #[test]
 fn session_init_native_fallback_malformed_graph_emits_no_memory_block() {
-    // Arrange: a memory.graph.json that is not valid JSON.
+    // Arrange: a memory.db that is not a database.
     let work = scratch_dir("native-fallback-malformed");
     let repo_slug = "acme/widget";
     let repo_dir = work.join("repo");
@@ -321,7 +318,11 @@ fn session_init_native_fallback_malformed_graph_emits_no_memory_block() {
     let home = work.join("home-malformed");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(memory_dir.join("memory.graph.json"), "{not valid json").unwrap();
+    // The graph lives in memory.db now; a file that is not a database is the
+    // unreadable case.
+    let data_dir = home.join(".config").join("playbook").join("data");
+    fs::create_dir_all(&data_dir).unwrap();
+    fs::write(data_dir.join("memory.db"), "{not valid json").unwrap();
 
     // Act
     let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
@@ -355,7 +356,7 @@ fn session_init_native_fallback_no_nodes_array_emits_no_memory_block() {
     let home = work.join("home-no-nodes");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(memory_dir.join("memory.graph.json"), r#"{"edges":[]}"#).unwrap();
+    playbook::testing::write_graph_fixture(&memory_dir, r#"{"edges":[]}"#);
 
     // Act
     let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
@@ -387,11 +388,16 @@ fn session_init_migrates_legacy_home_memory_root_before_recall() {
     let home = work.join("home-legacy-root");
     let legacy_dir = home.join(".claude").join("memory");
     fs::create_dir_all(&legacy_dir).unwrap();
+    let fact_dir = legacy_dir.join("acme").join("widget");
+    fs::create_dir_all(&fact_dir).unwrap();
+    fs::write(
+        fact_dir.join("legacy-root-fact.md"),
+        "---\nname: legacy-root-fact\ntype: project\ndescription: still under the old home tree\npinned: true\n---\nBody.\n",
+    )
+    .unwrap();
     fs::write(
         legacy_dir.join("memory.graph.json"),
-        format!(
-            r#"{{"nodes":[{{"id":"{repo_slug}/legacy-root-fact","file":"{repo_slug}/legacy-root-fact.md","scope":"project","type":"project","name":"legacy-root-fact","description":"still under the old home tree","project":"{repo_slug}","pinned":true}}],"edges":[]}}"#
-        ),
+        r#"{"nodes":[],"edges":[]}"#,
     )
     .unwrap();
 
@@ -409,11 +415,11 @@ fn session_init_migrates_legacy_home_memory_root_before_recall() {
     let new_graph = home
         .join(".config")
         .join("playbook")
-        .join("memory")
-        .join("memory.graph.json");
+        .join("data")
+        .join("memory.db");
     assert!(
         new_graph.is_file(),
-        "the graph file should now live at the new location: {}",
+        "the graph should now live in the data folder: {}",
         new_graph.display()
     );
     assert!(
@@ -460,11 +466,10 @@ fn session_init_outside_a_git_repo_emits_no_memory_block() {
     let home = work.join("home-graph");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
+    playbook::testing::write_graph_fixture(
+        &memory_dir,
         r#"{"nodes":[{"id":"acme/widget/f1","file":"acme/widget/f1.md","scope":"project","type":"project","name":"widget-fact-one","description":"desc","project":"acme/widget"}],"edges":[]}"#,
-    )
-    .unwrap();
+    );
 
     // Act
     let outcome = run_hook(
@@ -593,13 +598,12 @@ fn session_init_injects_a_pinned_fact_independent_of_general_memory_slice() {
     let home = work.join("home-pinned");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
-        format!(
+    playbook::testing::write_graph_fixture(
+        &memory_dir,
+        &format!(
             r#"{{"nodes":[{{"id":"{repo_slug}/pinned-fact","file":"{repo_slug}/pinned-fact.md","scope":"project","type":"project","name":"pinned-fact-name","description":"Pinned fact description text.","project":"{repo_slug}","pinned":true}}],"edges":[]}}"#
         ),
-    )
-    .unwrap();
+    );
 
     // Act: no CLAUDE_PLUGIN_ROOT, so the general memory slice runs through
     // its native fallback rather than the script-backed path.
@@ -635,13 +639,12 @@ fn session_init_injects_a_promoted_fact_independent_of_general_memory_slice() {
     let home = work.join("home-promoted");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
-        format!(
+    playbook::testing::write_graph_fixture(
+        &memory_dir,
+        &format!(
             r#"{{"nodes":[{{"id":"{repo_slug}/promoted-fact","file":"{repo_slug}/promoted-fact.md","scope":"project","type":"project","name":"promoted-fact-name","description":"Promoted fact description text.","project":"{repo_slug}"}}],"edges":[]}}"#
         ),
-    )
-    .unwrap();
+    );
     fs::write(
         memory_dir.join("memory.signals.json"),
         format!(r#"{{"nodes":{{"{repo_slug}/promoted-fact":{{"hits":3,"promoted":true}}}}}}"#),
@@ -682,13 +685,12 @@ fn a_pinned_fact_from_a_different_repo_does_not_inject() {
     let home = work.join("home-pinned-other-repo");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
-        format!(
+    playbook::testing::write_graph_fixture(
+        &memory_dir,
+        &format!(
             r#"{{"nodes":[{{"id":"{other_slug}/other-repo-fact","file":"{other_slug}/other-repo-fact.md","scope":"project","type":"project","name":"other-repo-fact-name","description":"Should never appear here.","project":"{other_slug}","pinned":true}}],"edges":[]}}"#
         ),
-    )
-    .unwrap();
+    );
 
     // Act
     let outcome = run_hook("session-init", &repo_dir, &home, "{}", &[]);
@@ -716,11 +718,10 @@ fn a_global_promoted_fact_injects_regardless_of_repo() {
     let home = work.join("home-promoted-global");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
+    playbook::testing::write_graph_fixture(
+        &memory_dir,
         r#"{"nodes":[{"id":"global/global-promoted-fact","file":"global-promoted-fact.md","scope":"global","type":"reference","name":"global-promoted-fact-name","description":"Global fact, any repo."}],"edges":[]}"#,
-    )
-    .unwrap();
+    );
     fs::write(
         memory_dir.join("memory.signals.json"),
         r#"{"nodes":{"global/global-promoted-fact":{"hits":3,"promoted":true}}}"#,
@@ -757,11 +758,10 @@ fn an_org_scoped_promoted_fact_injects_for_a_sibling_repo_under_the_same_owner()
     let home = work.join("home-promoted-org");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
+    playbook::testing::write_graph_fixture(
+        &memory_dir,
         r#"{"nodes":[{"id":"acme/org-promoted-fact","file":"acme/org-promoted-fact.md","scope":"org","type":"reference","name":"org-promoted-fact-name","description":"Shared across every acme repo.","project":"acme"}],"edges":[]}"#,
-    )
-    .unwrap();
+    );
     fs::write(
         memory_dir.join("memory.signals.json"),
         r#"{"nodes":{"acme/org-promoted-fact":{"hits":3,"promoted":true}}}"#,
@@ -798,11 +798,10 @@ fn an_org_scoped_promoted_fact_does_not_leak_to_a_different_owner() {
     let home = work.join("home-promoted-org-other-owner");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(
-        memory_dir.join("memory.graph.json"),
+    playbook::testing::write_graph_fixture(
+        &memory_dir,
         r#"{"nodes":[{"id":"acme/org-promoted-fact","file":"acme/org-promoted-fact.md","scope":"org","type":"reference","name":"org-promoted-fact-name","description":"Shared across every acme repo.","project":"acme"}],"edges":[]}"#,
-    )
-    .unwrap();
+    );
     fs::write(
         memory_dir.join("memory.signals.json"),
         r#"{"nodes":{"acme/org-promoted-fact":{"hits":3,"promoted":true}}}"#,
@@ -2182,7 +2181,7 @@ fn ranked_world(tag: &str, graph: &str, signals: Option<&str>) -> (PathBuf, Path
     let home = work.join("home");
     let memory_dir = home.join(".config").join("playbook").join("memory");
     fs::create_dir_all(&memory_dir).unwrap();
-    fs::write(memory_dir.join("memory.graph.json"), graph).unwrap();
+    playbook::testing::write_graph_fixture(&memory_dir, &graph);
     if let Some(signals) = signals {
         fs::write(memory_dir.join("memory.signals.json"), signals).unwrap();
     }
@@ -2259,10 +2258,13 @@ fn session_init_never_writes_to_the_memory_store() {
     // The ranking reads these two files; the one-off migration marker that
     // session start has always written is outside this check.
     let snapshot = |dir: &Path| -> Vec<Vec<u8>> {
-        ["memory.graph.json", "memory.signals.json"]
-            .iter()
-            .map(|name| fs::read(dir.join(name)).unwrap_or_default())
-            .collect()
+        [
+            dir.join("memory.signals.json"),
+            dir.parent().unwrap().join("data").join("memory.db"),
+        ]
+        .iter()
+        .map(|path| fs::read(path).unwrap_or_default())
+        .collect()
     };
     let before = snapshot(&memory_dir);
 

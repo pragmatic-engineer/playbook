@@ -155,18 +155,31 @@ pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<()
         [now_secs().to_string()],
     )
     .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())
+    tx.commit().map_err(|e| e.to_string())?;
+    // Fold the log into the database file now, so its file time says when the
+    // graph changed even while a reader still has the database open.
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+    Ok(())
 }
 
-/// Removes the database file and its journal files, so a reader finds no
-/// graph rather than a stale one. Errors are ignored: a missing file is the
-/// goal, and a file that cannot be removed is no worse than before.
-pub fn remove_db(db: &Path) {
-    for suffix in ["-wal", "-shm", ""] {
-        let mut name = db.as_os_str().to_os_string();
-        name.push(suffix);
-        let _ = std::fs::remove_file(PathBuf::from(name));
+/// When the graph in `db` last changed, from the file time of the database.
+/// A writer closes the database (which folds its log in) when it is done, and
+/// a reader never changes the file, so reading is not mistaken for a write.
+/// `Ok(None)` when the database does not exist, and an error when it cannot
+/// be inspected.
+pub fn touched_at(db: &Path) -> std::io::Result<Option<std::time::SystemTime>> {
+    match std::fs::metadata(db).and_then(|m| m.modified()) {
+        Ok(t) => Ok(Some(t)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
     }
+}
+
+/// Whether `error` (from [`write_graph`]) says the file is not a usable
+/// database, as opposed to being busy or read only.
+pub fn is_corrupt(error: &str) -> bool {
+    let e = error.to_lowercase();
+    e.contains("not a database") || e.contains("malformed") || e.contains("corrupt")
 }
 
 fn now_secs() -> u64 {
@@ -366,14 +379,25 @@ mod tests {
     }
 
     #[test]
-    fn remove_db_takes_the_file_and_its_journal_files() {
-        let d = scratch_dir("mem-remove");
+    fn a_file_that_is_not_a_database_is_reported_as_corrupt() {
+        let d = scratch_dir("mem-corrupt");
         let db = db_in(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(&db, b"this is not a sqlite file at all, just text padding").unwrap();
+
+        let error = write_graph(&db, &[node("a")], &[]).unwrap_err();
+
+        assert!(is_corrupt(&error), "{error}");
+    }
+
+    #[test]
+    fn touched_at_follows_the_database() {
+        let d = scratch_dir("mem-touched");
+        let db = db_in(&d);
+        assert!(touched_at(&db).unwrap().is_none());
+
         write_graph(&db, &[node("a")], &[]).unwrap();
 
-        remove_db(&db);
-
-        assert!(!db.exists());
-        assert!(read_graph(&db).unwrap().is_none());
+        assert!(touched_at(&db).unwrap().is_some());
     }
 }

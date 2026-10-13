@@ -3,7 +3,7 @@
 
 //! Two events, one cache. `PreToolUse` on Edit|Write: when the target path
 //! is anchored in the graph-first memory store
-//! (`~/.config/playbook/memory/memory.graph.json`), surface the facts that describe it, plus
+//! (`~/.config/playbook/data/memory.db`), surface the facts that describe it, plus
 //! their `depends_on` and `contradicts` neighbours, as `additionalContext`
 //! before the edit lands. `UserPromptSubmit` (ADR 0008 WU-0): match prompt
 //! text and this-session touched files against the same index, injecting
@@ -630,7 +630,7 @@ fn git_last_commit_epoch(path: &Path) -> Option<staleness::DateTime> {
     crate::common::git::output(dir, &args)?.parse::<i64>().ok()
 }
 
-/// Build the tab-separated anchor index from `memory.graph.json` for the current
+/// Build the tab-separated anchor index from `memory.db` for the current
 /// repo scope. One row per in-scope `anchors` edge, columns anchor, from_id,
 /// name, description, neighbours, file. The `file` column exists solely for
 /// `run_prompt`'s body reads; `PreToolUse`'s `format_message` only reads
@@ -639,18 +639,13 @@ fn git_last_commit_epoch(path: &Path) -> Option<staleness::DateTime> {
 /// yields an empty index rather than an error, so a stale or absent graph
 /// still leaves this hook silent instead of breaking the edit.
 fn build_index(idx_path: &Path) {
-    let graph_path = memory_graph_path();
     let repo = repo_slug();
-    let rows = compute_index_rows(&graph_path, &repo);
+    let rows = compute_index_rows(&memory_dir(), &repo);
     write_index_atomically(idx_path, &rows);
 }
 
-fn memory_graph_path() -> PathBuf {
-    memory_dir().join("memory.graph.json")
-}
-
-fn compute_index_rows(graph_path: &Path, repo: &str) -> Vec<String> {
-    let Ok(content) = fs::read_to_string(graph_path) else {
+fn compute_index_rows(mem_dir: &Path, repo: &str) -> Vec<String> {
+    let Some(content) = crate::hooks::rebuild_memory_graph::graph_text(mem_dir) else {
         return Vec::new();
     };
     let Ok(graph) = serde_json::from_str::<Value>(&content) else {
@@ -728,7 +723,7 @@ fn in_scope(node: &Value, repo: &str) -> bool {
 }
 
 /// `depends_on`/`contradicts` neighbours, keyed by source node id, in the
-/// order their edges appear in `memory.graph.json`.
+/// order their edges are stored in `memory.db`.
 fn collect_neighbours<'a>(
     edges: &'a [Value],
     byid: &HashMap<&'a str, &'a Value>,
