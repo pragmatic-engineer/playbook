@@ -150,8 +150,7 @@ fn evaluate(
          repo-local path"
             .to_string()
     })?;
-    db::migrate_legacy_repo_local(&repo_root, &dest_base)?;
-    let db_path = dest_base.join("state.db");
+    let db_path = db::resolve_db_path(&repo_root, &dest_base)?;
     let conn = db::open_db(&db_path)?;
 
     let mut states = Vec::with_capacity(phases.len());
