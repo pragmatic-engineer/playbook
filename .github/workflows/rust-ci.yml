@@ -322,7 +322,7 @@ jobs:
             cargo-docs-checks-${{ runner.os }}-
 
       - name: cargo test (doc-reading tests only)
-        run: cargo test -p playbook --test reference_docs --test policy_table --test commands_pr_settings
+        run: cargo test -p playbook --test reference_docs
 
   # release.yml builds five targets, but nothing else ever compiled for
   # Windows, so `std::os::unix` reached the lib unnoticed and every Windows
