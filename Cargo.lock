@@ -752,6 +752,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "playbook-data"
+version = "0.1.0"
+dependencies = [
+ "playbook-common",
+]
+
+[[package]]
 name = "playbook-telemetry"
 version = "0.1.6"
 source = "git+https://github.com/pragmatic-engineer/playbook-telemetry?tag=v0.1.6#eabd120d8efc182e79f29e28bfe0ad0876204612"
