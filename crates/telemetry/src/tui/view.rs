@@ -185,7 +185,7 @@ fn render_help(frame: &mut Frame, area: Rect, scroll: usize, pal: &Palette) {
     let accent = Style::default()
         .fg(pal.color(pal.hi))
         .add_modifier(Modifier::BOLD);
-    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let plain = Style::default().fg(pal.color(pal.fg));
     let lines: Vec<Line> = keys::help_lines()
         .into_iter()
         .map(|l| match l {
@@ -198,7 +198,7 @@ fn render_help(frame: &mut Frame, area: Rect, scroll: usize, pal: &Palette) {
             } => Line::from(vec![
                 Span::styled(format!("{shown:<10} "), accent),
                 Span::raw(format!("{text:<41}")),
-                Span::styled(panels, dim),
+                Span::styled(panels, plain),
             ]),
         })
         .collect();
@@ -243,11 +243,11 @@ fn render_notice(frame: &mut Frame, area: Rect, n: &Notice, pal: &Palette) {
 /// The key hints: each key in the accent color, its meaning in the text color,
 /// and at the right when the view was last refreshed.
 fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
-    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let plain = Style::default().fg(pal.color(pal.fg));
     if app.editing {
         return Line::styled(
             format!(" filter: {}_   enter apply   esc cancel", app.draft),
-            dim,
+            plain,
         );
     }
     let keys = Style::default()
@@ -286,7 +286,7 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
     for (key, label, _) in hints {
         spans.push(Span::styled(key.to_string(), keys));
-        spans.push(Span::styled(format!(" {label} "), dim));
+        spans.push(Span::styled(format!(" {label} "), plain));
     }
     let gap = usize::from(area_width).saturating_sub(used + status.chars().count());
     spans.push(Span::raw(" ".repeat(gap)));
@@ -303,9 +303,9 @@ fn refresh_status(app: &App, pal: &Palette, area_width: u16) -> (String, Style) 
         let text = fit(&format!("refresh failed: {e} "), room);
         return (text, Style::default().fg(pal.color(pal.error)));
     }
-    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let plain = Style::default().fg(pal.color(pal.fg));
     if let Some((done, total)) = app.indexing {
-        return (format!("indexing {done}/{total} files "), dim);
+        return (format!("indexing {done}/{total} files "), plain);
     }
     match &app.data {
         // The telemetry state and the interval go first when the line is short.
@@ -317,7 +317,7 @@ fn refresh_status(app: &App, pal: &Palette, area_width: u16) -> (String, Style) 
                 crate::tz::describe(d.now),
                 app.refresh_every.as_secs()
             ),
-            dim,
+            plain,
         ),
         Some(d) if area_width >= 100 => (
             format!(
@@ -326,13 +326,13 @@ fn refresh_status(app: &App, pal: &Palette, area_width: u16) -> (String, Style) 
                 crate::tz::describe(d.now),
                 app.refresh_every.as_secs()
             ),
-            dim,
+            plain,
         ),
         Some(d) => (
             format!("updated {} {} ", clock(d.now), crate::tz::short(d.now)),
-            dim,
+            plain,
         ),
-        None => (String::new(), dim),
+        None => (String::new(), plain),
     }
 }
 
@@ -507,11 +507,11 @@ fn header_lines(d: &Data, pal: &Palette, room: usize) -> Vec<Line<'static>> {
     let accent = Style::default()
         .fg(pal.color(pal.hi))
         .add_modifier(Modifier::BOLD);
-    let dim = Style::default().fg(pal.color(pal.graph_text));
+    let plain = Style::default().fg(pal.color(pal.fg));
     let (now, rest) = context_line(d, room);
     let mut lines = vec![Line::from(vec![
         Span::styled(now, accent),
-        Span::styled(rest, dim),
+        Span::styled(rest, plain),
     ])];
     for m in metrics(d) {
         let tint = if m.change > 0.0 {
@@ -519,17 +519,17 @@ fn header_lines(d: &Data, pal: &Palette, room: usize) -> Vec<Line<'static>> {
         } else if m.change < 0.0 {
             pal.live
         } else {
-            pal.graph_text
+            pal.fg
         };
         let mut spans = vec![
-            Span::styled(format!("{:<9}", m.name), dim),
+            Span::styled(format!("{:<9}", m.name), plain),
             Span::styled(
                 format!("{:>11}", m.now),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
         ];
         if let Some(before) = &m.before {
-            spans.push(Span::styled(format!("   vs{before:>11}   "), dim));
+            spans.push(Span::styled(format!("   vs{before:>11}   "), plain));
             spans.push(Span::styled(
                 format!("{:>9} {:>8}", m.amount, m.percent),
                 Style::default().fg(pal.color(tint)),
@@ -575,10 +575,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
         ]))
         .title(Line::from(vec![
             Span::styled("\u{2500}\u{2524}", edge),
-            Span::styled(
-                zone_note(app),
-                Style::default().fg(pal.color(pal.graph_text)),
-            ),
+            Span::styled(zone_note(app), Style::default().fg(pal.color(pal.fg))),
             Span::styled("\u{251c}", edge),
         ]));
     if !app.filter.is_empty() {

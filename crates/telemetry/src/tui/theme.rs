@@ -446,4 +446,33 @@ mod tests {
         assert_eq!(p.graded(p.cpu, 90.0), Color::Reset);
         assert_eq!(p.graded(p.process, 90.0), Color::Reset);
     }
+
+    /// The default theme's roles equal btop's built-in default theme
+    /// (`Default_theme` in btop's `src/btop_theme.cpp`, aristocratos/btop).
+    /// A two digit hex there is a gray.
+    #[test]
+    fn default_theme_matches_btop_default() {
+        let p = Theme::Standard.palette(ColorDepth::True);
+        let ink = |g: Rgb| Ink::Rgb(g);
+        assert_eq!(p.bg, ink(gray(0x00)));
+        assert_eq!(p.fg, ink(gray(0xcc)));
+        assert_eq!(p.title, ink(gray(0xee)));
+        assert_eq!(p.hi, ink(hex(0xb54040)));
+        assert_eq!(p.sel_bg, ink(hex(0x6a2f2f)));
+        assert_eq!(p.sel_fg, ink(gray(0xee)));
+        assert_eq!(p.inactive, ink(gray(0x40)));
+        assert_eq!(p.graph_text, ink(gray(0x60)));
+        assert_eq!(p.meter_bg, ink(gray(0x40)));
+        assert_eq!(p.div_line, ink(gray(0x30)));
+        assert_eq!(p.box_cpu, ink(hex(0x556d59)));
+        assert_eq!(p.box_mem, ink(hex(0x6c6c4b)));
+        assert_eq!(p.box_net, ink(hex(0x5c588d)));
+        assert_eq!(p.box_proc, ink(hex(0x805252)));
+        let g = |a, b, c| Fill::Gradient(hex(a), hex(b), hex(c));
+        assert_eq!(p.cpu, g(0x77ca9b, 0xcbc06c, 0xdc4c4c));
+        assert_eq!(p.down, g(0x291f75, 0x4f43a3, 0xb0a9de));
+        assert_eq!(p.cached, g(0x163350, 0x74e6fc, 0x26c5ff));
+        assert_eq!(p.avail, g(0x4e3f0e, 0xffd77a, 0xffb814));
+        assert_eq!(p.process, g(0x80d0a3, 0xdcd179, 0xd45454));
+    }
 }
