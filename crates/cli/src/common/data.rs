@@ -16,9 +16,11 @@
 //! * When the new file already exists (for example an older binary kept
 //!   writing the old path and recreated it), the rows are merged with
 //!   `INSERT OR IGNORE`, which cannot duplicate a row with a primary key.
-//! * A corrupt old file is left alone and reported once.
+//! * A corrupt old file is left alone and reported on each run.
+//! * The old file's write lock is held from the copy to the rename, and
+//!   merged tables must have a primary key, so a repeat cannot double count.
 
-use crate::common::atomic::{ensure_private_dir, with_dir_lock_aged, LONG_LOCK_STALE_AGE};
+use crate::common::atomic::{acquire_dir_lock_aged, ensure_private_dir, LONG_LOCK_STALE_AGE};
 use crate::common::paths::playbook_root_from;
 use crate::common::session::home_dir;
 use rusqlite::{Connection, OpenFlags};
@@ -113,18 +115,48 @@ fn count(conn: &Connection, schema: &str, table: &str) -> rusqlite::Result<i64> 
     )
 }
 
+/// Why the old file could not be opened for a move.
+enum OldError {
+    /// The file is not a usable database: left in place.
+    Corrupt(String),
+    /// A transient failure (busy, permissions): the next run retries.
+    Transient(String),
+}
+
+fn classify(e: rusqlite::Error) -> OldError {
+    match e.sqlite_error_code() {
+        Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt) => {
+            OldError::Corrupt(e.to_string())
+        }
+        _ => OldError::Transient(e.to_string()),
+    }
+}
+
 /// Open the old file read only and run an integrity check.
-fn open_old(old: &Path) -> Result<Connection, String> {
-    let conn = Connection::open_with_flags(old, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|e| e.to_string())?;
+fn open_old(old: &Path) -> Result<Connection, OldError> {
+    let conn =
+        Connection::open_with_flags(old, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(classify)?;
     conn.busy_timeout(Duration::from_millis(5000))
-        .map_err(|e| e.to_string())?;
+        .map_err(classify)?;
     let verdict: String = conn
         .query_row("PRAGMA quick_check", [], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
+        .map_err(classify)?;
     if verdict != "ok" {
-        return Err(verdict);
+        return Err(OldError::Corrupt(verdict));
     }
+    Ok(conn)
+}
+
+/// Take the old file's write lock until dropped, so no writer can commit
+/// between the copy and the rename. A writer that holds it longer than the
+/// wait makes the move retry on the next run.
+fn lock_old(old: &Path) -> Result<Connection, String> {
+    let conn = Connection::open_with_flags(old, OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(|e| e.to_string())?;
+    conn.busy_timeout(Duration::from_millis(2000))
+        .map_err(|e| e.to_string())?;
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| format!("the old database is busy: {e}"))?;
     Ok(conn)
 }
 
@@ -159,7 +191,9 @@ fn set_aside(old: &Path) -> Result<(), String> {
     for side in SIDE_SUFFIXES {
         let from = with_suffix(old, side);
         if from.exists() {
-            let to = with_suffix(old, &format!("{side}{suffix}"));
+            // SQLite pairs a main file with `<main>-wal`, so the sidecars
+            // keep that shape next to the renamed main file.
+            let to = with_suffix(&with_suffix(old, &suffix), side);
             fs::rename(&from, &to)
                 .map_err(|e| format!("could not rename {}: {e}", from.display()))?;
         }
@@ -181,15 +215,35 @@ fn copy_then_verify(step: &Move, old_conn: &Connection) -> Result<(), String> {
         }
         drop(copy);
         crate::common::atomic::make_db_file_private(&tmp)?;
-        if step.new.exists() {
-            return Err("the new file appeared during the copy".to_string());
-        }
-        fs::rename(&tmp, &step.new).map_err(|e| e.to_string())
+        // A hard link fails when the target exists, unlike rename, which
+        // would silently replace a file another process just created.
+        fs::hard_link(&tmp, &step.new).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                "the new file appeared during the copy".to_string()
+            } else {
+                e.to_string()
+            }
+        })?;
+        Ok(())
     })();
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
+    let _ = fs::remove_file(&tmp);
     result
+}
+
+/// Remove partial copies a killed process left next to `new`. Called with
+/// the migrate lock held.
+fn remove_stale_tmp(new: &Path) {
+    let (Some(dir), Some(name)) = (new.parent(), new.file_name()) else {
+        return;
+    };
+    let prefix = format!("{}.tmp-", name.to_string_lossy());
+    if let Ok(rd) = fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy().starts_with(&prefix) {
+                let _ = fs::remove_file(e.path());
+            }
+        }
+    }
 }
 
 fn merge(step: &Move, tables_to_merge: &[&str]) -> Result<u64, String> {
@@ -198,19 +252,26 @@ fn merge(step: &Move, tables_to_merge: &[&str]) -> Result<u64, String> {
         .map_err(|e| e.to_string())?;
     conn.execute(
         "ATTACH DATABASE ?1 AS old",
-        [format!("file:{}?mode=ro", step.old.display())],
+        [step.old.to_string_lossy().as_ref()],
     )
-    .or_else(|_| {
-        conn.execute(
-            "ATTACH DATABASE ?1 AS old",
-            [step.old.to_string_lossy().as_ref()],
-        )
-    })
     .map_err(|e| e.to_string())?;
     let old_tables = tables(&conn, "old").map_err(|e| e.to_string())?;
+    // Deferred: an immediate transaction would also lock the attached old
+    // file, which this process already holds a write lock on.
     let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
         .map_err(|e| e.to_string())?;
+    // Every non-empty old table must be listed, or it would be dropped when
+    // the old file is set aside.
+    for t in &old_tables {
+        if !tables_to_merge.contains(&t.as_str())
+            && count(&tx, "old", t).map_err(|e| e.to_string())? > 0
+        {
+            return Err(format!(
+                "old table {t} has rows but is not in the merge list"
+            ));
+        }
+    }
     let mut inserted = 0u64;
     for table in tables_to_merge {
         if !old_tables.iter().any(|t| t == table) {
@@ -219,6 +280,11 @@ fn merge(step: &Move, tables_to_merge: &[&str]) -> Result<u64, String> {
         let new_cols = columns(&tx, "main", table).map_err(|e| e.to_string())?;
         if new_cols.is_empty() {
             return Err(format!("table {table} is missing in the new file"));
+        }
+        if !has_primary_key(&tx, table)? {
+            // Without a key INSERT OR IGNORE appends every row, so a repeat
+            // after a crash would double count.
+            return Err(format!("table {table} has no primary key, cannot merge"));
         }
         let old_cols = columns(&tx, "old", table).map_err(|e| e.to_string())?;
         let common: Vec<String> = new_cols
@@ -262,6 +328,18 @@ fn merge(step: &Move, tables_to_merge: &[&str]) -> Result<u64, String> {
     Ok(inserted)
 }
 
+fn has_primary_key(conn: &Connection, table: &str) -> Result<bool, String> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA main.table_info({})", q(table)))
+        .map_err(|e| e.to_string())?;
+    let any = stmt
+        .query_map([], |r| r.get::<_, i64>(5))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .any(|pk| pk > 0);
+    Ok(any)
+}
+
 /// Old rows with no counterpart sharing the table's primary key.
 fn lost_rows(conn: &Connection, table: &str, cols: &[String]) -> Result<i64, String> {
     let mut stmt = conn
@@ -303,12 +381,13 @@ pub fn migrate(step: &Move) -> Result<Outcome, String> {
     ensure_private_dir(parent)
         .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
     let lock = with_suffix(&step.new, ".migrate.lock");
-    let (_, result) =
-        with_dir_lock_aged(&lock, LOCK_RETRIES, LOCK_DELAY, LONG_LOCK_STALE_AGE, || {
-            let r = run_locked(step);
-            let _ = fs::remove_dir(&lock);
-            r
-        });
+    // Without the lock another process may be mid-move, so do nothing and let
+    // the next run retry. Only the holder removes the lock directory.
+    if !acquire_dir_lock_aged(&lock, LOCK_RETRIES, LOCK_DELAY, LONG_LOCK_STALE_AGE) {
+        return Ok(Outcome::Nothing);
+    }
+    let result = run_locked(step);
+    let _ = fs::remove_dir(&lock);
     result
 }
 
@@ -316,10 +395,14 @@ fn run_locked(step: &Move) -> Result<Outcome, String> {
     if !step.old.is_file() {
         return Ok(Outcome::Nothing);
     }
+    remove_stale_tmp(&step.new);
     let old_conn = match open_old(&step.old) {
         Ok(c) => c,
-        Err(e) => return Ok(Outcome::Corrupt(e)),
+        Err(OldError::Corrupt(e)) => return Ok(Outcome::Corrupt(e)),
+        Err(OldError::Transient(e)) => return Err(e),
     };
+    // Held until the old file is set aside.
+    let writer_lock = lock_old(&step.old)?;
     let outcome = if !step.new.exists() {
         copy_then_verify(step, &old_conn)?;
         Outcome::Moved
@@ -327,15 +410,17 @@ fn run_locked(step: &Move) -> Result<Outcome, String> {
         match step.policy {
             Policy::KeepNew => Outcome::SetAside,
             Policy::MergeTables(list) => {
-                drop(old_conn);
                 let inserted = merge(step, list)?;
+                drop(old_conn);
                 set_aside(&step.old)?;
+                drop(writer_lock);
                 return Ok(Outcome::Merged { inserted });
             }
         }
     };
     drop(old_conn);
     set_aside(&step.old)?;
+    drop(writer_lock);
     Ok(outcome)
 }
 
@@ -394,7 +479,8 @@ pub fn list_files(dir: &Path) -> Vec<Entry> {
 
 /// Whether a path is a leftover from a finished migration.
 pub fn is_migrated_leftover(path: &Path) -> bool {
-    path.to_string_lossy().contains(".migrated")
+    let p = path.to_string_lossy();
+    p.contains(".migrated") || p.contains(".tmp-") || p.ends_with(".migrate.lock")
 }
 
 #[cfg(test)]
@@ -532,13 +618,112 @@ mod tests {
     }
 
     #[test]
+    fn held_lock_makes_the_step_wait_and_do_nothing() {
+        let (m, _d) = step("dm-held", Policy::MergeTables(T));
+        make(&m.old, &[(1, "a")]);
+        fs::create_dir_all(m.new.parent().unwrap()).unwrap();
+        fs::create_dir(with_suffix(&m.new, ".migrate.lock")).unwrap();
+        assert_eq!(migrate(&m).unwrap(), Outcome::Nothing);
+        assert!(m.old.exists());
+        assert!(!m.new.exists());
+        // The lock that was not ours is still there.
+        assert!(with_suffix(&m.new, ".migrate.lock").is_dir());
+    }
+
+    #[test]
+    fn a_writer_holding_the_old_file_makes_the_move_fail_and_keep_it() {
+        let (m, _d) = step("dm-writer", Policy::MergeTables(T));
+        make(&m.old, &[(1, "a")]);
+        let w = Connection::open(&m.old).unwrap();
+        w.execute_batch("BEGIN IMMEDIATE; INSERT INTO t VALUES (2, 'b');")
+            .unwrap();
+        assert!(migrate(&m).is_err());
+        assert!(m.old.exists());
+        assert!(!m.new.exists());
+        w.execute_batch("COMMIT").unwrap();
+        drop(w);
+        assert_eq!(migrate(&m).unwrap(), Outcome::Moved);
+        assert_eq!(rows(&m.new).len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn moved_file_and_folder_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let (m, _d) = step("dm-perm", Policy::MergeTables(T));
+        make(&m.old, &[(1, "a")]);
+        migrate(&m).unwrap();
+        let file = fs::metadata(&m.new).unwrap().permissions().mode() & 0o777;
+        let dir = fs::metadata(m.new.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!((file, dir), (0o600, 0o700));
+    }
+
+    #[test]
+    fn merge_refuses_a_table_without_a_primary_key_and_keeps_the_old_file() {
+        let (m, _d) = step("dm-nopk", Policy::MergeTables(&["t"]));
+        fs::create_dir_all(m.new.parent().unwrap()).unwrap();
+        for p in [&m.old, &m.new] {
+            let c = Connection::open(p).unwrap();
+            c.execute_batch("CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('x');")
+                .unwrap();
+        }
+        assert!(migrate(&m).is_err());
+        assert!(m.old.exists());
+    }
+
+    #[test]
+    fn merge_refuses_an_unlisted_non_empty_old_table() {
+        let (m, _d) = step("dm-unlisted", Policy::MergeTables(T));
+        fs::create_dir_all(m.new.parent().unwrap()).unwrap();
+        make(&m.new, &[(1, "a")]);
+        make(&m.old, &[(2, "b")]);
+        Connection::open(&m.old)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE extra (k INTEGER PRIMARY KEY); INSERT INTO extra VALUES (1);",
+            )
+            .unwrap();
+        assert!(migrate(&m).is_err());
+        assert!(m.old.exists());
+        assert_eq!(rows(&m.new).len(), 1);
+    }
+
+    #[test]
+    fn sidecars_follow_the_renamed_main_file() {
+        let (m, _d) = step("dm-side", Policy::KeepNew);
+        fs::create_dir_all(m.new.parent().unwrap()).unwrap();
+        make(&m.new, &[(1, "a")]);
+        make(&m.old, &[(2, "b")]);
+        fs::write(with_suffix(&m.old, "-wal"), b"").unwrap();
+        migrate(&m).unwrap();
+        assert!(with_suffix(&m.old, ".migrated").exists());
+        assert!(with_suffix(&m.old, ".migrated-wal").exists());
+    }
+
+    #[test]
+    fn a_stale_partial_copy_is_removed_before_the_move() {
+        let (m, _d) = step("dm-tmp", Policy::MergeTables(T));
+        make(&m.old, &[(1, "a")]);
+        fs::create_dir_all(m.new.parent().unwrap()).unwrap();
+        let stale = with_suffix(&m.new, ".tmp-99999");
+        fs::write(&stale, b"partial").unwrap();
+        migrate(&m).unwrap();
+        assert!(!stale.exists());
+    }
+
+    #[test]
     fn list_files_reports_sizes_and_leftovers() {
         let d = scratch_dir("dm-list");
         fs::create_dir_all(d.join("x")).unwrap();
         fs::write(d.join("x").join("a.db"), b"12345").unwrap();
         fs::write(d.join("a.db.migrated"), b"1").unwrap();
+        fs::write(d.join("b.db.tmp-1"), b"1").unwrap();
         let files = list_files(&d);
-        assert_eq!(files.len(), 2);
+        assert_eq!(files.len(), 3);
         assert!(files.iter().any(|f| f.bytes == 5));
         assert!(files.iter().any(|f| is_migrated_leftover(&f.path)));
     }
