@@ -39,8 +39,8 @@ jobs:
   #
   # Docs-only means every changed path is a root policy file (README.md,
   # CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, CHANGELOG.md) or a *.md
-  # under docs/. commands/, skills/, agents/, prompts/, output-styles/ and
-  # .github/ are never docs-only: tests read them.
+  # under docs/. prompts/, hooks/ and .github/ are never docs-only: tests
+  # read them.
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -50,7 +50,7 @@ jobs:
       # Cargo package selection for clippy, tests and doc tests: `--workspace`,
       # or `-p a -p b` when only crates/<name> folders changed, plus every
       # crate that depends on them. Anything outside crates/ (Cargo.lock, the
-      # root manifest, the toolchain, commands/, hooks, .github) selects the
+      # root manifest, the toolchain, hooks, .github) selects the
       # whole workspace, and so does any error.
       pkgs: ${{ steps.classify.outputs.pkgs }}
     steps:
@@ -233,11 +233,6 @@ jobs:
       - name: Validate the tracked-file manifest
         if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: ./target/debug/playbook manifest check .
-
-      # Moved out of shell-ci for the same reason as the two validators above.
-      - name: Validate agent definitions
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
-        run: ./target/debug/playbook agents check
 
       # cargo-audit's own `cargo install --locked` compiles it from source
       # every run, ~2 minutes on ubuntu-latest, the single most expensive
