@@ -110,6 +110,12 @@ fn slugify(s: &str) -> String {
         .collect()
 }
 
+/// The worktree id of the worktree rooted at `path`: the same slug
+/// [`worktree_id`] gives from inside it, for a worktree seen from outside.
+pub fn worktree_id_for(path: &Path) -> String {
+    slugify(&path.to_string_lossy())
+}
+
 /// Which tier of a repo's scoped storage a path resolves to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepoScope {

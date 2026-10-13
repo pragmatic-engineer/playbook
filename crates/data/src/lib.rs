@@ -44,6 +44,63 @@ pub fn scoped_db_in(data: &Path, kind: &str, owner: &str, repo: &str, worktree: 
         .join(format!("{worktree}.db"))
 }
 
+/// The per-worktree database kinds.
+pub const WORKTREE_KINDS: [&str; 2] = ["gate", "code"];
+
+/// Removes the databases of one removed worktree (each kind, with its `-wal`
+/// and `-shm`). Returns how many files were removed. Missing files are fine.
+pub fn remove_worktree_dbs(data: &Path, slug: &str, worktree: &str) -> usize {
+    let Some((owner, repo)) = slug.split_once('/') else {
+        return 0;
+    };
+    if !slug.split('/').all(safe_segment) || !safe_segment(worktree) {
+        return 0;
+    }
+    let mut removed = 0;
+    for kind in WORKTREE_KINDS {
+        let main = scoped_db_in(data, kind, owner, repo, worktree);
+        for side in ["", "-wal", "-shm"] {
+            let mut name = main.as_os_str().to_owned();
+            name.push(side);
+            if std::fs::remove_file(PathBuf::from(name)).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
+/// The per-worktree databases of `slug` whose worktree id is not in `live`,
+/// as `(kind, path)`. They belong to worktrees that no longer exist.
+pub fn orphan_dbs(data: &Path, slug: &str, live: &[String]) -> Vec<(&'static str, PathBuf)> {
+    let Some((owner, repo)) = slug.split_once('/') else {
+        return Vec::new();
+    };
+    if !slug.split('/').all(safe_segment) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for kind in WORKTREE_KINDS {
+        let dir = data.join(kind).join(owner).join(repo);
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let path = e.path();
+            let is_db = path.extension().is_some_and(|x| x == "db");
+            let stem = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if is_db && path.is_file() && !live.contains(&stem) {
+                out.push((kind, path));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 /// A path part that cannot climb out of its folder or merge two kinds.
 fn safe_segment(s: &str) -> bool {
     !s.is_empty() && s != "." && s != ".." && !s.contains(['/', '\\'])
@@ -71,6 +128,44 @@ mod tests {
             data_dir_from(Path::new("/h")),
             PathBuf::from("/h/.config/playbook/data")
         );
+    }
+
+    fn touch(p: &Path) {
+        std::fs::create_dir_all(p.parent().expect("parent")).expect("dirs");
+        std::fs::write(p, b"x").expect("write");
+    }
+
+    #[test]
+    fn removing_a_worktree_takes_its_databases_and_sidecars_only() {
+        let d = std::env::temp_dir().join(format!("pbdata-rm-{}", std::process::id()));
+        let gone = scoped_db_in(&d, "gate", "o", "r", "wt-gone");
+        let kept = scoped_db_in(&d, "gate", "o", "r", "wt-kept");
+        let code = scoped_db_in(&d, "code", "o", "r", "wt-gone");
+        for p in [&gone, &kept, &code] {
+            touch(p);
+        }
+        touch(&PathBuf::from(format!("{}-wal", gone.display())));
+        assert_eq!(remove_worktree_dbs(&d, "o/r", "wt-gone"), 3);
+        assert!(!gone.exists() && !code.exists());
+        assert!(kept.exists());
+        assert_eq!(remove_worktree_dbs(&d, "o/r", "../x"), 0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn orphans_are_the_databases_of_worktrees_that_are_gone() {
+        let d = std::env::temp_dir().join(format!("pbdata-orphan-{}", std::process::id()));
+        touch(&scoped_db_in(&d, "gate", "o", "r", "live"));
+        touch(&scoped_db_in(&d, "gate", "o", "r", "dead"));
+        touch(&scoped_db_in(&d, "code", "o", "r", "dead"));
+        touch(&scoped_db_in(&d, "code", "o", "other", "dead"));
+        let got = orphan_dbs(&d, "o/r", &["live".to_string()]);
+        let names: Vec<_> = got
+            .iter()
+            .map(|(k, p)| format!("{k}:{}", p.file_name().expect("name").to_string_lossy()))
+            .collect();
+        assert_eq!(names, vec!["code:dead.db", "gate:dead.db"]);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
