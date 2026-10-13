@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook review ref` and `playbook review triage-merge`: the lens to
-//! reference mapping and the triage fail-open merge the review commands call,
-//! plus a guard that the commands call them instead of restating the rules.
+//! `playbook review triage-merge` and `review size`: the triage fail-open
+//! merge and the reviewer-count rule the review commands call.
 
 use std::fs;
 use std::io::Write;

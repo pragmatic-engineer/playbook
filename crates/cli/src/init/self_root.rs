@@ -61,6 +61,25 @@ pub fn skills_root(self_root: Option<&Path>, claude_home: &Path) -> Option<PathB
         .or_else(|| resolve(None, claude_home).filter(|root| root.join("skills").is_dir()))
 }
 
+/// The root that holds the skills, commands and agents: `claude_plugin_root_env`
+/// when it holds them, else the cached `playbook` skills plugin. `None` when no
+/// skills plugin is installed, which callers treat as "no plugin files", never
+/// as an error. The hooks plugin sets `CLAUDE_PLUGIN_ROOT` for its own hooks,
+/// so the variable alone is not enough.
+pub fn skills_root_from_env(
+    claude_plugin_root_env: Option<&str>,
+    claude_home: &Path,
+) -> Option<PathBuf> {
+    let has_components = |root: &Path| {
+        ["agents", "commands", "skills"]
+            .iter()
+            .any(|dir| root.join(dir).is_dir())
+    };
+    resolve(claude_plugin_root_env, claude_home)
+        .filter(|root| has_components(root))
+        .or_else(|| resolve(None, claude_home).filter(|root| has_components(root)))
+}
+
 /// The embedded Brewfile, written under the same embedded directory.
 pub fn embedded_brewfile(home: &Path) -> std::io::Result<PathBuf> {
     Ok(write_embedded(home)?.join("Brewfile"))
@@ -320,5 +339,34 @@ mod tests {
         // Assert
         assert!(got.starts_with(home.join(".config/playbook/embedded")));
         assert!(has_seed_files(&got));
+    }
+
+    #[test]
+    fn the_hooks_plugin_env_root_does_not_hide_the_cached_skills_plugin() {
+        // Arrange: CLAUDE_PLUGIN_ROOT points at the hooks plugin, which has no skills.
+        let claude_home = scratch("skills-env-hooks");
+        let cache = cache_dir_for(&claude_home);
+        fs::create_dir_all(cache.join("skills")).expect("skills dir");
+        let hooks_root = scratch("skills-env-hooks-root");
+
+        // Act
+        let got = skills_root_from_env(hooks_root.to_str(), &claude_home);
+
+        // Assert
+        assert_eq!(got, Some(cache));
+    }
+
+    #[test]
+    fn with_no_skills_plugin_anywhere_the_skills_root_is_none() {
+        // Arrange
+        let claude_home = scratch("skills-env-none");
+        let hooks_root = scratch("skills-env-none-root");
+
+        // Act and assert
+        assert_eq!(
+            skills_root_from_env(hooks_root.to_str(), &claude_home),
+            None
+        );
+        assert_eq!(skills_root_from_env(None, &claude_home), None);
     }
 }

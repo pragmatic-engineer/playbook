@@ -683,11 +683,6 @@ pub enum Command {
         #[command(subcommand)]
         sub: GlossaryCommand,
     },
-    /// Print the path of a skill file or one of its references
-    Skill {
-        #[command(subcommand)]
-        sub: SkillCommand,
-    },
     /// List the commands a session can use for each task
     Tools {
         #[command(subcommand)]
@@ -1376,23 +1371,6 @@ pub enum GlossaryCommand {
     },
 }
 
-/// `playbook skill` subcommands.
-#[derive(Subcommand, Debug)]
-pub enum SkillCommand {
-    /// Print the absolute path of a reference file, or of `SKILL.md`
-    ///
-    /// Falls back to `SKILL.md` when the reference is missing or not named.
-    Ref {
-        /// Skill folder name, for example `grounding-review`
-        skill: String,
-        /// Reference file name without `.md`
-        name: Option<String>,
-        /// Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
-        #[arg(long)]
-        plugin_root: Option<PathBuf>,
-    },
-}
-
 /// `playbook adr` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum AdrCommand {
@@ -1535,21 +1513,6 @@ pub enum ReviewCommand {
         /// The repository to measure in; defaults to the current directory
         #[arg(long)]
         dir: Option<PathBuf>,
-    },
-    /// Print the absolute path of the reference file a review lens reads
-    ///
-    /// Maps a deep-review lens or an implement Step 9 lens to its
-    /// grounding-review reference file and prints the absolute path. A lens
-    /// with no matching file, or an unknown one, prints the path of the full
-    /// `SKILL.md`. Hand the path to `cheap-checker`, which has no shell.
-    ///
-    /// Example: `playbook review ref security`
-    Ref {
-        /// The lens, such as `security`, `types` or `behaviour-drift`
-        lens: String,
-        /// Plugin root; defaults to `$CLAUDE_PLUGIN_ROOT`
-        #[arg(long)]
-        plugin_root: Option<PathBuf>,
     },
     /// Complete a review-triage tier map so no lens is left unclassified
     ///

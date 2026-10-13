@@ -50,22 +50,6 @@ pub fn glossary_add(root: &Path, entry: &str) -> PathBuf {
     file
 }
 
-/// The reference file for a skill, or the skill's `SKILL.md` when the file is
-/// missing or no name was given.
-pub fn skill_ref(plugin_root: &Path, skill: &str, name: Option<&str>) -> PathBuf {
-    let dir = plugin_root.join("skills").join(skill);
-    if let Some(name) = name {
-        let name = name.strip_suffix(".md").unwrap_or(name);
-        if valid_slug(name) {
-            let file = dir.join("references").join(format!("{name}.md"));
-            if file.is_file() {
-                return file;
-            }
-        }
-    }
-    dir.join("SKILL.md")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,21 +92,5 @@ mod tests {
             fs::read_to_string(file).unwrap(),
             "- **Term**: a thing\n- **Other**: another\n"
         );
-    }
-
-    #[test]
-    fn a_missing_reference_falls_back_to_the_skill_file() {
-        let root = scratch("ref");
-        let refs = root.join("skills/grounding-review/references");
-        fs::create_dir_all(&refs).unwrap();
-        fs::write(refs.join("security.md"), "").unwrap();
-        let skill = root.join("skills/grounding-review/SKILL.md");
-        assert_eq!(
-            skill_ref(&root, "grounding-review", Some("security")),
-            refs.join("security.md")
-        );
-        assert_eq!(skill_ref(&root, "grounding-review", Some("nope")), skill);
-        assert_eq!(skill_ref(&root, "grounding-review", None), skill);
-        assert_eq!(skill_ref(&root, "grounding-review", Some("../x")), skill);
     }
 }

@@ -75,7 +75,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `skill`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -1096,7 +1096,7 @@ Reads the GitHub stack API, then falls back to the branch chain. Takes the argum
 
 Setup for the review commands
 
-Subcommands: `checks`, `prepare`, `ref`, `size`, `triage-merge`
+Subcommands: `checks`, `prepare`, `size`, `triage-merge`
 
 ### `playbook review checks`
 
@@ -1117,17 +1117,6 @@ Example: `playbook review prepare deep "#4265 --self"`
 - `<KIND>`: Which review: `quick` or `deep` (one of `quick`, `deep`)
 - `<ARGS>`: The review command's arguments, as one string
 - `--auto`: Accepted for compatibility; auto mode does not skip the post question
-
-### `playbook review ref`
-
-Print the absolute path of the reference file a review lens reads
-
-Maps a deep-review lens or an implement Step 9 lens to its grounding-review reference file and prints the absolute path. A lens with no matching file, or an unknown one, prints the path of the full `SKILL.md`. Hand the path to `cheap-checker`, which has no shell.
-
-Example: `playbook review ref security`
-
-- `<LENS>`: The lens, such as `security`, `types` or `behaviour-drift`
-- `--plugin-root <PLUGIN_ROOT>`: Plugin root; defaults to `$CLAUDE_PLUGIN_ROOT`
 
 ### `playbook review size`
 
@@ -1301,22 +1290,6 @@ Print the shell function that lets `playbook cc` and `playbook ccd` change direc
 A program cannot change its parent shell's directory, so this wraps `playbook` to `cd` into a worktree that `playbook cc launch worktree <branch>` creates (the old `ccc worktree <branch>`). Load it from your rc file with `eval "$(playbook shell-init)"`.
 
 - `--shell <SHELL>`: Target shell (default: the one named by `$SHELL`) (one of `bash`, `zsh`)
-
-### `playbook skill`
-
-Print the path of a skill file or one of its references
-
-Subcommands: `ref`
-
-### `playbook skill ref`
-
-Print the absolute path of a reference file, or of `SKILL.md`
-
-Falls back to `SKILL.md` when the reference is missing or not named.
-
-- `<SKILL>`: Skill folder name, for example `grounding-review`
-- `<NAME>`: Reference file name without `.md`
-- `--plugin-root <PLUGIN_ROOT>`: Plugin root (default: `CLAUDE_PLUGIN_ROOT`)
 
 ### `playbook state`
 
