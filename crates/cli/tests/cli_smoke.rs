@@ -485,7 +485,7 @@ fn table() -> Vec<Case> {
         case("shell-init", &["shell-init"]).out("_playbook_cc").plain(),
         case("update", &["update", "--check"]).code(1).err("could not read the release list"),
         case("effort", &["effort"]).writes(),
-        case("effort", &["effort", "high"]).writes(),
+        case("effort", &["effort", "high"]).grows(),
         case("usage", &["usage", "--summary"]).writes(),
         case("version", &["version"]).out("playbook ").plain(),
         case("deps ensure", &["deps", "ensure", "{ROOT}/Brewfile"]).err("no Brewfile"),
