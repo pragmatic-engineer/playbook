@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Behavioural tests for the `rebuild-memory-graph` hook, the sole writer
-//! of `~/.config/playbook/memory/memory.graph.json`. Exercised black-box, through the
+//! of `~/.config/playbook/data/memory.db`. Exercised black-box, through the
 //! compiled `playbook` binary, the same way
 //! the retired shell test exercises the python original.
 //! Every assertion in that shell script has a corresponding case below,
@@ -48,16 +48,29 @@ fn write_fact(home: &Path, relpath: &str, content: &str) {
     fs::write(full, content).unwrap();
 }
 
+/// The database the hook writes the graph to.
 fn graph_path(home: &Path) -> PathBuf {
+    home.join(".config")
+        .join("playbook")
+        .join("data")
+        .join("memory.db")
+}
+
+/// The legacy `memory.graph.json` file of an older playbook.
+fn legacy_json_path(home: &Path) -> PathBuf {
     home.join(".config")
         .join("playbook")
         .join("memory")
         .join("memory.graph.json")
 }
 
+/// The graph in `memory.db`, as the JSON document older versions kept in a file.
 fn read_graph(home: &Path) -> Value {
-    let content = fs::read_to_string(graph_path(home)).expect("memory.graph.json should exist");
-    serde_json::from_str(&content).expect("memory.graph.json should be valid JSON")
+    let root = home.join(".config").join("playbook");
+    let content = playbook::hooks::rebuild_memory_graph::export_json(&root)
+        .expect("memory.db should be readable")
+        .expect("memory.db should exist");
+    serde_json::from_str(&content).expect("the exported graph should be valid JSON")
 }
 
 fn run_playbook(home: &Path, args: &[&str], hook_input: &str) -> Output {
@@ -735,7 +748,7 @@ fn org_source_resolves_a_link_in_its_own_scope_before_global() {
 
 /// the retired shell test scenario 10 and the brief's "non-memory
 /// file edits are a no-op" done-when criterion: writing a file outside the
-/// memory dir leaves memory.graph.json completely untouched, even when a second
+/// memory dir leaves memory.db completely untouched, even when a second
 /// in-scope fact was added to disk (but not via a hook-triggering write)
 /// in between.
 #[test]
@@ -1107,43 +1120,46 @@ fn bare_carriage_return_does_not_corrupt_a_scalar_value() {
 }
 
 /// Done-when: the graph write is atomic, so a write that cannot complete
-/// (stood in for a crash mid-write by making the memory dir read-only right
-/// before the rebuild, so the temp file this hook writes before any rename
-/// cannot even be created) leaves the previously written memory.graph.json intact
-/// rather than truncated.
+/// (stood in for a crash mid-write by making the database read-only right
+/// before the rebuild) leaves the
+/// previously written graph intact rather than emptied.
 #[test]
-fn graph_write_is_atomic_a_failed_write_cannot_truncate_the_existing_file() {
+fn graph_write_is_atomic_a_failed_write_cannot_empty_the_existing_graph() {
     // Arrange
     let home = scratch_home("atomic-write");
-    let mem_dir = home.join(".config").join("playbook").join("memory");
+    let db = graph_path(&home);
     write_fact(
         &home,
         "seed.md",
         "---\nname: seed\ntype: reference\n---\n\nBody.\n",
     );
-    run_rebuild_for(&home, "seed.md"); // establishes a real memory.graph.json while the dir is still writable
+    run_rebuild_for(&home, "seed.md"); // establishes a real memory.db while the dir is still writable
 
-    if !permission_checks_are_enforced(&mem_dir) {
+    if !permission_checks_are_enforced(db.parent().unwrap()) {
         eprintln!(
-            "skipping graph_write_is_atomic_a_failed_write_cannot_truncate_the_existing_file: \
+            "skipping graph_write_is_atomic_a_failed_write_cannot_empty_the_existing_graph: \
              this filesystem/user does not enforce permission bits (likely running as root)"
         );
         let _ = fs::remove_dir_all(&home);
         return;
     }
 
-    let sentinel = r#"{"nodes":[],"edges":[],"sentinel":true}"#;
-    fs::write(graph_path(&home), sentinel).unwrap();
-    set_mode(&mem_dir, 0o555); // read + execute only: no new file can be created in it
+    write_fact(
+        &home,
+        "second.md",
+        "---\nname: second\ntype: reference\n---\n\nBody.\n",
+    );
+    set_mode(&db, 0o444); // read only: the database cannot be written
 
     // Act
-    run_rebuild_for(&home, "seed.md");
+    run_rebuild_for(&home, "second.md");
 
-    // Assert: the temp-file write failed before any rename could happen, so
-    // the sentinel content set above survives untouched.
-    let after = fs::read_to_string(graph_path(&home)).unwrap();
-    set_mode(&mem_dir, 0o755); // restore before cleanup can remove the dir
-    assert_eq!(after, sentinel);
+    // Assert: the write failed before anything was stored, so the graph still
+    // holds the seed alone.
+    set_mode(&db, 0o644);
+    let after = read_graph(&home);
+    assert!(has_node(&after, "global/seed"));
+    assert!(!has_node(&after, "global/second"));
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -1274,24 +1290,23 @@ fn hook_rebuild_path_stays_silent_on_stdout_but_reports_unreadable_subdirectory_
     let _ = fs::remove_dir_all(&home);
 }
 
-/// Done-when: a write failure (the memory dir is read-only, so the temp file
-/// this hook writes before any rename cannot even be created) makes
-/// `playbook memory rebuild` exit non-zero and report the real failure on
-/// stderr, instead of the hardcoded success line, and leaves the previously
-/// written `memory.graph.json` byte-for-byte intact.
+/// Done-when: a write failure (the database is read-only, so it cannot be
+/// written) makes `playbook memory rebuild` exit non-zero and
+/// report the real failure on stderr, instead of the hardcoded success line,
+/// and leaves the previously written graph intact.
 #[test]
 fn memory_rebuild_subcommand_fails_loud_on_a_write_failure() {
     // Arrange
     let home = scratch_home("write-failure-cli");
-    let mem_dir = home.join(".config").join("playbook").join("memory");
+    let db = graph_path(&home);
     write_fact(
         &home,
         "seed.md",
         "---\nname: seed\ntype: reference\n---\n\nBody.\n",
     );
-    run_rebuild_for(&home, "seed.md"); // establishes a real memory.graph.json while the dir is still writable
+    run_rebuild_for(&home, "seed.md"); // establishes a real memory.db while the dir is still writable
 
-    if !permission_checks_are_enforced(&mem_dir) {
+    if !permission_checks_are_enforced(db.parent().unwrap()) {
         eprintln!(
             "skipping memory_rebuild_subcommand_fails_loud_on_a_write_failure: \
              this filesystem/user does not enforce permission bits (likely running as root)"
@@ -1300,14 +1315,14 @@ fn memory_rebuild_subcommand_fails_loud_on_a_write_failure() {
         return;
     }
 
-    let before = fs::read_to_string(graph_path(&home)).unwrap();
-    set_mode(&mem_dir, 0o555); // read + execute only: no new file can be created in it
+    let before = read_graph(&home);
+    set_mode(&db, 0o444); // read only: the database cannot be written
 
     // Act
     let out = run_playbook(&home, &["memory", "rebuild"], "");
 
     // Assert
-    set_mode(&mem_dir, 0o755); // restore before cleanup can remove the dir
+    set_mode(&db, 0o644);
     assert!(
         !out.status.success(),
         "memory rebuild should exit non-zero when the graph write fails"
@@ -1318,37 +1333,36 @@ fn memory_rebuild_subcommand_fails_loud_on_a_write_failure() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("write memory.graph.json"),
+        stderr.contains("write memory.db"),
         "stderr should contain the RebuildError wrapper text: {stderr}"
     );
-    let after = fs::read_to_string(graph_path(&home)).unwrap();
     assert_eq!(
-        after, before,
-        "the previous memory.graph.json must stay byte-for-byte intact after a failed write"
+        read_graph(&home),
+        before,
+        "the previous graph must stay intact after a failed write"
     );
 
     let _ = fs::remove_dir_all(&home);
 }
 
-/// Done-when: a rename failure (the target path already occupied by a
-/// directory instead of the graph file) makes `playbook memory rebuild`
-/// exit non-zero and report the real failure on stderr. Forced
-/// deterministically by replacing the graph file with a directory of the
-/// same name, not by permission bits, so this needs no root-skip.
+/// Done-when: a database that cannot be opened (the path is occupied by a
+/// directory) makes `playbook memory rebuild` exit non-zero and report the
+/// real failure on stderr. Forced deterministically by replacing the
+/// database with a directory of the same name, not by permission bits, so
+/// this needs no root-skip.
 #[test]
-fn memory_rebuild_subcommand_fails_loud_on_a_rename_failure() {
+fn memory_rebuild_subcommand_fails_loud_when_the_database_cannot_be_opened() {
     // Arrange
     let home = scratch_home("rename-failure-cli");
-    let mem_dir = home.join(".config").join("playbook").join("memory");
     write_fact(
         &home,
         "seed.md",
         "---\nname: seed\ntype: reference\n---\n\nBody.\n",
     );
-    run_rebuild_for(&home, "seed.md"); // establishes a real memory.graph.json
+    run_rebuild_for(&home, "seed.md"); // establishes a real memory.db
 
     fs::remove_file(graph_path(&home)).unwrap();
-    fs::create_dir(mem_dir.join("memory.graph.json")).unwrap();
+    fs::create_dir(graph_path(&home)).unwrap();
 
     // Act
     let out = run_playbook(&home, &["memory", "rebuild"], "");
@@ -1356,7 +1370,7 @@ fn memory_rebuild_subcommand_fails_loud_on_a_rename_failure() {
     // Assert
     assert!(
         !out.status.success(),
-        "memory rebuild should exit non-zero when the graph rename fails"
+        "memory rebuild should exit non-zero when the database cannot be opened"
     );
     assert!(
         out.stdout.is_empty(),
@@ -1364,7 +1378,7 @@ fn memory_rebuild_subcommand_fails_loud_on_a_rename_failure() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("write memory.graph.json"),
+        stderr.contains("write memory.db"),
         "stderr should contain the RebuildError wrapper text: {stderr}"
     );
 
@@ -1549,12 +1563,10 @@ fn sort_key(v: &Value) -> String {
     )
 }
 
-/// Parse `memory.graph.json` at `path` and sort its `nodes`/`edges` arrays by a
+/// The graph in `memory.db` with its `nodes`/`edges` arrays sorted by a
 /// canonical key, for comparison that ignores array order.
-fn canonical_graph(path: &Path) -> Value {
-    let content = fs::read_to_string(path).expect("memory.graph.json should exist");
-    let mut value: Value =
-        serde_json::from_str(&content).expect("memory.graph.json should be valid JSON");
+fn canonical_graph(home: &Path) -> Value {
+    let mut value = read_graph(home);
     if let Some(arr) = value.get_mut("nodes").and_then(Value::as_array_mut) {
         arr.sort_by_key(sort_key);
     }
@@ -1565,7 +1577,7 @@ fn canonical_graph(path: &Path) -> Value {
 }
 
 /// Run the python writer and the Rust writer over the same fixture memory
-/// tree and assert the two `memory.graph.json` outputs are equal.
+/// tree and assert the two graphs are equal.
 ///
 /// Byte-for-byte equality is not attempted here and would not be
 /// meaningful: python's `os.walk` and Rust's `fs::read_dir` both return
@@ -1591,7 +1603,7 @@ fn rust_writer_matches_the_frozen_python_golden() {
     // ADR 0007 WU-14, so its output is committed instead. This keeps the
     // cross-implementation check that a ported-only suite cannot give, since
     // a ported suite passes against an empty stub.
-    let mut rust_graph = canonical_graph(&graph_path(&home_rs));
+    let mut rust_graph = canonical_graph(&home_rs);
     assert_eq!(
         rust_graph["version"], 1,
         "graph output should carry \"version\":1"
@@ -1620,7 +1632,7 @@ fn rust_writer_matches_the_frozen_python_golden() {
     .expect("golden fixture should be valid JSON");
     assert_eq!(
         golden, rust_graph,
-        "rust memory.graph.json drifted from the frozen python output"
+        "rust memory.db drifted from the frozen python output"
     );
 
     let _ = fs::remove_dir_all(&home_rs);
@@ -1685,7 +1697,7 @@ fn memory_rebuild_subcommand_rebuilds_with_no_payload_where_the_hook_skips() {
         graph.exists(),
         "memory rebuild must rebuild with no payload, which is what --graph-only needs"
     );
-    let value = canonical_graph(&graph);
+    let value = canonical_graph(&home);
     assert!(
         !value["nodes"].as_array().unwrap().is_empty(),
         "the rebuilt graph should carry the fixture tree's facts, not be empty"
@@ -2066,10 +2078,10 @@ fn two_rebuilds_of_the_same_store_write_the_same_bytes() {
         "---\nname: source\ntype: reference\nlinks:\n  relates_to: target-a\n  depends_on: target-b\n  supersedes: target-a\n  contradicts: target-b\n---\nBody\n",
     );
     assert!(run_rebuild_for(&home, "source.md").status.success());
-    let first = fs::read(graph_path(&home)).unwrap();
+    let first = read_graph(&home);
     for _ in 0..5 {
         assert!(run_rebuild_for(&home, "source.md").status.success());
-        assert_eq!(fs::read(graph_path(&home)).unwrap(), first);
+        assert_eq!(read_graph(&home), first);
     }
 }
 
@@ -2098,28 +2110,29 @@ fn a_large_store_takes_the_threaded_path_and_still_finds_the_similar_pair() {
         &format!("---\nname: twin-b\ntype: reference\n---\n{shared}\n"),
     );
     assert!(run_rebuild_for(&home, "twin-a.md").status.success());
-    let first = fs::read(graph_path(&home)).unwrap();
+    let first = read_graph(&home);
     let graph = read_graph(&home);
     let signals = possible_relates_to_signals(&graph, "global/twin-a", "global/twin-b")
         .expect("the twins share type_scope and body_overlap");
     assert_eq!(signals, &vec![json!("type_scope"), json!("body_overlap")]);
     assert!(run_rebuild_for(&home, "twin-a.md").status.success());
-    assert_eq!(fs::read(graph_path(&home)).unwrap(), first);
+    assert_eq!(read_graph(&home), first);
 }
 
-// --- memory.db: the derived index beside the JSON -----------------------
+// --- memory.db: the one store of the graph -----------------------------
 
 fn memory_db(home: &Path) -> PathBuf {
-    home.join(".config")
-        .join("playbook")
-        .join("data")
-        .join("memory.db")
+    graph_path(home)
 }
 
 const PINNED_FACT: &str = "---\nname: a-fact\ndescription: d\ntype: feedback\npinned: true\nanchors:\n  - code:~/.zshrc\n---\nbody\n";
 
+fn export(home: &Path) -> Output {
+    run_playbook(home, &["memory", "export", "--json"], "")
+}
+
 #[test]
-fn a_rebuild_also_writes_the_same_graph_into_memory_db() {
+fn a_rebuild_writes_the_graph_into_memory_db_and_no_json_file() {
     let home = scratch_home("memdb-same");
     write_fact(&home, "global/a-fact.md", PINNED_FACT);
 
@@ -2130,28 +2143,21 @@ fn a_rebuild_also_writes_the_same_graph_into_memory_db() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let json = read_graph(&home);
-    let exported = run_playbook(&home, &["memory", "export", "--json"], "");
+    assert!(memory_db(&home).is_file());
+    assert!(
+        !legacy_json_path(&home).exists(),
+        "memory.graph.json is not written any more"
+    );
+    let exported = export(&home);
     assert!(
         exported.status.success(),
         "{}",
         String::from_utf8_lossy(&exported.stderr)
     );
-    let from_db: Value = serde_json::from_slice(&exported.stdout).expect("export is JSON");
-    let sorted = |doc: &Value, key: &str| {
-        let mut rows = doc[key].as_array().cloned().unwrap_or_default();
-        rows.sort_by_key(|r| r.to_string());
-        rows
-    };
-    for key in ["nodes", "edges"] {
-        assert_eq!(
-            sorted(&from_db, key),
-            sorted(&json, key),
-            "memory.db and memory.graph.json hold one graph ({key})"
-        );
-    }
-    assert_eq!(from_db["version"], json["version"]);
-    assert!(memory_db(&home).is_file());
+    let from_cli: Value = serde_json::from_slice(&exported.stdout).expect("export is JSON");
+    assert_eq!(from_cli, read_graph(&home));
+    assert!(has_node(&from_cli, "global/a-fact"));
+    assert_eq!(from_cli["version"], 1);
 }
 
 #[test]

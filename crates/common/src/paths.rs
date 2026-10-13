@@ -21,8 +21,8 @@ pub fn playbook_root_from(home: &Path) -> PathBuf {
     home.join(".config").join("playbook")
 }
 
-/// `$HOME/.config/playbook/memory`: saved memory facts and the rebuilt
-/// `memory.graph.json`.
+/// `$HOME/.config/playbook/memory`: saved memory facts. The graph built from
+/// them is `data/memory.db`.
 pub fn memory_dir() -> PathBuf {
     playbook_root().join("memory")
 }

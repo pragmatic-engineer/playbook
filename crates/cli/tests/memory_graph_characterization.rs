@@ -109,8 +109,11 @@ fn rebuild_of_a_generated_corpus_pins_the_similarity_edges() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let graph: Value =
-        serde_json::from_str(&fs::read_to_string(mem.join("memory.graph.json")).unwrap()).unwrap();
+    let graph: Value = serde_json::from_str(
+        &playbook::hooks::rebuild_memory_graph::graph_text(&mem)
+            .expect("memory.db should hold the graph"),
+    )
+    .unwrap();
     let lines: Vec<String> = graph["edges"]
         .as_array()
         .unwrap()

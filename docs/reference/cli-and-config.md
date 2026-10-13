@@ -855,13 +855,13 @@ Subcommands: `context`, `export`, `import-claude`, `rebuild`
 Print the repo-scoped markdown slice of the memory graph (facts in scope, typed edges, anchor index). When there is nothing to show it prints one `Memory context: none (<reason>)` line, exit 0. A missing default graph is rebuilt from the fact files first
 
 - `--repo <REPO>`: Repo slug (`owner/name`); defaults to the origin remote's slug
-- `--graph <GRAPH>`: Graph file; defaults to `~/.config/playbook/memory/memory.graph.json`
+- `--graph <GRAPH>`: Graph JSON file; defaults to the graph in `~/.config/playbook/data/memory.db`
 
 ### `playbook memory export`
 
 Print the memory graph as JSON
 
-The graph lives in `~/.config/playbook/data/memory.db`, rebuilt from the fact files. This prints the same document `memory.graph.json` holds, for tools that read that shape. A missing database is rebuilt first.
+The graph lives in `~/.config/playbook/data/memory.db`, rebuilt from the fact files. This prints the document older versions kept in `memory.graph.json`, for tools that read that shape. A missing database is rebuilt first.
 
 Example: `playbook memory export --json`
 
@@ -882,7 +882,7 @@ Example: `playbook memory import-claude --dry-run`
 
 Rebuild the memory graph from every fact on disk
 
-Memory is rebuilt on its own when a fact is saved, so you only need this after editing fact files by hand.
+Memory is rebuilt on its own when a fact is saved, so you only need this after editing fact files by hand. The graph is written to `~/.config/playbook/data/memory.db`; the fact files stay the source of truth, so the database is safe to delete.
 
 ### `playbook mode`
 
@@ -939,7 +939,7 @@ Example: `playbook plan brief docs/plan.md WU-1 WU-2 --out /tmp/briefs --verify 
 - `--worktree-base <WORKTREE_BASE>`: Folder holding one worktree per Work Unit, named by its lower case id
 - `--verify <VERIFY>`: Scoped verify command; `{tests}` and `{files}` become the Work Unit's paths
 - `--repo <REPO>`: Repo slug (`owner/name`) for the memory scope; defaults to the origin remote's
-- `--graph <GRAPH>`: Memory graph file; defaults to `~/.config/playbook/memory/memory.graph.json`
+- `--graph <GRAPH>`: Graph JSON file; defaults to the graph in `~/.config/playbook/data/memory.db`
 
 ### `playbook plan checkpoint`
 

@@ -984,14 +984,16 @@ pub enum MemoryCommand {
     /// Rebuild the memory graph from every fact on disk
     ///
     /// Memory is rebuilt on its own when a fact is saved, so you only need
-    /// this after editing fact files by hand.
+    /// this after editing fact files by hand. The graph is written to
+    /// `~/.config/playbook/data/memory.db`; the fact files stay the source of
+    /// truth, so the database is safe to delete.
     Rebuild,
     /// Print the memory graph as JSON
     ///
     /// The graph lives in `~/.config/playbook/data/memory.db`, rebuilt from
-    /// the fact files. This prints the same document `memory.graph.json`
-    /// holds, for tools that read that shape. A missing database is rebuilt
-    /// first.
+    /// the fact files. This prints the document older versions kept in
+    /// `memory.graph.json`, for tools that read that shape. A missing database
+    /// is rebuilt first.
     ///
     /// Example: `playbook memory export --json`
     Export {
@@ -1025,7 +1027,7 @@ pub enum MemoryCommand {
         /// Repo slug (`owner/name`); defaults to the origin remote's slug.
         #[arg(long)]
         repo: Option<String>,
-        /// Graph file; defaults to `~/.config/playbook/memory/memory.graph.json`.
+        /// Graph JSON file; defaults to the graph in `~/.config/playbook/data/memory.db`.
         #[arg(long)]
         graph: Option<PathBuf>,
     },
@@ -1338,7 +1340,7 @@ pub enum PlanCommand {
         /// Repo slug (`owner/name`) for the memory scope; defaults to the origin remote's
         #[arg(long)]
         repo: Option<String>,
-        /// Memory graph file; defaults to `~/.config/playbook/memory/memory.graph.json`
+        /// Graph JSON file; defaults to the graph in `~/.config/playbook/data/memory.db`
         #[arg(long)]
         graph: Option<PathBuf>,
     },

@@ -258,7 +258,7 @@ fn check_config_drift(payload: &Payload, dir: &str, home: &str) -> (String, Stri
     (system_message, extra_context)
 }
 
-/// Reads `memory.graph.json` and `memory.signals.json` (read only) and injects
+/// Reads `memory.db` and `memory.signals.json` (read only) and injects
 /// one small ranked block of the repo's most relevant facts. Nothing is added
 /// when there is no repo, no slug, no readable graph, nothing ranks, or the
 /// rest of the context has already used the budget.
@@ -268,7 +268,7 @@ fn append_memory_context(extra_context: &mut String, repo_root: &str) {
         return;
     }
     let mem_dir = crate::common::paths::memory_dir();
-    let Ok(content) = fs::read_to_string(mem_dir.join("memory.graph.json")) else {
+    let Some(content) = crate::hooks::rebuild_memory_graph::graph_text(&mem_dir) else {
         return;
     };
     let Some(graph) = crate::json::memorycontext::parse_graph(&content) else {
