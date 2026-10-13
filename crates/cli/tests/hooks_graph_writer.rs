@@ -2193,3 +2193,47 @@ fn a_second_rebuild_replaces_the_rows_and_does_not_add_to_them() {
         "the removed fact is gone from the db"
     );
 }
+
+#[test]
+fn two_files_naming_one_node_leave_one_node_in_both_stores() {
+    let home = scratch_home("memdb-collide");
+    write_fact(&home, "x.md", PINNED_FACT.replace("a-fact", "x").as_str());
+    write_fact(
+        &home,
+        "global/x.md",
+        PINNED_FACT.replace("a-fact", "x").as_str(),
+    );
+
+    let out = run_rebuild_for(&home, "global/x.md");
+
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json = read_graph(&home);
+    let exported = run_playbook(&home, &["memory", "export", "--json"], "");
+    let doc: Value = serde_json::from_slice(&exported.stdout).unwrap();
+    let count = |g: &Value| nodes(g).iter().filter(|n| n["id"] == "global/x").count();
+    assert_eq!(count(&json), 1, "the file holds the node once");
+    assert_eq!(count(&doc), 1, "the database holds the node once");
+    assert_eq!(nodes(&json).len(), nodes(&doc).len());
+    assert_eq!(edges(&json).len(), edges(&doc).len());
+}
+
+#[test]
+fn a_top_level_fact_is_a_global_node_in_the_database() {
+    let home = scratch_home("memdb-top-level");
+    write_fact(
+        &home,
+        "top.md",
+        PINNED_FACT.replace("a-fact", "top").as_str(),
+    );
+
+    run_rebuild_for(&home, "top.md");
+
+    let exported = run_playbook(&home, &["memory", "export", "--json"], "");
+    let doc: Value = serde_json::from_slice(&exported.stdout).unwrap();
+    assert!(has_node(&doc, "global/top"));
+    assert!(has_node(&read_graph(&home), "global/top"));
+}

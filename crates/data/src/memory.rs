@@ -158,6 +158,17 @@ pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<()
     tx.commit().map_err(|e| e.to_string())
 }
 
+/// Removes the database file and its journal files, so a reader finds no
+/// graph rather than a stale one. Errors are ignored: a missing file is the
+/// goal, and a file that cannot be removed is no worse than before.
+pub fn remove_db(db: &Path) {
+    for suffix in ["-wal", "-shm", ""] {
+        let mut name = db.as_os_str().to_os_string();
+        name.push(suffix);
+        let _ = std::fs::remove_file(PathBuf::from(name));
+    }
+}
+
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -176,7 +187,10 @@ pub fn read_graph(db: &Path) -> Result<Option<Graph>, String> {
     )
     .map_err(|e| e.to_string())?;
     conn.busy_timeout(BUSY).map_err(|e| e.to_string())?;
-    let mut ns = conn
+    // One read transaction for both tables, so a rebuild between the two
+    // queries cannot hand back nodes of one graph with edges of the next.
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let mut ns = tx
         .prepare(
             "SELECT id, file, scope, project, type, name, description, pinned FROM nodes ORDER BY id",
         )
@@ -197,7 +211,7 @@ pub fn read_graph(db: &Path) -> Result<Option<Graph>, String> {
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
-    let mut es = conn
+    let mut es = tx
         .prepare("SELECT src, dst, relation, signals FROM edges ORDER BY src, dst, relation")
         .map_err(|e| e.to_string())?;
     let edges = es
@@ -321,14 +335,45 @@ mod tests {
     }
 
     #[test]
+    fn two_nodes_with_one_id_leave_one_row() {
+        let d = scratch_dir("mem-dup");
+        let db = db_in(&d);
+        write_graph(&db, &[node("b"), node("b")], &[]).unwrap();
+        let (n, _) = read_graph(&db).unwrap().unwrap();
+        assert_eq!(n.len(), 1);
+    }
+
+    #[test]
     fn a_failed_rewrite_leaves_the_old_graph() {
         let d = scratch_dir("mem-atomic");
         let db = db_in(&d);
         write_graph(&db, &[node("a")], &[]).unwrap();
-        // Two nodes with one id cannot both stay; the second replaces the first,
-        // and the transaction still commits whole.
-        write_graph(&db, &[node("b"), node("b")], &[]).unwrap();
+        // A trigger makes the insert of one node fail halfway through.
+        Connection::open(&db)
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER boom BEFORE INSERT ON nodes WHEN NEW.id = 'boom' \
+                 BEGIN SELECT RAISE(ABORT, 'boom'); END;",
+            )
+            .unwrap();
+
+        let result = write_graph(&db, &[node("c"), node("boom")], &[]);
+
+        assert!(result.is_err());
         let (n, _) = read_graph(&db).unwrap().unwrap();
         assert_eq!(n.len(), 1);
+        assert_eq!(n[0].id, "a");
+    }
+
+    #[test]
+    fn remove_db_takes_the_file_and_its_journal_files() {
+        let d = scratch_dir("mem-remove");
+        let db = db_in(&d);
+        write_graph(&db, &[node("a")], &[]).unwrap();
+
+        remove_db(&db);
+
+        assert!(!db.exists());
+        assert!(read_graph(&db).unwrap().is_none());
     }
 }
