@@ -315,3 +315,16 @@ fn live_worktree_checkouts_are_not_copied() {
     assert!(!f.expected_dir("worktrees").join("branch").exists());
     assert!(old.join("branch/file.rs").is_file());
 }
+
+#[test]
+fn handoff_kind_prints_the_old_shared_folder_without_an_origin_remote() {
+    let f = Fixture::new_without_origin("handoff-no-origin");
+
+    let out = f.run("handoff");
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    assert_eq!(
+        PathBuf::from(stdout_of(&out).trim()),
+        f.home.join(".config/playbook/runtime/handoff")
+    );
+}

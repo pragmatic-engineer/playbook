@@ -148,6 +148,19 @@ pub fn repo_scoped_dir(kind: RepoScope) -> Option<PathBuf> {
     Some(repo_scope_path(&playbook_root(), owner, repo, kind, &id))
 }
 
+/// `repos/<owner>/<repo>/` for an `<owner>/<repo>` slug, or `None` when the
+/// slug is empty or has no owner.
+pub fn repo_dir_for_slug(slug: &str) -> Option<PathBuf> {
+    let (owner, repo) = slug.split_once('/')?;
+    Some(repo_scope_path(
+        &playbook_root(),
+        owner,
+        repo,
+        RepoScope::Repo,
+        "",
+    ))
+}
+
 /// Pure form of `repo_scoped_dir` for a known root, owner, repo and worktree id.
 pub fn repo_scope_path(
     root: &Path,

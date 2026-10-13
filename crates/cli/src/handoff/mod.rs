@@ -33,7 +33,19 @@ const OTHER_DIRS_SHOWN: usize = 5;
 /// The handoff folder for the repo this process runs in, or the old global
 /// folder outside a repo with an `origin` remote. See [`crate::storage`].
 pub fn root() -> PathBuf {
-    crate::storage::handoff_root(&current_slug())
+    crate::storage::handoff_root(&current_slug(), None)
+}
+
+/// The folder for the directory `dir` names, which may sit in another repo
+/// than the current one.
+fn root_for_dir(dir: &str, slug: &str) -> PathBuf {
+    let given = Path::new(dir);
+    let absolute = if given.is_absolute() {
+        given.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(given)
+    };
+    crate::storage::handoff_root(slug, Some(&absolute))
 }
 
 /// Longest key kept. The file name adds an epoch, a pid, and `.md`, and a
@@ -114,7 +126,7 @@ fn parse_name(name: &str, slug: &str) -> Option<Option<String>> {
     parts.next().is_none().then(|| Some(tag.to_string()))
 }
 
-fn is_handoff_for(name: &str, slug: &str) -> bool {
+pub(crate) fn is_handoff_for(name: &str, slug: &str) -> bool {
     parse_name(name, slug).is_some()
 }
 
@@ -434,12 +446,16 @@ fn show_in(dir: &Path, slug: &str, all: bool, now: SystemTime) -> String {
 
 /// CLI entry for `handoff save`.
 pub fn run_save(dir: Option<&str>, text: &str, session: Option<&str>) -> Result<String, String> {
-    let slug = match dir {
-        Some(d) => slug_for_dir(d)?,
-        None => current_slug(),
+    let (slug, root) = match dir {
+        Some(d) => {
+            let slug = slug_for_dir(d)?;
+            let root = root_for_dir(d, &slug);
+            (slug, root)
+        }
+        None => (current_slug(), root()),
     };
     let path = save_in(
-        &root(),
+        &root,
         &slug,
         text,
         crate::common::time::now_epoch_secs(),
@@ -451,11 +467,15 @@ pub fn run_save(dir: Option<&str>, text: &str, session: Option<&str>) -> Result<
 
 /// CLI entry for `handoff show`.
 pub fn run_show(dir: Option<&str>, all: bool) -> Result<String, String> {
-    let slug = match dir {
-        Some(d) => slug_for_dir(d)?,
-        None => current_slug(),
+    let (slug, root) = match dir {
+        Some(d) => {
+            let slug = slug_for_dir(d)?;
+            let root = root_for_dir(d, &slug);
+            (slug, root)
+        }
+        None => (current_slug(), root()),
     };
-    Ok(show_in(&root(), &slug, all, SystemTime::now()))
+    Ok(show_in(&root, &slug, all, SystemTime::now()))
 }
 
 const LOG_FILE: &str = "session-start.log";

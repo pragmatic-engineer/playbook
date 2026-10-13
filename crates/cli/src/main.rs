@@ -1772,10 +1772,16 @@ fn main() {
                 playbook::PathKind::Plans => Some(storage::Kind::Plans),
                 playbook::PathKind::Implement => Some(storage::Kind::Implement),
                 playbook::PathKind::Worktrees => Some(storage::Kind::Worktrees),
-                playbook::PathKind::Handoff => Some(storage::Kind::Handoff),
-                playbook::PathKind::Data => None,
+                playbook::PathKind::Handoff | playbook::PathKind::Data => None,
             };
-            match stored.and_then(storage::kind_dir) {
+            let resolved = if matches!(kind, playbook::PathKind::Handoff) {
+                // Outside a repo this is the old shared folder, the same one
+                // `handoff save` writes to there.
+                Some(handoff::root())
+            } else {
+                stored.and_then(storage::kind_dir)
+            };
+            match resolved {
                 Some(dir) => {
                     if create {
                         if let Err(err) = std::fs::create_dir_all(&dir) {

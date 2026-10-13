@@ -13,7 +13,8 @@
 //! deleted or overwritten: an old file stays where it was, and a `MOVED.txt`
 //! note beside it says where the copy went and doubles as the "done" marker.
 
-use crate::common::paths::{repo_scoped_dir, RepoScope};
+use crate::common::paths::{repo_dir_for_slug, repo_scoped_dir, RepoScope};
+use crate::common::repo::repo_slug_in;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -54,6 +55,15 @@ pub fn repo_dir() -> Option<PathBuf> {
     repo_scoped_dir(RepoScope::Repo)
 }
 
+/// `repos/<owner>/<repo>/` for the repo that holds `dir`, or for the current
+/// repo when `dir` is `None`.
+pub fn repo_dir_in(dir: Option<&Path>) -> Option<PathBuf> {
+    match dir {
+        None => repo_dir(),
+        Some(dir) => repo_dir_for_slug(&repo_slug_in(dir)),
+    }
+}
+
 /// The folder for `kind`, after copying anything older versions left in a
 /// worktree-scoped folder. `None` without a usable `origin` remote.
 pub fn kind_dir(kind: Kind) -> Option<PathBuf> {
@@ -69,17 +79,22 @@ pub fn kind_dir(kind: Kind) -> Option<PathBuf> {
     Some(base.join(kind.dir_name()))
 }
 
-/// Old worktree folders sit next to the new ones, named by a slug of the
-/// worktree's absolute path, which always starts with a dash.
-fn worktree_dirs(base: &Path) -> Vec<PathBuf> {
+/// Names under a repo folder that are not old worktree folders.
+const RESERVED: &[&str] = &["plans", "implement", "worktrees", "handoff", ".config"];
+
+/// Old worktree folders sit next to the new ones, named by an id built from
+/// the worktree's absolute path. The id starts with a dash on Unix and with a
+/// drive letter on Windows, so a folder counts by shape: it is not one of the
+/// new folders and it holds a `<kind>/` folder.
+fn worktree_dirs(base: &Path, kind: Kind) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(base) else {
         return Vec::new();
     };
     let mut dirs: Vec<PathBuf> = entries
         .flatten()
-        .filter(|e| e.file_name().to_string_lossy().starts_with('-'))
+        .filter(|e| !RESERVED.contains(&e.file_name().to_string_lossy().as_ref()))
         .map(|e| e.path())
-        .filter(|p| p.is_dir())
+        .filter(|p| p.is_dir() && p.join(kind.dir_name()).is_dir())
         .collect();
     dirs.sort();
     dirs
@@ -92,30 +107,63 @@ pub fn migrate_worktree_dirs(base: &Path, kind: Kind) -> io::Result<()> {
         return Ok(());
     }
     let new = base.join(kind.dir_name());
-    for old in worktree_dirs(base)
+    for old in worktree_dirs(base, kind)
         .into_iter()
         .map(|d| d.join(kind.dir_name()))
         .filter(|d| d.is_dir() && !d.join(POINTER).exists())
     {
         fs::create_dir_all(&new)?;
         let stats = copy_missing(&old, &new)?;
-        write_pointer(&old, &new, &format!("{} files copied, {} kept apart because the new folder already had a different file with the same name", stats.copied, stats.clashed))?;
-        if stats.copied > 0 || stats.clashed > 0 {
+        let mut summary = format!(
+            "{} files copied, {} kept apart because the new folder already had a different file with the same name",
+            stats.copied,
+            stats.clashed.len()
+        );
+        for name in &stats.clashed {
+            summary.push_str(&format!("\n  kept apart: {}", name.display()));
+        }
+        if stats.skipped > 0 {
+            summary.push_str(&format!(
+                "\n  {} link(s) or special file(s) were not copied",
+                stats.skipped
+            ));
+        }
+        write_pointer(&old, &new, &summary)?;
+        if stats.copied > 0 || !stats.clashed.is_empty() {
             eprintln!(
                 "playbook: copied {} file(s) from {} to {}; the originals stay where they are",
                 stats.copied,
                 old.display(),
                 new.display()
             );
+            for name in stats.clashed.iter().take(CLASH_NAMES_SHOWN) {
+                eprintln!(
+                    "playbook: kept apart, the new folder has a different {}",
+                    name.display()
+                );
+            }
+            if stats.clashed.len() > CLASH_NAMES_SHOWN {
+                eprintln!(
+                    "playbook: and {} more; see {}",
+                    stats.clashed.len() - CLASH_NAMES_SHOWN,
+                    old.join(POINTER).display()
+                );
+            }
         }
     }
     Ok(())
 }
 
+/// Most clashing file names printed on stderr; the pointer note lists them all.
+const CLASH_NAMES_SHOWN: usize = 5;
+
 #[derive(Default)]
 struct Copied {
     copied: usize,
-    clashed: usize,
+    /// Files whose name the new folder already had with different bytes.
+    clashed: Vec<PathBuf>,
+    /// Symbolic links and special files, which are not copied.
+    skipped: usize,
 }
 
 /// Copy regular files from `from` into `to`, recursively. A name that already
@@ -133,34 +181,47 @@ fn copy_missing(from: &Path, to: &Path) -> io::Result<Copied> {
             fs::create_dir_all(&target)?;
             let inner = copy_missing(&entry.path(), &target)?;
             stats.copied += inner.copied;
-            stats.clashed += inner.clashed;
+            stats.clashed.extend(inner.clashed);
+            stats.skipped += inner.skipped;
         } else if kind.is_file() {
             if copy_new(&entry.path(), &target)? {
                 stats.copied += 1;
             } else if !same_bytes(&entry.path(), &target) {
-                stats.clashed += 1;
+                stats.clashed.push(target);
             }
+        } else {
+            stats.skipped += 1;
         }
     }
     Ok(stats)
 }
 
-/// Copy `from` to `to` unless `to` exists. The bytes land in a temporary file
-/// first and a hard link puts them in place, so a reader never sees half a
-/// file and two processes cannot both win.
+/// Copy `from` to `to` unless `to` exists, keeping the file's modified time
+/// (a handoff's age decides whether it is still fresh). The bytes land in a
+/// temporary file first and a hard link puts them in place, so a reader never
+/// sees half a file and two processes cannot both win.
 fn copy_new(from: &Path, to: &Path) -> io::Result<bool> {
     if to.exists() {
         return Ok(false);
     }
     let tmp = to.with_extension(format!("copying-{}", std::process::id()));
-    fs::copy(from, &tmp)?;
-    let linked = fs::hard_link(&tmp, to);
+    let staged = stage(from, &tmp);
+    let linked = staged.and_then(|()| fs::hard_link(&tmp, to));
     let _ = fs::remove_file(&tmp);
     match linked {
         Ok(()) => Ok(true),
         Err(err) if err.kind() == io::ErrorKind::AlreadyExists => Ok(false),
         Err(err) => Err(err),
     }
+}
+
+fn stage(from: &Path, tmp: &Path) -> io::Result<()> {
+    let modified = fs::metadata(from)?.modified()?;
+    fs::copy(from, tmp)?;
+    fs::OpenOptions::new()
+        .write(true)
+        .open(tmp)?
+        .set_modified(modified)
 }
 
 fn same_bytes(a: &Path, b: &Path) -> bool {
@@ -184,12 +245,13 @@ pub fn legacy_handoff_root() -> PathBuf {
     crate::common::paths::runtime_root().join("handoff")
 }
 
-/// The handoff folder for the current repo, or the old global one when the
-/// current directory has no usable `origin` remote. Copies this directory's
-/// handoffs across the first time.
-pub fn handoff_root(slug: &str) -> PathBuf {
+/// The handoff folder for the repo that holds `dir` (the current repo when
+/// `dir` is `None`), or the old global one when that directory has no usable
+/// `origin` remote. Copies the handoffs of exactly `slug` across the first
+/// time.
+pub fn handoff_root(slug: &str, dir: Option<&Path>) -> PathBuf {
     let legacy = legacy_handoff_root();
-    let Some(base) = repo_dir() else {
+    let Some(base) = repo_dir_in(dir) else {
         return legacy;
     };
     let new = base.join(Kind::Handoff.dir_name());
@@ -199,8 +261,10 @@ pub fn handoff_root(slug: &str) -> PathBuf {
     new
 }
 
-/// Copy the handoffs for directory `slug` (and the directories under it) from
-/// the old global folder into `new`, once per `slug`. The old files stay; a
+/// Copy the handoffs for the directory `slug` from the old global folder into
+/// `new`, once per `slug`. Only that directory's own files move: a handoff
+/// belongs to the directory its session ran in, so a child or sibling
+/// directory's handoffs wait for its own first call. The old files stay; a
 /// marker in `new` stops a handoff that a session already consumed from
 /// coming back.
 pub fn migrate_handoffs(legacy: &Path, new: &Path, slug: &str) -> io::Result<()> {
@@ -212,12 +276,10 @@ pub fn migrate_handoffs(legacy: &Path, new: &Path, slug: &str) -> io::Result<()>
         return Ok(());
     }
     fs::create_dir_all(new)?;
-    let prefix = format!("{slug}-");
     let mut copied = 0;
     for entry in fs::read_dir(legacy)?.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.ends_with(".md")
-            && name.starts_with(&prefix)
+        if crate::handoff::is_handoff_for(&name, slug)
             && entry.file_type()?.is_file()
             && copy_new(&entry.path(), &new.join(&name))?
         {
@@ -234,7 +296,7 @@ pub fn migrate_handoffs(legacy: &Path, new: &Path, slug: &str) -> io::Result<()>
             write_pointer(
                 legacy,
                 new,
-                "handoffs for a repo's directories are copied there on first use",
+                "each directory's handoffs are copied there on first use",
             )?;
         }
     }
@@ -320,6 +382,7 @@ mod tests {
         );
         let note = fs::read_to_string(base.join("-a-wt1/plans/MOVED.txt")).unwrap();
         assert!(note.contains("1 kept apart"), "{note}");
+        assert!(note.contains("plans/one.md"), "{note}");
     }
 
     #[test]
@@ -334,7 +397,19 @@ mod tests {
     }
 
     #[test]
-    fn handoffs_for_this_directory_and_its_children_are_copied_once() {
+    fn old_folders_are_found_by_shape_not_by_a_leading_dash() {
+        let base = scratch_dir("storage-shape");
+        write(&base.join("C--Users-me-repo/plans/win.md"), "win");
+        write(&base.join("handoff/plans/not-a-worktree.md"), "x");
+
+        migrate_worktree_dirs(&base, Kind::Plans).unwrap();
+
+        assert!(base.join("plans/win.md").is_file());
+        assert!(!base.join("plans/not-a-worktree.md").exists());
+    }
+
+    #[test]
+    fn handoffs_for_this_directory_are_copied_once() {
         let root = scratch_dir("storage-handoff");
         let legacy = root.join("legacy");
         let new = root.join("new");
@@ -350,9 +425,64 @@ mod tests {
             !new.join("-w-repo-1-2.md").exists(),
             "a consumed handoff came back"
         );
-        assert!(new.join("-w-repo-sub-1-2.md").is_file());
+        assert!(!new.join("-w-repo-sub-1-2.md").exists());
         assert!(!new.join("-w-other-1-2.md").exists());
         assert!(legacy.join("-w-repo-1-2.md").is_file());
         assert!(legacy.join(POINTER).is_file());
+    }
+
+    #[test]
+    fn a_child_that_consumed_its_handoff_does_not_get_it_back_from_the_parent() {
+        let root = scratch_dir("storage-handoff-child");
+        let legacy = root.join("legacy");
+        let new = root.join("new");
+        write(&legacy.join("-w-repo-1-2.md"), "parent");
+        write(&legacy.join("-w-repo-sub-1-2.md"), "child");
+
+        migrate_handoffs(&legacy, &new, "-w-repo-sub").unwrap();
+        fs::remove_file(new.join("-w-repo-sub-1-2.md")).unwrap();
+        migrate_handoffs(&legacy, &new, "-w-repo").unwrap();
+        migrate_handoffs(&legacy, &new, "-w-repo-sub").unwrap();
+
+        assert!(new.join("-w-repo-1-2.md").is_file());
+        assert!(
+            !new.join("-w-repo-sub-1-2.md").exists(),
+            "a consumed child handoff came back"
+        );
+    }
+
+    #[test]
+    fn a_copy_keeps_the_modified_time_of_the_original() {
+        let root = scratch_dir("storage-mtime");
+        let legacy = root.join("legacy");
+        let new = root.join("new");
+        write(&legacy.join("-w-repo-1-2.md"), "old");
+        let old_time = std::time::SystemTime::now() - std::time::Duration::from_secs(20 * 86_400);
+        fs::File::options()
+            .write(true)
+            .open(legacy.join("-w-repo-1-2.md"))
+            .unwrap()
+            .set_modified(old_time)
+            .unwrap();
+
+        migrate_handoffs(&legacy, &new, "-w-repo").unwrap();
+
+        let got = fs::metadata(new.join("-w-repo-1-2.md"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(got, old_time);
+    }
+
+    #[test]
+    fn a_failed_copy_leaves_no_temporary_file() {
+        let root = scratch_dir("storage-tmpclean");
+        let missing = root.join("missing.md");
+        let to = root.join("out.md");
+
+        assert!(copy_new(&missing, &to).is_err());
+
+        let leftovers = fs::read_dir(&root).map(|d| d.count()).unwrap_or(0);
+        assert_eq!(leftovers, 0);
     }
 }
