@@ -42,19 +42,12 @@ pub fn repo_root(cwd: &Path) -> Result<PathBuf, String> {
 }
 
 fn git_toplevel(cwd: &Path) -> Option<PathBuf> {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(["rev-parse", "--show-toplevel"])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let text = String::from_utf8(out.stdout).ok()?;
-    let line = text.trim_end_matches('\n');
-    (!line.is_empty()).then(|| PathBuf::from(line))
+    playbook_common::git::output_slow(cwd, &["rev-parse", "--show-toplevel"])
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        // A root with no `.git` entry means git was redirected (for example by
+        // `core.worktree`), which gitfacts refuses on purpose; keep refusing.
+        .filter(|top| top.join(".git").exists())
 }
 
 /// `<data dir>/code/<owner>/<repo>/<worktree-id>.db` for the current repo.
@@ -152,6 +145,8 @@ mod tests {
     #[test]
     fn a_ceiling_directory_variable_still_finds_the_repo_and_still_fails_outside_one() {
         // Arrange
+        // The ceiling only covers this test's scratch dir and is restored
+        // before the asserts; the lock is not crate-wide env isolation.
         let _guard = playbook_common::test_support::lock_cwd();
         let base = scratch("loc-ceiling");
         let repo = base.join("repo");
