@@ -105,6 +105,8 @@ pub fn write_graph(db: &Path, nodes: &[NodeRow], edges: &[EdgeRow]) -> Result<()
         playbook_common::atomic::ensure_private_dir(dir)
             .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     }
+    // Owner-only before SQLite can create it with the default umask.
+    playbook_common::atomic::make_db_file_private(db)?;
     let mut conn = Connection::open(db).map_err(|e| e.to_string())?;
     conn.busy_timeout(BUSY).map_err(|e| e.to_string())?;
     playbook_common::sqlite::retry_busy(

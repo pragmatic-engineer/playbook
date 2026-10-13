@@ -114,6 +114,14 @@ fn init_connection(root: &Path) -> rusqlite::Result<Connection> {
         } else {
             db_path(root)
         };
+        // Owner-only before SQLite can create it with the default umask; the
+        // WAL and shm files copy this mode.
+        crate::common::atomic::make_db_file_private(&path).map_err(|msg| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+                Some(msg),
+            )
+        })?;
         let conn = Connection::open(path)?;
         // Before any statement that can contend for the write lock: the
         // default busy timeout is 0.
