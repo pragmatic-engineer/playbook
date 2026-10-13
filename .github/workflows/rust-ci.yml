@@ -47,6 +47,12 @@ jobs:
       contents: read
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
+      # Cargo package selection for clippy, tests and doc tests: `--workspace`,
+      # or `-p a -p b` when only crates/<name> folders changed, plus every
+      # crate that depends on them. Anything outside crates/ (Cargo.lock, the
+      # root manifest, the toolchain, commands/, hooks, .github) selects the
+      # whole workspace, and so does any error.
+      pkgs: ${{ steps.classify.outputs.pkgs }}
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -76,7 +82,7 @@ jobs:
           esac
           if [ -n "$base" ] && [ "${base#0000000}" = "$base" ] \
               && git fetch --no-tags --depth=1 origin "$base" 2>/dev/null \
-              && files="$(git diff --name-only "$base" HEAD)" \
+              && files="$(git diff --name-only --no-renames "$base" HEAD)" \
               && [ -n "$files" ]; then
             echo "$files"
             if ! echo "$files" | grep -qvE '^(docs/.+\.md|(README|CONTRIBUTING|SECURITY|CODE_OF_CONDUCT|CHANGELOG)\.md)$'; then
@@ -84,6 +90,30 @@ jobs:
             fi
           fi
           echo "docs_only=$docs_only" | tee -a "$GITHUB_OUTPUT"
+
+          # Package selection. A crate maps to itself plus its dependents:
+          # cli (playbook) depends on common, code and telemetry; common is depended on
+          # by everything.
+          pkgs="--workspace"
+          if [ -n "${files:-}" ] && ! echo "$files" | grep -qvE '^crates/(cli|code|common|data|telemetry)/'; then
+            sel=""
+            add() { case " $sel " in *" $1 "*) ;; *) sel="$sel $1" ;; esac; }
+            for c in $(echo "$files" | sed -E 's#^crates/([^/]+)/.*#\1#' | sort -u); do
+              case "$c" in
+                common) sel=""; pkgs="--workspace"; break ;;
+                cli) add playbook ;;
+                code) add playbook-code; add playbook ;;
+                telemetry) add playbook-telemetry; add playbook ;;
+                data) add playbook-data ;;
+              esac
+            done
+            if [ -n "$sel" ]; then
+              pkgs=""
+              for p in $sel; do pkgs="$pkgs -p $p"; done
+              pkgs="${pkgs# }"
+            fi
+          fi
+          echo "pkgs=$pkgs" | tee -a "$GITHUB_OUTPUT"
 
   build-test:
     strategy:
@@ -155,13 +185,13 @@ jobs:
 
       - name: cargo clippy
         if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy ${{ needs.changes.outputs.pkgs || '--workspace' }} --all-targets -- -D warnings
 
       # Non-test code must not panic on bad input: unwrap and expect are errors
       # there. Tests may use them, so this covers the library and the binary only.
       - name: cargo clippy (no unwrap or expect outside tests)
         if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
-        run: cargo clippy --workspace --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
+        run: cargo clippy ${{ needs.changes.outputs.pkgs || '--workspace' }} --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
 
       # `tests/plugin_archive.rs` runs `claude plugin validate`, and fails in CI
       # when the CLI is missing. Pinned to a release older than two weeks.
@@ -181,12 +211,12 @@ jobs:
 
       - name: cargo nextest run
         if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
-        run: cargo nextest run --workspace --config-file .github/nextest.toml --profile ci
+        run: cargo nextest run ${{ needs.changes.outputs.pkgs || '--workspace' }} --no-tests=pass --config-file .github/nextest.toml --profile ci
 
       # nextest does not run doctests.
       - name: cargo test --workspace --doc
         if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
-        run: cargo test --workspace --doc
+        run: cargo test ${{ needs.changes.outputs.pkgs || '--workspace' }} --doc
 
       # Moved out of shell-ci with the port: the seed validator is now a
       # subcommand, so it needs a built binary and belongs on this lane.
