@@ -490,7 +490,7 @@ fn session_init_outside_a_git_repo_emits_no_memory_block() {
     // either: `git_toplevel()` reads empty there, so `maybe_sweep_worktrees`
     // must have returned before ever reaching the marker.
     let playbook_dir = home.join(".config").join("playbook");
-    let wrote_a_sweep_marker = playbook_dir.join("playbook.db").exists()
+    let wrote_a_sweep_marker = playbook_dir.join("data").join("config.db").exists()
         && !playbook::state::list(&playbook_dir, playbook::state::SWEEP_PREFIX)
             .unwrap_or_default()
             .is_empty();

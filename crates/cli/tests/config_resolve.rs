@@ -290,6 +290,9 @@ fn pr_draft_false_opens_ready_and_a_broken_or_invalid_config_stays_draft() {
         for name in ["playbook.db", "playbook.db-wal", "playbook.db-shm"] {
             let _ = fs::remove_file(global_config_path(&home).with_file_name(name));
         }
+        for name in ["config.db", "config.db-wal", "config.db-shm"] {
+            let _ = fs::remove_file(global_config_path(&home).with_file_name("data").join(name));
+        }
         write_json(&global_config_path(&home), legacy);
     };
     reset(r#"{"pr": {"draft": false}}"#);

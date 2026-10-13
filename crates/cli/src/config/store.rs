@@ -18,31 +18,40 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const SCHEMA_SQL: &str = "\
-CREATE TABLE IF NOT EXISTS meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-) WITHOUT ROWID;
-CREATE TABLE IF NOT EXISTS config (
-    tier TEXT NOT NULL,
-    scope TEXT NOT NULL,
-    key TEXT NOT NULL,
-    value_json TEXT NOT NULL,
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (tier, scope, key)
-) WITHOUT ROWID;
-CREATE TABLE IF NOT EXISTS state (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
-) WITHOUT ROWID;";
+use playbook_data::config::SCHEMA_SQL;
 
 /// The meta row that records the legacy JSON import ran.
 const IMPORTED_FLAG: &str = "legacy_imported";
 
-/// Where the database lives under `root`.
+/// Where the database lives under `root`: `data/config.db`.
 pub fn db_path(root: &Path) -> PathBuf {
-    root.join("playbook.db")
+    playbook_data::config::db_in(&root.join("data"))
+}
+
+/// Where earlier versions kept the same tables, `playbook.db` under `root`.
+fn legacy_db_path(root: &Path) -> PathBuf {
+    playbook_data::config::legacy_db_in(root)
+}
+
+/// How the move from `playbook.db` merges when both files exist (an older
+/// playbook wrote the old path again): the row with the later `updated_at`
+/// wins, so a setting changed by an old binary is not lost and one changed
+/// since is not undone.
+const MOVE_RULES: &[(&str, playbook_data::migrate::Rule)] = &[
+    ("config", playbook_data::migrate::Rule::Newer("updated_at")),
+    ("state", playbook_data::migrate::Rule::Newer("updated_at")),
+    ("meta", playbook_data::migrate::Rule::Ignore),
+];
+
+/// Move `playbook.db` into the data folder as `config.db`. A deferred or
+/// failed move is not an error: the next open merges what is left.
+fn move_legacy_db(root: &Path) {
+    let step = playbook_data::migrate::Move {
+        old: legacy_db_path(root),
+        new: db_path(root),
+        policy: playbook_data::migrate::Policy::Merge(MOVE_RULES),
+    };
+    let _ = playbook_data::migrate::migrate_with_notice(&step, "settings");
 }
 
 /// Whether there is anything to read: a database, or legacy JSON files that
@@ -50,6 +59,7 @@ pub fn db_path(root: &Path) -> PathBuf {
 /// and nothing needs creating.
 fn has_data(root: &Path) -> bool {
     db_path(root).exists()
+        || legacy_db_path(root).exists()
         || super::global_config_path(root).exists()
         || super::any_scoped_config(root)
 }
@@ -73,6 +83,10 @@ fn broken(root: &Path) -> impl Fn(rusqlite::Error) -> ConfigError + '_ {
 /// run the one-time legacy import.
 pub fn open(root: &Path) -> Result<Connection, ConfigError> {
     fs::create_dir_all(root).map_err(|_| ConfigError::DirectoryUnwritable(root.to_path_buf()))?;
+    let data = root.join("data");
+    crate::common::atomic::ensure_private_dir(&data)
+        .map_err(|_| ConfigError::DirectoryUnwritable(data.clone()))?;
+    move_legacy_db(root);
     let conn = init_connection(root).map_err(broken(root))?;
     import_legacy_once(&conn, root)?;
     Ok(conn)
@@ -164,7 +178,7 @@ pub fn lookup(root: &Path, key: &str, repo_slug: Option<&str>) -> Result<TierVal
 /// or without a slug gives the same answer, so a caller can skip the slug
 /// lookup (a `git` spawn).
 pub fn any_scoped(root: &Path) -> bool {
-    if db_path(root).exists() {
+    if db_path(root).exists() || legacy_db_path(root).exists() {
         let Ok(conn) = open(root) else { return false };
         return conn
             .query_row(
@@ -739,6 +753,7 @@ mod tests {
     #[test]
     fn a_corrupt_database_reports_its_path() {
         let r = root("store-corrupt");
+        fs::create_dir_all(r.join("data")).unwrap();
         fs::write(
             db_path(&r),
             b"this is not a database file at all, not even close",
@@ -747,6 +762,85 @@ mod tests {
         assert!(
             matches!(lookup(&r, "mode", None), Err(ConfigError::Malformed(p)) if p == db_path(&r))
         );
+    }
+
+    /// A `playbook.db` as an older playbook left it, with one global row.
+    fn old_db(r: &Path, key: &str, value: &str, updated_at: i64) {
+        let conn = Connection::open(legacy_db_path(r)).unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO config VALUES ('global', '', ?1, ?2, ?3)",
+            params![key, value, updated_at],
+        )
+        .unwrap();
+    }
+
+    fn global(r: &Path, key: &str) -> Option<Value> {
+        lookup(r, key, None).unwrap().global
+    }
+
+    #[test]
+    fn an_old_playbook_db_moves_into_config_db_on_first_open() {
+        let r = root("store-move");
+        old_db(&r, "mode", "\"auto\"", 10);
+
+        assert_eq!(global(&r, "mode"), Some(json!("auto")));
+
+        assert!(db_path(&r).is_file());
+        assert!(!legacy_db_path(&r).exists());
+        assert!(r.join("playbook.db.migrated").exists());
+    }
+
+    #[test]
+    fn no_old_file_and_no_new_file_resolve_to_defaults_without_creating_anything() {
+        let r = root("store-none");
+        assert_eq!(global(&r, "mode"), None);
+        assert!(!db_path(&r).exists());
+        assert!(!r.join("data").exists());
+    }
+
+    #[test]
+    fn both_files_merge_with_the_later_write_winning_and_no_double_counting() {
+        let r = root("store-both");
+        put(&r, Tier::Global, None, "mode", &json!("new")).unwrap();
+        // An older playbook writes the old path: one newer, one older, one new key.
+        old_db(&r, "mode", "\"older\"", 1);
+        let conn = Connection::open(legacy_db_path(&r)).unwrap();
+        conn.execute(
+            "INSERT INTO config VALUES ('global', '', 'fix.maxFiles', '7', 99999999999)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        assert_eq!(global(&r, "mode"), Some(json!("new")), "newer row stays");
+        assert_eq!(global(&r, "fix.maxFiles"), Some(json!(7)));
+        assert!(!legacy_db_path(&r).exists());
+
+        // Merging again changes nothing.
+        let n: i64 = open(&r)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM config", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn a_later_value_in_the_old_file_replaces_the_stored_one() {
+        let r = root("store-later");
+        put(&r, Tier::Global, None, "mode", &json!("new")).unwrap();
+        old_db(&r, "mode", "\"changed-by-old-binary\"", 99999999999);
+        assert_eq!(global(&r, "mode"), Some(json!("changed-by-old-binary")));
+    }
+
+    #[test]
+    fn a_corrupt_old_file_is_left_in_place_and_settings_still_work() {
+        let r = root("store-old-corrupt");
+        fs::write(legacy_db_path(&r), vec![b'x'; 4096]).unwrap();
+        put(&r, Tier::Global, None, "mode", &json!("auto")).unwrap();
+        assert_eq!(global(&r, "mode"), Some(json!("auto")));
+        assert!(legacy_db_path(&r).exists());
     }
 
     #[test]

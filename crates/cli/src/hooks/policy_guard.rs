@@ -248,10 +248,19 @@ fn changes_rm_guard_config_at(
     }
 }
 
+/// Whether `word` names one of playbook's databases: the settings store (now
+/// `config.db`, earlier `playbook.db`), the memory index or the data folder.
+pub(crate) fn names_database(word: &str) -> bool {
+    word.contains("playbook.db")
+        || word.contains("config.db")
+        || word.contains("memory.db")
+        || word.contains("playbook/data")
+}
+
 /// Whether `word` names playbook's config database or one of its config
 /// files, or a glob inside the playbook folder.
 fn names_config_store(word: &str, home: &str) -> bool {
-    if word.to_lowercase().contains("playbook.db") {
+    if names_database(&word.to_lowercase()) {
         return true;
     }
     if home.is_empty() {

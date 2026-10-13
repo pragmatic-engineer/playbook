@@ -491,8 +491,11 @@ fn the_probes_run_side_by_side_but_the_table_keeps_its_order() {
     let b = Box::new("order");
     b.settings("{}");
     let dir = b.stub("bin", "1.2.3", true);
+    // The first run may create the config store, which the data folder row
+    // then lists, so it is not part of the comparison.
+    let warm = b.run(&[&dir], "/bin/zsh", None);
+    assert!(!warm.is_empty());
     let first = b.run(&[&dir], "/bin/zsh", None);
-    assert!(!first.is_empty());
     for _ in 0..5 {
         assert_eq!(b.run(&[&dir], "/bin/zsh", None), first);
     }

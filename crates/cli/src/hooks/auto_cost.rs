@@ -528,7 +528,10 @@ fn is_guarded_command(command: &str) -> bool {
 
 fn is_guarded_invocation(words: &[String]) -> bool {
     // Any program pointed at the config database can change guarded settings.
-    if words.iter().any(|word| word.contains("playbook.db")) {
+    if words
+        .iter()
+        .any(|word| super::policy_guard::names_database(&word.to_lowercase()))
+    {
         return true;
     }
     let Some(start) = program_index(words) else {
@@ -593,6 +596,8 @@ pub(super) fn is_config_file(path: &Path, root: &Path) -> bool {
     matches!(
         parts.as_slice(),
         ["config.json" | "playbook.db" | "playbook.db-wal" | "playbook.db-shm"]
+            | ["data", "config.db" | "config.db-wal" | "config.db-shm"]
+            | ["data", "memory.db" | "memory.db-wal" | "memory.db-shm"]
             | ["orgs", _, "config.json"]
             | ["repos", _, _, ".config", "config.json"]
     )

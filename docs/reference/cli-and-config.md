@@ -1305,7 +1305,7 @@ Falls back to `SKILL.md` when the reference is missing or not named.
 
 Inspect playbook's own bookkeeping (migration record, sweep markers)
 
-`list` prints the rows of the `state` table in `playbook.db`, sorted by key, optionally only those under a prefix. Read only: use `playbook init` to repair and `playbook config export` to back up the config.
+`list` prints the rows of the `state` table in `config.db`, sorted by key, optionally only those under a prefix. Read only: use `playbook init` to repair and `playbook config export` to back up the config.
 
 Example: `playbook state list migrations/`
 
