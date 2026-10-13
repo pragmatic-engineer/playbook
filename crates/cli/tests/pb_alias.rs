@@ -179,3 +179,24 @@ fn cc_subcommands_still_parse_after_the_passthrough_change() {
     );
     assert!(sb.claude_calls().is_empty());
 }
+
+#[test]
+fn cc_fresh_accepts_claude_flags_after_the_mode_word() {
+    // Arrange
+    let sb = Sandbox::new("fresh");
+
+    // Act
+    let out = sb.run(
+        Path::new(env!("CARGO_BIN_EXE_playbook")),
+        &["cc", "fresh", "--model", "opus"],
+        "0",
+    );
+
+    // Assert
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(sb.claude_calls()[0].contains("--model opus"));
+}

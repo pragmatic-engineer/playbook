@@ -138,7 +138,7 @@ fn sourcing_twice_keeps_one_working_definition() {
 fn the_short_name_is_absent_unless_asked_for() {
     let text = script_with(ShellKind::Bash, true);
     assert!(!text.contains("_playbook_pb_taken"));
-    assert!(text.contains("\nplaybook() {"));
+    assert!(text.contains("\nfunction playbook {"));
 }
 
 #[test]

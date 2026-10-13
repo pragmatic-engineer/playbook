@@ -533,3 +533,30 @@ fn plugin_only_row_is_silent_once_hooks_are_wired() {
     let rows = b.run(&[], "/bin/bash", None);
     assert!(!text(&layer(&rows, "-")).contains("plugin only"));
 }
+
+#[test]
+fn an_old_ccc_alias_and_ccd_script_are_reported_with_their_replacements_and_left_alone() {
+    // Arrange
+    let b = Box::new("oldlaunch");
+    let rc = b.home().join(".zshrc");
+    fs::write(&rc, "alias ccc='claude --foo'\n").unwrap();
+    let bin = b.root.join("old");
+    fs::create_dir_all(&bin).unwrap();
+    let ccd = bin.join("ccd");
+    fs::write(&ccd, "#!/bin/sh\nexec claude \"$@\"\n").unwrap();
+    fs::set_permissions(&ccd, fs::Permissions::from_mode(0o755)).unwrap();
+
+    // Act
+    let rows = b.run(&[&bin], "/bin/zsh", None);
+
+    // Assert
+    let all: Vec<&Value> = rows.iter().collect();
+    let t = text(&all);
+    assert!(t.contains("playbook cc` instead"), "{t}");
+    assert!(t.contains("playbook ccd` instead"), "{t}");
+    assert_eq!(
+        fs::read_to_string(&rc).unwrap(),
+        "alias ccc='claude --foo'\n"
+    );
+    assert!(ccd.exists());
+}

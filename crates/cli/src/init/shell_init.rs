@@ -114,20 +114,23 @@ _playbook_cc() {{
   fi
   return $_pb_rc
 }}
-playbook() {{
+function playbook {{
   case "${{1-}}" in
     ccd) shift; _playbook_cc --skip-permissions -- "$@" ;;
     cc)
       shift
       case "${{1-}}" in
-        launch) shift; _playbook_cc -- "$@" ;;
-        worktree|new|housekeep|help|-h|--help) command playbook cc "$@" ;;
+        launch) shift; _playbook_cc "$@" ;;
+        list|ls|prune|bust-cache|worktree|new|housekeep|help|-h|--help) command playbook cc "$@" ;;
         *) _playbook_cc -- "$@" ;;
       esac
       ;;
     *) command playbook "$@" ;;
   esac
 }}
+_playbook_moved() {{ echo "$1 moved into playbook: run \`playbook $2\` (or \`pb $2\`)" >&2; return 127; }}
+type ccc >/dev/null 2>&1 || eval 'ccc() {{ _playbook_moved ccc cc; }}'
+type ccd >/dev/null 2>&1 || eval 'ccd() {{ _playbook_moved ccd ccd; }}'
 "#
     )
 }
@@ -143,7 +146,7 @@ mod tests {
             let text = script(kind);
 
             // Assert
-            assert!(text.contains("\nplaybook() {"));
+            assert!(text.contains("\nfunction playbook {"));
             assert!(!text.contains("\nccc() {"));
             assert!(!text.contains("\nccd() {"));
             assert!(!text.contains("\ncc() {"));

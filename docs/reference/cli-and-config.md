@@ -132,7 +132,7 @@ Prints one line for `acli` (`ok`, `too old` with the `brew upgrade atlassian/acl
 
 Start a Claude Code session, or manage sessions and worktrees
 
-With no subcommand, starts a session with the playbook prompt and model chain (this replaces the old `playbook cc` launcher). Any other arguments go to claude as they are. The subcommands do the housekeeping: list sessions, prune state, clear caches, and create worktrees. `pb` is an alias for `playbook`, so `pb cc` works too.
+With no subcommand, starts a session with the playbook prompt and model chain (this replaces the old `ccc` shell function). Any other arguments go to claude as they are. The subcommands do the housekeeping: list sessions, prune state, clear caches, and create worktrees. `pb` is an alias for `playbook`, so `pb cc` works too.
 
 Example: `playbook cc --model sonnet`
 
@@ -148,9 +148,13 @@ Clear caches that would freeze old settings into a session
 
 Mode of the `playbook cc` launcher: clean up and resume (no action by itself)
 
+- `<ARGS>`: Arguments passed through to claude
+
 ### `playbook cc fresh`
 
 Mode of the `playbook cc` launcher: start a fresh session (no action by itself)
+
+- `<ARGS>`: Arguments passed through to claude
 
 ### `playbook cc launch`
 
@@ -173,7 +177,7 @@ Mode of the `playbook cc` launcher: resume a session as it was (no action by its
 
 The launcher handles these modes. Running this command directly does nothing and exits 0.
 
-- `<SID>`: Session id to resume (default: the most recent)
+- `<ARGS>`: Session id to resume (default: the most recent), then arguments for claude
 
 ### `playbook cc worktree`
 
@@ -1294,7 +1298,7 @@ Create the shared settings template from a live settings.json
 
 Print the shell function that lets `playbook cc` and `playbook ccd` change directory
 
-A program cannot change its parent shell's directory, so this wraps `playbook` to `cd` into a worktree that `playbook cc worktree` style launches create. Load it from your rc file with `eval "$(playbook shell-init)"`.
+A program cannot change its parent shell's directory, so this wraps `playbook` to `cd` into a worktree that `playbook cc launch worktree <branch>` creates (the old `ccc worktree <branch>`). Load it from your rc file with `eval "$(playbook shell-init)"`.
 
 - `--shell <SHELL>`: Target shell (default: the one named by `$SHELL`) (one of `bash`, `zsh`)
 

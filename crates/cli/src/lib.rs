@@ -309,8 +309,8 @@ pub enum Command {
     /// Print the shell function that lets `playbook cc` and `playbook ccd` change directory
     ///
     /// A program cannot change its parent shell's directory, so this wraps
-    /// `playbook` to `cd` into a worktree that `playbook cc worktree` style
-    /// launches create. Load it from your rc file with
+    /// `playbook` to `cd` into a worktree that `playbook cc launch worktree <branch>`
+    /// creates (the old `ccc worktree <branch>`). Load it from your rc file with
     /// `eval "$(playbook shell-init)"`.
     ShellInit {
         /// Target shell (default: the one named by `$SHELL`)
@@ -480,7 +480,7 @@ pub enum Command {
     /// Start a Claude Code session, or manage sessions and worktrees
     ///
     /// With no subcommand, starts a session with the playbook prompt and model
-    /// chain (this replaces the old `playbook cc` launcher). Any other arguments go to
+    /// chain (this replaces the old `ccc` shell function). Any other arguments go to
     /// claude as they are. The subcommands do the housekeeping: list sessions,
     /// prune state, clear caches, and create worktrees. `pb` is an alias for
     /// `playbook`, so `pb cc` works too.
@@ -1971,16 +1971,25 @@ pub enum HooksCommand {
 #[derive(Subcommand, Debug)]
 pub enum CcCommand {
     /// Mode of the `playbook cc` launcher: clean up and resume (no action by itself)
-    Clean,
+    Clean {
+        /// Arguments passed through to claude
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Mode of the `playbook cc` launcher: start a fresh session (no action by itself)
-    Fresh,
+    Fresh {
+        /// Arguments passed through to claude
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Mode of the `playbook cc` launcher: resume a session as it was (no action by itself)
     ///
     /// The launcher handles these modes. Running this command directly
     /// does nothing and exits 0.
     Raw {
-        /// Session id to resume (default: the most recent)
-        sid: Option<String>,
+        /// Session id to resume (default: the most recent), then arguments for claude
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// List sessions for the current project
     #[command(alias = "ls")]

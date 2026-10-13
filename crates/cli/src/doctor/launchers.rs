@@ -33,14 +33,23 @@ pub struct Finding {
 /// Whether `line` defines the shell name `name` as an alias or a function.
 fn defines(line: &str, name: &str) -> bool {
     let line = line.trim_start();
-    if line.starts_with('#') {
+    // Only definitions that run playbook or claude are old launchers; an
+    // unrelated alias that happens to share the name is the user's own.
+    // One that already points at the new command needs no migration.
+    let mine = line.contains("playbook") || line.contains("claude");
+    let migrated = ["playbook cc", "playbook ccd", "pb cc", "pb ccd"]
+        .iter()
+        .any(|n| line.contains(n));
+    if line.starts_with('#') || !mine || migrated {
         return false;
     }
     let alias = format!("alias {name}=");
     let func = format!("{name}()");
+    let func_spaced = format!("{name} ()");
     let kw = format!("function {name}");
     line.starts_with(&alias)
         || line.starts_with(&func)
+        || line.starts_with(&func_spaced)
         || line
             .strip_prefix(&kw)
             .is_some_and(|r| r.is_empty() || r.starts_with([' ', '(', '{']))
@@ -77,6 +86,12 @@ fn executable(path: &Path) -> bool {
     }
 }
 
+/// Whether the script at `path` mentions playbook or claude. A compiled
+/// program or an unrelated tool with the same name is left alone.
+fn runs_playbook_or_claude(path: &Path) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|t| t.contains("playbook") || t.contains("claude"))
+}
+
 /// Every old launcher under `home`'s rc files and in the `path_var` directories.
 pub fn find(home: &Path, path_var: &OsStr) -> Vec<Finding> {
     let mut out = Vec::new();
@@ -86,10 +101,14 @@ pub fn find(home: &Path, path_var: &OsStr) -> Vec<Finding> {
             out.extend(scan_text(&format!("~/{rc}"), &text));
         }
     }
+    let mut seen = std::collections::HashSet::new();
     for dir in std::env::split_paths(path_var).filter(|d| d.is_absolute()) {
+        if !seen.insert(dir.clone()) {
+            continue;
+        }
         for (name, replacement) in OLD_NAMES {
             let candidate: PathBuf = dir.join(name);
-            if executable(&candidate) {
+            if executable(&candidate) && runs_playbook_or_claude(&candidate) {
                 out.push(Finding {
                     place: candidate.display().to_string(),
                     replacement,
@@ -115,13 +134,13 @@ mod tests {
     #[test]
     fn alias_and_function_definitions_are_found() {
         // Arrange
-        let text = "export A=1\nalias ccc='claude'\nccd() { claude; }\n";
+        let text = "export A=1\nalias ccc='claude'\nccd () { claude; }\nfunction ccc { claude; }\n";
 
         // Act
         let found = scan_text("~/.zshrc", text);
 
         // Assert
-        assert_eq!(found.len(), 2);
+        assert_eq!(found.len(), 3);
         assert_eq!(found[0].replacement, "playbook cc");
         assert_eq!(found[1].replacement, "playbook ccd");
         assert!(found[0].place.contains(":2"));
@@ -130,7 +149,7 @@ mod tests {
     #[test]
     fn comments_and_other_names_are_ignored() {
         // Arrange
-        let text = "# alias ccc=x\nalias cccx=y\nalias cd=z\n";
+        let text = "# alias ccc=x\nalias cccx=y\nalias cd=z\nalias ccd='cd ~/code'\nalias ccc='playbook cc'\n";
 
         // Act
         let found = scan_text("rc", text);
@@ -145,7 +164,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pb-launchers-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap_or_default();
         let file = dir.join("ccc");
-        std::fs::write(&file, "#!/bin/sh\n").unwrap_or_default();
+        std::fs::write(&file, "#!/bin/sh\nexec playbook cc launch\n").unwrap_or_default();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

@@ -873,3 +873,58 @@ fn cc_starts_no_collector_without_a_usage_db_or_with_telemetry_off() {
     assert_eq!(seen, "unset\nunset\n");
     assert!(!usage.join("collector.json").exists());
 }
+
+#[test]
+fn the_wrapper_sends_cc_subcommands_to_the_binary_and_launch_modes_to_the_launcher() {
+    // Arrange
+    let cases = [
+        ("cc bust-cache", "cc bust-cache"),
+        ("cc list", "cc list"),
+        ("cc worktree b", "cc worktree b"),
+        ("cc fresh --model x", "cc launch -- fresh --model x"),
+        (
+            "cc launch --skip-permissions",
+            "cc launch --skip-permissions",
+        ),
+        ("doctor", "doctor"),
+    ];
+    for shell in ["bash", "zsh"] {
+        if Command::new(shell).arg("--version").output().is_err() {
+            continue;
+        }
+        for (typed, expected) in cases {
+            let e = env(&format!("route-{shell}"));
+            make_exec(
+                &e.root.join("bin/playbook"),
+                &format!(
+                    "#!/bin/sh\necho \"$*\" > \"{}\"\n",
+                    e.root.join("argv").display()
+                ),
+            );
+            let script = format!("{}\nplaybook {typed}", shell_init(shell));
+
+            // Act
+            let out = Command::new(shell)
+                .arg("-c")
+                .arg(&script)
+                .current_dir(&e.work)
+                .env(
+                    "PATH",
+                    format!("{}:/usr/bin:/bin", e.root.join("bin").display()),
+                )
+                .env("TMPDIR", &e.root)
+                .env("HOME", &e.home)
+                .env("ZDOTDIR", &e.home)
+                .output()
+                .unwrap();
+
+            // Assert
+            assert!(out.status.success(), "{shell} {typed}");
+            assert_eq!(
+                fs::read_to_string(e.root.join("argv")).unwrap().trim(),
+                expected,
+                "{shell} {typed}"
+            );
+        }
+    }
+}

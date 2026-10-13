@@ -327,5 +327,5 @@ fn sourcing_twice_keeps_one_working_definition() {
 fn the_override_is_absent_unless_asked_for() {
     let text = playbook::init::shell_init::script_with(ShellKind::Bash, false);
     assert!(!text.contains("claude()"));
-    assert!(text.contains("\nplaybook() {"));
+    assert!(text.contains("\nfunction playbook {"));
 }
