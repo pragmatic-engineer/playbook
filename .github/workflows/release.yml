@@ -1,11 +1,24 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: Apache-2.0
 #
-# WU-10 of ADR 0007. Attaches verified binaries to a release that already
-# exists: releases are cut by pushing a signed annotated tag and then running
-# `gh release create --target main`. This workflow does NOT create the release,
-# it only builds, ad hoc codesigns and uploads the artefacts plus SHA256SUMS,
-# then attests their build provenance.
+# One release workflow for every tool in this repository (ADR 0029). A release
+# is cut by pushing a signed annotated tag, and the tag prefix picks the tool:
+#   vX.Y.Z            playbook            raw binaries, the two plugin archives
+#   telemetry-vX.Y.Z  playbook-telemetry  .tar.gz holding playbook-telemetry and pbtop
+#   code-vX.Y.Z       playbook-code       reserved, fails until crates/code has a binary
+# The first job, `resolve`, maps the prefix to the package, binaries, archive
+# shape and Homebrew tool name and fails on any other tag.
+#
+# The workflow creates the GitHub release for the tag when it does not exist,
+# then builds, ad hoc codesigns and uploads the artefacts plus SHA256SUMS, and
+# attests their build provenance. Releases for telemetry-v and code-v tags are
+# created with `--latest=false`, so GitHub's "latest release" stays on the
+# playbook `vX.Y.Z` line that install.sh and the marketplace read.
+#
+# Dry run: `workflow_dispatch` with a `tag` input and `dry_run` left on runs
+# resolve, verify-version, the five builds and the plugin archive build, and
+# skips release creation, uploads, checksums, attestation and the tap notice.
+# A dispatch can never publish: publishing needs a pushed tag.
 #
 # Five targets, built on the host that matches them:
 #   aarch64-apple-darwin        macos-latest, native
@@ -15,25 +28,12 @@
 #   x86_64-pc-windows-msvc      windows-latest
 #
 # rusqlite's `bundled` feature compiles SQLite's C source (via
-# libsqlite3-sys) and needs a real C compiler, unlike the rest of this
-# crate graph (clap, serde, serde_json), which is why both musl legs below
-# install `musl-tools` for a native `musl-gcc` and still link with
-# rust-lld. Neither leg cross-compiles C code: this repo is public, so
-# GitHub's arm64-hosted `ubuntu-24.04-arm` runner (GA since 2025-08, free
-# for public repos) builds the aarch64 leg NATIVELY on real arm64 hardware
-# instead of cross-compiling from an x86_64 host, the same way the
-# aarch64-apple-darwin leg already builds natively on Apple Silicon. That
-# sidesteps needing a musl cross C toolchain entirely, and both Linux legs
-# use the exact same technique, verified in CI: rust-ci.yml's container-smoke
-# matrix job runs both the x86_64 and aarch64 musl legs on real hardware,
-# including a real `gate record`/`gate check` round trip through rusqlite
-# (not just "the binary starts"). The aarch64-unknown-linux-musl leg here in
-# release.yml specifically still hasn't run for real (this workflow only
-# runs on a pushed tag or `workflow_dispatch`), but it uses no new mechanism
-# beyond "install musl-tools, build", already proven on real arm64 hardware
-# by that same container-smoke matrix leg; watch its first run anyway, since
-# the artefact upload and checksums steps below hard-require all 5 targets
-# to succeed.
+# libsqlite3-sys) and needs a real C compiler, which is why both musl legs
+# install `musl-tools` for a native `musl-gcc` and still link with rust-lld.
+# Neither leg cross-compiles C code: the arm64-hosted `ubuntu-24.04-arm`
+# runner builds the aarch64 leg natively, the same way the aarch64-apple-darwin
+# leg builds natively on Apple Silicon. rust-ci.yml's container-smoke matrix
+# job runs both musl legs on real hardware.
 #
 # Why `codesign --force`: on Apple Silicon the linker already ad-hoc signs the
 # native binary, while the cross-built x86_64 one comes out "not signed at
@@ -43,21 +43,123 @@ name: release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v*', 'telemetry-v*', 'code-v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name to resolve and build, for example v0.25.0 or telemetry-v0.2.0. Its version must match the files on the selected ref.'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build only: no release, upload, attestation or tap notice. A dispatch is always a dry run.'
+        required: false
+        type: boolean
+        default: true
 
 permissions: {}
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
-  # Fail before spending five build legs on a version mismatch. The hooks
-  # manifest version is user-visible through `claude plugin details`, so a
-  # binary whose version contradicts the manifest must never publish. The
+  # Map the tag prefix to what gets built and released, and fail on any tag
+  # that is not one of ours. Every later job reads these outputs, so the
+  # prefix rules live in one place. The tag reaches the script through the
+  # environment, never through the script text.
+  resolve:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      tag: ${{ steps.map.outputs.tag }}
+      version: ${{ steps.map.outputs.version }}
+      package: ${{ steps.map.outputs.package }}
+      bins: ${{ steps.map.outputs.bins }}
+      archive: ${{ steps.map.outputs.archive }}
+      cargo_toml: ${{ steps.map.outputs.cargo_toml }}
+      tool: ${{ steps.map.outputs.tool }}
+      tag_prefix: ${{ steps.map.outputs.tag_prefix }}
+      latest_flag: ${{ steps.map.outputs.latest_flag }}
+      is_playbook: ${{ steps.map.outputs.is_playbook }}
+      dry_run: ${{ steps.map.outputs.dry_run }}
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+
+      - name: Map the tag prefix
+        id: map
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
+            dry_run=true
+            if [ "$INPUT_DRY_RUN" != "true" ]; then
+              echo "::error::a manual run is always a dry run. Push a signed tag to publish." >&2
+              exit 1
+            fi
+          else
+            tag="$REF_NAME"
+            dry_run=false
+          fi
+
+          case "$tag" in
+            telemetry-v[0-9]*)
+              prefix="telemetry-v"; package="playbook-telemetry"
+              bins="playbook-telemetry pbtop"; archive="tar"
+              cargo_toml="crates/telemetry/Cargo.toml"
+              tool="playbook-telemetry"; latest_flag="--latest=false"; is_playbook=false
+              ;;
+            code-v[0-9]*)
+              echo "::error::code-v tags are reserved. crates/code has no binary yet, so there is nothing to release." >&2
+              exit 1
+              ;;
+            v[0-9]*)
+              prefix="v"; package="playbook"
+              bins="playbook"; archive="raw"
+              cargo_toml="Cargo.toml"
+              tool="playbook"; latest_flag=""; is_playbook=true
+              ;;
+            *)
+              echo "::error::unknown tag '${tag}'. Expected vX.Y.Z or telemetry-vX.Y.Z." >&2
+              exit 1
+              ;;
+          esac
+
+          version="${tag#"$prefix"}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag '${tag}' does not end in a plain X.Y.Z version." >&2
+            exit 1
+          fi
+
+          {
+            echo "tag=${tag}"
+            echo "version=${version}"
+            echo "package=${package}"
+            echo "bins=${bins}"
+            echo "archive=${archive}"
+            echo "cargo_toml=${cargo_toml}"
+            echo "tool=${tool}"
+            echo "tag_prefix=${prefix}"
+            echo "latest_flag=${latest_flag}"
+            echo "is_playbook=${is_playbook}"
+            echo "dry_run=${dry_run}"
+          } >> "$GITHUB_OUTPUT"
+          echo "tag ${tag} resolves to package ${package}, dry run ${dry_run}"
+
+  # Fail before spending five build legs on a version mismatch. For playbook
+  # the hooks manifest version is user-visible through `claude plugin details`,
+  # so a binary whose version contradicts the manifest must never publish. The
   # skills plugin has its own version line in pragmatic-engineer/skills.
   verify-version:
+    needs: resolve
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -76,25 +178,78 @@ jobs:
 
       - name: Tag, Cargo.toml and the hooks plugin manifest must agree
         id: check
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+          TAG_VERSION: ${{ needs.resolve.outputs.version }}
+          CARGO_TOML: ${{ needs.resolve.outputs.cargo_toml }}
+          IS_PLAYBOOK: ${{ needs.resolve.outputs.is_playbook }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          tag_version="${tag#v}"
-          cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
-          hooks_version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' .claude-plugin/hooks.plugin.json | head -1)"
+          cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$CARGO_TOML" | head -1)"
+          echo "tag:         $TAG (version $TAG_VERSION)"
+          echo "$CARGO_TOML:  $cargo_version"
 
-          echo "tag:         $tag (version $tag_version)"
-          echo "Cargo.toml:  $cargo_version"
-          echo "hooks.plugin.json: $hooks_version"
-
-          if [ "$tag_version" != "$cargo_version" ] || [ "$tag_version" != "$hooks_version" ]; then
-            echo "::error::version mismatch: tag=$tag_version Cargo.toml=$cargo_version hooks.plugin.json=$hooks_version. All three must agree before publishing." >&2
+          if [ "$IS_PLAYBOOK" = "true" ]; then
+            hooks_version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' .claude-plugin/hooks.plugin.json | head -1)"
+            echo "hooks.plugin.json: $hooks_version"
+            if [ "$TAG_VERSION" != "$cargo_version" ] || [ "$TAG_VERSION" != "$hooks_version" ]; then
+              echo "::error::version mismatch: tag=$TAG_VERSION Cargo.toml=$cargo_version hooks.plugin.json=$hooks_version. All three must agree before publishing." >&2
+              exit 1
+            fi
+          elif [ "$TAG_VERSION" != "$cargo_version" ]; then
+            echo "::error::version mismatch: tag=$TAG_VERSION $CARGO_TOML=$cargo_version. Both must agree before publishing." >&2
             exit 1
           fi
-          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+
+  # Create the release for the tag when it is missing, so a pushed tag is all a
+  # maintainer has to do. Releases for tools other than playbook are created
+  # with --latest=false, which keeps the playbook vX.Y.Z release as the
+  # repository's latest. --verify-tag refuses to create a tag implicitly.
+  create-release:
+    needs: [resolve, verify-version]
+    if: needs.resolve.outputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+
+      - name: Create the release when it does not exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          TOOL: ${{ needs.resolve.outputs.tool }}
+          LATEST_FLAG: ${{ needs.resolve.outputs.latest_flag }}
+          IS_PLAYBOOK: ${{ needs.resolve.outputs.is_playbook }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists."
+            exit 0
+          fi
+          args=("$TAG" --verify-tag --title "$TOOL $VERSION")
+          if [ -n "$LATEST_FLAG" ]; then
+            args+=("$LATEST_FLAG")
+          fi
+          if [ "$IS_PLAYBOOK" = "true" ]; then
+            args+=(--generate-notes)
+          else
+            args+=(--notes "Release of $TOOL $VERSION. The archives below hold both binaries for each platform, and SHA256SUMS lists their checksums.")
+          fi
+          gh release create "${args[@]}"
 
   build:
-    needs: verify-version
+    needs: [resolve, verify-version, create-release]
+    # create-release is skipped on a dry run; any other outcome stops the build.
+    if: ${{ !cancelled() && needs.verify-version.result == 'success' && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
@@ -157,6 +312,7 @@ jobs:
         env:
           RELEASE_LINKER: ${{ matrix.linker }}
           RELEASE_CC: ${{ matrix.cc }}
+          PACKAGE: ${{ needs.resolve.outputs.package }}
         run: |
           set -euo pipefail
           if [ -n "${RELEASE_LINKER:-}" ]; then
@@ -172,46 +328,85 @@ jobs:
             tc="$(echo '${{ matrix.target }}' | tr '-' '_')"
             export "CC_${tc}=${RELEASE_CC}"
           fi
-          cargo build --release -p playbook --target ${{ matrix.target }}
+          cargo build --release -p "$PACKAGE" --target ${{ matrix.target }}
 
       - name: Ad-hoc sign the macOS binaries
         if: runner.os == 'macOS'
-        run: codesign --sign - --force target/${{ matrix.target }}/release/playbook
+        env:
+          BINS: ${{ needs.resolve.outputs.bins }}
+        run: |
+          set -euo pipefail
+          read -ra bins <<< "$BINS"
+          for b in "${bins[@]}"; do codesign --sign - --force "target/${{ matrix.target }}/release/$b"; done
 
       - name: Confirm the macOS signature is adhoc
         if: runner.os == 'macOS'
+        env:
+          BINS: ${{ needs.resolve.outputs.bins }}
         run: |
           set -euo pipefail
-          codesign -dvv target/${{ matrix.target }}/release/playbook 2>&1 | tee /tmp/cs.txt
-          grep -q 'Signature=adhoc' /tmp/cs.txt
+          read -ra bins <<< "$BINS"
+          for b in "${bins[@]}"; do
+            codesign -dvv "target/${{ matrix.target }}/release/$b" 2>&1 | tee /tmp/cs.txt
+            grep -q 'Signature=adhoc' /tmp/cs.txt
+          done
 
       - name: Confirm the linux binaries are static
         if: runner.os == 'Linux'
+        env:
+          BINS: ${{ needs.resolve.outputs.bins }}
         run: |
           set -euo pipefail
-          file -b target/${{ matrix.target }}/release/playbook | tee /tmp/f.txt
-          grep -qE 'static-pie linked|statically linked' /tmp/f.txt
+          read -ra bins <<< "$BINS"
+          for b in "${bins[@]}"; do
+            file -b "target/${{ matrix.target }}/release/$b" | tee /tmp/f.txt
+            grep -qE 'static-pie linked|statically linked' /tmp/f.txt
+          done
 
-      - name: Name and upload the artefact
+      - name: Name the artefact
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          TOOL: ${{ needs.resolve.outputs.tool }}
+          BINS: ${{ needs.resolve.outputs.bins }}
+          ARCHIVE: ${{ needs.resolve.outputs.archive }}
+        run: |
+          set -euo pipefail
+          dir="target/${{ matrix.target }}/release"
+          if [ "$ARCHIVE" = "tar" ]; then
+            # One archive per target holding every binary of the tool.
+            asset="${TOOL}-${VERSION}-${{ matrix.target }}.tar.gz"
+            files=()
+            read -ra bins <<< "$BINS"
+            for b in "${bins[@]}"; do files+=("${b}${{ matrix.ext }}"); done
+            tar -czf "$asset" -C "$dir" "${files[@]}"
+          else
+            asset="${TOOL}-${VERSION}-${{ matrix.target }}${{ matrix.ext }}"
+            cp "${dir}/${TOOL}${{ matrix.ext }}" "$asset"
+          fi
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+          if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$asset"; else sha256sum "$asset"; fi
+
+      - name: Upload the artefact
+        if: needs.resolve.outputs.dry_run != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.verify-version.outputs.version }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
-          asset="playbook-${VERSION}-${{ matrix.target }}${{ matrix.ext }}"
-          cp "target/${{ matrix.target }}/release/playbook${{ matrix.ext }}" "$asset"
-          # The release is created by the maintainer before this runs; see the
-          # header. A missing release is a procedure error, not a build error,
-          # so say so rather than failing on an opaque upload error.
-          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || {
-            echo "::error::release ${GITHUB_REF_NAME} does not exist. Create it first with: gh release create ${GITHUB_REF_NAME} --target main" >&2
+          # The create-release job makes the release before this runs. A
+          # missing release here means that job did not run; say so rather
+          # than failing on an opaque upload error.
+          gh release view "$TAG" >/dev/null 2>&1 || {
+            echo "::error::release $TAG does not exist. The create-release job should have made it." >&2
             exit 1
           }
-          gh release upload "${GITHUB_REF_NAME}" "$asset" --clobber
+          gh release upload "$TAG" "$ASSET" --clobber
 
   checksums:
-    needs: [verify-version, build]
+    needs: [resolve, verify-version, build]
+    if: needs.resolve.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -238,7 +433,9 @@ jobs:
         id: sums
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.verify-version.outputs.version }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          TOOL: ${{ needs.resolve.outputs.tool }}
           # This job never checks the repo out, so gh cannot infer the repo
           # from a git remote the way it does in the build jobs. Passing it
           # explicitly is cheaper than a checkout it has no other use for.
@@ -246,24 +443,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist && cd dist
-          # Download exactly the five binaries, never a previous SHA256SUMS.
-          gh release download "${GITHUB_REF_NAME}" --pattern "playbook-${VERSION}-*" --clobber
+          # Download exactly the five artefacts, never a previous SHA256SUMS.
+          gh release download "$TAG" --pattern "${TOOL}-${VERSION}-*" --clobber
           count="$(find . -type f | wc -l | tr -d ' ')"
           if [ "$count" -ne 5 ]; then
             echo "::error::expected 5 artefacts, found $count. Refusing to publish a partial SHA256SUMS." >&2
             find . -type f
             exit 1
           fi
-          shasum -a 256 playbook-* > SHA256SUMS
+          shasum -a 256 "${TOOL}"-* > SHA256SUMS
           shasum -a 256 -c SHA256SUMS
           cat SHA256SUMS
-          gh release upload "${GITHUB_REF_NAME}" SHA256SUMS --clobber
+          gh release upload "$TAG" SHA256SUMS --clobber
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
-            dist/playbook-*
+            dist/${{ needs.resolve.outputs.tool }}-*
             dist/SHA256SUMS
 
   # Builds the trimmed hooks plugin archive the marketplace points at (the
@@ -274,7 +471,10 @@ jobs:
   # name does not match the checksums job's `playbook-<version>-*` pattern, so
   # that job still sees exactly five files.
   plugin-archive:
-    needs: verify-version
+    needs: [resolve, verify-version, create-release]
+    # Only playbook ships the plugin archives. create-release is skipped on a
+    # dry run; any other outcome stops the job.
+    if: ${{ !cancelled() && needs.resolve.outputs.is_playbook == 'true' && needs.verify-version.result == 'success' && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -304,7 +504,7 @@ jobs:
       - name: Build the archive from its allowlist
         id: build
         env:
-          VERSION: ${{ needs.verify-version.outputs.version }}
+          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -337,19 +537,22 @@ jobs:
           build playbook-hooks-plugin .claude-plugin/archive-hooks-files.txt
 
       - name: Upload the archive to the release
+        if: needs.resolve.outputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.verify-version.outputs.version }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           set -euo pipefail
-          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || {
-            echo "::error::release ${GITHUB_REF_NAME} does not exist. Create it first with: gh release create ${GITHUB_REF_NAME} --target main" >&2
+          gh release view "$TAG" >/dev/null 2>&1 || {
+            echo "::error::release $TAG does not exist. The create-release job should have made it." >&2
             exit 1
           }
-          gh release upload "${GITHUB_REF_NAME}" \
+          gh release upload "$TAG" \
             "dist/playbook-hooks-plugin-${VERSION}.zip" --clobber
 
       - name: Attest build provenance
+        if: needs.resolve.outputs.dry_run != 'true'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
@@ -357,14 +560,15 @@ jobs:
 
   # Fast path to Homebrew: tell the tap a release exists so the formula is
   # bumped within minutes. The tap also checks daily, so this is only a speed
-  # up. It needs the TAP_DISPATCH_TOKEN secret; without it the step says so and
-  # the job still succeeds. Only `v*` tags reach this workflow, so telemetry-v
-  # and code-v releases never run it.
+  # up, and the job never fails the release. It sends the repository dispatch
+  # with the workflow token and prints the HTTP status, so a refusal is visible
+  # in the log. Skipped on a dry run and when an earlier job failed.
   notify-tap:
-    needs: [checksums, plugin-archive]
-    if: github.ref_type == 'tag'
+    needs: [resolve, checksums, plugin-archive]
+    if: ${{ !cancelled() && needs.resolve.outputs.dry_run != 'true' && needs.checksums.result == 'success' && (needs.plugin-archive.result == 'success' || needs.plugin-archive.result == 'skipped') }}
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: write
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -373,17 +577,23 @@ jobs:
             api.github.com:443
 
       - name: Tell the Homebrew tap
+        continue-on-error: true
         env:
-          TAP_DISPATCH_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          TOOL: ${{ needs.resolve.outputs.tool }}
+          TAG_PREFIX: ${{ needs.resolve.outputs.tag_prefix }}
         run: |
-          set -euo pipefail
-          if [ -z "${TAP_DISPATCH_TOKEN:-}" ]; then
-            echo "::notice::TAP_DISPATCH_TOKEN is not set. The tap will pick this release up on its daily run."
-            exit 0
-          fi
-          curl -fsS -X POST \
-            -H "Authorization: Bearer ${TAP_DISPATCH_TOKEN}" \
+          set -uo pipefail
+          body="$(jq -nc --arg tool "$TOOL" --arg prefix "$TAG_PREFIX" \
+            '{event_type: "tool-released", client_payload: {tool: $tool, tag_prefix: $prefix}}')"
+          status="$(curl -sS -o /tmp/dispatch.out -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/pragmatic-engineer/homebrew-tap/dispatches \
-            -d '{"event_type":"tool-released","client_payload":{"tool":"playbook"}}'
-          echo "Sent tool-released to pragmatic-engineer/homebrew-tap."
+            -d "$body")" || status="curl-failed"
+          if [ "$status" = "204" ]; then
+            echo "Sent tool-released for ${TOOL} to pragmatic-engineer/homebrew-tap (HTTP 204)."
+          else
+            echo "::warning::The tap dispatch returned HTTP ${status}. The tap picks this release up on its daily run, or run the bump workflow there by hand."
+            cat /tmp/dispatch.out || true
+          fi
