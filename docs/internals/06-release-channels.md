@@ -4,7 +4,7 @@ A tagged release reaches users through three channels: the GitHub release assets
 (built by the `build` and `checksums` jobs of `release.yml`), the Homebrew tap
 `pragmatic-engineer/homebrew-tap`, and the plugin marketplace, which lives in
 `pragmatic-engineer/skills`. This repo does not push to the last two. Each of
-those repos runs its own daily workflow that reads this repo's latest release and
+those repos runs its own workflow, the tap every 30 minutes, that reads this repo's latest release and
 updates itself:
 
 1. The tap rewrites the URLs and checksums in `Formula/playbook.rb` from the
@@ -34,15 +34,13 @@ creates the GitHub release when it is missing, with `--latest=false` for every
 prefix except `v`, so the repository's latest release stays on the playbook
 line. `build` compiles the five targets, ad hoc signs the macOS binaries and
 uploads one asset per target. `checksums` writes `SHA256SUMS` and attests the
-assets. `plugin-archive` runs for `v*` only. `notify-tap` sends the tap a
-`tool-released` event with the tool name and tag prefix. It never fails the
-release, and it prints the HTTP status when the tap refuses it, because the
-workflow token may not be allowed to dispatch to another repository. The tap also
-checks daily.
+assets. `plugin-archive` runs for `v*` only. The workflow only publishes. The tap's own
+`release` workflow checks every 30 minutes and picks the new release up, so a
+formula follows within about half an hour.
 
 To rehearse, run the `release` workflow by hand with a `tag` input. A manual run
 is always a dry run: it resolves, verifies and builds, and skips release
-creation, uploads, attestation and the tap notice. The tag's version must match
+creation, uploads and attestation. The tag's version must match
 the files on the ref you run it from.
 
 ## The plugin archive

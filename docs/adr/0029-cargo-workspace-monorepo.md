@@ -15,7 +15,7 @@ The binary grew a code index and a usage dashboard that other tools should reuse
 3. **Crates depend on each other by path.** There is one `Cargo.lock`. The internal-crate bump workflow and its scripts are removed.
 4. **Tags carry a prefix per tool.** `vX.Y.Z` releases `playbook` (plugin zip, five binaries, `SHA256SUMS`, attestations). `telemetry-vX.Y.Z` releases `playbook-telemetry` as `playbook-telemetry-<version>-<target>.tar.gz` holding both binaries. `code-vX.Y.Z` is reserved for `playbook-code`. Telemetry and code releases are created with `--latest=false` so GitHub's latest release stays on the `v` line.
 5. **Versions.** `playbook` and `playbook-code` use the workspace version. `playbook-telemetry` keeps its own version. `playbook-common` and `playbook-data` are not published.
-6. **Consumers map tags to tools.** The Homebrew tap maps each formula to a repository and tag prefix and falls back to the legacy repository until a prefixed release exists. The marketplace pin follows plain `vX.Y.Z` tags only.
+6. **Consumers map tags to tools.** The Homebrew tap maps each formula to a repository and tag prefix and falls back to the legacy repository until a prefixed release exists. The tap checks for new releases every 30 minutes, so the release workflow sends it nothing. The marketplace pin follows plain `vX.Y.Z` tags only.
 7. **CI selects packages by changed path.** The required check names do not change. A change under one crate runs that crate and the crates that depend on it. Anything else runs the whole workspace.
 8. **History.** `playbook-telemetry` was imported as a single squash commit of tag v0.1.7, because the repository allows squash merges only. The old repository is archived with a README pointer and keeps its history and releases.
 

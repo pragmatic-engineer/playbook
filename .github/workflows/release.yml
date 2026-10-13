@@ -17,7 +17,7 @@
 #
 # Dry run: `workflow_dispatch` with a `tag` input and `dry_run` left on runs
 # resolve, verify-version, the five builds and the plugin archive build, and
-# skips release creation, uploads, checksums, attestation and the tap notice.
+# skips release creation, uploads, checksums and attestation.
 # A dispatch can never publish: publishing needs a pushed tag.
 #
 # Five targets, built on the host that matches them:
@@ -51,7 +51,7 @@ on:
         required: true
         type: string
       dry_run:
-        description: 'Build only: no release, upload, attestation or tap notice. A dispatch is always a dry run.'
+        description: 'Build only: no release, upload or attestation. A dispatch is always a dry run.'
         required: false
         type: boolean
         default: true
@@ -557,43 +557,3 @@ jobs:
         with:
           subject-path: |
             dist/playbook-hooks-plugin-*.zip
-
-  # Fast path to Homebrew: tell the tap a release exists so the formula is
-  # bumped within minutes. The tap also checks daily, so this is only a speed
-  # up, and the job never fails the release. It sends the repository dispatch
-  # with the workflow token and prints the HTTP status, so a refusal is visible
-  # in the log. Skipped on a dry run and when an earlier job failed.
-  notify-tap:
-    needs: [resolve, checksums, plugin-archive]
-    if: ${{ !cancelled() && needs.resolve.outputs.dry_run != 'true' && needs.checksums.result == 'success' && (needs.plugin-archive.result == 'success' || needs.plugin-archive.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-
-      - name: Tell the Homebrew tap
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TOOL: ${{ needs.resolve.outputs.tool }}
-          TAG_PREFIX: ${{ needs.resolve.outputs.tag_prefix }}
-        run: |
-          set -uo pipefail
-          body="$(jq -nc --arg tool "$TOOL" --arg prefix "$TAG_PREFIX" \
-            '{event_type: "tool-released", client_payload: {tool: $tool, tag_prefix: $prefix}}')"
-          status="$(curl -sS -o /tmp/dispatch.out -w '%{http_code}' -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/pragmatic-engineer/homebrew-tap/dispatches \
-            -d "$body")" || status="curl-failed"
-          if [ "$status" = "204" ]; then
-            echo "Sent tool-released for ${TOOL} to pragmatic-engineer/homebrew-tap (HTTP 204)."
-          else
-            echo "::warning::The tap dispatch returned HTTP ${status}. The tap picks this release up on its daily run, or run the bump workflow there by hand."
-            cat /tmp/dispatch.out || true
-          fi
