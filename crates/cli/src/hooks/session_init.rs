@@ -93,7 +93,8 @@ pub fn run(payload: &Payload) {
     }
     clear_statusline_cache();
     // Headless runs (CI, `claude -p`) have no stale worktrees, no person to nudge,
-    // and no handoff to consume: they inject nothing unless memory is opted in.
+    // and no handoff to consume: they get the tool map and the auto mode note,
+    // and memory only when it is opted in.
     let headless = crate::common::headless::is_headless();
     if !headless {
         maybe_sweep_worktrees(&home, &repo_root);
