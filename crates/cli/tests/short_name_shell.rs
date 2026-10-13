@@ -85,8 +85,8 @@ fn shells() -> Vec<&'static str> {
 fn pb_runs_playbook_when_the_name_is_free() {
     for shell in shells() {
         let sb = Sandbox::new();
-        let log = sb.run(shell, "", "pb cc list");
-        assert_eq!(log, vec!["PLAYBOOK cc list".to_string()], "{shell}");
+        let log = sb.run(shell, "", "pb doctor list");
+        assert_eq!(log, vec!["PLAYBOOK doctor list".to_string()], "{shell}");
     }
 }
 
@@ -138,14 +138,14 @@ fn sourcing_twice_keeps_one_working_definition() {
 fn the_short_name_is_absent_unless_asked_for() {
     let text = script_with(ShellKind::Bash, true);
     assert!(!text.contains("_playbook_pb_taken"));
-    assert!(text.contains("\nccc() {"));
+    assert!(text.contains("\nfunction playbook {"));
 }
 
 #[test]
 fn golden_text_of_the_short_name_snippet() {
     let text = script_with_options(ShellKind::Zsh, false, true);
-    let tail = text.split("ccd() {").nth(1).unwrap();
+    let tail = text.split_once("# Optional short name").unwrap().1;
     assert!(tail.contains("_playbook_pb_taken() {"));
-    assert!(tail.contains("_PLAYBOOK_PB_DEF='pb() { command playbook \"$@\"; }'"));
+    assert!(tail.contains("_PLAYBOOK_PB_DEF='pb() { playbook \"$@\"; }'"));
     assert!(tail.ends_with("unset _PLAYBOOK_PB_DEF\n"));
 }

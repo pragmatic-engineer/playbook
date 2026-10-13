@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook cc launch`: the launcher the `ccc` and `ccd` shell functions call.
+//! `playbook cc launch`: the launcher the `playbook cc` and `playbook ccd` shell functions call.
 //!
 //! Subcommands: (none) resume or start, `clean`, `fresh`, `raw [sid]`, `list`,
 //! `prune`, `worktree <branch>`. The shell function only wraps this and `cd`s
@@ -40,7 +40,7 @@ fn takes_value(opt: &str) -> bool {
 }
 
 /// Splits leading flags (with their values) from the rest; the subcommand is
-/// the first non-flag token, so `ccd clean` works.
+/// the first non-flag token, so `playbook ccd clean` works.
 fn split_flags(args: &[String]) -> (Vec<String>, Vec<String>) {
     let mut flags = Vec::new();
     let mut i = 0;
@@ -254,7 +254,7 @@ fn dispatch(cwd: &mut PathBuf, args: &[String]) -> i32 {
 
 fn clean(cwd: &Path, project_dir: &Path, name: &str, flags: &[String], tail: &[String]) -> i32 {
     let Some(old) = sessions::find_by_title(project_dir, name) else {
-        println!("-> ccc clean: no matching session for '{name}'; starting fresh");
+        println!("-> cc clean: no matching session for '{name}'; starting fresh");
         return claude(
             cwd,
             [&["-n".into(), name.to_string()], flags, tail].concat(),
@@ -263,22 +263,22 @@ fn clean(cwd: &Path, project_dir: &Path, name: &str, flags: &[String], tail: &[S
     match clean_resume::prepare(project_dir, &old) {
         Ok(done) => {
             println!(
-                "-> ccc clean: cloned {}... -> {}... (stripped {} override entries)",
+                "-> cc clean: cloned {}... -> {}... (stripped {} override entries)",
                 short(&old),
                 short(&done.new_sid),
                 done.stripped
             );
-            println!("-> ccc clean: settings.json + plugins + hooks reload from current config");
+            println!("-> cc clean: settings.json + plugins + hooks reload from current config");
             config_drift::stamp(&cwd.to_string_lossy());
             let head = ["--resume".into(), done.new_sid, "-n".into(), name.into()];
             claude(cwd, [&head[..], flags, tail].concat())
         }
         Err(clean_resume::CleanError::TranscriptMissing(path)) => {
-            println!("-> ccc clean: transcript missing at {}", path.display());
+            println!("-> cc clean: transcript missing at {}", path.display());
             1
         }
         Err(clean_resume::CleanError::Io(err)) => {
-            println!("-> ccc clean: {err}");
+            println!("-> cc clean: {err}");
             1
         }
     }
@@ -292,11 +292,11 @@ fn raw(cwd: &Path, project_dir: &Path, name: &str, flags: &[String], tail: &[Str
     let name_args = ["-n".to_string(), name.to_string()];
     match sid {
         None => {
-            println!("-> ccc raw: no matching session; starting fresh");
+            println!("-> cc raw: no matching session; starting fresh");
             claude(cwd, [flags, &name_args[..], tail].concat())
         }
         Some(sid) => {
-            println!("-> ccc raw: resuming {sid} (no fork, overrides preserved)");
+            println!("-> cc raw: resuming {sid} (no fork, overrides preserved)");
             let head = ["--resume".to_string(), sid];
             claude(cwd, [flags, &head[..], &name_args[..], tail].concat())
         }
@@ -340,7 +340,9 @@ fn worktree(cwd: &mut PathBuf, flags: &[String], tail: &[String]) -> i32 {
             "--ai-resolve" | "--" => {}
             "--no-push" => no_push = true,
             "-h" | "--help" => {
-                eprintln!("usage: ccc worktree <branch> [env-base-folder] [--no-push]");
+                eprintln!(
+                    "usage: playbook cc launch worktree <branch> [env-base-folder] [--no-push]"
+                );
                 return 0;
             }
             other if other.starts_with('-') => {

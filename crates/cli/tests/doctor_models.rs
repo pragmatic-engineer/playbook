@@ -38,7 +38,9 @@ fn it_lists_every_tier_and_the_chain_ccc_passes() {
         "{t}"
     );
     assert!(
-        t.contains("fallback chain ccc passes: claude-opus-5,claude-sonnet-5,claude-haiku-4-5"),
+        t.contains(
+            "fallback chain playbook cc passes: claude-opus-5,claude-sonnet-5,claude-haiku-4-5"
+        ),
         "{t}"
     );
 }

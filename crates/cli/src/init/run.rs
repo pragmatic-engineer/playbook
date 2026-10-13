@@ -201,6 +201,10 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     ];
     steps.extend(migrated.steps);
     steps.push(trust_step);
+    steps.extend(old_launcher_steps(
+        &paths.home,
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
     InitOutcome {
         steps,
         warnings: migrated.warnings,
@@ -826,6 +830,15 @@ fn wire_hooks(settings_path: &Path, epoch: u64) -> StepReport {
         Ok(_) => StepReport::already_correct("hooks", "all hooks already wired"),
         Err(err) => StepReport::failed("hooks", err.to_string()),
     }
+}
+
+/// One skipped step per old `ccc` or `ccd` launcher found. Init only tells the
+/// user what replaces it and what to remove; it never edits or deletes them.
+pub(crate) fn old_launcher_steps(home: &Path, path: &std::ffi::OsStr) -> Vec<StepReport> {
+    crate::doctor::launchers::find(home, path)
+        .iter()
+        .map(|f| StepReport::skipped("old-launcher", crate::doctor::launchers::describe(f)))
+        .collect()
 }
 
 /// Patch the rc file. Gated on `aliases`, then `$SHELL`.

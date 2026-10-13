@@ -8,7 +8,7 @@
 //! a model id. Claude Code resolves each alias to the newest model the
 //! provider offers. The fallback is Claude Code's own `--fallback-model`,
 //! which switches for one turn when the preferred model is overloaded or
-//! unavailable. `ccc` and `ccd` pass the chain from this table.
+//! unavailable. `playbook cc` and `playbook ccd` pass the chain from this table.
 
 use crate::config;
 use crate::effort;
@@ -242,7 +242,7 @@ pub fn report(home: &Path, claude_home: &Path, cwd: &Path, json: bool) -> String
     if user_fallback {
         out.push_str("fallback chain: set by you (flag or fallbackModel), playbook adds none\n");
     } else {
-        out.push_str(&format!("fallback chain ccc passes: {chain}\n"));
+        out.push_str(&format!("fallback chain playbook cc passes: {chain}\n"));
         if let Some(level) = effort.as_deref().filter(|l| OLD_GEN_REJECTS.contains(l)) {
             out.push_str(&format!(
                 "effort {level} in force: the previous Sonnet and Opus reject it, so the chain starts at Haiku\n"

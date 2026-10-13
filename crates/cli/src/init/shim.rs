@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wires the rc file to load the `ccc`/`ccd` launcher with
+//! Wires the rc file to load the `playbook cc` cd wrapper with
 //! `eval "$(playbook shell-init)"`, and upgrades the legacy `source` lines.
 
 use std::fs;
@@ -64,7 +64,7 @@ pub const SOURCE_LINE: &str =
     "command -v playbook >/dev/null 2>&1 && eval \"$(playbook shell-init)\"";
 
 /// Comment line that opens the managed block; uninstall keys on it too, and
-/// still strips the older `(cc/ccd)` wording.
+/// still strips the older `(cc/ccd)` wording. The text is kept so existing rc files match.
 const BLOCK_COMMENT: &str = "# playbook launchers (ccc/ccd)";
 
 /// What `rewire_rc_file` did, for a caller to report to the user.

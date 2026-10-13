@@ -7,4 +7,5 @@
 
 pub mod check;
 pub mod field;
+pub mod launchers;
 pub mod style;

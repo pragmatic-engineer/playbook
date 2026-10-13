@@ -45,6 +45,13 @@ fn run_hook(name: playbook::HookName) {
     hooks::dispatch(name, &payload);
 }
 
+/// The launcher arguments for a mode word followed by what the user typed.
+fn mode_args(mode: &str, rest: Vec<String>) -> Vec<String> {
+    let mut args = vec![mode.to_string()];
+    args.extend(rest);
+    args
+}
+
 fn main() {
     restore_sigpipe();
     playbook::usage_host::install();
@@ -78,7 +85,7 @@ fn main() {
     match cli.command {
         Command::Hook { name } => run_hook(name),
         // Launcher subcommands land in a later Work Unit; stub for now.
-        Command::Cc { sub } => match sub {
+        Command::Cc { sub, args } => match sub {
             Some(CcCommand::Prune) => cc::retention::prune(&cc::logical_cwd()),
             Some(CcCommand::BustCache) => cc::bust_cache::bust(),
             Some(CcCommand::List) => {
@@ -107,14 +114,16 @@ fn main() {
                 no_push,
             )
             .run(),
-            Some(CcCommand::Clean) => std::process::exit(cc::launch::run(false, &["clean".into()])),
-            Some(CcCommand::Fresh) => std::process::exit(cc::launch::run(false, &["fresh".into()])),
-            Some(CcCommand::Raw { sid }) => {
-                let mut args = vec!["raw".to_string()];
-                args.extend(sid);
-                std::process::exit(cc::launch::run(false, &args));
+            Some(CcCommand::Clean { args }) => {
+                std::process::exit(cc::launch::run(false, &mode_args("clean", args)))
             }
-            None => std::process::exit(cc::launch::run(false, &[])),
+            Some(CcCommand::Fresh { args }) => {
+                std::process::exit(cc::launch::run(false, &mode_args("fresh", args)))
+            }
+            Some(CcCommand::Raw { args }) => {
+                std::process::exit(cc::launch::run(false, &mode_args("raw", args)))
+            }
+            None => std::process::exit(cc::launch::run(false, &args)),
         },
         Command::Ccd { args } => std::process::exit(cc::launch::run(true, &args)),
         Command::Effort { sub: Some(sub), .. } => {

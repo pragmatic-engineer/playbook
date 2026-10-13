@@ -389,7 +389,7 @@ mod tests {
             place: Place {
                 cwd: Some("/w/r".into()),
                 worktree: Some("/w/r/536".into()),
-                convention: "ccc",
+                convention: "cc",
                 dirty: Some(dirty),
                 ..Place::default()
             },
@@ -464,7 +464,7 @@ mod tests {
             "aaaaaaaa",
             "playbook",
             "feat/536-x",
-            "536 (ccc)",
+            "536 (cc)",
             "PR #540 merged",
             "182k",
             "$1.50",

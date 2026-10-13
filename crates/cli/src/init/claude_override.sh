@@ -30,12 +30,20 @@ _playbook_real_claude() {
     whence -p claude 2>/dev/null
   fi
 }
+# The playbook shell function exists once shell-init ran, so only the binary counts.
+_playbook_has_binary() {
+  if [ -n "${BASH_VERSION-}" ]; then
+    builtin type -P playbook >/dev/null 2>&1
+  else
+    whence -p playbook >/dev/null 2>&1
+  fi
+}
 _playbook_is_tty() { [ -t 0 ] && [ -t 1 ]; }
 # Returns 0 when the call must go straight to claude, untouched.
 _playbook_claude_bypass() {
   [ "${PLAYBOOK_BYPASS-}" = "1" ] && return 0
   _playbook_is_tty || return 0
-  command -v playbook >/dev/null 2>&1 || return 0
+  _playbook_has_binary || return 0
   local _pb_first _pb_arg
   _pb_first="${1-}"
   case "$_pb_first" in

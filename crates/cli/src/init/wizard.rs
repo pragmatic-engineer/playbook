@@ -82,7 +82,7 @@ fn decline_line(id: &str) -> &'static str {
         "hooks" => "No hooks are added. The safety guards, session helpers and usage warm-up do not run.",
         "statusline" => "Your status line stays as it is.",
         "path" => "Your shell files are not touched. Hooks may not find playbook unless it is already on PATH.",
-        "aliases" => "No line is added to your rc file, so ccc and ccd are not defined.",
+        "aliases" => "No line is added to your rc file, so `playbook cc` will not follow you into a new worktree.",
         "system-prompt" => "No file is copied. The launchers start without the playbook prompt.",
         "telemetry" => "No variables are written. `playbook usage` reads transcripts instead.",
         "claude-override" => "`claude` stays the plain Claude Code command.",
