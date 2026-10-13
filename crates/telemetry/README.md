@@ -1,0 +1,127 @@
+# playbook-telemetry (alias: pbtop)
+
+Type `pbtop`. It is the short name of the `playbook-telemetry` command, and both run the same program.
+
+```sh
+brew install pragmatic-engineer/tap/playbook-telemetry
+pbtop
+```
+
+A token and cost dashboard for Claude Code sessions. It reads the session history Claude Code already keeps on your machine, prices it, and shows it in a terminal view or as a text or JSON report. Everything stays local.
+
+It is part of the [playbook](https://github.com/pragmatic-engineer/playbook) toolkit and also works on its own. If you use playbook, you do not need to download anything here: `playbook usage` runs this same code.
+
+## What it shows
+
+- Cost and tokens per day, model, repo, branch and session, with a week over week comparison.
+- Cache read and write tokens, split into the five minute and one hour tiers.
+- Tool, skill and agent breakdowns and latency, when Claude Code telemetry is on (see the receiver below).
+- Budget and rate limit panels, when you set budgets or provide limits.
+- Codex session history, read the same way.
+
+## Install
+
+The tool ships two command names for the same program: the short alias `pbtop` and the long name `playbook-telemetry`. Type `pbtop` at the prompt and use `playbook-telemetry` in scripts, where the full name is easier to search for.
+
+With Homebrew (macOS and Linux), which installs both names:
+
+```sh
+brew install pragmatic-engineer/tap/playbook-telemetry
+pbtop
+```
+
+Or download the archive for your platform from the [latest release](https://github.com/pragmatic-engineer/playbook/releases?q=telemetry-v&expanded=true). Releases carry `playbook-telemetry-<version>-<target>.tar.gz` for macOS (arm64 and x86_64), Linux (arm64 and x86_64, static musl) and Windows (x86_64), each holding both `playbook-telemetry` and `pbtop`, plus a `SHA256SUMS` file with build provenance attestations.
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+gh attestation verify playbook-telemetry-<version>-<target>.tar.gz --repo pragmatic-engineer/playbook
+tar -xzf playbook-telemetry-<version>-<target>.tar.gz -C ~/.local/bin
+```
+
+Or build from source with the Rust version in `rust-toolchain.toml`:
+
+```sh
+cargo build --release
+./target/release/pbtop
+```
+
+## Use
+
+```sh
+pbtop                 # terminal view, this week against last week
+pbtop --summary       # text summary and exit
+pbtop --json          # the same numbers as JSON
+pbtop --range 30d     # today, week, last-week, month, last-month, 30d, 60d, 90d, all
+pbtop status          # is the telemetry receiver running
+pbtop collect         # run the local OpenTelemetry receiver in the foreground
+pbtop prune --dry-run # say what old telemetry rows would be removed
+```
+
+`playbook-telemetry` takes the same arguments and is the long name for scripts. `pbtop --help` and `pbtop --version` print `pbtop`, and the long name prints `playbook-telemetry`.
+
+Times and days use your local time zone by default, daylight saving included, and a day runs from local midnight to local midnight. Every view says which zone it uses: the footer of the terminal view reads `local time (UTC+10)` or `UTC`, the text summary opens with `Times and days are in ...`, and `--json` carries a `time_zone` object with the `mode`, the `offset_seconds` and a `label`. To use UTC instead, pass `--utc` (or `--local` to force the default), set `PLAYBOOK_TELEMETRY_TZ=utc`, or run `playbook config set usage.timeZone utc`. The flag beats the environment variable, which beats the setting. A value that is not `local` or `utc` is ignored with a warning. Weeks start on Monday unless `usage.weekStart` says otherwise.
+
+It finds Claude Code history in `~/.claude/projects`, or in `$CLAUDE_CONFIG_DIR/projects` when that variable is set.
+
+## Where it keeps its data
+
+The tool shares its data and settings with playbook, so both show the same numbers.
+
+All playbook tools keep their databases in one folder, `~/.config/playbook/data`, whichever tool runs. This tool's file is `~/.config/playbook/data/usage.db` (folder `0700`, file `0600`). It is created on first use, so every command works on a new machine. Lock and receiver files sit next to it. Several processes can use it at once (the terminal view and the receiver); it runs in WAL mode with a busy timeout.
+
+When an older database exists, the first run brings it in, and the view never prints while it is drawn:
+
+- `~/.config/playbook/usage.db` (playbook 0.25, playbook-telemetry 0.1.5) and `~/.config/playbook/usage/usage.db` (older playbook) move into place with their `-wal` and `-shm` files, or merge when the data file already exists.
+- `~/.local/state/playbook-telemetry/usage.db` and `~/.local/state/playbook-usage/usage.db` (older standalone releases, also under `$XDG_STATE_HOME`) are merged in one transaction, keyed on each table's primary key.
+- Merged files are renamed to `*.migrated`. Nothing is deleted. One line on stderr says how many rows were merged, and only when some were.
+- If an older playbook keeps writing to the old path, its new rows are merged quietly on later refreshes, and one line at exit asks you to upgrade it (`brew upgrade playbook` or `playbook update`).
+- A file that cannot be read is skipped with a warning and left untouched.
+
+Settings are playbook's own, from the global tier of its config store (`~/.config/playbook/playbook.db`), and from the nested `usage` object of `~/.config/playbook/config.json` when that store does not exist. The tool has no config file of its own and only reads them. Set them with `playbook config set usage.<key> <value>`. An invalid value is ignored with a warning, and a missing one means the default. An old `~/.config/playbook-telemetry/config.json` is no longer read; the tool names it on stderr if it exists.
+
+| Key | Default | Values |
+| --- | --- | --- |
+| `usage.theme` | `default` | `default`, `dark`, `light`, `mono` |
+| `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
+| `usage.timeZone` | `local` | `local`, `utc` |
+| `usage.refreshSeconds` | `5` | number |
+| `usage.telemetry` | `auto` | `auto`, `off` |
+| `usage.telemetryRetentionDays` | `90` | number, 0 keeps all |
+| `usage.telemetryMaxRows` | `500000` | number, 0 means no limit |
+| `usage.autoIngest` | `true` | true or false |
+| `usage.autoIngestMinutes` | `10` | number |
+| `usage.budget.monthlyUsd` | `0` | number |
+| `usage.budget.weeklyUsd` | `0` | number |
+
+## Telemetry receiver
+
+`pbtop collect` listens on 127.0.0.1 only and stores API request cost and token rows, tool call timings and API errors from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. The receiver checks a bearer token. Its port and token are in `collector.json` in the state folder (owner-only; `pbtop status` shows the port and never prints the token). To point a Claude Code session at it, set `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_METRICS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:<port>` and `OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer <token>"` for that session. Playbook's `cc` launcher does all of this for you. Without the receiver, every total still comes from the session transcripts.
+
+## Use it as a library
+
+The crate `playbook-telemetry` (library `playbook_telemetry`, published from this repository) exposes the same code the binary runs. A program that embeds it implements the `host::Host` trait (config lookup, state folder, program name, repo layout, sessions panel data) and installs it once with `host::install` before calling `entry::run`. `entry::run` picks the time zone itself when `tz::init` has not run, so an embedder gets the same local-time default and the same `usage.timeZone` setting. Without an installed host the standalone one described above is used.
+
+```toml
+playbook-telemetry = { git = "https://github.com/pragmatic-engineer/playbook-telemetry", tag = "v0.1.4", package = "playbook-telemetry" }
+```
+
+Pin an exact tag. The API is still settling, so expect changes between minor versions until 1.0.
+
+## History
+
+This code was extracted from `src/usage` in [pragmatic-engineer/playbook](https://github.com/pragmatic-engineer/playbook). The repository allows squash merges only, so the earlier history is not copied here. Use `git log` and `git blame` in the playbook repository for anything before the first release; commit subjects there carry the pull request numbers.
+
+## Develop
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo clippy --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
+cargo test
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution rules and [SECURITY.md](SECURITY.md) to report a vulnerability.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).

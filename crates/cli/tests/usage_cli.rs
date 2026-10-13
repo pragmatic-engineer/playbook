@@ -290,7 +290,7 @@ fn summary_accepts_a_range_and_says_which_dates_it_covers() {
     assert!(stdout(&all).contains("3 messages, $0.0973 estimated cost across all"));
     let text = stdout(&today);
     assert!(text.starts_with("No usage in today ("), "{text}");
-    assert!(text.contains("UTC"), "{text}");
+    assert!(text.contains("local"), "{text}");
     // A range with no flag prints the summary when stdout is not a terminal.
     assert!(
         stdout(&week).starts_with("No usage in this week ("),

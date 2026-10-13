@@ -78,23 +78,16 @@ tagged release.
 
 ## Internal tool crates
 
-`playbook` depends on `playbook-telemetry` (and later `playbook-code`) by exact git
-tag in `Cargo.toml`, and `Cargo.lock` records the commit. There is no floating
-branch. Releasing a tool opens a bump PR in this repo and updates the tap.
+`playbook-telemetry` (and later `playbook-code`) are workspace members of this
+repo under `crates/`. `playbook` depends on them by path, so there is one
+`Cargo.lock` and no bump pull requests. Each tool still releases on its own
+tag prefix and keeps its own version in its own `Cargo.toml`:
 
-1. The tool repo's release workflow ends with a job that sends an
-   `internal-crate-release` event here, with `crate`, `repo` and `tag` in the
-   payload, and a `tool-released` event to the tap.
-2. `.github/workflows/bump-internal-crates.yml` runs `.github/scripts/bump-internal-crate.sh`.
-   It checks that the tag is the latest release and has a `SHA256SUMS` asset,
-   edits the tag, and runs `cargo update -p <crate>`. It then builds, runs clippy
-   and runs the tests.
-3. It commits through the GitHub API so the commit is signed, opens or updates
-   one PR per crate on `chore/bump-<crate>` titled `chore(deps): bump <crate> to <tag>`,
-   and turns on auto-merge. Normal checks still gate the merge.
+| Tool | Tag | Release assets |
+| --- | --- | --- |
+| playbook | `vX.Y.Z` | plugin zip, five binaries, `SHA256SUMS` |
+| playbook-telemetry | `telemetry-vX.Y.Z` | `playbook-telemetry-<version>-<target>.tar.gz` holding `playbook-telemetry` and `pbtop`, `SHA256SUMS` |
+| playbook-code | `code-vX.Y.Z` | `playbook-code-<version>-<target>.tar.gz` holding `playbook-code` and `pbcode`, `SHA256SUMS` |
 
-A daily run checks every internal crate, so a missed event is picked up within a
-day. To run it by hand, use the workflow's "Run workflow" button with the crate,
-repo and tag. The sending side needs the `TAP_DISPATCH_TOKEN` secret in the tool
-repo, with access to this repo and the tap. Without it the tool's job logs a notice
-and the daily runs take over.
+The Homebrew tap maps each formula to the repo and tag prefix, and the
+marketplace pin follows plain `vX.Y.Z` tags only.
