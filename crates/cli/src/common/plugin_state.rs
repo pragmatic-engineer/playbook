@@ -47,6 +47,10 @@ pub fn is_disabled_in(home: &Path) -> bool {
         == Some(serde_json::Value::Bool(false))
 }
 
+/// The key of the `playbook-hooks` plugin. Only `playbook uninstall` reads it,
+/// to list the step that removes the plugin from a machine that installed it.
+pub const HOOKS_PLUGIN_KEY: &str = "playbook-hooks@pragmatic-engineer";
+
 /// The marketplace the plugin comes from.
 pub const MARKETPLACE: &str = "pragmatic-engineer";
 
@@ -135,5 +139,38 @@ mod tests {
             r#"{"enabledPlugins":{"playbook@pragmatic-engineer":"false"}}"#,
         ));
         assert!(!is_disabled_in(&home));
+    }
+
+    fn write_installed(home: &std::path::Path, body: &str) {
+        let dir = home.join(".claude/plugins");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("installed_plugins.json"), body).unwrap();
+    }
+
+    #[test]
+    fn installed_in_reads_both_shapes_of_the_plugin_list() {
+        let v2 = home_with(None);
+        write_installed(
+            &v2,
+            r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"scope":"user"}]}}"#,
+        );
+        assert_eq!(installed_in(&v2), Some(true));
+        let v1 = home_with(None);
+        write_installed(
+            &v1,
+            r#"{"version":1,"plugins":{"playbook@pragmatic-engineer":{"version":"0.25.0"}}}"#,
+        );
+        assert_eq!(installed_in(&v1), Some(true));
+        let empty = home_with(None);
+        write_installed(&empty, r#"{"version":2,"plugins":{}}"#);
+        assert_eq!(installed_in(&empty), Some(false));
+    }
+
+    #[test]
+    fn installed_in_is_unknown_when_the_list_is_missing_or_malformed() {
+        assert_eq!(installed_in(&home_with(None)), None);
+        let bad = home_with(None);
+        write_installed(&bad, "{not json");
+        assert_eq!(installed_in(&bad), None);
     }
 }

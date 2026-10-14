@@ -450,6 +450,22 @@ fn uninstall_lists_the_plugin_and_marketplace_steps_that_still_apply() {
 }
 
 #[test]
+fn uninstall_lists_the_hooks_plugin_too() {
+    let sb = Sandbox::new("manual-hooks-plugin");
+    sb.write(
+        ".claude/plugins/installed_plugins.json",
+        r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{}],"playbook-hooks@pragmatic-engineer":[{}]}}"#,
+    );
+
+    let shown = text(&sb.run(&["uninstall", "--yes"]));
+
+    assert!(
+        shown.contains("claude plugin uninstall playbook-hooks@pragmatic-engineer"),
+        "{shown}"
+    );
+}
+
+#[test]
 fn uninstall_lists_only_the_steps_that_apply() {
     // Arrange: the plugin is gone but the marketplace entry remains.
     let sb = Sandbox::new("manual-marketplace-only");
@@ -526,4 +542,14 @@ fn init_telemetry_then_uninstall_removes_exactly_the_variables_init_wrote() {
     assert!(!after.contains("OTEL_"), "{after}");
     assert!(!after.contains("CLAUDE_CODE_ENABLE_TELEMETRY"), "{after}");
     assert!(after.contains("MY_OWN"), "{after}");
+}
+
+#[test]
+fn uninstall_removes_a_plugin_seen_marker_an_earlier_release_left() {
+    let sb = Sandbox::new("plugin-seen");
+    sb.write(".config/playbook/plugin-seen", "1\n");
+
+    sb.run(&["uninstall", "--yes"]);
+
+    assert!(!sb.path(".config/playbook/plugin-seen").exists());
 }

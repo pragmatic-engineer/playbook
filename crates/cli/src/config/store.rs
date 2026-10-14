@@ -314,6 +314,11 @@ pub fn export(root: &Path) -> Result<Value, ConfigError> {
             .map_err(broken(root))?;
         for row in rows {
             let (tier, scope, key, raw) = row.map_err(broken(root))?;
+            // A key a release retired stays in the database. Import rejects it
+            // as unknown, so leaving it out keeps an export importable.
+            if keys::default_value(&key).is_none() {
+                continue;
+            }
             let value: Value =
                 serde_json::from_str(&raw).map_err(|_| ConfigError::Malformed(db_path(root)))?;
             let target = match tier.as_str() {
@@ -937,6 +942,19 @@ mod tests {
         assert!(!any_scoped(&r));
         put(&r, Tier::Org, Some("a/b"), "mode", &json!("ask")).unwrap();
         assert!(any_scoped(&r));
+    }
+
+    #[test]
+    fn export_leaves_out_a_key_a_release_retired() {
+        let r = root("store-retired");
+        put(&r, Tier::Global, None, "mode", &json!("auto")).unwrap();
+        put(&r, Tier::Global, None, "hints.pluginRemoved", &json!(false)).unwrap();
+
+        let doc = export(&r).unwrap();
+
+        assert_eq!(doc["global"]["mode"], json!("auto"));
+        assert!(doc["global"].get("hints.pluginRemoved").is_none());
+        assert!(import(&r, &doc).is_ok());
     }
 
     #[test]

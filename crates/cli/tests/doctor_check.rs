@@ -560,3 +560,39 @@ fn an_old_ccc_alias_and_ccd_script_are_reported_with_their_replacements_and_left
     );
     assert!(ccd.exists());
 }
+
+/// A fake `claude` whose `plugin list` prints `body`, returned as the dir to put on PATH.
+fn fake_claude(b: &Box, body: &str) -> PathBuf {
+    let dir = b.root.join("claude-bin");
+    fs::create_dir_all(&dir).unwrap();
+    let claude = dir.join("claude");
+    fs::write(&claude, format!("#!/bin/sh\nprintf '{body}'\n")).unwrap();
+    fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
+    dir
+}
+
+#[test]
+fn layer_one_reads_the_playbook_block_even_when_a_longer_named_plugin_is_listed_first() {
+    let b = Box::new("layer1-exact");
+    let dir = fake_claude(
+        &b,
+        "  playbook-hooks@pragmatic-engineer\\n    Status: disabled\\n\\n  playbook@pragmatic-engineer\\n    Status: enabled\\n",
+    );
+
+    let rows = b.run(&[&dir], "/bin/bash", None);
+
+    assert!(text(&layer(&rows, "1")).contains("PASS plugin enabled"));
+}
+
+#[test]
+fn layer_one_fails_when_the_playbook_plugin_is_disabled() {
+    let b = Box::new("layer1-disabled");
+    let dir = fake_claude(
+        &b,
+        "  playbook@pragmatic-engineer\\n    Status: disabled\\n",
+    );
+
+    let rows = b.run(&[&dir], "/bin/bash", None);
+
+    assert!(text(&layer(&rows, "1")).contains("FAIL plugin installed but disabled"));
+}
