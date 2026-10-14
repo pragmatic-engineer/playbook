@@ -3,6 +3,7 @@
 
 //! `playbook pr`: the mechanical half of `/playbook:create-pull-request`.
 
+pub mod body_rules;
 pub mod comments;
 pub mod create;
 pub mod guard;

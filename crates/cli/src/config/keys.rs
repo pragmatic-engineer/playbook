@@ -15,6 +15,14 @@ pub const KNOWN_KEYS: &[&str] = &[
     "autoMerge.enabled",
     "commit.signOff",
     "pr.draft",
+    "pr.rules.template",
+    "pr.rules.length",
+    "pr.rules.issue",
+    "pr.rules.ticketLine",
+    "pr.rules.scope",
+    "pr.rules.prose",
+    "pr.bodyMaxChars",
+    "pr.ticketPatterns",
     "worktreeCleanup.enabled",
     "worktreeCleanup.staleAfterDays",
     "worktreeCleanup.conflictGracePeriodDays",
@@ -96,6 +104,14 @@ pub fn default_value(key: &str) -> Option<Value> {
         "autoMerge.enabled" => Some(Value::Bool(false)),
         "commit.signOff" => Some(Value::Bool(true)),
         "pr.draft" => Some(Value::Bool(true)),
+        "pr.rules.template" | "pr.rules.ticketLine" => Some(Value::String("block".to_string())),
+        "pr.rules.length" | "pr.rules.issue" | "pr.rules.scope" | "pr.rules.prose" => {
+            Some(Value::String("warn".to_string()))
+        }
+        "pr.bodyMaxChars" => Some(Value::Number(1200.into())),
+        "pr.ticketPatterns" => Some(Value::Array(vec![Value::String(
+            "[A-Z][A-Z0-9]+-[0-9]+".to_string(),
+        )])),
         "worktreeCleanup.enabled" => Some(Value::Bool(true)),
         "worktreeCleanup.staleAfterDays" => Some(Value::Number(30.into())),
         "worktreeCleanup.conflictGracePeriodDays" => Some(Value::Number(90.into())),
@@ -160,6 +176,12 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "usage.telemetry" => Some(&["auto", "off"]),
         "docs.convert" => Some(&["auto", "off"]),
         "hooks.proseLint.mode" => Some(&["warn", "block", "off"]),
+        "pr.rules.template"
+        | "pr.rules.length"
+        | "pr.rules.issue"
+        | "pr.rules.ticketLine"
+        | "pr.rules.scope"
+        | "pr.rules.prose" => Some(&["off", "warn", "block"]),
         _ => None,
     }
 }
