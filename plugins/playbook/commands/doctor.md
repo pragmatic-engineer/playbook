@@ -31,7 +31,7 @@ and stop.
 ## What each layer checks
 
 1. **Plugin enabled.** `claude plugin list` names playbook and does not show it
-   disabled. Hint on a miss: `claude plugin marketplace add pragmatic-engineer/skills && claude plugin install playbook@pragmatic-engineer`.
+   disabled. Hint on a miss: `claude plugin marketplace add pragmatic-engineer/marketplace && claude plugin install playbook@pragmatic-engineer`.
 2. **Safety guards wired.** `settings.json` runs the binary's hook command for the
    six PreToolUse guards (`rm-workspace-guard`, `bg-await-guard`,
    `no-slop-guard`, `precommit-check`, `commit-message-sanitizer`,

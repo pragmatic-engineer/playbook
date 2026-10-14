@@ -1,14 +1,14 @@
 {
   "name": "playbook",
   "displayName": "Playbook",
-  "version": "0.27.2",
-  "description": "A pragmatic Claude Code toolkit: opinionated skills, slash commands and subagents for planning, review, memory, and guarded editing. Pairs with the playbook-hooks plugin.",
+  "version": "0.27.3",
+  "description": "A pragmatic Claude Code toolkit: opinionated skills, slash commands and subagents for planning, review, memory, and guarded editing.",
   "author": {
     "name": "Igor Santos",
     "email": "2278164+igorjs@users.noreply.github.com"
   },
-  "homepage": "https://github.com/pragmatic-engineer/skills",
-  "repository": "https://github.com/pragmatic-engineer/skills",
+  "homepage": "https://github.com/pragmatic-engineer/playbook",
+  "repository": "https://github.com/pragmatic-engineer/playbook",
   "license": "Apache-2.0",
   "keywords": [
     "skills",
