@@ -677,6 +677,24 @@ fn the_agents_view_lists_cost_per_agent_and_the_telemetry_share() {
 }
 
 #[test]
+fn the_agents_view_falls_back_to_transcript_counts_with_a_label() {
+    let mut a = agents_app(false);
+    let data = a.data.as_mut().unwrap();
+    data.agents.from_transcripts = true;
+    data.agents.rows = vec![crate::aggregate::Group {
+        key: "Explore".into(),
+        messages: 7,
+        ..Default::default()
+    }];
+
+    let text = draw(&a, 100, 30);
+
+    assert!(text.contains("from transcripts"), "{text}");
+    assert!(text.contains("Explore"), "{text}");
+    assert!(!text.contains("Telemetry off"), "{text}");
+}
+
+#[test]
 fn the_agents_view_says_telemetry_is_off_when_there_are_no_rows() {
     let text = draw(&agents_app(false), 100, 30);
     assert!(text.contains("Telemetry off"), "{text}");

@@ -14,7 +14,7 @@
 │    5 7  9  11 13 15 17 19 21 23 25 27 29 31  3 ││     5   8   11  14   17  20  23   26  29  1  3 │
 ╰──────────────────────────┤cost low ■■■■■ high├─╯╰────────────────────────┤tokens low ■■■■■ high├─╯
 ╭─┤³Models├──────────────────────────────────────╮╭─┤⁴Agents├─┤v view: agents├─────────────────────╮
-│name             msgs  tokens     cost▼ share   ││Telemetry off. Start sessions with cc and set us│
+│name             msgs  tokens     cost▼ share   ││Telemetry off. Run `playbook init --telemetry`, │
 │■opus-5            10  238.0K    $14.25 ■■■■■■··││                                                │
 │■sonnet-5           9  214.2K     $5.85 ■■······││                                                │
 │■haiku-5            7  166.6K     $0.17 ········││                                                │

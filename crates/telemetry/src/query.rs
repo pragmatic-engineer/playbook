@@ -263,6 +263,8 @@ pub struct AgentView {
     pub rows: Vec<super::aggregate::Group>,
     /// Telemetry cost over the range, all agents.
     pub cost_usd: f64,
+    /// The rows are invocation counts read from transcripts, with no cost.
+    pub from_transcripts: bool,
 }
 
 impl AgentView {
@@ -287,8 +289,15 @@ impl AgentView {
 pub fn load_agents(conn: &Connection, range: Range, now: i64) -> Result<AgentView, String> {
     let (since, until) = window_seconds(range, now);
     let rows = super::telemetry_db::agent_groups(conn, since, until)?;
+    if rows.is_empty() {
+        return transcript_view(conn, "agent", since, until);
+    }
     let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
-    Ok(AgentView { rows, cost_usd })
+    Ok(AgentView {
+        rows,
+        cost_usd,
+        from_transcripts: false,
+    })
 }
 
 /// The name Claude Code reports for a skill of a non official plugin.
@@ -308,8 +317,32 @@ pub fn load_skills(conn: &Connection, range: Range, now: i64) -> Result<AgentVie
             row.key = "plugin skills (names hidden)".to_string();
         }
     }
+    if rows.is_empty() {
+        return transcript_view(conn, "skill", since, until);
+    }
     let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
-    Ok(AgentView { rows, cost_usd })
+    Ok(AgentView {
+        rows,
+        cost_usd,
+        from_transcripts: false,
+    })
+}
+
+/// Invocation counts of `kind` (`agent` or `skill`) read from transcripts,
+/// the fallback when telemetry has no request in the range. Counts only,
+/// since a transcript does not say which agent paid for a request.
+fn transcript_view(
+    conn: &Connection,
+    kind: &str,
+    since: i64,
+    until: i64,
+) -> Result<AgentView, String> {
+    let rows = super::telemetry_db::invocation_groups(conn, kind, since, until)?;
+    Ok(AgentView {
+        rows,
+        cost_usd: 0.0,
+        from_transcripts: true,
+    })
 }
 
 /// Tool latency and errors, API errors and retries, and busy time from

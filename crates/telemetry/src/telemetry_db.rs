@@ -632,6 +632,33 @@ pub fn skill_groups(
     groups(conn, "skill_name", "", since, until)
 }
 
+/// Agent or skill invocations in `[since, until)` counted from transcripts,
+/// sorted by name. `messages` holds the count; tokens and cost stay zero.
+pub fn invocation_groups(
+    conn: &Connection,
+    kind: &str,
+    since: i64,
+    until: i64,
+) -> Result<Vec<super::aggregate::Group>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT name, COUNT(*) FROM tool_invocation_events
+             WHERE kind = ?1 AND timestamp >= ?2 AND timestamp < ?3
+             GROUP BY name ORDER BY name",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map((kind, since, until), |r| {
+            Ok(super::aggregate::Group {
+                key: r.get(0)?,
+                messages: r.get::<_, i64>(1)?.max(0) as u64,
+                ..Default::default()
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
 /// `column` is one of two fixed names, never user input.
 fn groups(
     conn: &Connection,
@@ -1107,5 +1134,39 @@ mod tests {
         migrate_up(&conn).unwrap();
         assert_eq!(health(&conn, 0, 10).unwrap().api_ms, 0);
         insert_request(&conn, &request("r2")).unwrap();
+    }
+
+    #[test]
+    fn invocation_groups_count_transcript_agents_inside_the_window_by_kind() {
+        let dir = std::env::temp_dir().join(format!("pbtop-inv-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = crate::db::open_db(&dir.join("usage.db")).unwrap();
+        let tool =
+            |id: &str, ts: i64, kind: crate::ToolKind, name: &str| crate::ToolInvocationEvent {
+                event_id: id.into(),
+                timestamp: ts,
+                session_id: "s".into(),
+                account: "a".into(),
+                kind,
+                name: name.into(),
+            };
+        for e in [
+            tool("1", 10, crate::ToolKind::Agent, "Explore"),
+            tool("2", 20, crate::ToolKind::Agent, "Explore"),
+            tool("3", 30, crate::ToolKind::Agent, "reviewer"),
+            tool("4", 40, crate::ToolKind::Skill, "plan"),
+            tool("5", 5_000, crate::ToolKind::Agent, "late"),
+        ] {
+            crate::db::insert_tool_event(&conn, &e).unwrap();
+        }
+
+        let groups = invocation_groups(&conn, "agent", 0, 1_000).unwrap();
+
+        let got: Vec<(&str, u64)> = groups
+            .iter()
+            .map(|g| (g.key.as_str(), g.messages))
+            .collect();
+        assert_eq!(got, [("Explore", 2), ("reviewer", 1)]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

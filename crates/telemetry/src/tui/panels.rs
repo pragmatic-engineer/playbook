@@ -718,9 +718,18 @@ fn skills(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) 
     );
 }
 
-const TELEMETRY_OFF: &str =
-    "Telemetry off. Start sessions with cc and set usage.telemetry to auto, \
-                             or see docs/guides/04-config-keys.md. v switches the view.";
+/// The empty state of a telemetry panel: what is missing and the command that
+/// fixes it, from the status the footer shows.
+fn telemetry_off(app: &App) -> String {
+    match app.telemetry {
+        Some(mode) => match mode.fix() {
+            Some(fix) => format!("{} Fix: {fix}.", mode.text()),
+            None => format!("{} but no rows in this range yet.", mode.text()),
+        },
+        None => "Telemetry off. Run `playbook init --telemetry`, or start sessions with `cc`."
+            .to_string(),
+    }
+}
 
 fn telemetry_split(
     frame: &mut Frame,
@@ -732,23 +741,26 @@ fn telemetry_split(
     view: &crate::query::AgentView,
 ) {
     let mut block = view_block(pal, app, area, Panel::Projects, title, pal.box_mem);
-    if !data.telemetry_rows {
-        return empty(frame, area, pal, block, TELEMETRY_OFF);
+    if !data.telemetry_rows && view.is_empty() {
+        return empty(frame, area, pal, block, &telemetry_off(app));
     }
     if view.is_empty() {
         let text = format!("No {label} activity in this range. v switches the view.");
         return empty(frame, area, pal, block, &text);
     }
     let covered = view.coverage(data.totals.cost_usd) * 100.0;
-    block = block.title(
-        note_line(
-            pal,
-            &format!("source telemetry {covered:.0}% of spend"),
-            pal.box_mem,
-        )
-        .right_aligned(),
-    );
-    let total_cost = view.cost_usd;
+    let note = if view.from_transcripts {
+        "from transcripts, counts only".to_string()
+    } else {
+        format!("source telemetry {covered:.0}% of spend")
+    };
+    block = block.title(note_line(pal, &note, pal.box_mem).right_aligned());
+    let from_transcripts = view.from_transcripts;
+    let total_cost = if view.from_transcripts {
+        view.rows.iter().map(|g| g.messages as f64).sum()
+    } else {
+        view.cost_usd
+    };
     let sorted = group_rows(&view.rows, app.sort(Panel::Projects));
     let cols = [
         col(label, Constraint::Fill(1), 0),
@@ -770,8 +782,13 @@ fn telemetry_split(
             sorted
                 .iter()
                 .map(|g| {
+                    let weight = if from_transcripts {
+                        g.messages as f64
+                    } else {
+                        g.cost_usd
+                    };
                     let share = if total_cost > 0.0 {
-                        g.cost_usd / total_cost
+                        weight / total_cost
                     } else {
                         0.0
                     };
@@ -779,7 +796,11 @@ fn telemetry_split(
                         Cell::from(fit(&g.key, w[0])),
                         num(g.messages.to_string()),
                         num(compact(group_tokens(g))),
-                        num(money(g.cost_usd)),
+                        num(if from_transcripts {
+                            "n/a".to_string()
+                        } else {
+                            money(g.cost_usd)
+                        }),
                         meter(pal, pal.avail, share, 8),
                     ]
                 })
@@ -806,7 +827,7 @@ fn telemetry_note(pal: &Palette, data: &Data) -> Line<'static> {
 fn tools(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
     let mut block = view_block(pal, app, area, Panel::Projects, "Tools", pal.box_mem);
     if !data.telemetry_rows {
-        return empty(frame, area, pal, block, TELEMETRY_OFF);
+        return empty(frame, area, pal, block, &telemetry_off(app));
     }
     if data.health.tools.is_empty() {
         return empty(
@@ -974,7 +995,7 @@ fn figures(data: &Data) -> Vec<Figure> {
 fn health(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) {
     let mut block = view_block(pal, app, area, Panel::Projects, "Health", pal.box_mem);
     if !data.telemetry_rows {
-        return empty(frame, area, pal, block, TELEMETRY_OFF);
+        return empty(frame, area, pal, block, &telemetry_off(app));
     }
     block = block.title(telemetry_note(pal, data));
     let min = if data.health.before.is_some() {
