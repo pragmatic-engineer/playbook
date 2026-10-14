@@ -668,7 +668,7 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
         rows.push(Row::new(
             "-",
             Level::Pass,
-            format!("playbook hook entries in settings.json ({total} of {total})"),
+            format!("playbook hook entries in settings.json ({total} of {total}), including session-init, which loads the handoff after /clear"),
         ));
     }
     for cmd in &found.stale {

@@ -71,7 +71,10 @@ documentation, matcher table: `startup, resume, clear, compact, fork`), and
 on every `SessionStart`, regardless of `source` (only `check_config_drift`,
 `:151,162`, branches on `resume`/`startup`). So a mechanism that reads a
 persisted handoff at `SessionStart` requires no new hook event: it rides the
-event and code path already firing on every `/clear`.
+event and code path that the documentation says fire on `/clear`. The
+documentation is not proof for a given install: the hook must be installed and
+Claude Code must run it, so user-facing text must not promise an automatic
+resume and points to `/playbook:session-start` as the on-demand path.
 
 A precedent for a cross-session, auto-pruned artifact already exists in this
 codebase: `to-learn/<repo-slug>.json`, written by
@@ -99,7 +102,7 @@ of the same repo share a `repo_slug` but never share a `project_slug`.
 - A read-once, auto-pruned, cross-session artifact pattern (`to-learn`) is
   already implemented and tested in this codebase; extending it is lower risk
   than inventing a new one.
-- `/clear` is a real, already-wired `SessionStart` source; no new hook event is
+- `/clear` is a documented `SessionStart` source, wired when the hook is installed; no new hook event is
   needed to reload something at that boundary.
 - Earlier in this same day, a single stray `settings.json` hook entry pointing
   at a file deleted by `uninstall.sh` silently killed prompt injection for an

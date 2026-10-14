@@ -5,8 +5,10 @@
 //! grows large. A long session replays its whole context on every message, so
 //! cache reads dominate the bill. Past `hygiene.thresholdTokens` this injects
 //! one short message per crossing that tells the model to save a session
-//! handoff itself, then tell the user to run `/clear`. It never clears or
-//! compacts anything.
+//! handoff itself, then tell the user where it is saved and how to continue
+//! (`/clear`, then `/playbook:session-start`). It never clears or compacts
+//! anything. The message does not promise an automatic resume: that happens
+//! only when the SessionStart hook is installed and Claude Code runs it.
 //!
 //! The size is the input side of the last main-session assistant message in
 //! the transcript (fresh, cache-written and cache-read input tokens). Only
@@ -71,12 +73,14 @@ pub fn run(payload: &Payload) {
     }
 }
 
-/// The nudge, kept under 300 characters.
+/// The nudge, kept under 400 characters.
 fn message(tokens: u64, session: &str) -> String {
     format!(
         "Context is large (~{}K tokens). Run /playbook:session-handoff yourself now and save it \
          with `playbook handoff save --session {session}`. Then tell the user in one line: \
-         context is large, run /clear to resume from the handoff.",
+         the handoff is saved; to continue in a fresh session run /clear, then \
+         /playbook:session-start. The automatic load after /clear needs the SessionStart \
+         hook installed (check with `playbook doctor`).",
         tokens / 1000
     )
 }
@@ -175,7 +179,7 @@ mod tests {
     #[test]
     fn the_message_fits_the_budget_with_a_real_session_id() {
         let msg = message(999_999, "0123456789abcdef0123456789abcdef0123");
-        assert!(msg.chars().count() < 300, "{}", msg.chars().count());
+        assert!(msg.chars().count() < 400, "{}", msg.chars().count());
         assert!(msg.contains("playbook handoff save --session"));
     }
 }
