@@ -128,6 +128,41 @@ fn guard_settings(pre: &[&str], post: &[&str]) -> String {
     )
 }
 
+// A paused plugin
+
+const PAUSED: &str = r#""enabledPlugins":{"playbook@pragmatic-engineer":false}"#;
+
+#[test]
+fn a_paused_plugin_turns_the_guard_row_into_a_warning_and_says_why() {
+    let b = Box::new("paused");
+    let live = guard_settings(&GUARDS, &["commit-message-sanitizer"]);
+    b.settings(&live.replacen('{', &format!("{{{PAUSED},"), 1));
+
+    let rows = b.run(&[], "/bin/zsh", None);
+
+    let (l1, l2) = (layer(&rows, "1"), layer(&rows, "2"));
+    assert_eq!(l1[0]["level"], "WARN", "{}", text(&l1));
+    assert!(text(&l1).contains("paused"), "{}", text(&l1));
+    assert_eq!(l2[0]["level"], "WARN", "{}", text(&l2));
+    assert!(text(&l2).contains("7 of 7"), "{}", text(&l2));
+    assert!(text(&l2).contains("plugin is paused"), "{}", text(&l2));
+}
+
+#[test]
+fn a_plugin_that_is_enabled_or_not_listed_keeps_its_pass_rows() {
+    let b = Box::new("not-paused");
+    let live = guard_settings(&GUARDS, &["commit-message-sanitizer"]);
+    b.settings(&live.replacen(
+        '{',
+        r#"{"enabledPlugins":{"playbook@pragmatic-engineer":true},"#,
+        1,
+    ));
+
+    let rows = b.run(&[], "/bin/zsh", None);
+
+    assert_eq!(layer(&rows, "2")[0]["level"], "PASS");
+}
+
 // Layer 2
 
 #[test]

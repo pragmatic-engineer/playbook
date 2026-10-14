@@ -31,7 +31,12 @@ pub fn paused() -> bool {
 
 /// Whether `home`'s `.claude/settings.json` sets the plugin to `false`.
 pub fn is_disabled_in(home: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(home.join(".claude").join("settings.json")) else {
+    disabled_in_file(&home.join(".claude").join("settings.json"))
+}
+
+/// Whether the settings file at `path` sets the plugin to `false`.
+pub fn disabled_in_file(path: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else {
         return false;
     };
     // Most users have no entry, so skip the JSON parse unless the key is there.
