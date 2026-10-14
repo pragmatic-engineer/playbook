@@ -753,6 +753,20 @@ fn layer_one_reads_the_playbook_block_even_when_a_longer_named_plugin_is_listed_
 }
 
 #[test]
+fn layer_one_is_info_not_a_failure_for_a_binary_only_install() {
+    let b = Box::new("layer1-absent");
+    let dir = fake_claude(&b, "No plugins installed\\n");
+
+    let rows = b.run(&[&dir], "/bin/bash", None);
+
+    let row = text(&layer(&rows, "1"));
+    assert!(
+        row.contains("INFO skills plugin not installed (optional)"),
+        "{row}"
+    );
+}
+
+#[test]
 fn layer_one_fails_when_the_playbook_plugin_is_disabled() {
     let b = Box::new("layer1-disabled");
     let dir = fake_claude(
