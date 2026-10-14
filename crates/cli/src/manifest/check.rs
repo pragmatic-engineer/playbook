@@ -36,8 +36,9 @@ const ALLOW_FILES: [&str; 15] = [
 ];
 
 /// Top-level directories any tracked file may live under.
-const ALLOW_DIRS: [&str; 11] = [
+const ALLOW_DIRS: [&str; 12] = [
     "prompts",
+    "plugins",
     "skills",
     "commands",
     "agents",
