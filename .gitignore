@@ -17,6 +17,7 @@
 !/justfile
 !/prompts/
 !/plugins/
+!/scripts/
 !/intents.json
 !/CHANGELOG.md
 # settings.json is intentionally NOT tracked: it is the owner's live, personal

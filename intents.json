@@ -1,0 +1,202 @@
+[
+  {
+    "intent": "add-glossary-term",
+    "required": false
+  },
+  {
+    "intent": "atlassian-check",
+    "required": false
+  },
+  {
+    "intent": "checkpoint",
+    "required": false
+  },
+  {
+    "intent": "commit-prepare",
+    "required": false
+  },
+  {
+    "intent": "commit-run",
+    "required": false
+  },
+  {
+    "intent": "config-get",
+    "required": false
+  },
+  {
+    "intent": "effort-choose",
+    "required": false
+  },
+  {
+    "intent": "effort-resolve",
+    "required": false
+  },
+  {
+    "intent": "gate-check",
+    "required": false
+  },
+  {
+    "intent": "gate-record",
+    "required": false
+  },
+  {
+    "intent": "gate-snapshot",
+    "required": false
+  },
+  {
+    "intent": "handoff-check",
+    "required": false
+  },
+  {
+    "intent": "handoff-facts",
+    "required": false
+  },
+  {
+    "intent": "handoff-save",
+    "required": false
+  },
+  {
+    "intent": "handoff-show",
+    "required": false
+  },
+  {
+    "intent": "handoff-template",
+    "required": false
+  },
+  {
+    "intent": "implement-dir",
+    "required": false
+  },
+  {
+    "intent": "learn-collect",
+    "required": false
+  },
+  {
+    "intent": "learn-preflight",
+    "required": false
+  },
+  {
+    "intent": "list-plans",
+    "required": false
+  },
+  {
+    "intent": "memory-context",
+    "required": false
+  },
+  {
+    "intent": "memory-rebuild",
+    "required": false
+  },
+  {
+    "intent": "mode-status",
+    "required": false
+  },
+  {
+    "intent": "next-adr-number",
+    "required": false
+  },
+  {
+    "intent": "plan-cleanup",
+    "required": false
+  },
+  {
+    "intent": "plans-dir",
+    "required": false
+  },
+  {
+    "intent": "pr-ci-wait",
+    "required": false
+  },
+  {
+    "intent": "pr-comments",
+    "required": false
+  },
+  {
+    "intent": "pr-create",
+    "required": false
+  },
+  {
+    "intent": "pr-land-wait",
+    "required": false
+  },
+  {
+    "intent": "pr-merge",
+    "required": false
+  },
+  {
+    "intent": "pr-prepare",
+    "required": false
+  },
+  {
+    "intent": "pr-reply",
+    "required": false
+  },
+  {
+    "intent": "pr-review-triage",
+    "required": false
+  },
+  {
+    "intent": "pr-rules",
+    "required": false
+  },
+  {
+    "intent": "pr-stack",
+    "required": false
+  },
+  {
+    "intent": "prose-check",
+    "required": false
+  },
+  {
+    "intent": "review-checks",
+    "required": false
+  },
+  {
+    "intent": "review-prepare",
+    "required": false
+  },
+  {
+    "intent": "review-size",
+    "required": false
+  },
+  {
+    "intent": "review-triage-merge",
+    "required": false
+  },
+  {
+    "intent": "review-worktree-setup",
+    "required": false
+  },
+  {
+    "intent": "review-worktree-teardown",
+    "required": false
+  },
+  {
+    "intent": "route-model",
+    "required": false
+  },
+  {
+    "intent": "run-mode",
+    "required": false
+  },
+  {
+    "intent": "segment-branch",
+    "required": false
+  },
+  {
+    "intent": "segment-resplit",
+    "required": false
+  },
+  {
+    "intent": "segment-size",
+    "required": false
+  },
+  {
+    "intent": "work-unit-briefs",
+    "required": false
+  },
+  {
+    "intent": "worktrees-dir",
+    "required": false
+  }
+]

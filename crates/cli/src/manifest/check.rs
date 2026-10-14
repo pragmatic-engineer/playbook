@@ -17,8 +17,10 @@
 use std::path::{Path, PathBuf};
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 15] = [
+const ALLOW_FILES: [&str; 17] = [
     ".gitignore",
+    "CHANGELOG.md",
+    "intents.json",
     "README.md",
     "LICENSE",
     "NOTICE",
@@ -36,9 +38,10 @@ const ALLOW_FILES: [&str; 15] = [
 ];
 
 /// Top-level directories any tracked file may live under.
-const ALLOW_DIRS: [&str; 12] = [
+const ALLOW_DIRS: [&str; 13] = [
     "prompts",
     "plugins",
+    "scripts",
     "skills",
     "commands",
     "agents",
@@ -137,10 +140,20 @@ mod tests {
         assert!(violations(&tracked).is_empty());
     }
 
-    /// Pins the specific ALLOW_FILES entry this array's last bump added, so
-    /// a future edit that drops or typos it fails here directly instead of
-    /// only being caught by `playbook manifest check .` against the real
-    /// repo, which `cargo test` never runs.
+    /// The plugin contract files and the scripts folder are allowlisted.
+    #[test]
+    fn the_plugin_contract_files_are_allowlisted() {
+        let tracked: Vec<String> = ["intents.json", "CHANGELOG.md", "scripts/check-intents.sh"]
+            .iter()
+            .map(|p| (*p).to_string())
+            .collect();
+        assert!(violations(&tracked).is_empty());
+    }
+
+    /// Pins an ALLOW_FILES entry, so a future edit that drops or typos it
+    /// fails here directly instead of only being caught by
+    /// `playbook manifest check .` against the real repo, which `cargo test`
+    /// never runs.
     #[test]
     fn rust_toolchain_toml_is_allowlisted() {
         let tracked = vec!["rust-toolchain.toml".to_string()];
