@@ -403,7 +403,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Bash"),
         name: "policy-guard",
         group: Group::Safety,
-        purpose: "Denies skipped git hooks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, and model-run changes to the `rm` guard's roots (`config set hooks.rmGuard.*`, `config import`, `config unset`, `config edit`, config file writes, inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`). The denial tells the model to ask the user to run it with `!`.",
+        purpose: "Denies skipped git hooks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, and model-run changes to the `rm` guard's roots (`config set hooks.rmGuard.*`, `config import`, `config unset`, `config edit`, config file writes, inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`). The denial tells the model to ask the user to run it with `!`. It also denies `playbook uninstall --yes`.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -435,7 +435,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Edit|Write"),
         name: "policy-guard",
         group: Group::Safety,
-        purpose: "Denies writes to Claude Code's own memory paths, to playbook's config files, and any Claude Code settings file that gains a `PLAYBOOK_SAFE_ROOTS`, `WORKTREE_BASE_DIR` or `POLICY_GUARD` entry. Shows the fact format when a fact file is written to playbook's store.",
+        purpose: "Denies writes to Claude Code's own memory paths, to playbook's config files, and any Claude Code settings file that gains a `PLAYBOOK_SAFE_ROOTS`, `WORKTREE_BASE_DIR` or `POLICY_GUARD` entry. Shows the fact format when a fact file is written to playbook's store. Also denies an edit or write that would drop a `playbook hook` entry, set `disableAllHooks` or switch the playbook plugin off; other settings changes pass.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -730,7 +730,7 @@ pub fn audit(settings_path: &Path) -> HookAudit {
                 .flatten()
             {
                 let cmd = entry.get("command").and_then(Value::as_str).unwrap_or("");
-                if cmd.starts_with("playbook hook ") && !is_managed_entry(entry, &known) {
+                if cmd.starts_with(HOOK_COMMAND_PREFIX) && !is_managed_entry(entry, &known) {
                     out.stale.push(cmd.to_string());
                 }
             }
@@ -882,10 +882,14 @@ fn is_legacy_command(cmd: &str, name: &str) -> bool {
     file_name == format!("{name}.py") || file_name == format!("{name}.sh")
 }
 
+/// What every command `wire` writes starts with. The policy guard reads it to
+/// tell the entries `init` owns from the user's own.
+pub const HOOK_COMMAND_PREFIX: &str = "playbook hook ";
+
 /// The bare command `wire` writes for the hook named `name`: no path,
 /// resolved on `PATH` the same way a hand-written `rtk hook claude` entry is.
 fn bare_command(name: &str) -> String {
-    format!("playbook hook {name}")
+    format!("{HOOK_COMMAND_PREFIX}{name}")
 }
 
 /// The exact JSON object `wire` writes for one `HookSpec`: `type` and

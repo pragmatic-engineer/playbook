@@ -140,7 +140,7 @@ fn check_hook_commands(template: &Value, repo_root: &Path) -> Result<(), String>
 fn check_one_command(cmd: &str, repo_root: &Path) -> Result<(), String> {
     let stripped = cmd.strip_prefix(BASH_WRAPPER).unwrap_or(cmd);
 
-    if let Some(name) = stripped.strip_prefix("playbook hook ") {
+    if let Some(name) = stripped.strip_prefix(crate::init::wire::HOOK_COMMAND_PREFIX) {
         return HookName::from_str(name, true)
             .map(|_| ())
             .map_err(|_| format!("unknown hook name in playbook hook command: '{name}'"));

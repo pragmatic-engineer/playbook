@@ -75,7 +75,7 @@ fn load_json(path: &Path, label: &str) -> Result<Value, GenError> {
 /// ported and `wire::wire` never writes that form any more.
 fn is_safe_hook_command(command: &str) -> bool {
     command
-        .strip_prefix("playbook hook ")
+        .strip_prefix(crate::init::wire::HOOK_COMMAND_PREFIX)
         .is_some_and(is_valid_hook_name)
 }
 

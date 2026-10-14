@@ -456,7 +456,7 @@ fn layer7(env: &Env) -> Vec<Row> {
     let mut checked = 0;
     let mut dangling: Vec<String> = Vec::new();
     for cmd in field::hook_commands(&settings) {
-        if cmd.starts_with("playbook hook ") {
+        if cmd.starts_with(crate::init::wire::HOOK_COMMAND_PREFIX) {
             continue;
         }
         let last = cmd.split_whitespace().next_back().unwrap_or("");
