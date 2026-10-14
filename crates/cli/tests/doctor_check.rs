@@ -258,6 +258,23 @@ fn l4_passes_when_the_system_prompt_is_placed() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn l4_warns_when_the_system_prompt_is_unreadable() {
+    use std::os::unix::fs::PermissionsExt;
+    let b = Box::new("l4u");
+    let dir = b.home().join(".config/playbook/prompts");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("SYSTEM_PROMPT.md");
+    fs::write(&file, "x").unwrap();
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::File::open(&file).is_ok() {
+        return; // running as root, the file stays readable
+    }
+    let row = layer(&b.run(&[], "/bin/zsh", None), "4");
+    assert_eq!(row[0]["level"], "WARN");
+}
+
 // Layer 5
 
 fn statusline(b: &Box, cmd: &str) {

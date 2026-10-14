@@ -293,18 +293,20 @@ fn the_prompt_is_only_ever_passed_through_the_replace_flag() {
 }
 
 #[test]
-fn ccd_adds_only_skip_permissions_on_top() {
+fn ccd_with_a_user_replace_flag_adds_only_skip_permissions() {
     let e = env("ccdonly");
-    let prompt = install_prompt(&e);
-    let out = e.launch_with(&["--skip-permissions", "--"], &["fresh"], &[]);
+    install_prompt(&e);
+    let out = e.launch_with(
+        &["--skip-permissions", "--"],
+        &["--system-prompt-file=/y", "fresh"],
+        &[],
+    );
     assert!(out.status.success());
     assert_eq!(
         e.calls()[0],
-        format!(
-            "--dangerously-skip-permissions --system-prompt-file {} -n proj",
-            prompt.display()
-        )
+        "--dangerously-skip-permissions --system-prompt-file=/y -n proj"
     );
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("playbook:"));
 }
 
 #[test]
