@@ -41,7 +41,7 @@ fn env(tag: &str) -> Env {
     }
     make_exec(
         &bin.join("claude"),
-        "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"$FAKE_LOG.path\"\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS:-unset}\" >> \"$FAKE_LOG.var\"\nprintf '%s\\n' \"${ANTHROPIC_DEFAULT_SONNET_MODEL:-unset}\" >> \"$FAKE_LOG.env\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS_PLUGIN:-unset}\" >> \"$FAKE_LOG.vplug\"\nprev=; for a in \"$@\"; do if [ \"$prev\" = --plugin-dir ]; then cp -R \"$a\" \"$FAKE_LOG.plug\"; fi; prev=$a; done\nexit ${FAKE_EXIT:-0}\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"$FAKE_LOG.path\"\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS:-unset}\" >> \"$FAKE_LOG.var\"\nprintf '%s\\n' \"${ANTHROPIC_DEFAULT_SONNET_MODEL:-unset}\" >> \"$FAKE_LOG.env\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS_PLUGIN:-unset}\" >> \"$FAKE_LOG.vplug\"\nprintf '%s\\n' \"${CLAUDE_CODE_EFFORT_LEVEL:-unset}\" >> \"$FAKE_LOG.eff\"\nprev=; for a in \"$@\"; do if [ \"$prev\" = --plugin-dir ]; then cp -R \"$a\" \"$FAKE_LOG.plug\"; fi; prev=$a; done\nexit ${FAKE_EXIT:-0}\n",
     );
     Env { root, home, work }
 }
@@ -513,58 +513,149 @@ fn set_effort(e: &Env, level: &str) {
     assert!(out.status.success(), "{out:?}");
 }
 
-#[test]
-fn a_playbook_effort_ceiling_reaches_the_session_through_settings() {
-    let e = env("effort-ceiling");
-    set_effort(&e, "xhigh");
-    e.launch(&["fresh"]);
-    assert_eq!(
-        e.calls()[0],
-        r#"--settings {"maxEffortLevel":"xhigh"} -n proj"#
-    );
+fn hash_of(path: &Path) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    fs::read(path).unwrap_or_default().hash(&mut h);
+    format!("{:x}", h.finish())
+}
+
+fn seed_settings(e: &Env, body: &str) -> PathBuf {
+    let settings = e.home.join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(&settings, body).unwrap();
+    settings
+}
+
+fn child_effort_env(e: &Env) -> Vec<String> {
+    fs::read_to_string(format!("{}.eff", e.log().display()))
+        .unwrap_or_default()
+        .lines()
+        .map(String::from)
+        .collect()
 }
 
 #[test]
-fn a_lower_claude_code_ceiling_adds_nothing_and_is_never_edited() {
+fn the_ceiling_lowers_the_launchers_effort_and_no_path_writes_claude_settings_or_passes_settings() {
+    let e = env("effort-ceiling");
+    let settings = seed_settings(&e, r#"{"theme":"dark","effortLevel":"xhigh"}"#);
+    let before = hash_of(&settings);
+
+    set_effort(&e, "low");
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["config", "set", "--global", "maxEffortLevel", "medium"])
+        .current_dir(&e.work)
+        .env("HOME", &e.home)
+        .output()
+        .expect("run playbook config set");
+    assert!(out.status.success(), "{out:?}");
+    e.launch(&["fresh"]);
+    e.launch_with(&["--skip-permissions", "--"], &["fresh"], &[]);
+
+    for raw in e.raw_calls() {
+        assert!(!raw.contains("--settings"), "{raw}");
+    }
+    assert_eq!(hash_of(&settings), before, "settings.json was modified");
+}
+
+#[test]
+fn a_ceiling_with_no_stated_effort_lowers_the_default() {
+    let e = env("effort-default-lowered");
+    set_effort(&e, "low");
+    e.launch(&["fresh"]);
+    let raw = e.raw_calls();
+    assert!(raw[0].contains("--effort low"), "{raw:?}");
+}
+
+#[test]
+fn an_unset_ceiling_keeps_the_current_level() {
+    let e = env("effort-current-level");
+    let settings = seed_settings(&e, r#"{"effortLevel":"high"}"#);
+    let before = hash_of(&settings);
+    e.launch(&["fresh"]);
+    let raw = e.raw_calls();
+    assert!(!raw[0].contains("--effort"), "{raw:?}");
+    assert_eq!(hash_of(&settings), before);
+}
+
+#[test]
+fn an_effort_env_of_max_moves_to_the_flag_so_a_component_set_to_low_stays_low() {
+    let e = env("effort-env-max");
+    let settings = seed_settings(&e, r#"{"maxEffortLevel":"max"}"#);
+    let before = hash_of(&settings);
+
+    let out = e.launch_with(&["--"], &["fresh"], &[("CLAUDE_CODE_EFFORT_LEVEL", "max")]);
+
+    assert!(out.status.success());
+    let raw = e.raw_calls();
+    assert!(raw[0].contains("--effort max"), "{raw:?}");
+    assert!(!raw[0].contains("--settings"), "{raw:?}");
+    assert_eq!(
+        child_effort_env(&e),
+        vec!["unset"],
+        "the child must not see the variable"
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("moved to --effort max"), "{err}");
+    assert_eq!(hash_of(&settings), before);
+}
+
+#[test]
+fn an_effort_env_that_is_not_a_level_is_dropped_without_a_flag() {
+    let e = env("effort-env-auto");
+    e.launch_with(&["--"], &["fresh"], &[("CLAUDE_CODE_EFFORT_LEVEL", "auto")]);
+    let raw = e.raw_calls();
+    assert!(!raw[0].contains("--effort"), "{raw:?}");
+    assert_eq!(child_effort_env(&e), vec!["unset"]);
+}
+
+#[test]
+fn an_own_effort_flag_beats_the_env_and_the_env_is_still_dropped() {
+    let e = env("effort-env-and-flag");
+    e.launch_with(
+        &["--"],
+        &["--effort", "low", "fresh"],
+        &[("CLAUDE_CODE_EFFORT_LEVEL", "max")],
+    );
+    let raw = e.raw_calls();
+    assert_eq!(raw[0].matches("--effort").count(), 1, "{raw:?}");
+    assert!(raw[0].contains("--effort low"), "{raw:?}");
+    assert_eq!(child_effort_env(&e), vec!["unset"]);
+}
+
+#[test]
+fn no_effort_env_leaves_the_child_environment_alone() {
+    let e = env("effort-no-env");
+    let out = e.launch(&["fresh"]);
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("CLAUDE_CODE_EFFORT_LEVEL"));
+    assert_eq!(child_effort_env(&e), vec!["unset"]);
+}
+
+#[test]
+fn a_lower_claude_code_ceiling_wins_and_is_never_edited() {
     let e = env("effort-claude-lower");
     let settings = e.home.join(".claude/settings.json");
     fs::create_dir_all(settings.parent().unwrap()).unwrap();
-    fs::write(&settings, r#"{"maxEffortLevel":"medium"}"#).unwrap();
-    set_effort(&e, "xhigh");
+    fs::write(&settings, r#"{"maxEffortLevel":"low"}"#).unwrap();
+    set_effort(&e, "high");
     e.launch(&["fresh"]);
-    assert_eq!(e.calls()[0], "-n proj");
+    let raw = e.raw_calls();
+    assert!(raw[0].contains("--effort low"), "{raw:?}");
+    assert!(!raw[0].contains("--settings"), "{raw:?}");
     assert_eq!(
         fs::read_to_string(&settings).unwrap(),
-        r#"{"maxEffortLevel":"medium"}"#
+        r#"{"maxEffortLevel":"low"}"#
     );
 }
 
 #[test]
-fn a_higher_claude_code_ceiling_is_read_and_left_alone() {
-    let e = env("effort-claude-higher");
-    let settings = e.home.join(".claude/settings.json");
-    fs::create_dir_all(settings.parent().unwrap()).unwrap();
-    fs::write(&settings, r#"{"maxEffortLevel":"max"}"#).unwrap();
-    set_effort(&e, "xhigh");
-    e.launch(&["fresh"]);
-    assert_eq!(
-        e.calls()[0],
-        r#"--settings {"maxEffortLevel":"xhigh"} -n proj"#
-    );
-    assert_eq!(
-        fs::read_to_string(&settings).unwrap(),
-        r#"{"maxEffortLevel":"max"}"#
-    );
-}
-
-#[test]
-fn max_and_an_own_settings_flag_add_nothing() {
-    let e = env("effort-max");
-    e.launch(&["fresh"]);
-    assert_eq!(e.calls()[0], "-n proj");
+fn an_own_settings_flag_is_passed_through_untouched() {
+    let e = env("effort-own-settings");
     set_effort(&e, "low");
-    e.launch_with(&["--settings", "my.json", "--"], &["fresh"], &[]);
-    assert!(!e.calls()[1].contains("maxEffortLevel"), "{:?}", e.calls());
+    e.launch_with(&["--"], &["--settings", "my.json", "fresh"], &[]);
+    let call = e.calls().pop().unwrap();
+    assert_eq!(call.matches("--settings").count(), 1, "{call}");
+    assert!(call.contains("--settings my.json"), "{call}");
 }
 
 #[test]

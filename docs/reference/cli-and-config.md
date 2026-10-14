@@ -551,6 +551,8 @@ Set playbook's own ceiling on effort, or inspect one component's
 
 `auto` (the default) sets no ceiling, so Claude Code's own `maxEffortLevel` decides how high effort may go. Each skill, command and agent still keeps the effort it ships with. `low`, `medium`, `high`, `xhigh` or `max` set playbook's own ceiling. The key is `maxEffortLevel`, named like Claude Code's. The effective ceiling is the lower of this and Claude Code's own `maxEffortLevel`, which playbook only reads and never changes. Sessions started with `playbook cc` or `playbook ccd` get the ceiling. With no level, shows both values and the one that wins.
 
+The ceiling caps the agent variants the launcher renders, the default effort it adds and what the binary reports. It does not cap a command or skill that ships its own effort, because only Claude Code's `maxEffortLevel` setting can, and playbook never writes it.
+
 Example: `playbook effort xhigh`
 
 - `<LEVEL>`: auto, low, medium, high, xhigh or max

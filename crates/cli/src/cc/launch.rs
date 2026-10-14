@@ -129,6 +129,67 @@ fn prompt_args(
 /// The one-line prompt notice, held until the screen is cleared so it stays visible.
 static PROMPT_NOTICE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
+/// What became of `CLAUDE_CODE_EFFORT_LEVEL` for this launch.
+struct EnvEffort {
+    /// The variable was set (to anything), so the launcher adds no default effort.
+    was_set: bool,
+    /// `--effort <level>` standing in for it, empty when there is none.
+    flag: Vec<String>,
+}
+
+/// Takes `CLAUDE_CODE_EFFORT_LEVEL` out of the child's environment and passes
+/// its level as `--effort` instead, ahead of the user's own arguments.
+///
+/// Claude Code's docs and `${CLAUDE_EFFORT}` probes agree: the variable
+/// overrides a skill's or subagent's `effort` frontmatter, while `--effort`
+/// does not. Nothing is raised: a component keeps the effort it ships with
+/// or is configured to, and the main session keeps the level the variable set.
+/// A value that is not a level (including `auto`) is dropped from the
+/// environment with no flag, so the model default applies as it would have.
+/// An unreadable value is left alone. One line goes to stderr when the
+/// environment changes.
+fn take_effort_env(args: &[String], all: &mut Vec<String>) -> EnvEffort {
+    let Some(raw) = std::env::var_os(crate::models::EFFORT_ENV) else {
+        return EnvEffort {
+            was_set: false,
+            flag: Vec::new(),
+        };
+    };
+    let Some(value) = raw.to_str().map(|v| v.trim().to_ascii_lowercase()) else {
+        return EnvEffort {
+            was_set: true,
+            flag: Vec::new(),
+        };
+    };
+    std::env::remove_var(crate::models::EFFORT_ENV);
+    let level = crate::effort::rank(&value).is_some();
+    let flag = if level
+        && !args
+            .iter()
+            .any(|a| a == "--effort" || a.starts_with("--effort="))
+    {
+        vec!["--effort".to_string(), value.clone()]
+    } else {
+        Vec::new()
+    };
+    let note = if !flag.is_empty() {
+        format!("moved to --effort {value}")
+    } else if level {
+        "dropped, your --effort applies".to_string()
+    } else {
+        "dropped (not a level), the model default applies".to_string()
+    };
+    eprintln!(
+        "playbook: {}={value} {note}, so playbook skills, commands and agents keep their own effort",
+        crate::models::EFFORT_ENV
+    );
+    all.extend(flag.iter().cloned());
+    EnvEffort {
+        was_set: true,
+        flag,
+    }
+}
+
 /// Runs the launcher and returns the exit code of the session (or the failure).
 pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
     let mut all: Vec<String> = Vec::new();
@@ -150,27 +211,23 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         }
     }
     let cwd_now = PathBuf::from(super::logical_cwd());
-    let has_settings = args
-        .iter()
-        .any(|a| a == "--settings" || a.starts_with("--settings="));
-    if !has_settings {
-        let home = crate::common::home_dir();
-        if let Some(json) = crate::effort::launcher_settings(&home, &home.join(".claude"), &cwd_now)
-        {
-            all.push("--settings".into());
-            all.push(json);
-        }
-    }
     let home = crate::common::home_dir();
     let user_settings = home.join(".claude/settings.json");
     let ceiling = crate::effort::ceiling(&home, &home.join(".claude"), &cwd_now);
-    let mut effort =
-        crate::models::effort_in_force(args, &user_settings, ceiling.effective.as_deref());
+    // `CLAUDE_CODE_EFFORT_LEVEL` beats a skill's or agent's own `effort`, so a
+    // session that exports `max` would raise every playbook component to max.
+    // The level moves to `--effort`, which a component's own effort overrides.
+    let env_effort = take_effort_env(args, &mut all);
+    let mut effort = crate::models::effort_in_force(
+        &[&env_effort.flag[..], args].concat(),
+        &user_settings,
+        ceiling.effective.as_deref(),
+    );
     // Playbook owns this command line, not Claude Code's settings: a session
     // that stated no effort runs at medium, and one that did is left alone.
     if let Some(default) = crate::models::session_default_effort(
         effort.as_deref(),
-        std::env::var_os(crate::models::EFFORT_ENV).is_some(),
+        env_effort.was_set,
         ceiling.effective.as_deref(),
     ) {
         all.push("--effort".into());

@@ -13,7 +13,7 @@ On every launch the launcher:
 - Trusts `$PWD` (the equivalent of `playbook trust`), so Claude Code's trust dialog never blocks. Best effort.
 - Passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` when it is installed.
 - Passes the model fallback chain with `--fallback-model`, and exports `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for any `models.*` override. See [Model tiers](02-model-routing-and-memory.md#model-tiers-and-the-55-rule).
-- Passes your effort ceiling with `--settings` when playbook's `maxEffortLevel` is the lower one. See [Effort policy](02-model-routing-and-memory.md#effort-policy).
+- Passes no `--settings`. Your effort ceiling lowers the default `--effort` the launcher adds and the agent variants it renders. It moves `CLAUDE_CODE_EFFORT_LEVEL` to `--effort` so the variable cannot raise a playbook skill, command or agent above its own effort. See [Effort policy](02-model-routing-and-memory.md#effort-policy).
 - Renders the agent effort variants into a throwaway session plugin and passes it with `--plugin-dir`. Nothing is committed. `agents.variants` (`auto`, `all`, `off`) picks which, and `playbook agents variants` shows them. `crates/cli/src/cc/agent_variants.rs`.
 - Sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for that session when `memory.source` is `playbook`. It never edits Claude Code's settings or memory.
 - After `claude` exits, prunes to the newest `CCD_KEEP` transcripts per project (default 5, floor 2), with their sidecars and runtime state.
