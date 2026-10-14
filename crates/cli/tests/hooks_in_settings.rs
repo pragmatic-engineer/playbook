@@ -128,10 +128,15 @@ fn the_hook_commands_are_the_bare_name_never_an_absolute_path() {
 
     h.run(&["init", "--hooks"]);
 
-    for (_, cmd) in commands(&h.settings()) {
-        if cmd.starts_with("playbook hook ") {
-            assert!(!cmd.contains('/'), "{cmd}");
-        }
+    let ours: Vec<String> = commands(&h.settings())
+        .into_iter()
+        .map(|(_, cmd)| cmd)
+        .filter(|cmd| cmd.contains("playbook hook "))
+        .collect();
+    assert!(!ours.is_empty(), "init wrote no playbook hook entries");
+    for cmd in ours {
+        assert!(cmd.starts_with("playbook hook "), "{cmd}");
+        assert!(!cmd.contains('/'), "{cmd}");
     }
 }
 
@@ -210,7 +215,10 @@ fn the_doctor_reports_the_wired_hooks_as_present() {
 
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains("PASS  playbook hook entries in settings.json (31 of 31)"),
+        text.contains(&format!(
+            "PASS  playbook hook entries in settings.json ({n} of {n})",
+            n = playbook::init::wire::wired_hooks().count()
+        )),
         "{text}"
     );
 }

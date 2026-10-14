@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Denies three things the system prompt used to ask for in prose:
+//! Denies these things the system prompt used to ask for in prose:
 //!
 //! - skipping git hooks or signing (`--no-verify`, `-n` on commit,
 //!   `--no-gpg-sign`, `-c commit.gpgsign=false`),
@@ -20,18 +20,23 @@
 //!   `auto.*` and `fix.*` in `auto` mode only. The inline assignments cannot
 //!   reach the hook process, so denying them is defense in depth.
 //!
-//! - changing the hook entries `playbook init` writes into Claude Code's
-//!   `settings.json`: an Edit or Write that adds, changes or removes a
-//!   `playbook hook` command or turns hooks off, a Bash write to a settings
-//!   file that mentions `hooks`, and `playbook uninstall`. An agent that could
-//!   drop the guard entries could run without them, so these are the user's to
-//!   change, in `ask` mode too.
+//! - dropping the hook entries `playbook init` writes into Claude Code's
+//!   `settings.json`. An Edit or Write is denied when the file it would
+//!   produce (worked out from the file on disk) lacks a `playbook hook`
+//!   command the file has now, sets `disableAllHooks`, or switches the
+//!   playbook plugin off. Bash is denied when it runs `playbook uninstall
+//!   --yes`, replaces or removes a settings file that holds the entries
+//!   (`>`, `cp`, `mv`, `rm`, `tee`), or edits one in place (`sed -i`, a
+//!   `python -c` script) in a command that names hooks or
+//!   `enabledPlugins`. An agent that could drop the guard entries could run without
+//!   them, so these are the user's to change, in `ask` mode too. Other
+//!   settings changes pass.
 //!
 //! It also shows the memory fact format (`MEMORY_SCHEMA`) when a fact file is
 //! written to playbook's store, so the system prompt does not carry it.
 //!
 //! One hook on two matchers: Bash looks at the command, Edit and Write look at
-//! the target path. It fails safe: a payload it cannot read, a command the
+//! the target path, and for a settings file also the file on disk. It fails safe: a payload it cannot read, a command the
 //! reader cannot split, or anything unexpected allows the call, and it never
 //! spawns a process. `POLICY_GUARD=0` turns it off. It only denies, it never
 //! writes anything.
@@ -42,6 +47,7 @@
 use crate::common::payload::Payload;
 use crate::common::shell::{program_index, program_name, simple_commands};
 use crate::common::{emit_pre_context, emit_pre_deny};
+use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
 /// Subcommands that run git hooks, so `--no-verify` matters.
@@ -109,7 +115,7 @@ owner or repo in the text.";
 
 const RM_GUARD_CONFIG_REASON: &str = "The rm guard's allowed roots are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Until then, clean up inside the repo, or leave the path and say so.";
 
-const HOOK_ENTRIES_REASON: &str = "The hook entries in settings.json are the user's to change, not the model's. They are the guards that keep this session safe. Ask the user to run `playbook init` (to add them) or `playbook uninstall` (to remove them) themselves in the prompt with `!`, or to edit settings.json by hand.";
+const HOOK_ENTRIES_REASON: &str = "The hook entries in settings.json are the user's to change, not the model's. They are the guards that keep this session safe. Ask the user to run `playbook init` (to add them) or `playbook uninstall` (to remove them) themselves in the prompt with `!`, or to edit settings.json by hand. Until then, leave the hook entries as they are and say so; in an unattended run, report this and stop. A settings change that keeps every hook entry is fine with the Edit tool.";
 
 /// What marks an entry `playbook init` owns.
 const HOOK_MARK: &str = "playbook hook ";
@@ -123,26 +129,21 @@ pub fn run(payload: &Payload) {
     let home = std::env::var("HOME").unwrap_or_default();
     let command = payload.field(".tool_input.command");
     let path = payload.field(".tool_input.file_path");
+    let mut new = payload.field(".tool_input.content");
+    if new.is_empty() {
+        new = payload.field(".tool_input.new_string");
+    }
     let reason = if !command.is_empty() {
         check_command(&command, &home)
-    } else if let Some(reason) = check_hook_edit(
-        &path,
-        &payload.field(".tool_input.old_string"),
-        &format!(
-            "{}{}",
-            payload.field(".tool_input.content"),
-            payload.field(".tool_input.new_string")
-        ),
-        payload.field(".tool_name") == "Write",
-    ) {
-        Some(reason)
+    } else if let Some(settings) = settings_path(&path) {
+        let edit = SettingsEdit {
+            old: payload.field(".tool_input.old_string"),
+            replace_all: payload.field(".tool_input.replace_all") == "true",
+            whole_file: payload.field(".tool_name") == "Write",
+        };
+        check_settings_edit(&settings, &edit, &new).or_else(|| check_path(&path, &home, &new))
     } else {
-        let content = format!(
-            "{}{}",
-            payload.field(".tool_input.content"),
-            payload.field(".tool_input.new_string")
-        );
-        check_path(&path, &home, &content)
+        check_path(&path, &home, &new)
     };
     if let Some(reason) = reason {
         emit_pre_deny(reason);
@@ -308,60 +309,280 @@ fn names_config_store(word: &str, home: &str) -> bool {
 }
 
 /// Whether `path` is a Claude Code settings file: `settings*.json` directly
-/// under a `.claude` directory.
-fn is_claude_settings(path: &str) -> bool {
-    let p = Path::new(path);
-    let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase());
-    p.parent()
+/// under a `.claude` directory. Case is ignored because the default macOS and
+/// Windows filesystems ignore it.
+fn is_claude_settings(path: &Path) -> bool {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase());
+    path.parent()
         .and_then(Path::file_name)
-        .is_some_and(|d| d == ".claude")
+        .is_some_and(|d| d.to_string_lossy().eq_ignore_ascii_case(".claude"))
         && name.is_some_and(|n| n.starts_with("settings") && n.ends_with(".json"))
 }
 
-/// Whether text touches the hook entries or switches hooks off.
-fn mentions_hook_entries(text: &str) -> bool {
-    text.contains(HOOK_MARK) || text.contains("disableAllHooks")
-}
-
-/// An Edit or Write on a settings file that adds, changes or removes a
-/// `playbook hook` entry. A Write replaces the whole file, so it is also
-/// denied when the file on disk carries entries the new text may drop.
-fn check_hook_edit(path: &str, old: &str, new: &str, whole_file: bool) -> Option<&'static str> {
-    if !is_claude_settings(path) {
+/// `path` as a Claude Code settings file, looking through a symlink, or
+/// `None` when it is some other file.
+fn settings_path(path: &str) -> Option<PathBuf> {
+    if path.is_empty() {
         return None;
     }
-    let on_disk =
-        whole_file && std::fs::read_to_string(path).is_ok_and(|text| mentions_hook_entries(&text));
-    (mentions_hook_entries(old) || mentions_hook_entries(new) || on_disk)
-        .then_some(HOOK_ENTRIES_REASON)
+    let direct = PathBuf::from(path);
+    if is_claude_settings(&direct) {
+        return Some(direct);
+    }
+    std::fs::canonicalize(&direct)
+        .ok()
+        .filter(|real| is_claude_settings(real))
 }
 
-/// A Bash command that rewrites the hook entries: `playbook uninstall`, or a
-/// write program naming a settings file in a command that mentions hooks.
-fn edits_hook_entries(words: &[String], program_at: usize, whole: &str) -> bool {
-    let program = program_name(&words[program_at]);
-    if program == "playbook" {
-        return words[program_at + 1..]
-            .iter()
-            .find(|w| !w.starts_with('-'))
-            .is_some_and(|w| w == "uninstall")
-            && !words.iter().any(|w| w == "--dry-run");
+/// What the guard watches in a settings file.
+#[derive(Debug, Default)]
+struct Guarded {
+    /// Event, matcher and command of every `playbook hook` entry.
+    entries: BTreeSet<(String, String, String)>,
+    /// `disableAllHooks` is on.
+    all_off: bool,
+    /// The playbook plugin is switched off, which pauses the hooks.
+    paused: bool,
+}
+
+/// The guarded parts of a settings text, or `None` when it is not JSON.
+fn guarded_state(text: &str) -> Option<Guarded> {
+    let root: serde_json::Value = serde_json::from_str(text).ok()?;
+    let mut state = Guarded {
+        all_off: !matches!(
+            root.get("disableAllHooks"),
+            None | Some(serde_json::Value::Null | serde_json::Value::Bool(false))
+        ),
+        paused: root
+            .get("enabledPlugins")
+            .and_then(|plugins| plugins.get(crate::common::plugin_state::PLUGIN_KEY))
+            == Some(&serde_json::Value::Bool(false)),
+        ..Guarded::default()
+    };
+    let events = root.get("hooks").and_then(serde_json::Value::as_object);
+    for (event, groups) in events.into_iter().flatten() {
+        for group in groups.as_array().into_iter().flatten() {
+            let matcher = group.get("matcher").and_then(serde_json::Value::as_str);
+            let hooks = group.get("hooks").and_then(serde_json::Value::as_array);
+            for hook in hooks.into_iter().flatten() {
+                let command = hook.get("command").and_then(serde_json::Value::as_str);
+                if let Some(command) = command.filter(|c| c.starts_with(HOOK_MARK)) {
+                    state.entries.insert((
+                        event.clone(),
+                        matcher.unwrap_or_default().to_string(),
+                        command.to_string(),
+                    ));
+                }
+            }
+        }
     }
-    // `jq` and `sed` only write through a redirect or `sed -i`.
-    let in_place_sed = program == "sed" && words.iter().any(|w| w.starts_with("-i"));
-    let writes = WRITER_PROGRAMS.contains(&program.as_str())
-        || (DB_WRITER_PROGRAMS.contains(&program.as_str())
-            && !matches!(program.as_str(), "jq" | "sed"))
-        || in_place_sed
-        || SHELL_PROGRAMS.contains(&program.as_str())
-        || words.iter().any(|w| redirects(w));
-    writes
-        && whole.to_lowercase().contains("hook")
-        && words.iter().any(|w| {
-            let w = w.trim_matches(|c| c == '"' || c == '\'');
-            let name = w.rsplit('/').next().unwrap_or(w);
-            w.contains(".claude/") && name.starts_with("settings") && name.ends_with(".json")
+    Some(state)
+}
+
+/// Whether going from `before` to `after` drops a `playbook hook` entry,
+/// switches all hooks off or pauses the playbook plugin. A `before` that is
+/// not JSON has nothing to lose.
+fn loses_guard(before: &str, after: &str) -> bool {
+    let Some(was) = guarded_state(before) else {
+        return false;
+    };
+    let Some(now) = guarded_state(after) else {
+        // Claude Code stops reading a settings file that is not JSON.
+        return !was.entries.is_empty();
+    };
+    !was.entries.is_subset(&now.entries)
+        || (now.all_off && !was.all_off)
+        || (now.paused && !was.paused)
+}
+
+/// The parts of an Edit or Write the settings check needs besides the new text.
+struct SettingsEdit {
+    /// The text an Edit replaces.
+    old: String,
+    replace_all: bool,
+    /// A Write replaces the whole file.
+    whole_file: bool,
+}
+
+/// An Edit or Write on a settings file that drops a `playbook hook` entry,
+/// turns hooks off or pauses the plugin. The result of the edit is worked out
+/// from the file on disk, so an edit that never names the entry (renaming the
+/// `hooks` key, say) is caught, and one that keeps every entry is allowed.
+fn check_settings_edit(path: &Path, edit: &SettingsEdit, new: &str) -> Option<&'static str> {
+    let on_disk = std::fs::read_to_string(path).ok();
+    let loses = match on_disk {
+        Some(before) if edit.whole_file => loses_guard(&before, new),
+        // An Edit always names text; do not guess at the result of an empty one.
+        Some(_) if edit.old.is_empty() => false,
+        Some(before) => {
+            let after = if edit.replace_all {
+                before.replace(&edit.old, new)
+            } else {
+                before.replacen(&edit.old, new, 1)
+            };
+            loses_guard(&before, &after)
+        }
+        // A new file has nothing to lose, but may still switch hooks off.
+        None if edit.whole_file => loses_guard("{}", new),
+        // No file to read: fall back to the text of the edit.
+        None => [edit.old.as_str(), new]
+            .iter()
+            .any(|text| text.contains(HOOK_MARK) || text.contains("disableAllHooks")),
+    };
+    loses.then_some(HOOK_ENTRIES_REASON)
+}
+
+/// The simple commands inside a shell `-c` script or behind a runner program
+/// (`nohup`, `xargs`), each as a word list starting at its program.
+fn wrapped_commands(words: &[String], program_at: usize) -> Vec<Vec<String>> {
+    let program = program_name(&words[program_at]);
+    let rest = &words[program_at + 1..];
+    if SHELL_PROGRAMS.contains(&program.as_str()) {
+        let script = rest
+            .iter()
+            .position(|w| w == "-c" || w.ends_with('c') && w.starts_with('-'))
+            .and_then(|at| rest.get(at + 1));
+        return script.map(|s| simple_commands(s)).unwrap_or_default();
+    }
+    if RUNNER_PROGRAMS.contains(&program.as_str()) {
+        return rest
+            .iter()
+            .position(|w| program_name(w) == "playbook")
+            .map(|at| vec![rest[at..].to_vec()])
+            .unwrap_or_default();
+    }
+    Vec::new()
+}
+
+/// A `playbook uninstall` that goes ahead (`--yes`, no `--dry-run`), alone or
+/// behind `cargo run`, a runner program or a shell `-c`.
+fn uninstalls_playbook(words: &[String], program_at: usize, depth: usize) -> bool {
+    if depth < 3
+        && wrapped_commands(words, program_at).iter().any(|inner| {
+            program_index(inner).is_some_and(|at| uninstalls_playbook(inner, at, depth + 1))
         })
+    {
+        return true;
+    }
+    let mut args = &words[program_at + 1..];
+    match program_name(&words[program_at]).as_str() {
+        "playbook" => {}
+        "cargo" => match super::auto_cost::cargo_run_args(args) {
+            Some(after) => args = after,
+            None => return false,
+        },
+        _ => return false,
+    }
+    args.iter()
+        .find(|w| !w.starts_with('-'))
+        .map(String::as_str)
+        == Some("uninstall")
+        && args.iter().any(|w| w == "--yes")
+        && !args.iter().any(|w| w == "--dry-run")
+}
+
+/// Programs that replace or remove the file they are handed.
+const REPLACER_PROGRAMS: [&str; 9] = [
+    "tee", "cp", "mv", "rm", "install", "rsync", "dd", "truncate", "unlink",
+];
+
+/// Whether `word` names a Claude Code settings file: a path ending in
+/// `.claude/settings*.json` (also inside a script word), or a bare
+/// `settings*.json` when the command mentions `.claude` elsewhere (after a
+/// `cd`, say). `lower_command` is the whole command in lower case.
+fn names_settings(word: &str, lower_command: &str) -> bool {
+    let word = word.trim_matches(|c| c == '"' || c == '\'').to_lowercase();
+    if let Some(at) = word.find(".claude/settings") {
+        return word[at..].contains(".json");
+    }
+    let name = word.rsplit('/').next().unwrap_or(&word);
+    name.starts_with("settings") && name.ends_with(".json") && lower_command.contains(".claude")
+}
+
+/// The files a command overwrites with `>` (not `>>`, which only appends).
+fn overwrite_targets(words: &[String]) -> Vec<&str> {
+    let mut targets = Vec::new();
+    for (i, word) in words.iter().enumerate() {
+        let operator = word.trim_start_matches(|c: char| c.is_ascii_digit());
+        if !operator.starts_with('>') || operator.starts_with(">&") || operator.starts_with(">>") {
+            continue;
+        }
+        let rest = operator.trim_start_matches(['>', '|']);
+        if !rest.is_empty() {
+            targets.push(rest);
+        } else if let Some(next) = words.get(i + 1) {
+            targets.push(next.as_str());
+        }
+    }
+    targets
+}
+
+/// Whether the settings file `word` names holds `playbook hook` entries. A
+/// word that is not a clean absolute path stands for the user's own
+/// `~/.claude/settings.json`.
+fn settings_hold_entries(word: &str, home: &str) -> bool {
+    let word = expand_home(word.trim_matches(|c| c == '"' || c == '\''), home);
+    let file = if word.starts_with('/') && word.ends_with(".json") {
+        PathBuf::from(word)
+    } else if home.is_empty() {
+        return false;
+    } else {
+        let name = word.rsplit('/').next().unwrap_or(&word);
+        let name = if name.ends_with(".json") {
+            name
+        } else {
+            "settings.json"
+        };
+        Path::new(home).join(".claude").join(name)
+    };
+    std::fs::read_to_string(file)
+        .ok()
+        .and_then(|text| guarded_state(&text))
+        .is_some_and(|state| !state.entries.is_empty())
+}
+
+/// A Bash command that rewrites the hook entries: `playbook uninstall`, a
+/// command that replaces or removes a settings file holding them, or one that
+/// edits a settings file in place while naming hooks.
+fn edits_hook_entries(
+    words: &[String],
+    program_at: usize,
+    lower_command: &str,
+    home: &str,
+) -> bool {
+    if uninstalls_playbook(words, program_at, 0) {
+        return true;
+    }
+    let named: Vec<&String> = words
+        .iter()
+        .filter(|w| names_settings(w, lower_command))
+        .collect();
+    if named.is_empty() {
+        return false;
+    }
+    let program = program_name(&words[program_at]);
+    let overwritten = overwrite_targets(words)
+        .iter()
+        .any(|t| names_settings(t, lower_command));
+    if (overwritten || REPLACER_PROGRAMS.contains(&program.as_str()))
+        && named.iter().any(|w| settings_hold_entries(w, home))
+    {
+        return true;
+    }
+    // An in-place edit cannot be replayed, so the command text has to say it
+    // is about the hooks or the plugin switch.
+    let in_place = matches!(
+        program.as_str(),
+        "python" | "python3" | "node" | "ruby" | "perl"
+    ) || SHELL_PROGRAMS.contains(&program.as_str())
+        || (program == "sed"
+            && words
+                .iter()
+                .any(|w| w.starts_with("-i") || w == "--in-place"));
+    in_place
+        && ["hook", "enabledplugins"]
+            .iter()
+            .any(|key| lower_command.contains(key))
 }
 
 /// The reason to deny `command`, or `None` to allow it.
@@ -369,6 +590,7 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
     if !mentions_a_guarded_program(command) {
         return None;
     }
+    let lower_command = command.to_lowercase();
     for words in simple_commands(command) {
         let Some(at) = program_index(&words) else {
             continue;
@@ -377,7 +599,7 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
         if changes_rm_guard_config(&words, at, home) {
             return Some(RM_GUARD_CONFIG_REASON);
         }
-        if edits_hook_entries(&words, at, command) {
+        if edits_hook_entries(&words, at, &lower_command, home) {
             return Some(HOOK_ENTRIES_REASON);
         }
         let found = match program_name(&words[at]).as_str() {
@@ -543,15 +765,7 @@ fn check_path(path: &str, home: &str, content: &str) -> Option<&'static str> {
 /// A Claude Code settings file that is given an `env` entry able to move the
 /// `rm` guard's roots or switch the guards off. Other edits to settings pass.
 fn writes_guard_env_to_settings(path: &str, content: &str) -> bool {
-    let p = Path::new(path);
-    let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase());
-    let in_claude_dir = p
-        .parent()
-        .and_then(Path::file_name)
-        .is_some_and(|d| d == ".claude");
-    let is_settings =
-        in_claude_dir && name.is_some_and(|n| n.starts_with("settings") && n.ends_with(".json"));
-    is_settings
+    settings_path(path).is_some()
         && ["PLAYBOOK_SAFE_ROOTS", "WORKTREE_BASE_DIR", "POLICY_GUARD"]
             .iter()
             .any(|key| content.contains(key))
@@ -705,71 +919,232 @@ mod tests {
         assert_eq!(check_path(&format!("{root}/memory/a.md"), HOME, "x"), None);
     }
 
-    #[test]
-    fn edits_that_touch_the_hook_entries_in_settings_are_denied() {
-        let settings = format!("{HOME}/.claude/settings.json");
-        for (old, new) in [
-            (
-                "",
-                r#"{"hooks":{"Stop":[{"hooks":[{"command":"playbook hook x"}]}]}}"#,
-            ),
-            ("\"command\": \"playbook hook policy-guard\"", ""),
-            ("", r#"{"disableAllHooks":true}"#),
-        ] {
-            assert_eq!(
-                check_hook_edit(&settings, old, new, false),
-                Some(HOOK_ENTRIES_REASON),
-                "{old} {new}"
-            );
+    const ENTRIES: &str = r#"{"model":"opus","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"playbook hook policy-guard"}]}],"Stop":[{"hooks":[{"command":"playbook hook session-clean-exit"},{"command":"echo mine"}]}]}}"#;
+
+    /// A scratch `.claude` folder holding `body` as settings.json.
+    fn settings_with(tag: &str, body: &str) -> PathBuf {
+        let dir = crate::common::test_support::scratch_dir(tag).join(".claude");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    fn edit(old: &str) -> SettingsEdit {
+        SettingsEdit {
+            old: old.to_string(),
+            replace_all: false,
+            whole_file: false,
         }
+    }
+
+    fn write() -> SettingsEdit {
+        SettingsEdit {
+            old: String::new(),
+            replace_all: false,
+            whole_file: true,
+        }
+    }
+
+    #[test]
+    fn a_change_that_drops_or_disables_an_entry_is_caught() {
+        for after in [
+            ENTRIES.replace("\"hooks\":{", "\"hooks_off\":{"),
+            ENTRIES.replace("playbook hook policy-guard", "playbook hook policy-guardx"),
+            ENTRIES.replace("\"matcher\":\"Bash\"", "\"matcher\":\"Nope\""),
+            ENTRIES.replace("\"PreToolUse\"", "\"PreToolUseOff\""),
+            ENTRIES.replace("{\"model\"", "{\"disableAllHooks\":true,\"model\""),
+            ENTRIES.replace("{\"model\"", "{\"disable\\u0041llHooks\":true,\"model\""),
+            ENTRIES.replace(
+                "{\"model\"",
+                "{\"enabledPlugins\":{\"playbook@pragmatic-engineer\":false},\"model\"",
+            ),
+            r#"{"model":"opus"}"#.to_string(),
+            "not json".to_string(),
+        ] {
+            assert!(loses_guard(ENTRIES, &after), "{after}");
+        }
+    }
+
+    #[test]
+    fn a_change_that_keeps_every_entry_is_allowed() {
+        for after in [
+            ENTRIES.replace("opus", "sonnet"),
+            ENTRIES.replace("echo mine", "echo yours"),
+            ENTRIES.replace(
+                "{\"model\"",
+                "{\"permissions\":{\"allow\":[\"Bash(ls)\"]},\"model\"",
+            ),
+            ENTRIES.replace("{\"model\"", "{\"disableAllHooks\":false,\"model\""),
+            ENTRIES.replace(
+                "]}}",
+                "]},\"Notification\":[{\"hooks\":[{\"command\":\"playbook hook x\"}]}]}",
+            ),
+        ] {
+            assert!(!loses_guard(ENTRIES, &after), "{after}");
+        }
+        // Nothing to lose when the file was not ours or not JSON.
+        assert!(!loses_guard("not json", "{}"));
+        assert!(!loses_guard(r#"{"model":"opus"}"#, r#"{"model":"sonnet"}"#));
+    }
+
+    #[test]
+    fn an_edit_is_judged_by_the_file_it_produces() {
+        let path = settings_with("hook-edit", ENTRIES);
+
+        // Renames the key without naming an entry.
         assert_eq!(
-            check_hook_edit(&settings, "", r#"{"model":"opus"}"#, false),
-            None
+            check_settings_edit(&path, &edit("\"hooks\":{"), "\"hooks_off\":{"),
+            Some(HOOK_ENTRIES_REASON)
         );
+        // Removes the entry by name.
         assert_eq!(
-            check_hook_edit("/work/notes/settings.json", "", "playbook hook x", false),
-            None
+            check_settings_edit(&path, &edit("playbook hook policy-guard"), "true"),
+            Some(HOOK_ENTRIES_REASON)
+        );
+        // Unrelated changes pass, and an Edit with no text to match is left alone.
+        assert_eq!(check_settings_edit(&path, &edit("opus"), "sonnet"), None);
+        assert_eq!(check_settings_edit(&path, &edit(""), "x"), None);
+        let all = SettingsEdit {
+            replace_all: true,
+            ..edit("playbook hook")
+        };
+        assert_eq!(
+            check_settings_edit(&path, &all, "echo"),
+            Some(HOOK_ENTRIES_REASON)
         );
     }
 
     #[test]
-    fn a_whole_file_write_is_denied_when_the_file_on_disk_has_our_entries() {
-        let dir = crate::common::test_support::scratch_dir("hook-entries").join(".claude");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("settings.json");
-        std::fs::write(
-            &path,
-            r#"{"hooks":{"Stop":[{"hooks":[{"command":"playbook hook a"}]}]}}"#,
-        )
-        .unwrap();
-        let path = path.to_string_lossy().into_owned();
+    fn a_write_is_judged_against_the_file_on_disk() {
+        let path = settings_with("hook-write", ENTRIES);
 
         assert_eq!(
-            check_hook_edit(&path, "", r#"{"model":"opus"}"#, true),
+            check_settings_edit(&path, &write(), r#"{"model":"opus"}"#),
             Some(HOOK_ENTRIES_REASON)
         );
         assert_eq!(
-            check_hook_edit(&path, "", r#"{"model":"opus"}"#, false),
+            check_settings_edit(&path, &write(), &ENTRIES.replace("opus", "sonnet")),
             None
         );
     }
 
     #[test]
-    fn bash_cannot_uninstall_or_rewrite_the_hook_entries() {
+    fn a_file_without_our_entries_can_be_written_but_not_used_to_turn_hooks_off() {
+        let plain = settings_with("hook-plain", r#"{"model":"opus"}"#);
+        let missing = plain.with_file_name("settings.local.json");
+
+        for path in [&plain, &missing] {
+            assert_eq!(
+                check_settings_edit(path, &write(), r#"{"model":"sonnet"}"#),
+                None
+            );
+        }
+        assert_eq!(
+            check_settings_edit(&missing, &write(), r#"{"disableAllHooks":true}"#),
+            Some(HOOK_ENTRIES_REASON)
+        );
+        assert_eq!(
+            check_settings_edit(&missing, &edit("a"), "playbook hook x"),
+            Some(HOOK_ENTRIES_REASON)
+        );
+    }
+
+    #[test]
+    fn settings_files_are_recognised_whatever_the_case_or_the_link() {
+        assert!(is_claude_settings(Path::new(
+            "/Users/me/.claude/settings.json"
+        )));
+        assert!(is_claude_settings(Path::new(
+            "/Users/me/.CLAUDE/Settings.local.json"
+        )));
+        assert!(!is_claude_settings(Path::new("/work/notes/settings.json")));
+        assert!(settings_path("").is_none());
+
+        let real = settings_with("hook-link", ENTRIES);
+        let link = real.parent().unwrap().parent().unwrap().join("link.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(settings_path(&link.to_string_lossy()).is_some());
+    }
+
+    #[test]
+    fn bash_cannot_uninstall_playbook() {
         for command in [
             "playbook uninstall --yes",
-            "cd x && playbook uninstall",
-            "jq '.hooks = {}' ~/.claude/settings.json > /tmp/s && mv /tmp/s ~/.claude/settings.json",
-            "sed -i '' '/playbook hook/d' ~/.claude/settings.json",
-            "echo '{\"hooks\":{}}' > ~/.claude/settings.json",
+            "cd x && playbook uninstall --yes --remove-binary",
+            "nohup playbook uninstall --yes",
+            "xargs playbook uninstall --yes",
+            "bash -c 'playbook uninstall --yes'",
+            "cargo run -q -- uninstall --yes",
+            "/usr/local/bin/playbook uninstall --yes",
         ] {
             assert_eq!(deny(command), Some(HOOK_ENTRIES_REASON), "{command}");
         }
         for command in [
+            "playbook uninstall",
             "playbook uninstall --dry-run",
+            "playbook uninstall --yes --dry-run",
+            "playbook init",
+            "cargo run -q -- doctor",
+        ] {
+            assert_eq!(deny(command), None, "{command}");
+        }
+    }
+
+    #[test]
+    fn bash_cannot_replace_a_settings_file_that_holds_our_entries() {
+        let path = settings_with("bash-replace", ENTRIES);
+        let file = path.to_string_lossy().into_owned();
+        let home = path
+            .parent()
+            .and_then(Path::parent)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+
+        for command in [
+            format!("echo '{{\"model\":\"opus\"}}' > {file}"),
+            format!("cp backup.json {file}"),
+            format!("mv /tmp/s {file}"),
+            format!("rm {file}"),
+            format!("jq '.model' {file} 2>/dev/null > {file}"),
+            "echo '{}' > ~/.claude/settings.json".to_string(),
+            "cd ~/.claude && cp /tmp/s settings.json".to_string(),
+        ] {
+            assert_eq!(
+                check_command(&command, &home),
+                Some(HOOK_ENTRIES_REASON),
+                "{command}"
+            );
+        }
+        for command in [
+            format!("cat {file}"),
+            format!("jq '.hooks' {file}"),
+            format!("jq '.hooks' {file} 2>/dev/null"),
+            format!("grep -n hook {file} > /tmp/out.txt"),
+            format!("echo x >> {file}"),
+            format!("sed -i '' s/opus/sonnet/ {file}"),
+        ] {
+            assert_eq!(check_command(&command, &home), None, "{command}");
+        }
+    }
+
+    #[test]
+    fn bash_cannot_edit_settings_in_place_while_naming_hooks() {
+        for command in [
+            "sed -i '' '/playbook hook/d' ~/.claude/settings.json",
+            "sed --in-place '/hook/d' ~/.claude/settings.json",
+            "cd ~/.claude && sed -i '/playbook hook/d' settings.json",
+            "python3 -c \"import json; p='/Users/me/.claude/settings.json'; d=json.load(open(p)); d['hooks']={}\"",
+            "perl -i -pe 's/hook//' ~/.claude/settings.json",
+            "sed -i '' 's/true/false/' ~/.claude/settings.json && echo enabledPlugins",
+        ] {
+            assert_eq!(deny(command), Some(HOOK_ENTRIES_REASON), "{command}");
+        }
+        for command in [
+            "sed -i '' s/opus/sonnet/ ~/.claude/settings.json",
+            "sed -i '' '/hook/d' /work/notes/settings.json",
             "cat ~/.claude/settings.json",
-            "jq '.hooks' ~/.claude/settings.json",
-            "echo '{\"model\":\"opus\"}' > ~/.claude/settings.json",
         ] {
             assert_eq!(deny(command), None, "{command}");
         }
