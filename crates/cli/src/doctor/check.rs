@@ -117,12 +117,60 @@ const PROBES: [Probe; 15] = [
 /// (`claude plugin list`, `git`, the binary's own `--version`), so they run
 /// side by side. Rows are joined in table order, so the output is unchanged.
 pub fn run(env: &Env) -> Vec<Row> {
-    crate::common::par::map(&PROBES, crate::common::par::MAX_CONCURRENT, |probe| {
+    let rows = crate::common::par::map(&PROBES, crate::common::par::MAX_CONCURRENT, |probe| {
         probe(env)
     })
     .into_iter()
     .flatten()
-    .collect()
+    .collect();
+    if is_paused(env) {
+        mark_paused(rows)
+    } else {
+        rows
+    }
+}
+
+/// Whether the plugin is switched off in the settings file, which makes every
+/// hook entry and the status line do nothing. `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1`
+/// runs them anyway, so then nothing is paused.
+fn is_paused(env: &Env) -> bool {
+    !std::env::var(crate::common::plugin_state::IGNORE_ENV).is_ok_and(|v| v == "1")
+        && crate::common::plugin_state::disabled_in_file(&env.settings())
+}
+
+/// Rows that claim hooks or the status line work cannot say PASS while the
+/// plugin is paused. The plugin row says why.
+fn mark_paused(mut rows: Vec<Row>) -> Vec<Row> {
+    let hint = "run: claude plugin enable playbook@pragmatic-engineer";
+    let message =
+        "plugin paused (enabledPlugins sets it to false), so hooks and the status line do nothing";
+    match rows.iter().position(|r| r.layer == "1") {
+        Some(at) if rows[at].level == Level::Fail => {}
+        Some(at) if rows[at].level == Level::Pass => {
+            rows[at] = Row::new("1", Level::Warn, message).hint(hint);
+        }
+        // An INFO or WARN row states another fact (not installed, claude
+        // missing); keep it and add the paused row in front.
+        Some(at) => rows.insert(at, Row::new("1", Level::Warn, message).hint(hint)),
+        None => rows.insert(0, Row::new("1", Level::Warn, message).hint(hint)),
+    }
+    for row in rows.iter_mut().filter(|r| {
+        matches!(r.layer, "2" | "5")
+            || r.message
+                .starts_with("playbook hook entries in settings.json")
+    }) {
+        if row.level == Level::Pass {
+            row.level = Level::Warn;
+            let tail = if row.layer == "5" {
+                "so it does not run"
+            } else {
+                "so they do not run"
+            };
+            row.message = format!("{}, but the plugin is paused {tail}", row.message);
+            row.hint = Some(hint.to_string());
+        }
+    }
+    rows
 }
 
 fn on_path(env: &Env, name: &str) -> Option<PathBuf> {
@@ -819,7 +867,13 @@ pub fn closing(rows: &[Row]) -> Vec<&'static str> {
             "Layer 7 needs a hand edit: remove or fix the named entry in ~/.claude/settings.json.",
         );
     }
-    if failed.is_empty() {
+    let paused = rows
+        .iter()
+        .any(|r| r.layer == "1" && r.message.starts_with("plugin paused"));
+    if paused {
+        out.push("The plugin is paused, so hooks and the status line do nothing. Run: claude plugin enable playbook@pragmatic-engineer");
+    }
+    if failed.is_empty() && !paused {
         out.push("All required layers pass.");
     }
     out
@@ -859,4 +913,66 @@ pub fn to_json(rows: &[Row]) -> Value {
 /// Whether any required layer failed.
 pub fn failed(rows: &[Row]) -> bool {
     rows.iter().any(|r| r.level == Level::Fail)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_paused_plugin_downgrades_only_the_hook_and_status_line_passes() {
+        let rows = vec![
+            Row::new("1", Level::Pass, "plugin enabled"),
+            Row::new("2", Level::Pass, "safety guards wired (7 of 7)"),
+            Row::new("3", Level::Pass, "launcher installed"),
+            Row::new("5", Level::Pass, "status line ok"),
+            Row::new(
+                "-",
+                Level::Pass,
+                "playbook hook entries in settings.json (9 of 9)",
+            ),
+            Row::new("-", Level::Pass, "acli found"),
+        ];
+
+        let marked = mark_paused(rows);
+
+        assert_eq!(marked[0].level, Level::Warn);
+        assert!(marked[0].message.contains("paused"));
+        assert_eq!(marked[1].level, Level::Warn);
+        assert_eq!(marked[2].level, Level::Pass);
+        assert_eq!(marked[3].level, Level::Warn);
+        assert_eq!(marked[4].level, Level::Warn);
+        assert_eq!(marked[5].level, Level::Pass);
+        assert!(marked[4].message.ends_with("so they do not run"));
+        assert!(marked[3].message.ends_with("so it does not run"));
+        assert!(closing(&marked)[0].contains("paused"));
+    }
+
+    #[test]
+    fn an_info_plugin_row_survives_with_the_paused_warning_in_front() {
+        let marked = mark_paused(vec![Row::new(
+            "1",
+            Level::Info,
+            "skills plugin not installed (optional)",
+        )]);
+
+        assert_eq!(marked.len(), 2);
+        assert_eq!(marked[0].level, Level::Warn);
+        assert_eq!(marked[1].level, Level::Info);
+    }
+
+    #[test]
+    fn a_missing_plugin_row_is_added_and_a_failing_one_is_kept() {
+        let without = mark_paused(vec![Row::new("2", Level::Fail, "not wired")]);
+        let failing = mark_paused(vec![Row::new(
+            "1",
+            Level::Fail,
+            "plugin installed but disabled",
+        )]);
+
+        assert_eq!((without[0].layer, without[0].level), ("1", Level::Warn));
+        assert_eq!(without[1].level, Level::Fail);
+        assert_eq!(failing.len(), 1);
+        assert_eq!(failing[0].level, Level::Fail);
+    }
 }
