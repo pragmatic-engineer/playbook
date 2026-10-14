@@ -813,6 +813,22 @@ mod memory_capture {
         mem_dir.parent().unwrap().join("data").join("memory.db")
     }
 
+    /// Writes the `capture-due` marker with an mtime well ahead of any graph
+    /// fixture. The hook compares the graph's recorded write time (taken from
+    /// the precise clock) with the marker's file time (taken from the kernel's
+    /// coarse clock, which can lag by several milliseconds on Linux), so a
+    /// marker written just after a fixture could read as older and be treated
+    /// as "memory was written", releasing silently instead of re-blocking.
+    fn arm_marker(marker: &Path) {
+        fs::write(marker, "").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(marker)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(3600))
+            .unwrap();
+    }
+
     /// Write `older_path`, sleep briefly, write `newer_path`, then poll up
     /// to 500ms confirming the mtime ordering actually holds.
     fn write_with_older_then_newer_mtime(older_path: &Path, newer_path: &Path) {
@@ -968,7 +984,7 @@ mod memory_capture {
         let home = scratch_home("mc-migrate-fails");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
 
         let legacy_mem_dir = home.join(".claude").join("memory");
         fs::create_dir_all(&legacy_mem_dir).unwrap();
@@ -1054,7 +1070,7 @@ mod memory_capture {
         let home = scratch_home("mc-paths");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(
             dir.join("edits.jsonl"),
             "{\"path\":\"/repo/src/one.sh\",\"ts\":1}\n{\"path\":\"/repo/src/two.sh\",\"ts\":2}\n",
@@ -1092,7 +1108,7 @@ mod memory_capture {
         let home = scratch_home("mc-cap-five");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         let mut edits = String::new();
         for i in 1..=5 {
             edits.push_str(&format!(
@@ -1123,7 +1139,7 @@ mod memory_capture {
         let home = scratch_home("mc-cap-six");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         let mut edits = String::new();
         for i in 1..=6 {
             edits.push_str(&format!(
@@ -1157,7 +1173,7 @@ mod memory_capture {
         let home = scratch_home("mc-handoff-nudge");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
 
         // Act
         let (stdout, _code) = run_hook("memory-capture", &home, &payload());
@@ -1178,7 +1194,7 @@ mod memory_capture {
         let home = scratch_home("mc-cap");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         let mut edits = String::new();
         for i in 1..=50 {
             edits.push_str(&format!(
@@ -1212,7 +1228,7 @@ mod memory_capture {
         let home = scratch_home("mc-non-object-line");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(
             dir.join("edits.jsonl"),
             "{\"path\":\"/repo/src/one.sh\",\"ts\":1}\n42\n{\"path\":\"/repo/src/two.sh\",\"ts\":2}\n",
@@ -1237,7 +1253,7 @@ mod memory_capture {
         let home = scratch_home("mc-no-edits");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
 
         // Act
         let (stdout, code) = run_hook("memory-capture", &home, &payload());
@@ -1282,7 +1298,7 @@ mod memory_capture {
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
         let marker = dir.join("capture-due");
-        fs::write(&marker, "").unwrap();
+        arm_marker(&marker);
 
         // Act
         let (stdout, code) = run_hook("memory-capture", &home, &payload());
@@ -1365,7 +1381,7 @@ mod memory_capture {
         let home = scratch_home("mc-cap-minus-one");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(dir.join("capture-attempts"), "1").unwrap();
 
         // Act
@@ -1392,7 +1408,7 @@ mod memory_capture {
         let home = scratch_home("mc-at-cap");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(dir.join("capture-attempts"), "2").unwrap();
 
         // Act
@@ -1433,7 +1449,7 @@ mod memory_capture {
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
         let marker = dir.join("capture-due");
-        fs::write(&marker, "").unwrap();
+        arm_marker(&marker);
 
         let original_mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
@@ -1472,7 +1488,7 @@ mod memory_capture {
         let home = scratch_home("mc-unreadable-graph");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         let mem_dir = memory_dir_for(&home);
         fs::create_dir_all(&mem_dir).unwrap();
 
@@ -1515,7 +1531,7 @@ mod memory_capture {
         let home = scratch_home("mc-corrupt-attempts");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(dir.join("capture-attempts"), "garbage").unwrap();
 
         // Act
@@ -1597,7 +1613,7 @@ mod memory_capture {
         let cwd = scratch_home("mc-nudge-at-threshold-cwd");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(dir.join("capture-crossings"), "3").unwrap();
         write_start_ts(&dir, 1_000_000_000);
 
@@ -1622,7 +1638,7 @@ mod memory_capture {
         let cwd = scratch_home("mc-nudge-above-threshold-cwd");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(dir.join("capture-crossings"), "5").unwrap();
         write_start_ts(&dir, 1_000_000_000);
 
@@ -1646,7 +1662,7 @@ mod memory_capture {
         let cwd = scratch_home("mc-nudge-below-threshold-cwd");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(dir.join("capture-crossings"), "2").unwrap();
         write_start_ts(&dir, 1_000_000_000);
 
@@ -1672,7 +1688,7 @@ mod memory_capture {
         let cwd = scratch_home("mc-nudge-handoff-written-cwd");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(dir.join("capture-crossings"), "3").unwrap();
         write_start_ts(&dir, 1);
         write_handoff(&home, &cwd);
@@ -1698,7 +1714,7 @@ mod memory_capture {
         let cwd = scratch_home("mc-nudge-handoff-stale-cwd");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(dir.join("capture-crossings"), "3").unwrap();
         write_start_ts(&dir, 4_102_444_800);
         write_handoff(&home, &cwd);
@@ -1748,7 +1764,7 @@ mod memory_capture {
         let cwd = scratch_home("mc-nudge-crossings-unparseable-cwd");
         let dir = session_dir_for(&home, SID);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(dir.join("capture-crossings"), "not-a-number").unwrap();
         write_start_ts(&dir, 1);
 
@@ -1838,7 +1854,7 @@ mod memory_capture {
             10,
         );
         let marker = dir.join("capture-due");
-        fs::write(&marker, "").unwrap();
+        arm_marker(&marker);
 
         // Act
         let (stdout, _code) = run_hook("memory-capture", &home, &payload());
@@ -1870,7 +1886,7 @@ mod memory_capture {
             &[("fact-0", "fact-1", "supersedes")],
             10,
         );
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
 
         // Act
         let (stdout, _code) = run_hook("memory-capture", &home, &payload());
@@ -1901,7 +1917,7 @@ mod memory_capture {
             10,
         );
         write_cursor(&mem_dir, 4_102_444_800);
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
 
         // Act
         let (stdout, _code) = run_hook("memory-capture", &home, &payload());
@@ -1931,7 +1947,7 @@ mod memory_capture {
             "a".repeat(OVERSIZED_FACT_BYTES + 1),
         )
         .unwrap();
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
 
         // Act
         let (stdout, _code) = run_hook("memory-capture", &home, &payload());
@@ -1961,7 +1977,7 @@ mod memory_capture {
             &[("fact-0", "fact-1", "supersedes")],
             10,
         );
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         assert!(!mem_dir.join("memory.signals.json").exists());
 
         // Act
@@ -1997,7 +2013,7 @@ mod memory_capture {
             &[("fact-0", "fact-1", "supersedes")],
             10,
         );
-        fs::write(dir.join("capture-due"), "").unwrap();
+        arm_marker(&dir.join("capture-due"));
         fs::write(dir.join("capture-attempts"), "2").unwrap();
 
         // Act
