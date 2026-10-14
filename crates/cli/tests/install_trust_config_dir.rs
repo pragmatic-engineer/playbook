@@ -57,7 +57,6 @@ fn run(tag: &str, trust: Trust, claude_json: Option<&str>) -> Case {
 /// Like `run`, with `~/.claude.json` content built from the home path.
 fn run_seeded(tag: &str, trust: Trust, seed: impl Fn(&std::path::Path) -> Option<String>) -> Case {
     let work = Work::new(tag);
-    let src = work.dir("src");
     let home = work.dir("home");
     let bindir = work.dir("bin");
     let tools = work.dir("tools");
@@ -98,9 +97,9 @@ fn run_seeded(tag: &str, trust: Trust, seed: impl Fn(&std::path::Path) -> Option
     }
     let out = Command::new("bash")
         .arg(repo_root().join("install.sh"))
-        .args(["--yes", "--skip-plugin"])
+        .arg("--yes")
         .env_remove("SHELL")
-        .env("PLAYBOOK_SRC", &src)
+        .env("PLAYBOOK_SKIP_DOWNLOAD", "1")
         .env("PLAYBOOK_BIN_DIR", &bindir)
         .env("CLAUDE_HOME", home.join(".claude"))
         .env("HOME", &home)

@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `install.sh` seeds `settings.json` from the shipped template through the
-//! real `playbook init`: a fresh install, a user hook that survives, and a
-//! `settings.json` shipped in the source tree that must never be copied.
+//! `install.sh --yes` seeds `settings.json` from the shipped template through
+//! the real `playbook init`: a fresh install, and a user hook that survives.
 
 #[path = "support/shell_fixture.rs"]
 mod fx;
@@ -14,33 +13,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Run the real installer with an otherwise empty source holding the template.
+/// Run the real installer with the real `playbook` already in the bin folder.
 /// Returns (home, log) and keeps the scratch dir alive through `work`.
-fn install(
-    work: &Work,
-    preseed: Option<&str>,
-    shipped_settings: Option<&str>,
-) -> (PathBuf, String) {
-    let src = work.dir("src");
+fn install(work: &Work, preseed: Option<&str>) -> (PathBuf, String) {
     let home = work.dir("home");
     let bin = bin_dir_with_playbook(work);
-    fs::copy(
-        repo_root().join("settings.shared.json"),
-        src.join("settings.shared.json"),
-    )
-    .unwrap();
-    if let Some(body) = shipped_settings {
-        fs::write(src.join("settings.json"), body).unwrap();
-    }
     if let Some(body) = preseed {
         fs::create_dir_all(home.join(".claude")).unwrap();
         fs::write(home.join(".claude/settings.json"), body).unwrap();
     }
     let out = Command::new("bash")
         .arg(repo_root().join("install.sh"))
-        .args(["--no-setup", "--yes"])
+        .arg("--yes")
         .env_remove("SHELL")
-        .env("PLAYBOOK_SRC", &src)
+        .env("PLAYBOOK_SKIP_DOWNLOAD", "1")
         .env("PLAYBOOK_BIN_DIR", &bin)
         .env("CLAUDE_HOME", home.join(".claude"))
         .env("HOME", &home)
@@ -80,7 +66,7 @@ fn ported_hooks(settings: &Value) -> usize {
 #[test]
 fn a_fresh_install_seeds_settings_and_wires_the_ported_hooks() {
     let work = Work::new("seed-fresh");
-    let (home, _) = install(&work, None, None);
+    let (home, _) = install(&work, None);
     let settings = settings_of(&home);
 
     let template: Value = serde_json::from_str(
@@ -111,7 +97,7 @@ fn a_fresh_install_seeds_settings_and_wires_the_ported_hooks() {
 fn a_user_authored_hook_survives_with_the_ported_hooks_beside_it() {
     let work = Work::new("seed-preserve");
     let user = r#"{"hooks":{"Notification":[{"hooks":[{"type":"command","command":"/opt/my-custom-notify.sh"}]}]}}"#;
-    let (home, _) = install(&work, Some(user), None);
+    let (home, _) = install(&work, Some(user));
     let settings = settings_of(&home);
     assert_eq!(
         settings["hooks"]["Notification"][0]["hooks"][0]["command"],
@@ -122,13 +108,4 @@ fn a_user_authored_hook_survives_with_the_ported_hooks_beside_it() {
         "got {}",
         ported_hooks(&settings)
     );
-}
-
-#[test]
-fn the_copy_loop_skips_a_settings_json_shipped_in_the_source() {
-    let work = Work::new("seed-skip");
-    let (home, _) = install(&work, None, Some("SHIPPED SENTINEL must never land\n"));
-    let raw = fs::read_to_string(home.join(".claude/settings.json")).unwrap();
-    assert!(!raw.contains("SHIPPED SENTINEL"), "sentinel landed");
-    serde_json::from_str::<Value>(&raw).expect("valid JSON");
 }
