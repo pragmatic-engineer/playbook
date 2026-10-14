@@ -158,7 +158,8 @@ fn layer1(env: &Env) -> Row {
     let lower = text.to_lowercase();
     // Match the plugin's own id.
     let Some(at) = lower.find("playbook@") else {
-        return Row::new("1", Level::Fail, "plugin not installed").hint(miss);
+        // The skills plugin is optional: a binary-only install is a valid state.
+        return Row::new("1", Level::Info, "skills plugin not installed (optional)").hint(miss);
     };
     let block_end = lower[at..].find("\n\n").map_or(lower.len(), |n| at + n);
     if lower[at..block_end].contains("disabled") {
