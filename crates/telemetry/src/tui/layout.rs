@@ -106,7 +106,7 @@ impl Layout {
         for part in text.split(';').filter(|p| !p.trim().is_empty()) {
             let (name, list) = part
                 .split_once('=')
-                .ok_or_else(|| format!("`{}` needs a name, `=` and panels", part.trim()))?;
+                .ok_or_else(|| format!("{:?} needs a name, `=` and panels", part.trim()))?;
             let name = name.trim();
             if name.is_empty() || name.chars().count() > MAX_NAME {
                 return Err(format!("a tab name needs 1 to {MAX_NAME} characters"));
@@ -121,7 +121,7 @@ impl Layout {
             for word in list.split(',').filter(|w| !w.trim().is_empty()) {
                 let panel = PanelId::parse(word).ok_or_else(|| {
                     format!(
-                        "`{}` is not a panel; use {}",
+                        "{:?} is not a panel; use {}",
                         word.trim(),
                         ALL.map(PanelId::word).join(", ")
                     )

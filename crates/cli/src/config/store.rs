@@ -328,6 +328,8 @@ pub fn export(root: &Path) -> Result<Value, ConfigError> {
                 "repo" => repos
                     .entry(scope)
                     .or_insert_with(|| Value::Object(Map::new())),
+                // A tool's own app tier row is not a global setting.
+                "app" => continue,
                 _ => {
                     global.insert(key, value);
                     continue;

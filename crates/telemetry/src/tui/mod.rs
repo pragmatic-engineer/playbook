@@ -50,6 +50,32 @@ fn start_theme(no_color: bool) -> Theme {
         .unwrap_or_default()
 }
 
+/// The range to open on: the `--range` flag, else the stored one, else this
+/// week.
+fn start_range(
+    flag: Option<Range>,
+    saved: &ui_state::UiState,
+    week: crate::query::WeekStart,
+) -> Range {
+    flag.or_else(|| {
+        saved
+            .range
+            .as_deref()
+            .and_then(|r| Range::parse_with(Some(r), week))
+    })
+    .unwrap_or(Range::ThisWeek(week))
+}
+
+/// The state to store. A range that only came from `--range` is not stored
+/// until the user changes it, so a one-off flag does not stick.
+fn state_to_save(app: &App, flag: Option<Range>, saved: &ui_state::UiState) -> ui_state::UiState {
+    let mut state = app.ui_state();
+    if flag == Some(app.range) {
+        state.range = saved.range.clone();
+    }
+    state
+}
+
 /// Runs the view until the user quits. Restores the terminal on every exit,
 /// including a panic (ratatui installs the hook).
 pub fn run(paths: &Paths, range: Option<Range>) -> Result<(), String> {
@@ -70,14 +96,8 @@ fn event_loop(
     let home = crate::host::home_dir();
     let saved = ui_state::load(&home);
     let week = super::entry::configured_week_start();
-    let range = range
-        .or_else(|| {
-            saved
-                .range
-                .as_deref()
-                .and_then(|r| Range::parse_with(Some(r), week))
-        })
-        .unwrap_or(Range::ThisWeek(week));
+    let flag = range;
+    let range = start_range(flag, &saved, week);
     let mut app = App::new(range);
     let (layout, layout_warning) = ui_state::load_layout(&home);
     app.layout = layout;
@@ -85,7 +105,7 @@ fn event_loop(
     if let Some(warning) = layout_warning {
         app.error = Some(warning);
     }
-    let mut last_saved = app.ui_state();
+    let mut last_saved = state_to_save(&app, flag, &saved);
     app.sources = paths.claude_projects.display().to_string();
     app.week_start = super::entry::configured_week_start();
     // NO_COLOR counts when it is set to anything but empty.
@@ -140,7 +160,7 @@ fn event_loop(
                 _ => {}
             }
         }
-        let now_state = app.ui_state();
+        let now_state = state_to_save(&app, flag, &saved);
         if now_state != last_saved {
             ui_state::save(&home, &now_state);
             last_saved = now_state;
@@ -238,5 +258,56 @@ impl SessionsLoop {
         if due {
             self.start();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::query::WeekStart;
+
+    fn saved(range: Option<&str>) -> ui_state::UiState {
+        ui_state::UiState {
+            range: range.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_range_flag_beats_the_stored_range() {
+        let got = start_range(Some(Range::Today), &saved(Some("30d")), WeekStart::Monday);
+
+        assert_eq!(got, Range::Today);
+    }
+
+    #[test]
+    fn the_stored_range_is_used_when_there_is_no_flag() {
+        let got = start_range(None, &saved(Some("30d")), WeekStart::Monday);
+
+        assert_eq!(got, Range::LastDays(30));
+    }
+
+    #[test]
+    fn a_missing_or_invalid_stored_range_opens_on_this_week() {
+        let week = Range::ThisWeek(WeekStart::Monday);
+
+        assert_eq!(start_range(None, &saved(None), WeekStart::Monday), week);
+        assert_eq!(
+            start_range(None, &saved(Some("nonsense")), WeekStart::Monday),
+            week
+        );
+    }
+
+    #[test]
+    fn a_flag_range_is_not_stored_until_the_user_changes_it() {
+        let mut app = App::new(Range::Today);
+        let stored = saved(Some("30d"));
+
+        let untouched = state_to_save(&app, Some(Range::Today), &stored);
+        app.range = Range::All;
+        let changed = state_to_save(&app, Some(Range::Today), &stored);
+
+        assert_eq!(untouched.range.as_deref(), Some("30d"));
+        assert_eq!(changed.range.as_deref(), Some("all"));
     }
 }

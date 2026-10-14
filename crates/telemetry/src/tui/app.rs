@@ -229,7 +229,7 @@ impl App {
             self.projects_view = v;
         }
         for panel in PANELS {
-            if let Some(sort) = state.sort_for(panel, false) {
+            if let Some(sort) = state.sort_for(panel, true) {
                 self.sorts[panel.index()] = sort;
             }
         }
@@ -1290,5 +1290,51 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_screen_setup_saved_from_one_app_is_restored_into_a_fresh_one() {
+        let mut first = App::new(Range::All);
+        first.layout = super::super::layout::Layout::default();
+        first.tab = 1;
+        first.spend_view = SpendView::Daily;
+        first.projects_view = ProjectsView::Agents;
+        first.sorts[Panel::Models.index()] = Sort::new(5, false);
+        first.filter = "alpha".into();
+        let text = first.ui_state().to_text();
+
+        let mut second = App::new(Range::All);
+        second.apply_ui_state(&super::super::ui_state::UiState::parse(&text));
+
+        assert_eq!(second.tab, 1);
+        assert_eq!(second.spend_view, SpendView::Daily);
+        assert_eq!(second.projects_view, ProjectsView::Agents);
+        assert_eq!(second.sorts[Panel::Models.index()], Sort::new(5, false));
+        assert_eq!(second.filter, "alpha");
+    }
+
+    #[test]
+    fn a_saved_tab_that_no_longer_exists_leaves_the_first_tab_selected() {
+        let mut app = App::new(Range::All);
+        let state = super::super::ui_state::UiState {
+            tab: Some("Gone".into()),
+            ..Default::default()
+        };
+
+        app.apply_ui_state(&state);
+
+        assert_eq!(app.tab, 0);
+    }
+
+    #[test]
+    fn a_saved_sort_on_a_column_the_panel_lacks_keeps_the_default_sort() {
+        let mut app = App::new(Range::All);
+        let mut state = super::super::ui_state::UiState::default();
+        state.sorts = vec![None; 6];
+        state.sorts[Panel::Live.index()] = Some(Sort::new(0, true));
+
+        app.apply_ui_state(&state);
+
+        assert_eq!(app.sort(Panel::Live), Panel::Live.default_sort());
     }
 }

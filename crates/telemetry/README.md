@@ -92,6 +92,8 @@ Settings are playbook's own, from the global tier of its config store (`~/.confi
 | `usage.autoIngestMinutes` | `10` | number |
 | `usage.budget.monthlyUsd` | `0` | number |
 | `usage.budget.weeklyUsd` | `0` | number |
+| `usage.ui.layout` | empty | text | The pbtop tabs and their panels, like `Charts=spend,tokens;Numbers=models`. |
+| `usage.ui.state` | empty | text | Written by pbtop: the screen setup it restores on the next start. |
 
 ## Telemetry receiver
 

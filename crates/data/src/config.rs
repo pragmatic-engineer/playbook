@@ -118,7 +118,8 @@ pub fn set_app_in(
         db,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
-    conn.busy_timeout(Duration::from_millis(2000))?;
+    // Best effort: a short wait, so a busy store never stalls a screen.
+    conn.busy_timeout(Duration::from_millis(250))?;
     let result = conn.execute(
         "INSERT OR REPLACE INTO config (tier, scope, key, value_json, updated_at) \
          VALUES ('app', ?1, ?2, ?3, ?4)",
@@ -252,5 +253,15 @@ mod tests {
 
         assert!(!wrote);
         assert!(!db.exists());
+    }
+
+    #[test]
+    fn set_app_in_reports_false_when_the_config_table_does_not_exist() {
+        let db = temp("setnotable");
+        drop(Connection::open(&db).expect("create"));
+
+        let wrote = set_app_in(&db, "k", "a", "1", 5).expect("write");
+
+        assert!(!wrote);
     }
 }

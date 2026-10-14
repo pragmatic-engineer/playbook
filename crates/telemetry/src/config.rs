@@ -205,6 +205,12 @@ fn old_file_notice(home: &Path) {
     }
 }
 
+/// The stored value of `key` without validating it, so a caller can say why
+/// an invalid value is ignored. `None` when nothing is stored.
+pub fn stored_raw(home: &Path, key: &str) -> Option<Value> {
+    stored(home, key)
+}
+
 /// The value of a usage key for the user at `home`: the stored value when it
 /// is valid, else the default. `None` for a key that is not a usage key.
 pub fn resolve(home: &Path, key: &str) -> Option<Value> {
@@ -357,5 +363,29 @@ mod tests {
             let d = default_value(key).unwrap();
             assert!(validate(key, &d).is_ok(), "{key}");
         }
+    }
+
+    #[test]
+    fn the_ui_keys_accept_good_text_and_refuse_bad_values() {
+        let long = "x".repeat(MAX_STATE_BYTES + 1);
+        let fits = "x".repeat(MAX_STATE_BYTES);
+
+        assert!(validate("usage.ui.layout", &Value::from("Money=budget,models")).is_ok());
+        assert!(validate("usage.ui.layout", &Value::from("A=bogus")).is_err());
+        assert!(validate("usage.ui.layout", &Value::from(5)).is_err());
+        assert!(validate("usage.ui.state", &Value::from(fits)).is_ok());
+        assert!(validate("usage.ui.state", &Value::from(long)).is_err());
+        assert!(validate("usage.ui.state", &Value::from(5)).is_err());
+    }
+
+    #[test]
+    fn save_app_refuses_a_key_that_is_not_a_usage_key_or_a_bad_value() {
+        let h = home("cfg-save-guard");
+
+        let other = save_app(&h, "models.default", &Value::from("opus"));
+        let bad = save_app(&h, "usage.ui.layout", &Value::from("A=bogus"));
+
+        assert!(other.is_err());
+        assert!(bad.is_err());
     }
 }

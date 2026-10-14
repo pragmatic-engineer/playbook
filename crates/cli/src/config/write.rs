@@ -105,6 +105,15 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
             });
         }
     }
+    if let ("usage.ui.state", Value::String(text)) = (key, value) {
+        if text.len() > playbook_telemetry::config::MAX_STATE_BYTES {
+            return Err(ConfigError::OutOfRange {
+                key: key.to_string(),
+                value: "(too long)".to_string(),
+                constraint: "text of at most 4096 bytes, written by pbtop",
+            });
+        }
+    }
     if key == "hooks.rmGuard.allowedRoots" {
         validate_root_list(key, value)?;
     }

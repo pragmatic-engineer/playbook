@@ -89,26 +89,41 @@ impl UiState {
     }
 }
 
-fn find_spend(name: &str) -> Option<SpendView> {
-    let mut view = SpendView::default();
-    for _ in 0..3 {
-        if view.name() == name {
+/// The view named `name`, found by stepping `next` once around the cycle.
+fn find_view<T: Copy + PartialEq>(
+    start: T,
+    next: impl Fn(T) -> T,
+    name: impl Fn(T) -> &'static str,
+    wanted: &str,
+) -> Option<T> {
+    let mut view = start;
+    loop {
+        if name(view) == wanted {
             return Some(view);
         }
-        view = view.next();
+        view = next(view);
+        if view == start {
+            return None;
+        }
     }
-    None
 }
 
-fn find_projects(name: &str) -> Option<ProjectsView> {
-    let mut view = ProjectsView::default();
-    for _ in 0..5 {
-        if view.name() == name {
-            return Some(view);
-        }
-        view = view.next();
-    }
-    None
+fn find_spend(wanted: &str) -> Option<SpendView> {
+    find_view(
+        SpendView::default(),
+        SpendView::next,
+        SpendView::name,
+        wanted,
+    )
+}
+
+fn find_projects(wanted: &str) -> Option<ProjectsView> {
+    find_view(
+        ProjectsView::default(),
+        ProjectsView::next,
+        ProjectsView::name,
+        wanted,
+    )
 }
 
 /// The stored state for the user at `home`.
@@ -127,7 +142,7 @@ pub fn save(home: &Path, state: &UiState) {
 /// The stored layout text and the layout it gives, with a message when the
 /// stored text is invalid.
 pub fn load_layout(home: &Path) -> (super::layout::Layout, Option<String>) {
-    let stored = crate::config::resolve(home, "usage.ui.layout");
+    let stored = crate::config::stored_raw(home, "usage.ui.layout");
     super::layout::Layout::from_stored(stored.as_ref().and_then(Value::as_str))
 }
 
@@ -223,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn an_invalid_stored_layout_falls_back_to_the_default_layout() {
+    fn an_invalid_stored_layout_falls_back_to_the_default_layout_and_says_why() {
         let home = crate::util::scratch_dir("ui-layout");
         let data = crate::config::root(&home).join("data");
         std::fs::create_dir_all(&data).unwrap();
@@ -238,8 +253,9 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let (layout, _) = load_layout(&home);
+        let (layout, warning) = load_layout(&home);
 
         assert_eq!(layout, super::super::layout::Layout::default());
+        assert!(warning.is_some_and(|w| w.contains("bogus")));
     }
 }
