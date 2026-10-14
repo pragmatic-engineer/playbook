@@ -100,6 +100,37 @@ pub fn get_in(
     }
 }
 
+/// Writes `value_json` for `key` in the `app` tier of `app`, in the existing
+/// database at `db`. Returns `false` and writes nothing when the database or
+/// its `config` table does not exist, so a tool never creates the store and
+/// hides an older one. One statement, so the write is atomic.
+pub fn set_app_in(
+    db: &Path,
+    key: &str,
+    app: &str,
+    value_json: &str,
+    now: i64,
+) -> rusqlite::Result<bool> {
+    if !db.is_file() {
+        return Ok(false);
+    }
+    let conn = Connection::open_with_flags(
+        db,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.busy_timeout(Duration::from_millis(2000))?;
+    let result = conn.execute(
+        "INSERT OR REPLACE INTO config (tier, scope, key, value_json, updated_at) \
+         VALUES ('app', ?1, ?2, ?3, ?4)",
+        (app, key, value_json, now),
+    );
+    match result {
+        Ok(_) => Ok(true),
+        Err(rusqlite::Error::SqliteFailure(_, Some(m))) if m.contains("no such table") => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +230,27 @@ mod tests {
         .expect("legacy");
         drop(c);
         assert_eq!(get(&db, None, Some(APP_TELEMETRY)).as_deref(), Some("true"));
+    }
+
+    #[test]
+    fn set_app_in_writes_the_app_tier_and_get_in_reads_it_back() {
+        let db = temp("setapp");
+        put(&db, "global", "", "k", "\"g\"");
+
+        let wrote = set_app_in(&db, "k", "a", "\"mine\"", 5).expect("write");
+
+        assert!(wrote);
+        assert_eq!(get(&db, None, Some("a")), Some("\"mine\"".to_string()));
+        assert_eq!(get(&db, None, Some("other")), Some("\"g\"".to_string()));
+    }
+
+    #[test]
+    fn set_app_in_does_not_create_a_missing_database() {
+        let db = temp("setmissing");
+
+        let wrote = set_app_in(&db, "k", "a", "1", 5).expect("write");
+
+        assert!(!wrote);
+        assert!(!db.exists());
     }
 }

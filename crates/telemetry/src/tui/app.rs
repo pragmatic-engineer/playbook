@@ -153,6 +153,10 @@ pub struct App {
     pub telemetry: Option<crate::telemetry_status::Mode>,
     /// How often the snapshot is refreshed, shown in the footer.
     pub refresh_every: Duration,
+    /// The tabs and the panels on each.
+    pub layout: super::layout::Layout,
+    /// The selected tab, an index into `layout.tabs`.
+    pub tab: usize,
 }
 
 /// What the loop must do after a key.
@@ -192,6 +196,45 @@ impl App {
             sources: String::new(),
             telemetry: None,
             refresh_every: Duration::from_secs(DEFAULT_REFRESH_SECONDS),
+            layout: super::layout::Layout::default(),
+            tab: 0,
+        }
+    }
+
+    /// The screen setup to remember.
+    pub fn ui_state(&self) -> super::ui_state::UiState {
+        super::ui_state::UiState {
+            tab: self.layout.tabs.get(self.tab).map(|t| t.name.clone()),
+            range: Some(self.range.key().to_string()),
+            spend_view: Some(self.spend_view),
+            projects_view: Some(self.projects_view),
+            sorts: self.sorts.iter().map(|s| Some(*s)).collect(),
+            filter: Some(self.filter.clone()),
+        }
+    }
+
+    /// Applies a remembered screen setup. The range is not part of it: the
+    /// caller picks the range, since a command line flag outranks the stored
+    /// one. A tab that no longer exists leaves the first tab selected.
+    pub fn apply_ui_state(&mut self, state: &super::ui_state::UiState) {
+        if let Some(name) = &state.tab {
+            if let Some(i) = self.layout.tabs.iter().position(|t| &t.name == name) {
+                self.tab = i;
+            }
+        }
+        if let Some(v) = state.spend_view {
+            self.spend_view = v;
+        }
+        if let Some(v) = state.projects_view {
+            self.projects_view = v;
+        }
+        for panel in PANELS {
+            if let Some(sort) = state.sort_for(panel, false) {
+                self.sorts[panel.index()] = sort;
+            }
+        }
+        if let Some(filter) = &state.filter {
+            self.filter = filter.clone();
         }
     }
 

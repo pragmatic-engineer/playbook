@@ -100,10 +100,7 @@ pub fn run(
             json_report(&conn, paths, range, crate::util::time::now_secs())
         }
         None if interactive => {
-            tui::run(
-                paths,
-                parse_range(opts.range.as_deref().unwrap_or(TUI_DEFAULT_RANGE))?,
-            )?;
+            tui::run(paths, opts.range.as_deref().map(parse_range).transpose()?)?;
             Ok(String::new())
         }
         None => {
@@ -115,10 +112,6 @@ pub fn run(
 
 /// The range of `--json` when `--range` is not given.
 const DEFAULT_RANGE: &str = "30d";
-
-/// The range the terminal view opens on when `--range` is not given: this week
-/// against last week.
-const TUI_DEFAULT_RANGE: &str = "week";
 
 /// The first day of the week, from the `usage.weekStart` config key. Monday
 /// when the key is unset or unreadable.

@@ -12,6 +12,7 @@ pub mod data;
 pub mod fmt;
 pub mod icon;
 pub mod keys;
+pub mod layout;
 pub mod notice;
 pub mod panels;
 #[cfg(test)]
@@ -22,6 +23,7 @@ pub mod sessions_view;
 mod snapshots;
 pub mod sort;
 pub mod theme;
+pub mod ui_state;
 pub mod view;
 pub mod worker;
 
@@ -50,7 +52,7 @@ fn start_theme(no_color: bool) -> Theme {
 
 /// Runs the view until the user quits. Restores the terminal on every exit,
 /// including a panic (ratatui installs the hook).
-pub fn run(paths: &Paths, range: Range) -> Result<(), String> {
+pub fn run(paths: &Paths, range: Option<Range>) -> Result<(), String> {
     // Nothing may write to stderr while the screen is drawn.
     crate::say::hold();
     let mut terminal = ratatui::init();
@@ -63,9 +65,27 @@ pub fn run(paths: &Paths, range: Range) -> Result<(), String> {
 fn event_loop(
     terminal: &mut ratatui::DefaultTerminal,
     paths: &Paths,
-    range: Range,
+    range: Option<Range>,
 ) -> std::io::Result<()> {
+    let home = crate::host::home_dir();
+    let saved = ui_state::load(&home);
+    let week = super::entry::configured_week_start();
+    let range = range
+        .or_else(|| {
+            saved
+                .range
+                .as_deref()
+                .and_then(|r| Range::parse_with(Some(r), week))
+        })
+        .unwrap_or(Range::ThisWeek(week));
     let mut app = App::new(range);
+    let (layout, layout_warning) = ui_state::load_layout(&home);
+    app.layout = layout;
+    app.apply_ui_state(&saved);
+    if let Some(warning) = layout_warning {
+        app.error = Some(warning);
+    }
+    let mut last_saved = app.ui_state();
     app.sources = paths.claude_projects.display().to_string();
     app.week_start = super::entry::configured_week_start();
     // NO_COLOR counts when it is set to anything but empty.
@@ -119,6 +139,11 @@ fn event_loop(
                 },
                 _ => {}
             }
+        }
+        let now_state = app.ui_state();
+        if now_state != last_saved {
+            ui_state::save(&home, &now_state);
+            last_saved = now_state;
         }
         while let Ok(update) = worker.updates.try_recv() {
             match update {
