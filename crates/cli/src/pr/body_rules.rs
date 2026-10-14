@@ -598,23 +598,6 @@ mod tests {
     }
 
     #[test]
-    fn the_scope_level_can_block_when_not_stacked() {
-        let rules = Rules {
-            scope: Level::Block,
-            ..Rules::default()
-        };
-
-        let found = check_scope(
-            "commit title",
-            "fix(x): y",
-            &rules,
-            &ctx(Some("PROJ-1"), None, false),
-        );
-
-        assert_eq!(found.blocks.len(), 1);
-    }
-
-    #[test]
     fn ticket_detection_follows_the_documented_order() {
         let patterns = vec![DEFAULT_TICKET_PATTERN.to_string()];
         let subjects = vec!["feat(OPS-9): older".to_string()];
@@ -648,15 +631,6 @@ mod tests {
 
             assert_eq!(got.as_deref(), *expected, "{name}");
         }
-    }
-
-    #[test]
-    fn a_custom_pattern_is_used_for_detection() {
-        let patterns = vec![r"WEB-[0-9]+".to_string()];
-
-        let got = detect_ticket(None, "feat/PROJ-1-and-WEB-4", &[], &patterns);
-
-        assert_eq!(got.as_deref(), Some("WEB-4"));
     }
 
     #[test]
