@@ -191,7 +191,7 @@ fn output_of(mut cmd: Command) -> Option<String> {
 }
 
 fn layer1(env: &Env) -> Row {
-    let miss = "run: claude plugin marketplace add pragmatic-engineer/skills && claude plugin install playbook@pragmatic-engineer";
+    let miss = "run: claude plugin marketplace add pragmatic-engineer/marketplace && claude plugin install playbook@pragmatic-engineer";
     let Some(claude) = on_path(env, "claude") else {
         return Row::new(
             "1",

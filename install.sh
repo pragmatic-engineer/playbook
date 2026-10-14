@@ -27,7 +27,7 @@ RELEASE_REPO="pragmatic-engineer/playbook"
 # crates/common/src/paths.rs. Not overridable by env var: nothing downstream
 # of this script reads such an override. The Claude Code folder is fixed too,
 # because `playbook init` always uses ~/.claude.
-SKILLS_INSTALL_CMD="claude plugin marketplace add pragmatic-engineer/skills"
+SKILLS_INSTALL_CMD="claude plugin marketplace add pragmatic-engineer/marketplace"
 SKILLS_INSTALL_CMD="$SKILLS_INSTALL_CMD && claude plugin install playbook@pragmatic-engineer"
 PLAYBOOK_CONFIG_DIR="$HOME/.config/playbook"
 PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
@@ -132,7 +132,7 @@ What it does:
 
 It does not install the skills. They are a separate Claude Code plugin that works
 without the binary:
-  claude plugin marketplace add pragmatic-engineer/skills
+  claude plugin marketplace add pragmatic-engineer/marketplace
   claude plugin install playbook@pragmatic-engineer
 
 Env:

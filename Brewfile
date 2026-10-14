@@ -32,7 +32,7 @@ brew "agent-browser"  # register: claude mcp add --scope user agent-browser -- a
 # review it, then run `brew trust atlassian/acli` once. That step is left to you
 # on purpose, since trusting a tap grants it code execution.
 tap "atlassian/acli"
-brew "acli"           # see the atlassian skill in pragmatic-engineer/skills; auth per product with `acli confluence auth login`
+brew "acli"           # see the atlassian skill in the playbook plugin; auth per product with `acli confluence auth login`
 
 # zsh ships with macOS; the `cc` launcher is zsh-only. Uncomment to pin a Homebrew zsh.
 # brew "zsh"

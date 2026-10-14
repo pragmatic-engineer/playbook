@@ -9,7 +9,7 @@ The skills ship as a Claude Code plugin and work on their own. The binary, which
 Skills, the part you can use alone:
 
 ```bash
-claude plugin marketplace add pragmatic-engineer/skills
+claude plugin marketplace add pragmatic-engineer/marketplace
 claude plugin install playbook@pragmatic-engineer
 ```
 

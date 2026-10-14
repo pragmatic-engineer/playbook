@@ -288,6 +288,10 @@ fn skills_only_is_refused_with_the_plugin_commands() {
     assert_ne!(rc, 0, "{log}");
     assert!(log.contains("--skills-only is gone"), "{log}");
     assert!(
+        log.contains("claude plugin marketplace add pragmatic-engineer/marketplace"),
+        "{log}"
+    );
+    assert!(
         log.contains("claude plugin install playbook@pragmatic-engineer"),
         "{log}"
     );

@@ -8,7 +8,7 @@ The quickest route is one command. This page covers every route, requirements, h
 
 | Mode | Commands, in order | You get | You lack |
 |---|---|---|---|
-| Skills only | `claude plugin marketplace add pragmatic-engineer/skills`, then `claude plugin install playbook@pragmatic-engineer` | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
+| Skills only | `claude plugin marketplace add pragmatic-engineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer` | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
 | Binary only | Install script: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash`. Or Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook init` | The `playbook` command, hooks, guards, status line, memory and usage | The skills and slash commands |
 | Both (recommended) | The binary first, then the two skills commands | Everything | Nothing |
 
