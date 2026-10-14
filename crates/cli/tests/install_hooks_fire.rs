@@ -73,6 +73,7 @@ fn installed() -> Fire {
         .env("PLAYBOOK_HEADLESS", "0")
         .env("HOME", &home)
         .env("CLAUDE_HOME", home.join(".claude"))
+        .env_remove("CLAUDE_PLUGIN_ROOT")
         .env("PLAYBOOK_SKIP_DOWNLOAD", "1")
         .env("PLAYBOOK_BIN_DIR", &bin)
         .output()

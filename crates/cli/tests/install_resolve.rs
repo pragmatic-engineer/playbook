@@ -102,7 +102,7 @@ fn no_release_404_is_refused() {
 #[test]
 fn a_rate_limit_403_aborts_and_never_installs_anything() {
     let c = Ctx::new("res-403");
-    let (_, out, ..) = c.install(
+    let (rc, out, _, bindir) = c.install(
         "a",
         &[
             ("STUB_CODE", "403"),
@@ -110,29 +110,32 @@ fn a_rate_limit_403_aborts_and_never_installs_anything() {
         ],
     );
     assert!(
-        !out.contains("Installing release") && out.contains("HTTP 403"),
+        rc != 0 && !out.contains("Installing release") && out.contains("HTTP 403"),
         "{out}"
     );
+    assert!(!bindir.join("playbook").exists());
 }
 
 #[test]
 fn a_transport_failure_aborts_and_never_installs_anything() {
     let c = Ctx::new("res-transport");
-    let (_, out, ..) = c.install("a", &[("STUB_TRANSPORT_FAIL", "1")]);
+    let (rc, out, _, bindir) = c.install("a", &[("STUB_TRANSPORT_FAIL", "1")]);
     assert!(
-        !out.contains("Installing release") && out.contains("HTTP 000"),
+        rc != 0 && !out.contains("Installing release") && out.contains("HTTP 000"),
         "{out}"
     );
+    assert!(!bindir.join("playbook").exists());
 }
 
 #[test]
 fn a_server_error_503_aborts_and_never_installs_anything() {
     let c = Ctx::new("res-503");
-    let (_, out, ..) = c.install("a", &[("STUB_CODE", "503"), ("STUB_BODY", "")]);
+    let (rc, out, _, bindir) = c.install("a", &[("STUB_CODE", "503"), ("STUB_BODY", "")]);
     assert!(
-        !out.contains("Installing release") && out.contains("HTTP 503"),
+        rc != 0 && !out.contains("Installing release") && out.contains("HTTP 503"),
         "{out}"
     );
+    assert!(!bindir.join("playbook").exists());
 }
 
 #[test]
@@ -330,7 +333,7 @@ fn a_successful_install_places_the_binary_and_wires_path_once() {
     let (_, out, home, bindir) = c.good("a", &[]);
     // A second run must not add a second PATH line.
     let sums = format!("{}  {ASSET}", sha256_hex(GOOD_ASSET.as_bytes()));
-    let _ = Command::new("bash")
+    let second = Command::new("bash")
         .arg(repo_root().join("install.sh"))
         .arg("--no-init")
         .env("PATH", c.path())
@@ -342,7 +345,9 @@ fn a_successful_install_places_the_binary_and_wires_path_once() {
         .env("STUB_BODY", RELEASE_BODY)
         .env("STUB_ASSET_BODY", GOOD_ASSET)
         .env("STUB_SUMS_BODY", sums)
-        .output();
+        .output()
+        .expect("bash spawns");
+    assert!(second.status.success(), "{}", both(&second));
     let bashrc = fs::read_to_string(home.join(".bashrc")).unwrap_or_default();
     let lines = bashrc
         .lines()

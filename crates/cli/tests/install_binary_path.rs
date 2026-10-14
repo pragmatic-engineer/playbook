@@ -28,7 +28,7 @@ fn binary_install(work: &Work, stubs: &Path, home: &Path, bindir: &Path, shell: 
         std::env::var("PATH").unwrap_or_default()
     );
     let _ = work;
-    let _ = Command::new("bash")
+    let out = Command::new("bash")
         .arg(repo_root().join("install.sh"))
         .arg("--no-init")
         .env("PATH", path)
@@ -40,7 +40,17 @@ fn binary_install(work: &Work, stubs: &Path, home: &Path, bindir: &Path, shell: 
         .env("STUB_BODY", RELEASE_BODY)
         .env("STUB_ASSET_BODY", GOOD_ASSET)
         .env("STUB_SUMS_BODY", sums)
-        .output();
+        .output()
+        .expect("bash spawns");
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.status.success() && text.contains("Installed playbook"),
+        "{text}"
+    );
 }
 
 fn markers(file: &Path) -> usize {
@@ -130,8 +140,8 @@ fn fish_gets_a_conf_d_file_with_fish_add_path() {
     );
 }
 
-/// Run the installer from the archived tree with a stub `playbook` in the
-/// bin dir (no network path).
+/// Run the installer with `PLAYBOOK_SKIP_DOWNLOAD=1` and a stub `playbook` in
+/// the bin dir (no network path).
 fn local_install(
     work: &Work,
     stub_dir: &Path,
@@ -244,10 +254,41 @@ fn aliases_and_system_prompt_flags_are_forwarded_to_init() {
 fn binary_only_does_not_opt_in_to_the_launcher_or_system_prompt() {
     let work = Work::new("bp-binonly");
     let (stub, argv) = recording_stub(&work);
-    local_install(&work, &stub, &["--yes", "--binary-only"], "bo");
+    let (rc, _, log) = local_install(&work, &stub, &["--yes", "--binary-only"], "bo");
+    assert_eq!(rc, 0, "{log}");
+    assert!(log.contains("Running playbook init"), "{log}");
     let got = fs::read_to_string(&argv).unwrap_or_default();
     assert!(
         !got.contains("--aliases") && !got.contains("--system-prompt"),
         "init received: '{got}'"
+    );
+}
+
+#[test]
+fn flags_from_older_commands_are_accepted_and_ignored() {
+    let work = Work::new("bp-legacy");
+    let (stub, argv) = recording_stub(&work);
+    let flags = [
+        "--no-init",
+        "--skip-plugin",
+        "--no-setup",
+        "--skip-deps",
+        "--skip-shell",
+    ];
+    let (rc, _, log) = local_install(&work, &stub, &flags, "legacy");
+    assert_eq!(rc, 0, "{log}");
+    assert!(!argv.exists(), "init ran: {log}");
+}
+
+#[test]
+fn skills_only_is_refused_with_the_plugin_commands() {
+    let work = Work::new("bp-skills-only");
+    let (stub, _) = recording_stub(&work);
+    let (rc, _, log) = local_install(&work, &stub, &["--skills-only"], "so");
+    assert_ne!(rc, 0, "{log}");
+    assert!(log.contains("--skills-only is gone"), "{log}");
+    assert!(
+        log.contains("claude plugin install playbook@pragmatic-engineer"),
+        "{log}"
     );
 }

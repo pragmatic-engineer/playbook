@@ -26,6 +26,7 @@ fn install(work: &Work, preseed: Option<&str>) -> (PathBuf, String) {
         .arg(repo_root().join("install.sh"))
         .arg("--yes")
         .env_remove("SHELL")
+        .env_remove("CLAUDE_PLUGIN_ROOT")
         .env("PLAYBOOK_SKIP_DOWNLOAD", "1")
         .env("PLAYBOOK_BIN_DIR", &bin)
         .env("CLAUDE_HOME", home.join(".claude"))

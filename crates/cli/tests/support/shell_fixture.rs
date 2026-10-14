@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Helpers for tests that run the repo's real shell script (`install.sh`)
-//! against stubbed `curl`, `gh`, `uname` and `claude`.
+//! against stubbed `curl`, `gh` and `uname`.
 
 #![allow(dead_code)]
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -64,47 +64,6 @@ pub fn write_exec(path: &Path, content: &str) {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("chmod");
     }
-}
-
-/// The tracked files of HEAD extracted into `dest`, so untracked build output
-/// cannot leak into a run. `None` when this is not a git checkout.
-pub fn archive_head(dest: &Path) -> Option<()> {
-    let root = repo_root();
-    let inside = Command::new("git")
-        .args(["-C"])
-        .arg(&root)
-        .args(["rev-parse", "--git-dir"])
-        .output()
-        .ok()?;
-    if !inside.status.success() {
-        return None;
-    }
-    fs::create_dir_all(dest).ok()?;
-    let archive = Command::new("git")
-        .arg("-C")
-        .arg(&root)
-        .args(["archive", "HEAD"])
-        .stdout(Stdio::piped())
-        .spawn()
-        .ok()?;
-    let status = Command::new("tar")
-        .arg("-x")
-        .arg("-C")
-        .arg(dest)
-        .stdin(archive.stdout?)
-        .status()
-        .ok()?;
-    status.success().then_some(())
-}
-
-/// Run `bash <script> <args>` with `envs`, capturing both streams.
-pub fn bash(script: &Path, args: &[&str], envs: &[(&str, String)]) -> Output {
-    let mut cmd = Command::new("bash");
-    cmd.arg(script).args(args);
-    for (k, v) in envs {
-        cmd.env(k, v);
-    }
-    cmd.output().expect("bash should spawn")
 }
 
 pub fn stdout(out: &Output) -> String {

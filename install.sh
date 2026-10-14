@@ -22,12 +22,13 @@
 set -euo pipefail
 
 RELEASE_REPO="pragmatic-engineer/playbook"
-CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 # Root for every directory playbook itself writes (memory, runtime state,
 # the statusline script); mirrors playbook_root_from() in
-# crates/common/src/paths.rs. Not currently overridable by env var, unlike
-# CLAUDE_HOME: nothing downstream of this script reads a PLAYBOOK_CONFIG_DIR
-# override yet, so introducing one here would be a knob with no effect.
+# crates/common/src/paths.rs. Not overridable by env var: nothing downstream
+# of this script reads such an override. The Claude Code folder is fixed too,
+# because `playbook init` always uses ~/.claude.
+SKILLS_INSTALL_CMD="claude plugin marketplace add pragmatic-engineer/skills"
+SKILLS_INSTALL_CMD="$SKILLS_INSTALL_CMD && claude plugin install playbook@pragmatic-engineer"
 PLAYBOOK_CONFIG_DIR="$HOME/.config/playbook"
 PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
 REF="${PLAYBOOK_REF:-}"
@@ -61,7 +62,8 @@ ask() {
     fi
     if [ "$def" = "n" ]; then hint="y/N"; else hint="Y/n"; fi
     printf '%s %s[%s]%s ' "$prompt" "$C_Y" "$hint" "$C_0" > /dev/tty
-    read -r ans < /dev/tty || ans=""
+    # End of input (Ctrl-D) or an interrupt is a no, never the default.
+    read -r ans < /dev/tty || return 1
     [ -z "$ans" ] && ans="$def"
     case "$ans" in
         [Yy]|[Yy][Ee][Ss]) return 0 ;;
@@ -69,13 +71,14 @@ ask() {
     esac
 }
 
-# consent PROMPT  ->  0 only on an explicit yes: --yes, or a typed answer. With
-# no terminal and no --yes there is nobody to ask, so the answer is no. Used
-# for changes to the user's Claude Code settings, which are never silent.
+# consent PROMPT  ->  0 only on an explicit yes: --yes, or a typed y. A bare
+# Enter is a no. With no terminal and no --yes there is nobody to ask, so the
+# answer is no. Used for changes to the user's Claude Code settings, which are
+# never silent.
 consent() {
     if [ "$ASSUME_YES" -eq 1 ]; then return 0; fi
     have_tty || return 1
-    ask "$1" Y
+    ask "$1" n
 }
 
 # Marks $PLAYBOOK_CONFIG_DIR as a trusted workspace in ~/.claude.json, so a
@@ -121,8 +124,8 @@ Usage:
   ./install.sh [flags]
 
 What it does:
-  - downloads the release binary, checks its SHA256 and build attestation, runs a
-    smoke test, installs it and puts its folder on PATH;
+  - downloads the release binary, checks its SHA256 (and its build attestation
+    when gh can), runs a smoke test, installs it and puts its folder on PATH;
   - then asks whether to run `playbook init`, which adds playbook's hook entries to
     ~/.claude/settings.json (your own entries stay), the status line and the shell
     integration. With no terminal and no --yes it only prints the command.
@@ -134,7 +137,6 @@ without the binary:
 
 Env:
   PLAYBOOK_REF=<tag>             release to install, such as v1.2.3 (default: latest)
-  CLAUDE_HOME=<dir>              Claude Code folder (default: $HOME/.claude)
   PLAYBOOK_BIN_DIR=<dir>         binary install dir (default: $HOME/.local/bin)
   PLAYBOOK_REQUIRE_ATTESTATION=1 abort unless the build attestation verifies
 
@@ -142,8 +144,9 @@ Flags:
   --yes              say yes to every question, including running `playbook init`
   --aliases          add the `playbook` shell wrapper (init --aliases) without asking
   --system-prompt    install the custom system prompt (init --system-prompt) without asking
-  --binary-only      do not ask about the shell wrapper or the system prompt
-  --no-init          install the binary only: do not ask about `playbook init`
+  --binary-only      still offers `playbook init`, but skips the wrapper and system
+                     prompt questions
+  --no-init          install the binary only: never ask about `playbook init`
   --ref <tag>        same as PLAYBOOK_REF
   -h, --help         show this help
 
@@ -160,7 +163,7 @@ while [ $# -gt 0 ]; do
         --system-prompt) OPT_SYSTEM_PROMPT=1; OPT_ALIASES=1 ;;
         --binary-only)   BINARY_ONLY=1 ;;
         --no-init)       NO_INIT=1 ;;
-        --skills-only)   die "--skills-only is gone: this script installs only the binary. For the skills run: claude plugin marketplace add pragmatic-engineer/skills && claude plugin install playbook@pragmatic-engineer" ;;
+        --skills-only)   die "--skills-only is gone: this script installs only the binary. For the skills run: $SKILLS_INSTALL_CMD" ;;
         --ref)           shift; REF="${1:-}" ;;
         --ref=*)         REF="${1#--ref=}" ;;
         -h|--help)       print_help; exit 0 ;;
@@ -168,8 +171,6 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-
-[ -n "$CLAUDE_HOME" ] || die "CLAUDE_HOME is empty"
 
 command -v curl >/dev/null 2>&1 || die "curl is required"
 # shasum ships on macOS, sha256sum on Linux (including a bare debian:stable-slim
@@ -184,9 +185,9 @@ fi
 
 # Only a 404 ("this repo published no release") is treated as "no release". Any
 # other failure means we do not know what the latest release is, and guessing
-# would swap a tagged release for something else. Hence no -f, which would
-# empty the body and collapse 403, 404 and a dead network into one
-# indistinguishable empty string. The 403 is routine: the unauthenticated API
+# would pick the wrong release. Hence no -f, which would empty the body and
+# collapse 403, 404 and a dead network into one indistinguishable empty
+# string, so each gets its own error. The 403 is routine: the unauthenticated API
 # allows 60 requests per hour per IP.
 #
 # Sets two globals rather than printing, so the caller can read the resolved
@@ -228,7 +229,6 @@ resolve_release() {
             RESOLVED_FROM_REF=0
             ;;
         404)
-            warn "$RELEASE_REPO has published no release"
             RESOLVED_TAG=""
             RESOLVED_FROM_REF=1
             ;;
@@ -331,9 +331,9 @@ verify_attestation() {
 }
 
 # Fetches, verifies, and installs the release binary matching $RESOLVED_TAG.
-# Refuses when the tag is not a confirmed release (a PLAYBOOK_REF pin, or the
-# no-release-published case in resolve_release): a branch or a commit has
-# no release and therefore no binary.
+# Refuses when the tag is not a confirmed release (a PLAYBOOK_REF that names a
+# branch or commit, or the no-release-published case in resolve_release):
+# those have no release and therefore no binary.
 install_release_binary() {
     if [ "$RESOLVED_FROM_REF" -eq 1 ]; then
         if [ -n "$REF" ]; then
@@ -342,6 +342,7 @@ install_release_binary() {
         die "$RELEASE_REPO has published no release; a verified release binary cannot be fetched."
     fi
 
+    log "Installing release $RESOLVED_TAG"
     local version
     version="${RESOLVED_TAG#v}"
     release_asset_name "$version"
@@ -498,7 +499,6 @@ if [ "${PLAYBOOK_SKIP_DOWNLOAD:-}" = "1" ]; then
     log "Using the playbook already in $PLAYBOOK_BIN_DIR (download skipped)"
 else
     resolve_release
-    log "Installing release ${RESOLVED_TAG:-none}"
     install_release_binary
 fi
 
@@ -510,7 +510,7 @@ fi
 # prompt. With no terminal and no --yes it is skipped and the command is
 # printed.
 INIT_RAN=0
-if [ "$NO_INIT" -eq 0 ] && consent "Run playbook init now? It adds playbook's hook entries to $CLAUDE_HOME/settings.json (your own entries stay), the status line and the shell integration."; then
+if [ "$NO_INIT" -eq 0 ] && consent "Run playbook init now? It adds playbook's hook entries to ~/.claude/settings.json (your own entries stay), the status line and the shell integration."; then
     if [ "$BINARY_ONLY" -eq 0 ] && [ "$OPT_ALIASES" -eq 0 ]; then
         if ask "Add the playbook shell wrapper, so playbook cc can leave you in a new worktree? Bash and zsh both supported." Y; then
             OPT_ALIASES=1
@@ -538,9 +538,9 @@ if [ "$NO_INIT" -eq 0 ] && consent "Run playbook init now? It adds playbook's ho
     # the binary is still writing; under `set -o pipefail` that SIGPIPE made
     # the probe report "unsupported" at random, so --aliases was sometimes
     # dropped.
+    _init_help="$("$PLAYBOOK_BIN_DIR/playbook" init --help 2>/dev/null || true)"
     _init_supports() {
-        _help="$("$PLAYBOOK_BIN_DIR/playbook" init --help 2>/dev/null)" || return 1
-        case "$_help" in
+        case "$_init_help" in
             *"$1"*) return 0 ;;
             *) return 1 ;;
         esac
@@ -552,6 +552,7 @@ if [ "$NO_INIT" -eq 0 ] && consent "Run playbook init now? It adds playbook's ho
             _INIT_ARGS="$_INIT_ARGS --aliases"
         else
             warn "the installed playbook $( "$PLAYBOOK_BIN_DIR/playbook" --version 2>/dev/null | awk '{print $NF}' ) does not support --aliases; skipping it. Re-run this installer once a release includes it."
+            OPT_ALIASES=0
         fi
     fi
     if [ "$OPT_SYSTEM_PROMPT" -eq 1 ]; then
@@ -574,6 +575,7 @@ if [ "$NO_INIT" -eq 0 ] && consent "Run playbook init now? It adds playbook's ho
         die "playbook init failed; see the step report above"
     INIT_RAN=1
 
+    # Older releases have no trust step in init, so this still runs here.
     trust_playbook_config_dir
 fi
 
@@ -584,9 +586,12 @@ printf '\n'
 printf 'Installed playbook to: %s\n' "$PLAYBOOK_BIN_DIR/playbook"
 printf '\nNext steps:\n'
 if [ "$INIT_RAN" -eq 0 ]; then
-    printf '  - Run: playbook init   (adds the hook entries to %s/settings.json, asks first)\n' "$CLAUDE_HOME"
+    INIT_CMD="playbook init"
+    [ "$OPT_ALIASES" -eq 1 ] && INIT_CMD="$INIT_CMD --aliases"
+    [ "$OPT_SYSTEM_PROMPT" -eq 1 ] && INIT_CMD="$INIT_CMD --system-prompt"
+    printf '  - Run: %s   (adds the hook entries to ~/.claude/settings.json, asks first)\n' "$INIT_CMD"
 fi
-printf '  - Skills (optional, they work without the binary): claude plugin marketplace add pragmatic-engineer/skills && claude plugin install playbook@pragmatic-engineer\n'
+printf '  - Skills (optional, they work without the binary): %s\n' "$SKILLS_INSTALL_CMD"
 if [ "$INIT_RAN" -eq 1 ] && [ "$OPT_ALIASES" -eq 1 ]; then
     printf '  - Shell wrapper installed. Open a new terminal or source the rc file; start sessions with playbook cc or playbook ccd.\n'
 fi
