@@ -100,6 +100,11 @@ fn pick(on: bool, off: bool) -> Option<bool> {
     }
 }
 
+/// True when nobody can be asked and the user did not pass `--yes`.
+pub fn unattended(flags: &Flags, interactive: bool) -> bool {
+    !interactive && !flags.yes && !flags.dry_run
+}
+
 /// Decide every part. `ask(question, default)` is called only for a part with
 /// no flag, and only when `interactive` is true. `security_config` is the
 /// resolved `security.defaults` key: the default for the security part, which
@@ -119,18 +124,21 @@ pub fn resolve(
             }
         })
     };
+    // Hooks and the status line are entries in Claude Code's settings. With
+    // nobody to ask and no --yes, they stay off unless a flag turns them on.
+    let settings_default = !unattended(flags, interactive);
     Choices {
         hooks: decide(
             flags.hooks,
             flags.no_hooks,
             catalog::question("hooks"),
-            true,
+            settings_default,
         ),
         statusline: decide(
             flags.statusline,
             flags.no_statusline,
             catalog::question("statusline"),
-            true,
+            settings_default,
         ),
         security: pick(flags.security, flags.no_security).unwrap_or(security_config),
         path: decide(flags.path, flags.no_path, catalog::question("path"), true),
@@ -251,13 +259,33 @@ mod tests {
     }
 
     #[test]
+    fn with_yes_and_no_terminal_the_settings_parts_are_on() {
+        let yes = Flags {
+            yes: true,
+            ..Flags::default()
+        };
+        let c = resolve(&yes, false, false, &mut never);
+        assert!(c.hooks && c.statusline);
+    }
+
+    #[test]
+    fn an_explicit_hooks_flag_is_consent_without_a_terminal() {
+        let flags = Flags {
+            hooks: true,
+            ..Flags::default()
+        };
+        let c = resolve(&flags, false, false, &mut never);
+        assert!(c.hooks && !c.statusline);
+    }
+
+    #[test]
     fn without_a_terminal_every_part_uses_its_default() {
         let c = resolve(&Flags::default(), false, false, &mut never);
         assert_eq!(
             c,
             Choices {
-                hooks: true,
-                statusline: true,
+                hooks: false,
+                statusline: false,
                 security: false,
                 path: true,
                 aliases: false,

@@ -126,7 +126,7 @@ fn a_dry_run_describes_what_a_real_run_then_does() {
     let sb = Sandbox::new("dry-vs-real");
     let plan = stdout(&sb.run(&["init", "--dry-run", "--aliases"]));
 
-    let real = sb.run(&["init", "--aliases"]);
+    let real = sb.run(&["init", "--yes", "--aliases"]);
 
     assert!(real.status.success());
     let settings = fs::read_to_string(sb.home.join(".claude/settings.json")).unwrap();

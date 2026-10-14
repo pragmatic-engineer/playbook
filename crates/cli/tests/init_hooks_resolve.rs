@@ -170,7 +170,7 @@ fn every_wired_command_after_a_real_init_resolves_to_something_that_actually_run
     let status = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")
-        .arg("init")
+        .args(["init", "--yes"])
         .env("HOME", &home)
         .env("CLAUDE_PLUGIN_ROOT", self_root())
         .env("SHELL", "/bin/bash")

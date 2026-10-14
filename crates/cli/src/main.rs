@@ -470,6 +470,12 @@ fn main() {
                 security_config,
                 &mut |question, default| init::wizard::guided_answer(&guided, question, default),
             );
+            if init::choices::unattended(&flags, asking) && !(choices.hooks && choices.statusline) {
+                eprintln!(
+                    "init: no terminal and no --yes, so the hooks and status line were not added to \
+                     your Claude Code settings. To add them, run: playbook init --yes"
+                );
+            }
             let (system_prompt, aliases) = (choices.system_prompt, choices.aliases);
             let home = common::home_dir();
             let claude_home = home.join(".claude");

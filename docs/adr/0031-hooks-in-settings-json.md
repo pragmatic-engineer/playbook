@@ -22,7 +22,7 @@ Claude Code already reads hooks from `~/.claude/settings.json`, and `playbook in
 ## Decision
 
 1. **The hooks live in `~/.claude/settings.json`.** `playbook init` writes one entry per hook, for every event, including the worktree hooks and the session start tool map. The commands use the bare form `playbook hook <name>`.
-2. **Writing the entries is a choice the user can make.** In a terminal `init` asks. Without a terminal it applies its defaults, which include the hooks, and `--no-hooks` turns them off. `install.sh` asks for a typed yes before it runs `init`. The entries never go through `--settings`.
+2. **Writing the entries is a choice the user can make.** In a terminal `init` asks. Without a terminal and without `--yes`, it writes no hooks and no status line and prints the command to run. `--hooks` or `--yes` is the explicit yes. `install.sh` asks for a typed yes before it runs `init`. The entries never go through `--settings`.
 3. **The merge keeps the user's entries.** `init` adds its own entries next to existing ones and leaves the rest alone. An entry is ours when its command is exactly one of the `playbook hook <name>` commands `init` writes. `init` also rewrites in place a legacy entry whose script is named `<hook>.sh` or `<hook>.py` in the same event and matcher group. A second run changes nothing.
 4. **Uninstall removes only the owned entries.** `playbook uninstall` deletes the entries that match those commands and keeps every entry the user wrote.
 5. **The doctor checks the entries.** `playbook doctor` reports whether each entry is present and whether the command resolves to a working binary.

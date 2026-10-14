@@ -32,7 +32,15 @@ impl Sandbox {
         Self { home }
     }
 
+    /// Runs `init --yes`: without a terminal, a run with no --yes leaves the
+    /// Claude Code settings alone.
     fn init(&self, shell: &str, flags: &[&str]) -> Output {
+        let mut all = vec!["--yes"];
+        all.extend_from_slice(flags);
+        self.init_raw(shell, &all)
+    }
+
+    fn init_raw(&self, shell: &str, flags: &[&str]) -> Output {
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
             .arg("init")
             .args(flags)
@@ -469,4 +477,28 @@ fn turning_every_settings_part_off_leaves_settings_json_alone() {
 
     assert_eq!(sb.read(".claude/settings.json"), "{\"theme\":\"dark\"}\n");
     assert!(t.contains("settings.json is not merged"), "{t}");
+}
+
+#[test]
+fn a_run_with_no_terminal_and_no_yes_leaves_the_claude_settings_alone() {
+    let h = Sandbox::new("unattended");
+
+    let out = h.init_raw("/bin/zsh", &[]);
+
+    let t = text(&out);
+    assert!(t.contains("playbook init --yes"), "{t}");
+    let settings = fs::read_to_string(h.path(".claude/settings.json")).unwrap_or_default();
+    assert!(!settings.contains("playbook hook"), "{settings}");
+    assert!(!settings.contains("statusLine"), "{settings}");
+}
+
+#[test]
+fn an_explicit_hooks_flag_with_no_terminal_adds_only_the_hooks() {
+    let h = Sandbox::new("unattended-hooks");
+
+    h.init_raw("/bin/zsh", &["--hooks"]);
+
+    let settings = fs::read_to_string(h.path(".claude/settings.json")).unwrap_or_default();
+    assert!(settings.contains("playbook hook"), "{settings}");
+    assert!(!settings.contains("statusLine"), "{settings}");
 }
