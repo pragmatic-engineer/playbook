@@ -8,9 +8,13 @@
 //! kept across restarts, so sessions started before a restart keep working
 //! and send to the same place. A start finds a live collector by pid and a
 //! connect to its port, and then does not start a second one. A stale file
-//! (dead pid) is replaced. The default port is 4318, the OTLP/HTTP standard;
-//! when it is taken by something else the receiver picks a free port and
-//! records it. It stops by itself after the idle time (default 10 minutes,
+//! (dead pid) is replaced. The port is chosen once: the default 47318 (the
+//! standard OTLP port 4318 is left alone because other collectors use it),
+//! or a free port when that one is taken on the first run. It is then
+//! recorded and never changed on its own, because the OTLP endpoint in
+//! Claude Code's settings names it. A restart binds the same port again,
+//! retrying for a few seconds while a killed predecessor lets go of it; when
+//! another program owns it the start fails with a message. It stops by itself after the idle time (default 10 minutes,
 //! 0 means never) and clears the pid on a clean exit.
 //!
 //! Claude Code may drop data that is sent while no receiver listens. That is
@@ -27,7 +31,11 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub const DEFAULT_PORT: u16 = 4318;
+pub const DEFAULT_PORT: u16 = 47318;
+
+/// How long a start waits for a recorded port that a killed predecessor is
+/// still releasing.
+const BIND_RETRY: Duration = Duration::from_secs(3);
 pub const DEFAULT_IDLE_SECONDS: u64 = 600;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -149,6 +157,39 @@ fn new_token() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// The port for a first run: the default when it is free, else a free one.
+fn first_port() -> u16 {
+    first_port_from(DEFAULT_PORT)
+}
+
+fn first_port_from(preferred: u16) -> u16 {
+    if bind(preferred).is_ok() {
+        return preferred;
+    }
+    bind(0)
+        .and_then(|l| l.local_addr())
+        .map_or(preferred, |a| a.port())
+}
+
+/// Binds the recorded port. A port a killed process is still releasing is
+/// retried for a few seconds; a port another program owns is an error, never
+/// a different port.
+fn bind_recorded(port: u16, wait: Duration) -> Result<std::net::TcpListener, String> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match bind(port) {
+            Ok(l) => return Ok(l),
+            Err(e) if std::time::Instant::now() >= deadline => {
+                return Err(format!(
+                    "port {port} is in use by another program ({e}). The collector keeps its recorded port so the Claude Code settings stay valid. Free the port, or move to a new one with `{} --port <N>` and then run `playbook init --only telemetry` to rewrite the endpoint in your settings",
+                    super::host::command("usage collect")
+                ));
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
+}
+
 /// The collector state with a token and port recorded, creating the file when
 /// there is none (no process, `pid` 0). `init --telemetry` uses this so the
 /// settings it writes name the same port and token the collector reuses.
@@ -161,7 +202,7 @@ pub fn ensure_state(paths: &Paths) -> Result<State, String> {
     let state = State {
         pid: if running(&previous) { previous.pid } else { 0 },
         port: if previous.port == 0 {
-            DEFAULT_PORT
+            first_port()
         } else {
             previous.port
         },
@@ -387,11 +428,13 @@ pub fn run_collect(
     let listener = match port {
         Some(p) => bind(p).map_err(|e| format!("cannot listen on 127.0.0.1:{p}: {e}"))?,
         None => {
-            let preferred = previous.as_ref().map_or(DEFAULT_PORT, |p| p.port);
-            bind(preferred)
-                .or_else(|_| bind(DEFAULT_PORT))
-                .or_else(|_| bind(0))
-                .map_err(|e| format!("cannot listen on 127.0.0.1: {e}"))?
+            let recorded = previous.as_ref().map(|p| p.port).filter(|p| *p != 0);
+            match recorded {
+                Some(p) => bind_recorded(p, BIND_RETRY)?,
+                None => {
+                    bind(first_port()).map_err(|e| format!("cannot listen on 127.0.0.1: {e}"))?
+                }
+            }
         }
     };
     let actual = listener.local_addr().map_err(|e| e.to_string())?.port();
@@ -573,27 +616,109 @@ mod tests {
         std::fs::create_dir_all(state_path(&p).parent().unwrap()).unwrap();
         let stale = State {
             pid: 999_999,
-            port: 1,
+            port: free_port(),
             token: "keep".into(),
             ..State::default()
         };
+        let recorded = stale.port;
         write_state(&state_path(&p), &stale).unwrap();
         let stop = Arc::new(AtomicBool::new(false));
         run_collect(&p, None, 1, &stop).unwrap();
         let after = read_state(&state_path(&p)).unwrap();
         assert_eq!(after.token, "keep");
-        assert_ne!(after.port, 1);
+        assert_eq!(after.port, recorded);
+    }
+
+    fn free_port() -> u16 {
+        bind(0).unwrap().local_addr().unwrap().port()
     }
 
     #[test]
-    fn an_explicit_busy_port_is_an_error_and_the_default_falls_back() {
+    fn an_explicit_busy_port_is_an_error() {
         let p = paths("collector-busy");
         let holder = bind(0).unwrap();
         let busy = holder.local_addr().unwrap().port();
         let stop = Arc::new(AtomicBool::new(false));
-        assert!(run_collect(&p, Some(busy), 1, &stop).is_err());
-        stop.store(true, Ordering::SeqCst);
-        assert!(run_collect(&p, None, 1, &stop).is_ok());
+
+        let result = run_collect(&p, Some(busy), 1, &stop);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn the_first_run_records_a_port_and_a_restart_binds_the_same_one() {
+        let p = paths("collector-first-run");
+        let stop = Arc::new(AtomicBool::new(false));
+
+        run_collect(&p, None, 1, &stop).unwrap();
+        let first = read_state(&state_path(&p)).unwrap();
+        run_collect(&p, None, 1, &stop).unwrap();
+        let second = read_state(&state_path(&p)).unwrap();
+
+        assert_ne!(first.port, 0);
+        assert_eq!(second.port, first.port);
+        assert_eq!(ensure_state(&p).unwrap().port, first.port);
+    }
+
+    #[test]
+    fn a_default_port_that_is_taken_on_the_first_run_falls_back_to_a_free_port() {
+        let holder = bind(0).unwrap();
+        let taken = holder.local_addr().unwrap().port();
+
+        let chosen = first_port_from(taken);
+
+        assert_ne!(chosen, taken);
+        assert_ne!(chosen, 0);
+    }
+
+    #[test]
+    fn a_free_default_port_is_chosen_on_the_first_run() {
+        let wanted = free_port();
+
+        let chosen = first_port_from(wanted);
+
+        assert_eq!(chosen, wanted);
+    }
+
+    #[test]
+    fn a_port_a_killed_predecessor_left_in_time_wait_still_binds() {
+        use std::io::Write;
+        let listener = bind(0).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let (mut accepted, _) = listener.accept().unwrap();
+        client.write_all(b"x").unwrap();
+        // The server side closes first, which leaves the port in TIME_WAIT.
+        let _ = accepted.write_all(b"y");
+        drop(accepted);
+        drop(listener);
+        drop(client);
+
+        let again = bind_recorded(port, Duration::from_secs(3));
+
+        assert!(again.is_ok(), "{:?}", again.err());
+    }
+
+    #[test]
+    fn a_port_owned_by_another_program_is_an_error_and_the_record_is_unchanged() {
+        let p = paths("collector-owned");
+        let holder = bind(0).unwrap();
+        let port = holder.local_addr().unwrap().port();
+        let state = State {
+            pid: 0,
+            port,
+            token: "t".into(),
+            ..State::default()
+        };
+        std::fs::create_dir_all(state_path(&p).parent().unwrap()).unwrap();
+        write_state(&state_path(&p), &state).unwrap();
+
+        let result = bind_recorded(port, Duration::from_millis(200));
+
+        let message = result.err().unwrap();
+        assert!(message.contains("in use by another program"), "{message}");
+        assert!(message.contains("init --only telemetry"), "{message}");
+        assert_eq!(read_state(&state_path(&p)).unwrap().port, port);
     }
 
     #[cfg(unix)]
