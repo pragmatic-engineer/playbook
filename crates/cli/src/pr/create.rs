@@ -4,7 +4,7 @@
 //! `pr create`: everything after the title and body are written (validate,
 //! push, confirm the push landed, open the PR, confirm its base).
 
-use crate::pr::body_rules::{check_body, check_scope, detect_issue, detect_ticket, Context, Rules};
+use crate::pr::body_rules::{enforce, Input, Rules};
 use crate::pr::guard::{attribution_problems, dash_problems};
 use crate::pr::shared::{current_branch, git, git_net, resolve_base, GhClient};
 use std::path::Path;
@@ -100,8 +100,7 @@ pub struct Args<'a> {
     pub issue: Option<&'a str>,
 }
 
-/// Runs the structure rules over the body, the title and every commit title.
-/// Warnings go to `warnings`; blocks come back as the error.
+/// Runs the shared structure rules. Warnings come back; blocks are the error.
 fn apply_rules(
     gh: &dyn GhClient,
     title: &str,
@@ -113,39 +112,21 @@ fn apply_rules(
 ) -> Result<Vec<String>, String> {
     let log = git(&["log", &format!("origin/{base}..HEAD"), "--format=%s"])?;
     let subjects: Vec<String> = log.lines().map(str::to_string).collect();
-    if let Some(raw) = args.issue {
-        if detect_issue(Some(raw), "").is_none() {
-            return Err(format!(
-                "--issue must be a number such as 12 or #12, got `{raw}`"
-            ));
-        }
-    }
-    let ctx = Context {
-        ticket: detect_ticket(args.ticket, branch, &subjects, &rules.patterns),
-        issue: detect_issue(args.issue, branch),
+    let input = Input {
+        title: Some(title),
+        body: Some(body),
+        branch,
+        subjects: &subjects,
         stacked: gh
             .repo_default_branch()
             .ok()
             .flatten()
             .is_some_and(|default| default != base),
+        ticket_arg: args.ticket,
+        issue_arg: args.issue,
     };
-    let mut found = check_body(body, rules, &ctx);
-    found.extend(check_scope("PR title", title, rules, &ctx));
-    for subject in &subjects {
-        found.extend(check_scope(
-            &format!("commit title `{subject}`"),
-            subject,
-            rules,
-            &ctx,
-        ));
-    }
-    if found.blocks.is_empty() {
-        return Ok(found.warns);
-    }
-    Err(format!(
-        "refusing to push or create:\n{}",
-        found.blocks.join("\n")
-    ))
+    enforce(&input, rules)
+        .map_err(|blocks| format!("refusing to push or create:\n{}", blocks.join("\n")))
 }
 
 /// `run` plus the structure rules in `rules`.

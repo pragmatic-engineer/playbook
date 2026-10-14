@@ -1549,6 +1549,8 @@ fn main() {
             timeout,
             dry_run,
             allow_large,
+            ticket,
+            issue,
             json,
         } => {
             let die = |message: String| -> ! {
@@ -1606,6 +1608,9 @@ fn main() {
             opts.wait = wait.then(|| std::time::Duration::from_secs(timeout));
             opts.dry_run = dry_run;
             opts.allow_large = allow_large;
+            opts.rules = Some(pr::body_rules::Rules::load(&common::home_dir(), repo_slug));
+            opts.ticket = ticket;
+            opts.issue = issue;
             match deliver::run(&opts) {
                 Ok(report) => {
                     if json {

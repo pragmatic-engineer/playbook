@@ -277,8 +277,18 @@ pub fn kept_lines<'a>(texts: impl IntoIterator<Item = &'a str>) -> Vec<String> {
 
 /// The body used when the caller gives none: a summary from the commit
 /// subjects, the repo template, and the lines worth keeping.
-pub fn compose_body(subjects: &[String], messages: &[String], template: Option<&str>) -> String {
-    let mut body = String::from("## Summary\n\n");
+pub fn compose_body(
+    subjects: &[String],
+    messages: &[String],
+    template: Option<&str>,
+    ticket: Option<&str>,
+    issue: Option<u64>,
+) -> String {
+    let mut body = String::new();
+    if let Some(ticket) = ticket {
+        body.push_str(&format!("{ticket}\n\n"));
+    }
+    body.push_str("## Summary\n\n");
     for subject in subjects {
         body.push_str(&format!("- {subject}\n"));
     }
@@ -287,7 +297,16 @@ pub fn compose_body(subjects: &[String], messages: &[String], template: Option<&
         body.push_str(template.trim_end());
         body.push('\n');
     }
-    let kept = kept_lines(messages.iter().map(String::as_str));
+    let kept: Vec<String> = kept_lines(messages.iter().map(String::as_str))
+        .into_iter()
+        .filter(|l| ticket.is_none() || !l.to_lowercase().starts_with("ticket:"))
+        .collect();
+    let mut kept = kept;
+    if let Some(n) = issue {
+        if !kept.iter().any(|l| l.contains(&format!("#{n}"))) {
+            kept.push(format!("Refs #{n}"));
+        }
+    }
     if !kept.is_empty() {
         body.push('\n');
         body.push_str(&kept.join("\n"));
@@ -328,6 +347,8 @@ mod tests {
             &["feat: one".to_string()],
             &["feat: one\n\nTicket: ABC-1".to_string()],
             Some("## Test plan\n"),
+            None,
+            None,
         );
 
         assert!(body.contains("- feat: one") && body.contains("## Test plan"));
