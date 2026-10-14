@@ -1405,11 +1405,11 @@ Subcommands: `collect`, `prune`, `status`
 
 Run the local OpenTelemetry receiver in the foreground
 
-Listens on 127.0.0.1 only (default port 4318, the OTLP/HTTP port; a free port when that one is taken) and stores API request cost and token rows, tool call timings and API errors from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector (`playbook usage status` shows it too). It stops by itself after the idle time, counted from the last real telemetry request, so a status check does not keep it alive. Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no telemetry are read from transcripts as before. While it runs, `cc` points its sessions at it unless `usage.telemetry` is `off` or you set telemetry yourself. When none runs, `cc` starts one itself in the background (once the usage database exists) under the same conditions.
+Listens on 127.0.0.1 only (default port 47318, chosen once and then kept; a free port is chosen on the first run when that one is taken; an existing install keeps the port it recorded) and stores API request cost and token rows, tool call timings and API errors from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector (`playbook usage status` shows it too). It stops by itself after the idle time, counted from the last real telemetry request, so a status check does not keep it alive. Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no telemetry are read from transcripts as before. While it runs, `cc` points its sessions at it unless `usage.telemetry` is `off` or you set telemetry yourself. When none runs, `cc` starts one itself in the background (once the usage database exists) under the same conditions.
 
 Example: `playbook usage collect --idle-seconds 1800`
 
-- `--port <PORT>`: Port to listen on (an error when busy). Default: the last port, 4318, then any free port
+- `--port <PORT>`: Port to listen on (an error when busy). Default: the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook init --only telemetry` afterwards
 - `--idle-seconds <IDLE_SECONDS>`: Stop after this many seconds with no request; 0 means never
 
 ### `playbook usage prune`

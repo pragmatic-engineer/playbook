@@ -16,8 +16,10 @@ pub enum UsageCommand {
     Ingest,
     /// Run the local OpenTelemetry receiver in the foreground
     ///
-    /// Listens on 127.0.0.1 only (default port 4318, the OTLP/HTTP port; a free
-    /// port when that one is taken) and stores API request cost and token rows,
+    /// Listens on 127.0.0.1 only (default port 47318, chosen once and then kept; a
+    /// free port is chosen on the first run when that one is taken; an existing
+    /// install keeps the port it recorded) and stores API request cost and token
+    /// rows,
     /// tool call timings and API errors from Claude Code's JSON telemetry.
     /// Prompts, tool content, paths, emails and user ids are never stored. A
     /// second start reports the running collector (`playbook usage status`
@@ -31,7 +33,7 @@ pub enum UsageCommand {
     ///
     /// Example: `playbook usage collect --idle-seconds 1800`
     Collect {
-        /// Port to listen on (an error when busy). Default: the last port, 4318, then any free port.
+        /// Port to listen on (an error when busy). Default: the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook init --only telemetry` afterwards.
         #[arg(long)]
         port: Option<u16>,
         /// Stop after this many seconds with no request; 0 means never
