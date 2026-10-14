@@ -58,7 +58,21 @@ impl Box {
         d
     }
 
+    fn run_with_env(&self, extra: &[(&str, &str)]) -> Vec<Value> {
+        self.run_inner(&[], "/bin/zsh", None, extra)
+    }
+
     fn run(&self, path: &[&Path], shell: &str, plugin_root: Option<&Path>) -> Vec<Value> {
+        self.run_inner(path, shell, plugin_root, &[])
+    }
+
+    fn run_inner(
+        &self,
+        path: &[&Path],
+        shell: &str,
+        plugin_root: Option<&Path>,
+        extra: &[(&str, &str)],
+    ) -> Vec<Value> {
         let mut paths: Vec<PathBuf> = path.iter().map(|p| p.to_path_buf()).collect();
         paths.push(PathBuf::from("/usr/bin"));
         paths.push(PathBuf::from("/bin"));
@@ -68,10 +82,12 @@ impl Box {
             .env("SHELL", shell)
             .env("PATH", std::env::join_paths(paths).unwrap())
             .env_remove("CLAUDE_PLUGIN_ROOT")
+            .env_remove("PLAYBOOK_IGNORE_PLUGIN_DISABLED")
             .current_dir(&self.root);
         if let Some(root) = plugin_root {
             cmd.env("CLAUDE_PLUGIN_ROOT", root);
         }
+        cmd.envs(extra.iter().copied());
         let out = cmd.output().unwrap();
         assert!(
             out.status.success(),
@@ -132,35 +148,58 @@ fn guard_settings(pre: &[&str], post: &[&str]) -> String {
 
 const PAUSED: &str = r#""enabledPlugins":{"playbook@pragmatic-engineer":false}"#;
 
+const STATUS: &str = r#""statusLine":{"type":"command","command":"playbook statusline"}"#;
+
+fn paused_settings() -> String {
+    let live = guard_settings(&GUARDS, &["commit-message-sanitizer"]);
+    live.replacen('{', &format!("{{{PAUSED},{STATUS},"), 1)
+}
+
 #[test]
 fn a_paused_plugin_turns_the_guard_row_into_a_warning_and_says_why() {
     let b = Box::new("paused");
-    let live = guard_settings(&GUARDS, &["commit-message-sanitizer"]);
-    b.settings(&live.replacen('{', &format!("{{{PAUSED},"), 1));
+    b.settings(&paused_settings());
 
     let rows = b.run(&[], "/bin/zsh", None);
 
-    let (l1, l2) = (layer(&rows, "1"), layer(&rows, "2"));
+    let (l1, l2, l5) = (layer(&rows, "1"), layer(&rows, "2"), layer(&rows, "5"));
     assert_eq!(l1[0]["level"], "WARN", "{}", text(&l1));
     assert!(text(&l1).contains("paused"), "{}", text(&l1));
     assert_eq!(l2[0]["level"], "WARN", "{}", text(&l2));
     assert!(text(&l2).contains("7 of 7"), "{}", text(&l2));
     assert!(text(&l2).contains("plugin is paused"), "{}", text(&l2));
+    assert_eq!(l5[0]["level"], "WARN", "{}", text(&l5));
+    assert!(text(&l5).contains("plugin is paused"), "{}", text(&l5));
+}
+
+#[test]
+fn the_escape_hatch_keeps_the_pass_rows_of_a_paused_plugin() {
+    let b = Box::new("paused-ignored");
+    b.settings(&paused_settings());
+
+    let rows = b.run_with_env(&[("PLAYBOOK_IGNORE_PLUGIN_DISABLED", "1")]);
+
+    assert_eq!(layer(&rows, "2")[0]["level"], "PASS");
+    assert!(!text(&layer(&rows, "1")).contains("paused"));
 }
 
 #[test]
 fn a_plugin_that_is_enabled_or_not_listed_keeps_its_pass_rows() {
-    let b = Box::new("not-paused");
     let live = guard_settings(&GUARDS, &["commit-message-sanitizer"]);
-    b.settings(&live.replacen(
+    let enabled = live.replacen(
         '{',
         r#"{"enabledPlugins":{"playbook@pragmatic-engineer":true},"#,
         1,
-    ));
+    );
+    for (tag, settings) in [("enabled", enabled), ("not-listed", live)] {
+        let b = Box::new(tag);
+        b.settings(&settings);
 
-    let rows = b.run(&[], "/bin/zsh", None);
+        let rows = b.run(&[], "/bin/zsh", None);
 
-    assert_eq!(layer(&rows, "2")[0]["level"], "PASS");
+        assert_eq!(layer(&rows, "2")[0]["level"], "PASS", "{tag}");
+        assert!(!text(&layer(&rows, "1")).contains("paused"), "{tag}");
+    }
 }
 
 // Layer 2
