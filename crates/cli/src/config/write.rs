@@ -81,6 +81,21 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
     if matches!(default, Value::Number(_)) {
         validate_number(key, value)?;
     }
+    if key == "pr.ticketPatterns" {
+        let ok = value.as_array().is_some_and(|items| {
+            items.iter().all(|i| {
+                i.as_str()
+                    .is_some_and(|p| crate::pr::body_rules::compile_pattern(p).is_ok())
+            })
+        });
+        if !ok {
+            return Err(ConfigError::OutOfRange {
+                key: key.to_string(),
+                value: value.to_string(),
+                constraint: "a list of valid regular expressions",
+            });
+        }
+    }
     if key == "hooks.rmGuard.allowedRoots" {
         validate_root_list(key, value)?;
     }
@@ -171,9 +186,11 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         "fix.maxFiles" | "fix.maxLines" | "review.stackMaxPrs" | "review.stackMaxLines" => {
             (whole.is_some_and(|n| n >= 1), "a positive integer")
         }
-        "docs.maxBytes" | "docs.timeoutSeconds" | "docs.maxOutputChars" | "docs.maxMemoryMb" => {
-            (whole.is_some_and(|n| n >= 1), "a positive integer")
-        }
+        "pr.bodyMaxChars"
+        | "docs.maxBytes"
+        | "docs.timeoutSeconds"
+        | "docs.maxOutputChars"
+        | "docs.maxMemoryMb" => (whole.is_some_and(|n| n >= 1), "a positive integer"),
         _ => {
             return match whole {
                 Some(n) if n >= 0 => Ok(()),

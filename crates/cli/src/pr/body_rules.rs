@@ -109,7 +109,7 @@ impl Rules {
             let list: Vec<String> = items
                 .iter()
                 .filter_map(|v| v.as_str().map(str::to_string))
-                .filter(|p| Regex::new(p).is_ok())
+                .filter(|p| compile_pattern(p).is_ok())
                 .collect();
             if !list.is_empty() {
                 rules.patterns = list;
@@ -152,11 +152,31 @@ impl Findings {
     }
 }
 
+/// Compiles a configured pattern the way detection uses it.
+pub fn compile_pattern(pattern: &str) -> Result<Regex, regex::Error> {
+    Regex::new(&format!(r"\b(?:{pattern})\b"))
+}
+
+/// Uppercase tokens with a number that are standards, not tickets.
+const NOT_TICKETS: &[&str] = &[
+    "UTF", "ISO", "SHA", "HTTP", "HTTPS", "RFC", "MD", "TLS", "SSL",
+];
+
 fn pattern_regexes(patterns: &[String]) -> Vec<Regex> {
     patterns
         .iter()
-        .filter_map(|p| Regex::new(&format!(r"\b(?:{p})\b")).ok())
+        .filter_map(|p| compile_pattern(p).ok())
         .collect()
+}
+
+/// Whether `ticket` appears in `text` as a whole token, so PROJ-1 does not
+/// match PROJ-12.
+fn has_ticket(text: &str, ticket: &str) -> bool {
+    Regex::new(&format!(
+        r"(?:^|[^A-Za-z0-9-]){}(?:$|[^A-Za-z0-9])",
+        regex::escape(ticket)
+    ))
+    .is_ok_and(|re| re.is_match(text))
 }
 
 /// The ticket key for a branch. Order: explicit arg, then the branch name,
@@ -173,9 +193,14 @@ pub fn detect_ticket(
     }
     let regexes = pattern_regexes(patterns);
     let find = |text: &str| {
-        regexes
-            .iter()
-            .find_map(|re| re.find(text).map(|m| m.as_str().to_string()))
+        regexes.iter().find_map(|re| {
+            re.find_iter(text)
+                .map(|m| m.as_str())
+                .find(|k| {
+                    !k.is_empty() && !NOT_TICKETS.contains(&k.split('-').next().unwrap_or(""))
+                })
+                .map(str::to_string)
+        })
     };
     if let Some(key) = find(branch) {
         return Some(key);
@@ -248,7 +273,7 @@ fn is_empty_section(content: &str) -> bool {
         )
 }
 
-fn template_findings(body: &str, level: Level, out: &mut Findings) {
+fn template_findings(body: &str, level: Level, patterns: &[String], out: &mut Findings) {
     let (head, secs) = sections(body);
     let fix = "use the template: optional ticket line, ## Summary, optional ## Notes for reviewers, optional ## Related work";
     if secs.is_empty() || secs[0].name != "Summary" {
@@ -260,9 +285,12 @@ fn template_findings(body: &str, level: Level, out: &mut Findings) {
     let mut last = 0usize;
     for sec in &secs {
         if sec.name == LEGACY {
-            out.warns.push(
-                "PR body uses the old ## What Changed section; fold it into ## Summary".to_string(),
-            );
+            if level != Level::Off {
+                out.warns.push(
+                    "PR body uses the old ## What Changed section; fold it into ## Summary"
+                        .to_string(),
+                );
+            }
             continue;
         }
         match ORDER.iter().position(|n| *n == sec.name) {
@@ -289,8 +317,12 @@ fn template_findings(body: &str, level: Level, out: &mut Findings) {
             );
         }
     }
-    let head_lines = head.lines().filter(|l| !l.trim().is_empty()).count();
-    if head_lines > 1 {
+    let head_lines: Vec<&str> = head.lines().filter(|l| !l.trim().is_empty()).collect();
+    let ticket_like = head_lines.len() == 1
+        && pattern_regexes(patterns)
+            .iter()
+            .any(|re| re.is_match(head_lines[0]));
+    if head_lines.len() > 1 || (head_lines.len() == 1 && !ticket_like) {
         out.add(
             level,
             "PR body has text before ## Summary; only the ticket line may come first".to_string(),
@@ -301,7 +333,7 @@ fn template_findings(body: &str, level: Level, out: &mut Findings) {
 /// Checks a PR body against the rules.
 pub fn check_body(body: &str, rules: &Rules, ctx: &Context) -> Findings {
     let mut out = Findings::default();
-    template_findings(body, rules.template, &mut out);
+    template_findings(body, rules.template, &rules.patterns, &mut out);
 
     let length = body.chars().count();
     if length > rules.max_chars {
@@ -316,7 +348,7 @@ pub fn check_body(body: &str, rules: &Rules, ctx: &Context) -> Findings {
 
     if let Some(ticket) = &ctx.ticket {
         let first = body.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
-        if !first.contains(ticket.as_str()) {
+        if !has_ticket(first, ticket) {
             out.add(
                 rules.ticket_line,
                 format!("the first line of the PR body must carry the ticket {ticket}, for example: Ticket: {ticket}"),
@@ -326,7 +358,7 @@ pub fn check_body(body: &str, rules: &Rules, ctx: &Context) -> Findings {
 
     if let Some(n) = ctx.issue {
         let clause = static_regex(&format!(
-            r"(?im)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|relates to)\s+#{n}\b"
+            r"(?im)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|relates to):?\s+#{n}\b"
         ));
         if !clause.is_match(body) {
             out.add(
@@ -355,7 +387,7 @@ pub fn check_scope(label: &str, title: &str, rules: &Rules, ctx: &Context) -> Fi
     let has = scope
         .captures(title)
         .and_then(|c| c.get(1))
-        .is_some_and(|m| m.as_str().contains(ticket.as_str()));
+        .is_some_and(|m| has_ticket(m.as_str(), ticket));
     if !has {
         let level = if ctx.stacked && rules.scope != Level::Off {
             Level::Block
@@ -396,38 +428,17 @@ mod tests {
     }
 
     #[test]
+    #[rustfmt::skip]
     fn template_cases_are_judged_by_the_template_level() {
-        let cases: &[(&str, &str, bool)] = &[
-            ("no sections", "just text\n", true),
+        let cases: &[(&str, &str, bool)] = &[("no sections", "just text\n", true),
             ("wrong first section", "## Notes for reviewers\n\nx\n", true),
-            (
-                "unknown section",
-                "## Summary\n\nx\n\n## Test plan\n\n- run it\n",
-                true,
-            ),
-            (
-                "out of order",
-                "## Summary\n\nx\n\n## Related work\n\ny\n\n## Notes for reviewers\n\nz\n",
-                true,
-            ),
-            (
-                "empty section",
-                "## Summary\n\nx\n\n## Notes for reviewers\n\nN/A\n",
-                true,
-            ),
+            ("unknown section", "## Summary\n\nx\n\n## Test plan\n\n- run it\n", true),
+            ("out of order", "## Summary\n\nx\n\n## Related work\n\ny\n\n## Notes for reviewers\n\nz\n", true),
+            ("empty section", "## Summary\n\nx\n\n## Notes for reviewers\n\nN/A\n", true),
             ("comment only", "## Summary\n\n<!-- why -->\n", true),
-            (
-                "text before summary",
-                "Hello there\nmore\n\n## Summary\n\nx\n",
-                true,
-            ),
+            ("text before summary", "Hello there\nmore\n\n## Summary\n\nx\n", true),
             ("summary only", "## Summary\n\nx\n", false),
-            (
-                "all sections",
-                "## Summary\n\nx\n\n## Notes for reviewers\n\ny\n\n## Related work\n\nz\n",
-                false,
-            ),
-        ];
+            ("all sections", "## Summary\n\nx\n\n## Notes for reviewers\n\ny\n\n## Related work\n\nz\n", false),];
         for (name, body, blocked) in cases {
             let found = check_body(body, &Rules::default(), &ctx(None, None, false));
 
@@ -471,34 +482,13 @@ mod tests {
     }
 
     #[test]
+    #[rustfmt::skip]
     fn ticket_line_cases() {
-        let cases: &[(&str, &str, Option<&str>, bool)] = &[
-            (
-                "known and present",
-                "Ticket: PROJ-1\n\n## Summary\n\nx\n",
-                Some("PROJ-1"),
-                false,
-            ),
-            (
-                "known and linked",
-                "[PROJ-1](https://x.test/PROJ-1)\n\n## Summary\n\nx\n",
-                Some("PROJ-1"),
-                false,
-            ),
-            (
-                "known and missing",
-                "## Summary\n\nx\n",
-                Some("PROJ-1"),
-                true,
-            ),
-            (
-                "known and in the wrong place",
-                "## Summary\n\nPROJ-1 here\n",
-                Some("PROJ-1"),
-                true,
-            ),
-            ("none known", "## Summary\n\nx\n", None, false),
-        ];
+        let cases: &[(&str, &str, Option<&str>, bool)] = &[("known and present", "Ticket: PROJ-1\n\n## Summary\n\nx\n", Some("PROJ-1"), false),
+            ("known and linked", "[PROJ-1](https://x.test/PROJ-1)\n\n## Summary\n\nx\n", Some("PROJ-1"), false),
+            ("known and missing", "## Summary\n\nx\n", Some("PROJ-1"), true),
+            ("known and in the wrong place", "## Summary\n\nPROJ-1 here\n", Some("PROJ-1"), true),
+            ("none known", "## Summary\n\nx\n", None, false),];
         for (name, body, ticket, blocked) in cases {
             let found = check_body(body, &Rules::default(), &ctx(*ticket, None, false));
 
@@ -507,14 +497,14 @@ mod tests {
     }
 
     #[test]
+    #[rustfmt::skip]
     fn issue_clause_cases() {
-        let cases: &[(&str, &str, Option<u64>, bool)] = &[
-            ("closes", "## Summary\n\nx\n\nCloses #4\n", Some(4), false),
+        let cases: &[(&str, &str, Option<u64>, bool)] = &[("closes", "## Summary\n\nx\n\nCloses #4\n", Some(4), false),
             ("refs", "## Summary\n\nx\n\nRefs #4\n", Some(4), false),
             ("missing", "## Summary\n\nx\n", Some(4), true),
+            ("colon form", "## Summary\n\nCloses: #4\n", Some(4), false),
             ("other number", "## Summary\n\nCloses #44\n", Some(4), true),
-            ("no issue known", "## Summary\n\nx\n", None, false),
-        ];
+            ("no issue known", "## Summary\n\nx\n", None, false),];
         for (name, body, issue, warned) in cases {
             let found = check_body(body, &Rules::default(), &ctx(None, *issue, false));
 
@@ -524,66 +514,15 @@ mod tests {
     }
 
     #[test]
+    #[rustfmt::skip]
     fn scope_cases() {
-        let cases: &[(&str, &str, Option<&str>, bool, bool, bool)] = &[
-            // name, title, ticket, stacked, expect warn, expect block
-            (
-                "scoped",
-                "feat(PROJ-1): add retry",
-                Some("PROJ-1"),
-                false,
-                false,
-                false,
-            ),
-            (
-                "scoped and stacked",
-                "feat(PROJ-1): add retry",
-                Some("PROJ-1"),
-                true,
-                false,
-                false,
-            ),
-            (
-                "missing, not stacked",
-                "feat(sync): add retry",
-                Some("PROJ-1"),
-                false,
-                true,
-                false,
-            ),
-            (
-                "missing, stacked",
-                "feat(sync): add retry",
-                Some("PROJ-1"),
-                true,
-                false,
-                true,
-            ),
-            (
-                "no scope, stacked",
-                "feat: add retry",
-                Some("PROJ-1"),
-                true,
-                false,
-                true,
-            ),
-            (
-                "no ticket known, stacked",
-                "feat: add retry",
-                None,
-                true,
-                false,
-                false,
-            ),
-            (
-                "no ticket known",
-                "feat: add retry",
-                None,
-                false,
-                false,
-                false,
-            ),
-        ];
+        let cases: &[(&str, &str, Option<&str>, bool, bool, bool)] = &[ // name, title, ticket, stacked, expect warn, expect block ("scoped", "feat(PROJ-1): add retry", Some("PROJ-1"), false, false, false),
+            ("scoped and stacked", "feat(PROJ-1): add retry", Some("PROJ-1"), true, false, false),
+            ("missing, not stacked", "feat(sync): add retry", Some("PROJ-1"), false, true, false),
+            ("missing, stacked", "feat(sync): add retry", Some("PROJ-1"), true, false, true),
+            ("no scope, stacked", "feat: add retry", Some("PROJ-1"), true, false, true),
+            ("no ticket known, stacked", "feat: add retry", None, true, false, false),
+            ("no ticket known", "feat: add retry", None, false, false, false),];
         for (name, title, ticket, stacked, warn, block) in cases {
             let found = check_scope(
                 "PR title",
@@ -598,39 +537,55 @@ mod tests {
     }
 
     #[test]
+    #[rustfmt::skip]
     fn ticket_detection_follows_the_documented_order() {
         let patterns = vec![DEFAULT_TICKET_PATTERN.to_string()];
         let subjects = vec!["feat(OPS-9): older".to_string()];
-        let cases: &[(&str, Option<&str>, &str, &[String], Option<&str>)] = &[
-            (
-                "arg wins",
-                Some("ARG-1"),
-                "feat/BR-2-x",
-                &subjects,
-                Some("ARG-1"),
-            ),
-            (
-                "none turns it off",
-                Some("none"),
-                "feat/BR-2-x",
-                &subjects,
-                None,
-            ),
+        let cases: &[(&str, Option<&str>, &str, &[String], Option<&str>)] = &[("arg wins", Some("ARG-1"), "feat/BR-2-x", &subjects, Some("ARG-1")),
+            ("none turns it off", Some("none"), "feat/BR-2-x", &subjects, None),
             ("branch next", None, "feat/BR-2-x", &subjects, Some("BR-2")),
-            (
-                "commit scope last",
-                None,
-                "feat/plain",
-                &subjects,
-                Some("OPS-9"),
-            ),
-            ("nothing found", None, "feat/plain", &[], None),
-        ];
+            ("commit scope last", None, "feat/plain", &subjects, Some("OPS-9")),
+            ("nothing found", None, "feat/plain", &[], None),];
         for (name, arg, branch, subs, expected) in cases {
             let got = detect_ticket(*arg, branch, subs, &patterns);
 
             assert_eq!(got.as_deref(), *expected, "{name}");
         }
+    }
+
+    #[test]
+    fn detection_skips_standards_and_matches_whole_tokens_only() {
+        let patterns = vec![DEFAULT_TICKET_PATTERN.to_string()];
+
+        let got = detect_ticket(None, "fix/UTF-8-decoding", &[], &patterns);
+
+        assert_eq!(got, None);
+        assert!(has_ticket("Ticket: PROJ-1", "PROJ-1"));
+        assert!(!has_ticket("Ticket: PROJ-12", "PROJ-1"));
+        assert!(!has_ticket("feat(XPROJ-1): x", "PROJ-1"));
+    }
+
+    #[test]
+    fn prose_before_the_summary_is_refused_even_as_one_line() {
+        let body = "This PR fixes stuff.\n\n## Summary\n\nx\n";
+
+        let found = check_body(body, &Rules::default(), &ctx(None, None, false));
+
+        assert!(found.blocks.iter().any(|b| b.contains("before ## Summary")));
+    }
+
+    #[test]
+    fn an_empty_config_loads_the_same_defaults_as_the_struct() {
+        let home = std::env::temp_dir().join(format!("pb-rules-{}", crate::testing::run_id()));
+
+        let loaded = Rules::load(&home, None);
+
+        let want = Rules::default();
+        assert_eq!(
+            format!("{loaded:?}"),
+            format!("{want:?}"),
+            "keys.rs defaults and Rules::default must agree"
+        );
     }
 
     #[test]

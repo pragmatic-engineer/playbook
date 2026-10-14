@@ -113,6 +113,13 @@ fn apply_rules(
 ) -> Result<Vec<String>, String> {
     let log = git(&["log", &format!("origin/{base}..HEAD"), "--format=%s"])?;
     let subjects: Vec<String> = log.lines().map(str::to_string).collect();
+    if let Some(raw) = args.issue {
+        if detect_issue(Some(raw), "").is_none() {
+            return Err(format!(
+                "--issue must be a number such as 12 or #12, got `{raw}`"
+            ));
+        }
+    }
     let ctx = Context {
         ticket: detect_ticket(args.ticket, branch, &subjects, &rules.patterns),
         issue: detect_issue(args.issue, branch),
