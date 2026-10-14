@@ -3,7 +3,7 @@
 #
 # One release workflow for every tool in this repository (ADR 0029). A release
 # is cut by pushing a signed annotated tag, and the tag prefix picks the tool:
-#   vX.Y.Z            playbook            raw binaries, the two plugin archives
+#   vX.Y.Z            playbook            raw binaries
 #   telemetry-vX.Y.Z  playbook-telemetry  .tar.gz holding playbook-telemetry and pbtop
 #   code-vX.Y.Z       playbook-code       reserved, fails until crates/code has a binary
 # The first job, `resolve`, maps the prefix to the package, binaries, archive
@@ -13,11 +13,11 @@
 # then builds, ad hoc codesigns and uploads the artefacts plus SHA256SUMS, and
 # attests their build provenance. Releases for telemetry-v and code-v tags are
 # created with `--latest=false`, so GitHub's "latest release" stays on the
-# playbook `vX.Y.Z` line that install.sh and the marketplace read.
+# playbook `vX.Y.Z` line that install.sh reads.
 #
 # Dry run: `workflow_dispatch` with a `tag` input and `dry_run` left on runs
-# resolve, verify-version, the five builds and the plugin archive build, and
-# skips release creation, uploads, checksums and attestation.
+# resolve, verify-version and the five builds, and skips release creation,
+# uploads, checksums and attestation.
 # A dispatch can never publish: publishing needs a pushed tag.
 #
 # Five targets, built on the host that matches them:
@@ -152,10 +152,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "tag ${tag} resolves to package ${package}, dry run ${dry_run}"
 
-  # Fail before spending five build legs on a version mismatch. For playbook
-  # the hooks manifest version is user-visible through `claude plugin details`,
-  # so a binary whose version contradicts the manifest must never publish. The
-  # skills plugin has its own version line in pragmatic-engineer/skills.
+  # Fail before spending five build legs on a version mismatch: the tag and
+  # the tool's Cargo.toml must agree before anything publishes.
   verify-version:
     needs: resolve
     runs-on: ubuntu-latest
@@ -174,27 +172,19 @@ jobs:
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Tag, Cargo.toml and the hooks plugin manifest must agree
+      - name: Tag and Cargo.toml must agree
         id: check
         env:
           TAG: ${{ needs.resolve.outputs.tag }}
           TAG_VERSION: ${{ needs.resolve.outputs.version }}
           CARGO_TOML: ${{ needs.resolve.outputs.cargo_toml }}
-          IS_PLAYBOOK: ${{ needs.resolve.outputs.is_playbook }}
         run: |
           set -euo pipefail
           cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$CARGO_TOML" | head -1)"
           echo "tag:         $TAG (version $TAG_VERSION)"
           echo "$CARGO_TOML:  $cargo_version"
 
-          if [ "$IS_PLAYBOOK" = "true" ]; then
-            hooks_version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' .claude-plugin/hooks.plugin.json | head -1)"
-            echo "hooks.plugin.json: $hooks_version"
-            if [ "$TAG_VERSION" != "$cargo_version" ] || [ "$TAG_VERSION" != "$hooks_version" ]; then
-              echo "::error::version mismatch: tag=$TAG_VERSION Cargo.toml=$cargo_version hooks.plugin.json=$hooks_version. All three must agree before publishing." >&2
-              exit 1
-            fi
-          elif [ "$TAG_VERSION" != "$cargo_version" ]; then
+          if [ "$TAG_VERSION" != "$cargo_version" ]; then
             echo "::error::version mismatch: tag=$TAG_VERSION $CARGO_TOML=$cargo_version. Both must agree before publishing." >&2
             exit 1
           fi
@@ -460,98 +450,3 @@ jobs:
           subject-path: |
             dist/${{ needs.resolve.outputs.tool }}-*
             dist/SHA256SUMS
-
-  # Builds the trimmed hooks plugin archive the marketplace points at (the
-  # `archive` source, Claude Code 2.1.224+). `playbook-hooks` holds the hooks,
-  # the bin/ shim and the installer. The file list is an allowlist that
-  # tests/plugin_archive.rs guards, and the zip is cut by the same script that
-  # test runs. The skills plugin is served from pragmatic-engineer/skills. The
-  # name does not match the checksums job's `playbook-<version>-*` pattern, so
-  # that job still sees exactly five files.
-  plugin-archive:
-    needs: [resolve, verify-version, create-release]
-    # Only playbook ships the plugin archives. create-release is skipped on a
-    # dry run; any other outcome stops the job.
-    if: ${{ !cancelled() && needs.resolve.outputs.is_playbook == 'true' && needs.verify-version.result == 'success' && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-    steps:
-      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            fulcio.githubapp.com:443
-            fulcio.sigstore.dev:443
-            tuf-repo.github.com:443
-            tuf-repo-cdn.sigstore.dev:443
-            rekor.sigstore.dev:443
-            timestamp.githubapp.com:443
-            github.com:443
-            objects.githubusercontent.com:443
-            release-assets.githubusercontent.com:443
-            uploads.github.com:443
-
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Build the archive from its allowlist
-        id: build
-        env:
-          VERSION: ${{ needs.resolve.outputs.version }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          build() {
-            name="$1"
-            list="$2"
-            asset="dist/${name}-${VERSION}.zip"
-            .github/scripts/build-plugin-archive.sh HEAD "$list" "$asset"
-            unzip -Z1 "$asset" | grep -v '/$' | sort > "dist/${name}.files.txt"
-            count="$(wc -l < "dist/${name}.files.txt" | tr -d ' ')"
-            if [ "$count" -eq 0 ]; then
-              echo "::error::the $name archive is empty. Check $list." >&2
-              exit 1
-            fi
-            if grep -qE '^(src|tests|crates|docs|\.github)/|^Cargo\.|\.test\.sh$' "dist/${name}.files.txt"; then
-              echo "::error::the $name archive holds source, tests, docs, CI or Cargo files:" >&2
-              grep -E '^(src|tests|crates|docs|\.github)/|^Cargo\.|\.test\.sh$' "dist/${name}.files.txt" >&2
-              exit 1
-            fi
-            if ! grep -qx '.claude-plugin/plugin.json' "dist/${name}.files.txt"; then
-              echo "::error::the $name archive has no .claude-plugin/plugin.json." >&2
-              exit 1
-            fi
-            if grep -q 'hooks.plugin.json' "dist/${name}.files.txt"; then
-              echo "::error::the $name archive still holds hooks.plugin.json; it must be renamed to plugin.json." >&2
-              exit 1
-            fi
-            echo "$name files: $count, sha256: $(shasum -a 256 "$asset" | cut -d' ' -f1)"
-          }
-          build playbook-hooks-plugin .claude-plugin/archive-hooks-files.txt
-
-      - name: Upload the archive to the release
-        if: needs.resolve.outputs.dry_run != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.resolve.outputs.tag }}
-          VERSION: ${{ needs.resolve.outputs.version }}
-        run: |
-          set -euo pipefail
-          gh release view "$TAG" >/dev/null 2>&1 || {
-            echo "::error::release $TAG does not exist. The create-release job should have made it." >&2
-            exit 1
-          }
-          gh release upload "$TAG" \
-            "dist/playbook-hooks-plugin-${VERSION}.zip" --clobber
-
-      - name: Attest build provenance
-        if: needs.resolve.outputs.dry_run != 'true'
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: |
-            dist/playbook-hooks-plugin-*.zip
