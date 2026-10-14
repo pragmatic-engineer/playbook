@@ -19,6 +19,14 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `autoMerge.enabled` | `false` | `true`, `false` |
 | `commit.signOff` | `true` | `true`, `false` |
 | `pr.draft` | `true` | `true`, `false` |
+| `pr.rules.template` | `block` | `off`, `warn`, `block` |
+| `pr.rules.length` | `warn` | `off`, `warn`, `block` |
+| `pr.rules.issue` | `warn` | `off`, `warn`, `block` |
+| `pr.rules.ticketLine` | `block` | `off`, `warn`, `block` |
+| `pr.rules.scope` | `warn` | `off`, `warn`, `block` |
+| `pr.rules.prose` | `warn` | `off`, `warn`, `block` |
+| `pr.bodyMaxChars` | `1200` | a number, see the config keys guide for the range |
+| `pr.ticketPatterns` | `["[A-Z][A-Z0-9]+-[0-9]+"]` | see the config keys guide |
 | `worktreeCleanup.enabled` | `true` | `true`, `false` |
 | `worktreeCleanup.staleAfterDays` | `30` | a number, see the config keys guide for the range |
 | `worktreeCleanup.conflictGracePeriodDays` | `90` | a number, see the config keys guide for the range |
@@ -1019,6 +1027,8 @@ Opens a draft unless the `pr.draft` setting is `false`.
 - `--body-file <BODY_FILE>`: File holding the PR body
 - `--base <BASE>`: Base branch for the PR (default: the repo's default branch)
 - `--dir <DIR>`: Work in this directory instead of the current one
+- `--ticket <TICKET>`: Ticket key for the branch (`none` turns the ticket rules off)
+- `--issue <ISSUE>`: GitHub issue number the PR handles
 
 ### `playbook pr land-wait`
 

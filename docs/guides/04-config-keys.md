@@ -31,6 +31,14 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `autoMerge.enabled` | `false` | `true`, `false` | After the review and fixes, marks the PR ready, waits for green checks, then merges with `gh pr merge --auto`. |
 | `commit.signOff` | `true` | `true`, `false` | Commits made through `/playbook:commit-and-push` carry a `Signed-off-by` trailer. |
 | `pr.draft` | `true` | `true`, `false` | `/playbook:create-pull-request` opens the PR as a draft. |
+| `pr.rules.template` | `block` | `off`, `warn`, `block` | The PR body must follow the template: optional ticket line, `## Summary`, optional `## Notes for reviewers`, optional `## Related work`, in that order, with no empty section. The old `## What Changed` section only warns. |
+| `pr.rules.length` | `warn` | `off`, `warn`, `block` | The PR body stays under `pr.bodyMaxChars`. |
+| `pr.rules.issue` | `warn` | `off`, `warn`, `block` | When `--issue` or the branch names a GitHub issue, the body needs `Closes #N` or `Refs #N`. |
+| `pr.rules.ticketLine` | `block` | `off`, `warn`, `block` | When a ticket key is known, the first body line carries it. |
+| `pr.rules.scope` | `warn` | `off`, `warn`, `block` | When a ticket key is known, the PR title and every commit title carry it in the scope, as in `feat(PROJ-123): add retry`. A PR that targets a non-default branch (a stack) always blocks. |
+| `pr.rules.prose` | `warn` | `off`, `warn`, `block` | Runs the writing-rules lint over the PR body. |
+| `pr.bodyMaxChars` | `1200` | a number | The body length cap. The last 100 merged bodies had a median of 1145 characters and a p90 of 1907. |
+| `pr.ticketPatterns` | `["[A-Z][A-Z0-9]+-[0-9]+"]` | a list of regexes | The accepted ticket key shapes. |
 | `worktreeCleanup.enabled` | `true` | `true`, `false` | Lets the worktree sweep remove worktrees whose work has landed. Turn it off to keep every worktree. |
 | `worktreeCleanup.staleAfterDays` | `30` | whole number, 0 or more | Days since the last commit of an agent or `playbook cc launch worktree` branch after which the sweep treats it as landed, even when it was never merged. |
 | `worktreeCleanup.conflictGracePeriodDays` | `90` | whole number, 0 or more | Days a `/playbook:implement` worktree stopped on a cherry-pick conflict is kept, counted from the timestamp in its stop marker, before the sweep treats it as landed. |

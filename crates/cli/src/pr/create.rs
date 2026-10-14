@@ -4,6 +4,7 @@
 //! `pr create`: everything after the title and body are written (validate,
 //! push, confirm the push landed, open the PR, confirm its base).
 
+use crate::pr::body_rules::{check_body, check_scope, detect_issue, detect_ticket, Context, Rules};
 use crate::pr::guard::{attribution_problems, dash_problems};
 use crate::pr::shared::{current_branch, git, git_net, resolve_base, GhClient};
 use std::path::Path;
@@ -80,6 +81,76 @@ pub fn run(
     base_arg: Option<&str>,
     draft: bool,
 ) -> Result<String, String> {
+    run_with_rules(
+        gh,
+        title,
+        body_file,
+        base_arg,
+        draft,
+        &Rules::off(),
+        &Args::default(),
+    )
+}
+
+/// What the caller knows about the work: an explicit ticket key (or `none`)
+/// and a GitHub issue number.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Args<'a> {
+    pub ticket: Option<&'a str>,
+    pub issue: Option<&'a str>,
+}
+
+/// Runs the structure rules over the body, the title and every commit title.
+/// Warnings go to `warnings`; blocks come back as the error.
+fn apply_rules(
+    gh: &dyn GhClient,
+    title: &str,
+    body: &str,
+    branch: &str,
+    base: &str,
+    rules: &Rules,
+    args: &Args<'_>,
+) -> Result<Vec<String>, String> {
+    let log = git(&["log", &format!("origin/{base}..HEAD"), "--format=%s"])?;
+    let subjects: Vec<String> = log.lines().map(str::to_string).collect();
+    let ctx = Context {
+        ticket: detect_ticket(args.ticket, branch, &subjects, &rules.patterns),
+        issue: detect_issue(args.issue, branch),
+        stacked: gh
+            .repo_default_branch()
+            .ok()
+            .flatten()
+            .is_some_and(|default| default != base),
+    };
+    let mut found = check_body(body, rules, &ctx);
+    found.extend(check_scope("PR title", title, rules, &ctx));
+    for subject in &subjects {
+        found.extend(check_scope(
+            &format!("commit title `{subject}`"),
+            subject,
+            rules,
+            &ctx,
+        ));
+    }
+    if found.blocks.is_empty() {
+        return Ok(found.warns);
+    }
+    Err(format!(
+        "refusing to push or create:\n{}",
+        found.blocks.join("\n")
+    ))
+}
+
+/// `run` plus the structure rules in `rules`.
+pub fn run_with_rules(
+    gh: &dyn GhClient,
+    title: &str,
+    body_file: &str,
+    base_arg: Option<&str>,
+    draft: bool,
+    rules: &Rules,
+    args: &Args<'_>,
+) -> Result<String, String> {
     let length = title.chars().count();
     if length > TITLE_LIMIT {
         return Err(format!(
@@ -99,6 +170,9 @@ pub fn run(
     }
 
     refuse_bad_text(title, body_file, &base)?;
+    let body = std::fs::read_to_string(body_file)
+        .map_err(|e| format!("could not read PR body file {body_file}: {e}"))?;
+    let warnings = apply_rules(gh, title, &body, &branch, &base, rules, args)?;
 
     git_net(&["push", "-u", "origin", &format!("HEAD:refs/heads/{branch}")]).map_err(|e| {
         format!("push of {branch} failed; not creating a PR (it would be missing your local commits): {e}")
@@ -131,6 +205,9 @@ pub fn run(
     // The create command's own success message is not proof of the base. The
     // PR exists by now, so a failed check is a warning that keeps the URL.
     let mut report = format!("PR: {url}\n{summary}");
+    for warning in &warnings {
+        report.push_str(&format!("\nWARN: {warning}"));
+    }
     match gh.pr_view_base(&branch) {
         Ok(actual) if actual == base => {}
         Ok(_) => gh.pr_edit_base(&branch, &base).map_err(|e| {

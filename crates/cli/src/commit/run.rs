@@ -102,6 +102,31 @@ fn show(out: &std::process::Output) -> String {
     t.trim_end().to_string()
 }
 
+/// Checks that the commit title carries the branch's ticket in its scope.
+/// The ticket comes from the branch name only. A block is the `Err`; a warning
+/// is returned to print. Stacked work is enforced at `pr create`.
+fn scope_findings(branch: &str, message: &str) -> Result<Option<String>, String> {
+    use crate::pr::body_rules::{check_scope, detect_ticket, Context, Rules};
+    let slug = crate::common::repo_slug();
+    let rules = Rules::load(
+        &crate::common::home_dir(),
+        (!slug.is_empty()).then_some(slug.as_str()),
+    );
+    let ctx = Context {
+        ticket: detect_ticket(None, branch, &[], &rules.patterns),
+        ..Context::default()
+    };
+    let title = message.lines().next().unwrap_or("").trim();
+    let found = check_scope("commit title", title, &rules, &ctx);
+    if !found.blocks.is_empty() {
+        return Err(format!(
+            "{}\nNothing was committed.",
+            found.blocks.join("\n")
+        ));
+    }
+    Ok(found.warns.first().map(|w| format!("WARN: {w}")))
+}
+
 /// Commit, rebase when behind, push. `Ok` is the text to print, `Err` the
 /// text for stderr (the exit is 1).
 pub fn run(
@@ -123,6 +148,10 @@ pub fn run(
                 problems.join("\n")
             ));
         }
+    }
+
+    if let Some(warning) = scope_findings(&branch, &message)? {
+        log.push(warning);
     }
 
     if !opts.amend && !opts.no_type_check {

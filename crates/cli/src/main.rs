@@ -996,6 +996,8 @@ fn main() {
                     body_file,
                     base,
                     dir,
+                    ticket,
+                    issue,
                 } => {
                     // A relative body path is relative to where the caller ran.
                     let body_file = absolute_from_cwd(&body_file);
@@ -1003,7 +1005,20 @@ fn main() {
                     let slug = common::repo_slug();
                     let repo_slug = (!slug.is_empty()).then_some(slug.as_str());
                     let draft = pr::create::draft_setting(&common::home_dir(), repo_slug);
-                    match pr::create::run(&gh, &title, &body_file, base.as_deref(), draft) {
+                    let rules = pr::body_rules::Rules::load(&common::home_dir(), repo_slug);
+                    let args = pr::create::Args {
+                        ticket: ticket.as_deref(),
+                        issue: issue.as_deref(),
+                    };
+                    match pr::create::run_with_rules(
+                        &gh,
+                        &title,
+                        &body_file,
+                        base.as_deref(),
+                        draft,
+                        &rules,
+                        &args,
+                    ) {
                         Ok(output) => println!("{output}"),
                         Err(err) => {
                             eprintln!("pr create: {err}");
