@@ -403,7 +403,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Bash"),
         name: "policy-guard",
         group: Group::Safety,
-        purpose: "Denies skipped git hooks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, and model-run changes to the `rm` guard's roots (`config set hooks.rmGuard.*`, `config import`, `config unset`, `config edit`, config file writes, inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`). The denial tells the model to ask the user to run it with `!`. It also denies `playbook uninstall --yes`, and a command that replaces or removes a Claude Code settings file holding the hook entries or edits one in place while naming hooks.",
+        purpose: "Denies skipped git hooks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, and model-run changes to the `rm` guard's roots (`config set hooks.rmGuard.*`, `config import`, `config unset`, `config edit`, config file writes, inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`). The denial tells the model to ask the user to run it with `!`. It also denies `playbook uninstall --yes`.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,

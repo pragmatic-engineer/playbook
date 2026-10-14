@@ -266,7 +266,7 @@ fn the_hook_entries_in_settings_cannot_be_dropped_by_the_model() {
     let tool =
         |name: &str, input: Value| json!({"tool_name": name, "tool_input": input}).to_string();
 
-    // A Write that drops the entry, an Edit that renames the key, and a Bash overwrite.
+    // A Write that drops the entry, an Edit that renames the key, and an uninstall.
     let dropped = tool(
         "Write",
         json!({"file_path": &path, "content": r#"{"model":"opus"}"#}),
@@ -275,9 +275,8 @@ fn the_hook_entries_in_settings_cannot_be_dropped_by_the_model() {
         "Edit",
         json!({"file_path": &path, "old_string": "\"hooks\"", "new_string": "\"off\""}),
     );
-    let overwrite = bash(&format!("echo '{{}}' > {path}"));
     let uninstall = bash("playbook uninstall --yes");
-    for input in [dropped, renamed, overwrite, uninstall] {
+    for input in [dropped, renamed, uninstall] {
         let reason = reason_of(input.clone()).unwrap_or_default();
         assert!(reason.contains("playbook init"), "{input}: {reason}");
     }
@@ -297,6 +296,7 @@ fn the_hook_entries_in_settings_cannot_be_dropped_by_the_model() {
         bash(&format!("cat {path}")),
         bash("playbook uninstall --dry-run"),
     ] {
-        assert!(reason_of(input.clone()).is_none(), "{input}");
+        let (out, code, _) = run(&input, &[]);
+        assert_eq!((out.as_str(), code), ("", 0), "{input}");
     }
 }

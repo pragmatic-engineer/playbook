@@ -220,7 +220,7 @@ fn changes_rm_guard_config_at(
         if SHELL_PROGRAMS.contains(&program.as_str()) {
             if let Some(at) = rest
                 .iter()
-                .position(|w| w == "-c" || w.ends_with("c") && w.starts_with('-'))
+                .position(|w| w == "-c" || is_short_cluster_with(w, 'c'))
             {
                 if let Some(script) = rest.get(at + 1) {
                     return simple_commands(script).iter().any(|inner| {
@@ -468,7 +468,7 @@ fn wrapped_commands(words: &[String], program_at: usize) -> Vec<Vec<String>> {
     if SHELL_PROGRAMS.contains(&program.as_str()) {
         let script = rest
             .iter()
-            .position(|w| w == "-c" || w.ends_with('c') && w.starts_with('-'))
+            .position(|w| w == "-c" || is_short_cluster_with(w, 'c'))
             .and_then(|at| rest.get(at + 1));
         return script.map(|s| simple_commands(s)).unwrap_or_default();
     }
@@ -509,163 +509,14 @@ fn uninstalls_playbook(words: &[String], program_at: usize, depth: usize) -> boo
         && !args.iter().any(|w| w == "--dry-run")
 }
 
-/// Programs that replace or remove the file they are handed.
-const REPLACER_PROGRAMS: [&str; 11] = [
-    "tee", "cp", "mv", "rm", "install", "rsync", "dd", "truncate", "unlink", "ln", "sponge",
-];
-
-/// The operands of a replacer that it overwrites or removes. `cp`, `install`
-/// and `rsync` only read their sources, so only the destination counts; `dd`
-/// writes `of=`; the rest change every operand.
-fn replaced_operands<'a>(program: &str, words: &'a [String], program_at: usize) -> Vec<&'a String> {
-    let operands = || {
-        words[program_at + 1..]
-            .iter()
-            .filter(|w| !w.starts_with('-'))
-    };
-    match program {
-        "cp" | "install" | "rsync" | "ln" => operands().next_back().into_iter().collect(),
-        "dd" => words.iter().filter(|w| w.starts_with("of=")).collect(),
-        _ => operands().collect(),
-    }
-}
-
-/// Whether `word` names a Claude Code settings file: a path ending in
-/// `.claude/settings*.json` (also inside a script word), or a bare
-/// `settings*.json` when the command mentions `.claude` elsewhere (after a
-/// `cd`, say). `lower_command` is the whole command in lower case.
-fn names_settings(word: &str, lower_command: &str) -> bool {
-    let word = strip_quotes(word).to_lowercase();
-    if let Some(at) = word.find(".claude/settings") {
-        // `.json` must end the file name: not `settings.json.bak`.
-        let rest = &word[at..];
-        return rest.find(".json").is_some_and(|i| {
-            !rest[i + 5..]
-                .starts_with(|c: char| c.is_alphanumeric() || matches!(c, '.' | '_' | '-'))
-        });
-    }
-    let name = word.rsplit('/').next().unwrap_or(&word);
-    is_settings_name(name) && lower_command.contains(".claude")
-}
-
-fn strip_quotes(word: &str) -> &str {
-    word.trim_matches(|c| c == '"' || c == '\'')
-}
-
 /// Whether a lower-case file name is `settings*.json`.
 fn is_settings_name(name: &str) -> bool {
     name.starts_with("settings") && name.ends_with(".json")
 }
 
-/// The files a command overwrites with `>`, `&>`, `>|` or `>file` attached to
-/// a word (not `>>`, which only appends, and not `2>&1`).
-fn overwrite_targets(words: &[String]) -> Vec<&str> {
-    let mut targets = Vec::new();
-    for (i, word) in words.iter().enumerate() {
-        let Some(at) = word.rfind('>') else { continue };
-        let before = &word[..at];
-        let after = word[at + 1..].trim_start_matches('|');
-        let appends = before.ends_with('>');
-        let to_descriptor =
-            after.starts_with('&') && after[1..].chars().all(|c| c.is_ascii_digit() || c == '-');
-        if appends || to_descriptor {
-            continue;
-        }
-        let target = after.trim_start_matches('&');
-        if !target.is_empty() {
-            targets.push(target);
-        } else if let Some(next) = words.get(i + 1) {
-            targets.push(next.as_str());
-        }
-    }
-    targets
-}
-
-/// Whether the settings file `word` names holds `playbook hook` entries. A
-/// word that is not a clean absolute path stands for the user's own
-/// `~/.claude/settings.json`.
-fn settings_hold_entries(word: &str, home: &str) -> bool {
-    let word = expand_home(strip_quotes(word), home);
-    let file = if word.ends_with(".json") && word.starts_with('/') {
-        PathBuf::from(word)
-    } else if word.ends_with(".json") && word.contains('/') {
-        // A project's own settings, such as `.claude/settings.json`.
-        match std::env::current_dir() {
-            Ok(cwd) => cwd.join(word),
-            Err(_) => return false,
-        }
-    } else if home.is_empty() {
-        return false;
-    } else {
-        let name = word.rsplit('/').next().unwrap_or(&word);
-        let name = if name.ends_with(".json") {
-            name
-        } else {
-            "settings.json"
-        };
-        Path::new(home).join(".claude").join(name)
-    };
-    read_settings(&file)
-        .and_then(|text| guarded_state(&text))
-        .is_some_and(|state| !state.entries.is_empty())
-}
-
-/// Whether a `sed` word asks for an in-place edit: `-i`, a cluster such as
-/// `-Ei`, or `--in-place` with or without a backup suffix.
-fn sed_in_place(word: &str) -> bool {
-    word.starts_with("--in-place")
-        || (word.starts_with('-') && !word.starts_with("--") && word.contains('i'))
-}
-
-/// A Bash command that rewrites the hook entries: `playbook uninstall`, a
-/// command that replaces or removes a settings file holding them, or one that
-/// edits a settings file in place while naming hooks.
-fn edits_hook_entries(
-    words: &[String],
-    program_at: usize,
-    lower_command: &str,
-    home: &str,
-) -> bool {
-    if uninstalls_playbook(words, program_at, 0) {
-        return true;
-    }
-    let named: Vec<&String> = words
-        .iter()
-        .filter(|w| names_settings(w, lower_command))
-        .collect();
-    if named.is_empty() {
-        return false;
-    }
-    let program = program_name(&words[program_at]);
-    let replaced: Vec<&str> = if REPLACER_PROGRAMS.contains(&program.as_str()) {
-        replaced_operands(&program, words, program_at)
-            .into_iter()
-            .map(String::as_str)
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let overwritten = overwrite_targets(words);
-    if replaced
-        .iter()
-        .chain(overwritten.iter())
-        .filter(|w| names_settings(w, lower_command))
-        .any(|w| settings_hold_entries(w, home))
-    {
-        return true;
-    }
-    // An in-place edit cannot be replayed, so the command text has to say it
-    // is about the hooks or the plugin switch.
-    let in_place = matches!(
-        program.as_str(),
-        "python" | "python3" | "node" | "ruby" | "perl"
-    ) || SHELL_PROGRAMS.contains(&program.as_str())
-        || (program == "sed" && words.iter().any(|w| sed_in_place(w)));
-    let this_command = words.join(" ").to_lowercase();
-    in_place
-        && ["hook", "enabledplugins"]
-            .iter()
-            .any(|key| this_command.contains(key))
+/// Whether `word` is a cluster of short options (one dash) that includes `flag`.
+fn is_short_cluster_with(word: &str, flag: char) -> bool {
+    word.starts_with('-') && !word.starts_with("--") && word.contains(flag)
 }
 
 /// The reason to deny `command`, or `None` to allow it.
@@ -673,38 +524,15 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
     if !mentions_a_guarded_program(command) {
         return None;
     }
-    let lower_command = command.to_lowercase();
-    // `>|` ends a simple command at the pipe, leaving its target as the first
-    // word of the next one.
-    let mut dangling_redirect = false;
     for words in simple_commands(command) {
-        let target_of_redirect = std::mem::take(&mut dangling_redirect);
-        dangling_redirect = words
-            .last()
-            .is_some_and(|w| w.ends_with('>') && !w.ends_with(">>"));
-        if target_of_redirect
-            && words.first().is_some_and(|w| {
-                names_settings(w, &lower_command) && settings_hold_entries(w, home)
-            })
-        {
-            return Some(HOOK_ENTRIES_REASON);
-        }
         let Some(at) = program_index(&words) else {
-            // A bare `> file` still truncates the file.
-            if overwrite_targets(&words)
-                .iter()
-                .filter(|w| names_settings(w, &lower_command))
-                .any(|w| settings_hold_entries(w, home))
-            {
-                return Some(HOOK_ENTRIES_REASON);
-            }
             continue;
         };
         let args = &words[at + 1..];
         if changes_rm_guard_config(&words, at, home) {
             return Some(RM_GUARD_CONFIG_REASON);
         }
-        if edits_hook_entries(&words, at, &lower_command, home) {
+        if uninstalls_playbook(&words, at, 0) {
             return Some(HOOK_ENTRIES_REASON);
         }
         let found = match program_name(&words[at]).as_str() {
@@ -1131,11 +959,16 @@ mod tests {
 
     #[test]
     fn an_edit_that_does_not_match_the_file_is_judged_by_its_text() {
-        // CRLF on disk, LF in the edit: the replay is a no-op, so read the text.
+        // CRLF on disk, LF in the edit: the replay would be a no-op, so the
+        // text of the edit is read instead.
         let path = settings_with("edit-nomatch", &ENTRIES.replace(',', ",\r\n"));
 
         assert_eq!(
-            check_settings_edit(&path, &edit("\n\"command\": \"playbook hook x\""), ""),
+            check_settings_edit(
+                &path,
+                &edit("\"command\":\"playbook hook policy-guard\"\n"),
+                ""
+            ),
             Some(HOOK_ENTRIES_REASON)
         );
         assert_eq!(check_settings_edit(&path, &edit("no such text"), "x"), None);
@@ -1199,7 +1032,11 @@ mod tests {
         )));
         assert!(!is_claude_settings(Path::new("/work/notes/settings.json")));
         assert!(settings_path("", "").is_none());
+    }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_a_settings_file_is_followed_both_ways() {
         let real = settings_with("hook-link", ENTRIES);
         let link = real.parent().unwrap().parent().unwrap().join("link.json");
         std::os::unix::fs::symlink(&real, &link).unwrap();
@@ -1241,124 +1078,12 @@ mod tests {
     }
 
     #[test]
-    fn bash_cannot_replace_a_settings_file_that_holds_our_entries() {
-        let path = settings_with("bash-replace", ENTRIES);
-        let file = path.to_string_lossy().into_owned();
-        assert!(
-            !file.to_lowercase().contains("hook"),
-            "the scratch path must not name hooks: {file}"
+    fn a_shell_with_option_flags_before_c_is_still_unwrapped() {
+        assert_eq!(
+            deny("bash --norc -c 'playbook uninstall --yes'"),
+            Some(HOOK_ENTRIES_REASON)
         );
-        let home = path
-            .parent()
-            .and_then(Path::parent)
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-
-        for command in [
-            format!("echo '{{\"model\":\"opus\"}}' > {file}"),
-            format!("cp backup.json {file}"),
-            format!("mv /tmp/s {file}"),
-            format!("rm {file}"),
-            format!("jq '.model' {file} 2>/dev/null > {file}"),
-            "echo '{}' > ~/.claude/settings.json".to_string(),
-            "echo '{}'>~/.claude/settings.json".to_string(),
-            "echo '{}' &> ~/.claude/settings.json".to_string(),
-            "echo '{}' >| ~/.claude/settings.json".to_string(),
-            "> ~/.claude/settings.json".to_string(),
-            "ln -sf ~/dotfiles/claude.json ~/.claude/settings.json".to_string(),
-            "jq .a x.json | sponge ~/.claude/settings.json".to_string(),
-            "mv ~/.claude/settings.json /tmp/old.json".to_string(),
-            "cd ~/.claude && cp /tmp/s settings.json".to_string(),
-        ] {
-            assert_eq!(
-                check_command(&command, &home),
-                Some(HOOK_ENTRIES_REASON),
-                "{command}"
-            );
-        }
-        for command in [
-            format!("cat {file}"),
-            format!("jq '.hooks' {file}"),
-            format!("jq '.hooks' {file} 2>/dev/null"),
-            format!("grep -n hook {file} > /tmp/out.txt"),
-            format!("echo x >> {file}"),
-            format!("sed -i '' s/opus/sonnet/ {file}"),
-            format!("cp {file} {file}.bak"),
-            format!("rsync {file} /tmp/backup/"),
-            format!("dd if={file} of=/tmp/copy.json"),
-            format!("python3 -m json.tool {file} | grep hook"),
-            "echo x > /tmp/out.txt".to_string(),
-        ] {
-            assert_eq!(check_command(&command, &home), None, "{command}");
-        }
-    }
-
-    #[test]
-    fn bash_may_replace_a_settings_file_that_holds_none_of_our_entries() {
-        let path = settings_with("bash-plain", r#"{"model":"opus"}"#);
-        let file = path.to_string_lossy().into_owned();
-        let home = path
-            .parent()
-            .and_then(Path::parent)
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        let local = path.with_file_name("settings.local.json");
-
-        for command in [
-            format!("rm {file}"),
-            format!("cp /tmp/s {file}"),
-            format!("echo '{{}}' > {file}"),
-            format!("echo '{{}}' > {}", local.display()),
-            "echo '{}' > ~/.claude/settings.json".to_string(),
-        ] {
-            assert_eq!(check_command(&command, &home), None, "{command}");
-        }
-    }
-
-    #[test]
-    fn a_project_settings_file_is_not_the_users_settings_file() {
-        // `.claude/settings.json` in the working folder, not under HOME.
-        let user = settings_with("bash-user", ENTRIES);
-        let home = user
-            .parent()
-            .and_then(Path::parent)
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-
-        for command in [
-            "git show main:.claude/settings.json > .claude/settings.json",
-            "rm .claude/settings.json",
-        ] {
-            assert_eq!(check_command(command, &home), None, "{command}");
-        }
-    }
-
-    #[test]
-    fn bash_cannot_edit_settings_in_place_while_naming_hooks() {
-        for command in [
-            "sed -i '' '/playbook hook/d' ~/.claude/settings.json",
-            "sed --in-place '/hook/d' ~/.claude/settings.json",
-            "cd ~/.claude && sed -i '/playbook hook/d' settings.json",
-            "python3 -c \"import json; p='/Users/me/.claude/settings.json'; d=json.load(open(p)); d['hooks']={}\"",
-            "perl -i -pe 's/hook//' ~/.claude/settings.json",
-            "sed -Ei '/playbook hook/d' ~/.claude/settings.json",
-            "sed --in-place=.bak '/hook/d' ~/.claude/settings.json",
-            "sed -i '' 's/enabledPlugins/x/' ~/.claude/settings.json",
-        ] {
-            assert_eq!(deny(command), Some(HOOK_ENTRIES_REASON), "{command}");
-        }
-        for command in [
-            "sed -i '' s/opus/sonnet/ ~/.claude/settings.json",
-            "sed -i '' '/hook/d' /work/notes/settings.json",
-            "cat ~/.claude/settings.json",
-            "python3 -m json.tool ~/.claude/settings.json | grep hook",
-            "python3 fmt.py ~/.claude/settings.json && git commit -m 'fix hooks'",
-        ] {
-            assert_eq!(deny(command), None, "{command}");
-        }
+        assert_eq!(deny("bash --norc -c 'playbook doctor'"), None);
     }
 
     fn deny(command: &str) -> Option<&'static str> {
