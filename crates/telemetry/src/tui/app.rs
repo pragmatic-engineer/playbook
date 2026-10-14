@@ -1329,9 +1329,12 @@ mod tests {
     #[test]
     fn a_saved_sort_on_a_column_the_panel_lacks_keeps_the_default_sort() {
         let mut app = App::new(Range::All);
-        let mut state = super::super::ui_state::UiState::default();
-        state.sorts = vec![None; 6];
-        state.sorts[Panel::Live.index()] = Some(Sort::new(0, true));
+        let mut sorts = vec![None; 6];
+        sorts[Panel::Live.index()] = Some(Sort::new(0, true));
+        let state = super::super::ui_state::UiState {
+            sorts,
+            ..Default::default()
+        };
 
         app.apply_ui_state(&state);
 
