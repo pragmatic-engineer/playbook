@@ -62,7 +62,7 @@ Worked example, `tests/init_merge.rs`, measured:
 | `const FIXTURES: [Fixture; 9]` | 9 cases in ONE test |
 | `const INVALID_INPUT_CASES: [InvalidInputCase; 8]` | 8 cases in ONE test |
 
-So 8 test functions carry at least 17 distinct cases there. Comparing "19 old
+8 test functions carry at least 17 distinct cases there. Comparing "19 old
 scenarios to 8 new tests" and concluding coverage halved would be wrong.
 
 **Therefore the per-scenario rows below are the actual acceptance evidence, not
@@ -192,7 +192,7 @@ the row covers, and they sum to 61.
 | `graph_write_is_atomic_a_failed_write_cannot_truncate_the_existing_file` | Atomicity, untested in shell |
 | `python_and_rust_writers_agree_on_the_same_fixture_tree` | Differential against the real python writer |
 
-So 61 old scenarios map onto 20 Rust tests, and 4 further Rust tests add coverage
+61 old scenarios map onto 20 Rust tests, and 4 further Rust tests add coverage
 that never existed. That is the whole 24. This is why counting test functions
 misleads: 61 to 24 looks like a loss and is actually a gain.
 
@@ -222,7 +222,7 @@ suite's own summary line before mapping anything.
 |---|---|
 | `python_and_rust_readers_agree_on_the_same_fixture` | Differential against the real python reader |
 
-So 15 old scenarios map onto 7 Rust tests, plus 1 differential test, which is
+15 old scenarios map onto 7 Rust tests, plus 1 differential test, which is
 the whole 8.
 
 ## Per-scenario rows: the session pair
@@ -261,7 +261,7 @@ WU-14 may delete both suites.** Both map into `tests/hooks_session.rs`.
 | `session_clean_exit_at_default_threshold_queues_a_flag` | The boundary itself, not just below it |
 | `session_clean_exit_padded_min_edits_env_var_still_parses` | Whitespace-padded env var parsing |
 
-So 19 old scenarios map onto 9 Rust tests, and 7 more add coverage the shell
+19 old scenarios map onto 9 Rust tests, and 7 more add coverage the shell
 suites never had. That is the whole 16.
 
 Extraction note: `session-init.test.sh` uses FOUR `assert_*` helpers and all 13
@@ -299,7 +299,7 @@ inside existing tests instead, noted per row.
 | no session id is a silent no-op (1) | `no_session_id_is_a_silent_noop` | in `mod post_edit_track`, a separate test from the search-counter one of the same name |
 
 Extraction note: these are the two suites an earlier attempt gave up on. The
-technique that works is the one recorded for `session-clean-exit`, grep the
+technique that works is the one recorded for `session-clean-exit`: grep the
 `ok "` and `bad "` CALL SITES with line numbers and read them. Regex-extracting
 the quoted strings fails here because each scenario has an `ok` and a `bad`
 variant with interpolated text, so a naive extract returns roughly double the
@@ -365,7 +365,7 @@ Adds, with no old counterpart:
 | `large_and_unreadable_file_is_still_denied_on_byte_size` | Unreadable file, large, still denied on bytes |
 | `deny_output_matches_the_python_reference_byte_for_byte` | The deny shape, byte for byte against python |
 
-So 13 old scenarios map onto 13 Rust tests one for one, and 13 further tests
+13 old scenarios map onto 13 Rust tests one for one, and 13 further tests
 add the mandated boundary coverage. That is the whole 26.
 
 ## Per-scenario rows: the turn trio
@@ -483,7 +483,7 @@ Adds, with no old counterpart:
 | `settings_gen_works_from_the_cli` | The subcommand end to end, not just the library function |
 | `malformed_hooks_shape_fails_in_both_engines_and_writes_no_stdout` | A malformed .hooks shape must fail loudly, not emit a hooks-less seed |
 
-So 10 old scenarios map onto 6 Rust tests and 4 more are new, which is the whole
+10 old scenarios map onto 6 Rust tests and 4 more are new, which is the whole
 10. Two of those four exist because of defects found during the port itself.
 
 ## Per-scenario rows: the two `src/` unit-test suites
@@ -532,7 +532,7 @@ file under `tests/`. `cargo test --lib` reports 50: 46 live in `src/common/` and
 | `src/common/emit.rs` (3) | The `decision: block` shape, an emit probe, and public emitters matching the struct builders |
 | `src/common/repo.rs` (4) | URL normalisation across https, ssh shorthand, ssh scheme with trailing slash, and no-suffix |
 
-So 32 old scenarios map onto 24 unit tests, and 22 more add coverage the shell
+32 old scenarios map onto 24 unit tests, and 22 more add coverage the shell
 suites never had, which is the 46 in `src/common/`. The largest single addition,
 `proc.rs`, exists because a review found that no shell-out anywhere had a
 timeout while the python bounded every one.

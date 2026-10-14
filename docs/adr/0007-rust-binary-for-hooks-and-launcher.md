@@ -41,7 +41,7 @@ Aggregate latency available, over 2.1 days and 13 projects of heavy use, using r
 | Grep | 336 | 46ms | 9ms | 12s |
 | Glob | 153 | 46ms | 9ms | 6s |
 
-About 5.5 minutes, roughly 2.6 minutes a day. Inside turns the model dominates, that is close to 1% of felt wall clock. Latency is a supporting benefit here, not the case for the work.
+About 5.5 minutes, roughly 2.6 minutes a day. Inside turns the model dominates. The saving is close to 1% of felt wall clock. Latency is a supporting benefit here, not the case for the work.
 
 **Scope.** 15 hooks and the launcher, about 3,148 lines: 11 Python hooks (1,391) plus `common.py` (263), 4 bash guards (319) plus `common.sh` (150), and the launcher (~1,025). Against that sit 8,169 lines of markdown in `commands/`, `agents/`, `skills/`, `prompts/` and `docs/` that no rewrite touches. The product is prose; this changes only its runtime.
 

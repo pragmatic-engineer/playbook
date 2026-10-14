@@ -20,7 +20,7 @@ Ran mechanically against the record and blueprint before drafting the final revi
 
 ## Phase 2: Adversarial Review (`critic`, focus `decision`)
 
-**Iteration 1 — FAIL, 5 findings:**
+**Iteration 1: FAIL, 5 findings:**
 1. HIGH: the five commands (`plan.md`, `adr.md`, `implement.md`, `deep-review.md`, `learn-project.md`) lost their only jq-free memory-read path once `MEMORY.md` was retired, since `shell/memory-context.sh` silently produces nothing when `jq` is missing, and nothing filled that gap.
 2. MEDIUM: no way to distinguish "nothing relevant in memory" from "the script couldn't run."
 3. MEDIUM: Decision Drivers/Consequences never weighed the new jq dependency for the five commands.
@@ -29,18 +29,18 @@ Ran mechanically against the record and blueprint before drafting the final revi
 
 All fixed: native jq-free fallback added to WU-1 through WU-5 (read `memory.graph.json` directly via the `Read` tool when the script produces nothing); digest now notes which source produced a result; Decision Drivers reworded to state the no-new-dependency principle applies to every reader; WU-5 got an explicit Done-When gate; new WU-8 (`doctor.md` Layer 8, jq installed).
 
-**Iteration 2 — FAIL, 3 findings:**
+**Iteration 2: FAIL, 3 findings:**
 1. MEDIUM: WU-8's insertion-point citation was wrong (claimed Layer 7 spans to the end of the file; it actually ends at line 260, with a separate `## Output format` section after it containing remediation-branch logic WU-8 didn't touch).
 2. MEDIUM: Consequences section still framed the five commands' change as pure simplification, contradicting Decision Drivers' description of an added fallback code path.
 3. LOW: a `rebuild_memory_graph.rs:697-698` citation was off by up to two lines (the real `name: None` field is at `:699`).
 
 All fixed: WU-8's Changes corrected to the real insertion point, plus new bullets to update the two literal "seven" references and add a Layer 8 remediation branch; Consequences bullet reworded to disclose the added fallback branch as a real cost; citation corrected.
 
-**Iteration 3 — PASS**, with one LOW finding: the `:697-698` citation fix from iteration 2 had only been applied in one of three occurrences of the same claim. Fixed (two more spots corrected to `:699`) before finalizing; explicitly noted by the reviewer as non-blocking polish, confined to rationale text with no effect on any WU's Changes or Done-When criteria.
+**Iteration 3: PASS**, with one LOW finding: the `:697-698` citation fix from iteration 2 had only been applied in one of three occurrences of the same claim. Fixed (two more spots corrected to `:699`) before finalizing; explicitly noted by the reviewer as non-blocking polish, confined to rationale text with no effect on any WU's Changes or Done-When criteria.
 
 ## Phase 3: Test Review (`test-reviewer`)
 
-**Iteration 1 — FAIL, 1 FAIL + 4 WARN:**
+**Iteration 1: FAIL, 1 FAIL + 4 WARN:**
 - FAIL: WU-0 had no test scenario for a malformed/non-JSON `memory.graph.json`, despite its Changes section committing to "never panics."
 - WARN: no scenario for a graph with only code-anchor nodes and zero fact nodes.
 - WARN: WU-1 through WU-4 had no manual-verification callout, unlike WU-5.
@@ -49,7 +49,7 @@ All fixed: WU-8's Changes corrected to the real insertion point, plus new bullet
 
 All fixed: two new WU-0 test scenarios added (malformed JSON, code-anchor-only graph); open item added for WU-1 through WU-4's manual verification; WU-7's Done-When softened to allow one explanatory-note exception; WU-0's cap scenario now explicitly warns against copying the existing fixture's character-count assumptions.
 
-**Iteration 2 — WARN, 2 findings (informational, passes the gate):**
+**Iteration 2: WARN, 2 findings (informational, passes the gate):**
 - WARN: the code-anchor-only scenario's assertion was vague ("no fact-shaped line") rather than pinned to a concrete output shape.
 - WARN: WU-1 through WU-5's Done-When lists didn't gate on the "note which source produced the result" instruction surviving into the final wording.
 

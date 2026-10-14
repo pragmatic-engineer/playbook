@@ -32,7 +32,7 @@ One hard constraint bounds the capture design, and it is documented in the repo 
 
 > PreCompact has no additionalContext channel (the hook output schema defines no PreCompact variant), so the hook can't inject guidance to Claude here; the systemMessage prompts the user.
 
-So the event that fires when context is about to be lost cannot instruct the model. `SessionEnd` is worse: the session is over. The only per-turn event that can feed text back to the model is `Stop`, via `decision: block` with a `reason`.
+The event that fires when context is about to be lost cannot instruct the model. `SessionEnd` is worse: the session is over. The only per-turn event that can feed text back to the model is `Stop`, via `decision: block` with a `reason`.
 
 ## Decision Drivers
 
@@ -57,7 +57,7 @@ Three parts, each using plumbing that already exists:
 
 - **Retrieval, base case.** A helper reads `graph.json`, filters to global plus the current repo, and emits a compact block: each fact's id, description, and typed edges, plus an anchor index of file to facts. `session-init.sh` injects it at `SessionStart` in place of the raw `MEMORY.md` dump. Measured at 8.8 KB for this repo.
 - **Retrieval, just in time.** A `PreToolUse` hook on `Edit` and `Write` looks up the target path in the anchor index and injects the facts anchored to it, plus their `depends_on` and `contradicts` neighbours. Turns that edit nothing pay nothing. `hooks/preread-edit-check.sh` is the existing precedent for a `PreToolUse` hook that emits `additionalContext` and never blocks.
-- **Capture.** `statusline.sh` already parses `.context_window.used_percentage`; it writes a capture-due flag to the session dir when usage crosses a threshold well below the 90% auto-compact point. A `Stop` hook reads the flag and returns `decision: block` with a reason instructing capture of durable facts from this session. `/playbook:implement` additionally captures deterministically before and after a run, where it can spawn an agent rather than rely on a prompt.
+- **Capture.** `statusline.sh` already parses `.context_window.used_percentage`; it writes a capture-due flag to the session dir when usage crosses a threshold well below the 90% auto-compact point. A `Stop` hook reads the flag and returns `decision: block` with a reason instructing capture of durable facts from this session. `/playbook:implement` also captures deterministically before and after a run, where it can spawn an agent rather than rely on a prompt.
 - **Resolver.** Two-pass edge resolution: collect all nodes, then resolve each link target in the source's own scope first and fall back to global. Recovers the 3 cross-scope edges.
 
 - Trade-offs: uses existing signals, costs nothing on turns that do not edit, and the threshold fires while the model can still act. But it spreads logic across four touch points (statusline, a Stop hook, a PreToolUse hook, session-init), and capture at the threshold is a prompt the model must obey, not an enforced write. Coupling a capture signal to `statusline.sh` is unusual, justified only because it is the sole component that receives context usage.

@@ -162,7 +162,7 @@ not to do. This ADR's decision does not touch home-dir resolution at all.
   `designs/`, `implement/` content across every existing repo checkout on
   disk, not just the current one.
 
-### C. Rename repo-local storage to an agent-agnostic name, keep it repo-local (effort: M) — chosen
+### C. Rename repo-local storage to an agent-agnostic name, keep it repo-local (effort: M): chosen
 
 - `state.db`, `plans/`, `designs/`, `implement/`, `worktrees/` move from
   `.claude/<name>` to `.playbook/<name>`, at the same git-toplevel-resolved

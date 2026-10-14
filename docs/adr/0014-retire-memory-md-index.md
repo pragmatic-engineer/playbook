@@ -119,7 +119,7 @@ each hand-appending a line.
   auto-generated version needs it to be markdown rather than the graph's
   native JSON.
 
-### C. Drop MEMORY.md entirely; repoint the fallback and the five commands at the graph (effort: M) — chosen
+### C. Drop MEMORY.md entirely; repoint the fallback and the five commands at the graph (effort: M): chosen
 
 Stop writing `MEMORY.md` anywhere. `session_init.rs`'s fallback gets a new,
 native Rust function that reads `memory.graph.json` directly (`serde_json`,

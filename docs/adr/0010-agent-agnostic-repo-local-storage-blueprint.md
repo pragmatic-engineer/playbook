@@ -50,19 +50,19 @@ bootstraps.
   `.claude/state.db` shape.
 - Files:
   - `src/gate/record.rs` (path construction, currently lines 92-94; doc
-    comments lines 6, 82) — production
-  - `src/gate/check.rs` (path construction, currently lines 75-77) —
+    comments lines 6, 82): production
+  - `src/gate/check.rs` (path construction, currently lines 75-77): 
     production
   - `src/gate/db.rs` (`open_db` doc comment line 48; module doc lines
     4-5, 8-17; `ensure_state_db_gitignored` shape-check and its doc
     comment, currently lines 120-148, literal component comparisons
     `file_name != "state.db"` stays, `claude_dir_name != ".claude"`
     becomes `playbook_dir_name != ".playbook"`; unit test
-    `open_db_gitignores_claude_state_db_path`, currently lines 379-397)
-    — production + test
-  - `src/gate/mod.rs` (module doc, currently line 5) — production
-  - `src/lib.rs` (`GateCommand::Record` doc comment, currently line 156)
-    — production
+    `open_db_gitignores_claude_state_db_path`, currently lines 379-397):
+    production + test
+  - `src/gate/mod.rs` (module doc, currently line 5): production
+  - `src/lib.rs` (`GateCommand::Record` doc comment, currently line 156):
+    production
 - Verification: `cargo test --lib gate::` && `cargo clippy --all-targets -- -D warnings` && `cargo fmt --check`
 - Tests:
   - Scenario: opening a DB at `<repo>/.playbook/state.db` auto-appends
@@ -91,9 +91,9 @@ bootstraps.
   previously asserted this, and `record.rs`/`check.rs`'s own path
   construction isn't exercised by WU-0's unit test).
 - Files:
-  - `tests/gate_check.rs` (`db_path` fn, currently lines 43-44) — test
+  - `tests/gate_check.rs` (`db_path` fn, currently lines 43-44): test
   - `tests/gate_record.rs` (`db_path` fn, currently lines 64-65; fixture
-    doc comment, currently lines 22-24) — test
+    doc comment, currently lines 22-24): test
 - Verification: `cargo test --test gate_check --test gate_record`
 - Tests: existing scenarios in both fixtures (record then check a PASS;
   MISSING on an unrecorded phase; etc.) are unchanged in intent, only the
@@ -170,7 +170,7 @@ bootstraps.
     marker lines, as its own bash block placed before the
     `## Design Doc Handoff` section (currently starting line 81), which
     runs unconditionally "Before Step 1" per its own text (currently line
-    83) and today has no bash block of its own — production markdown
+    83) and today has no bash block of its own: production markdown
   - `commands/implement.md`: insert the snippet, markers included, as its
     own bash block placed immediately after the
     `## Step 1: Resolve the Task Reference` heading (currently line 80)
@@ -182,13 +182,13 @@ bootstraps.
     (`/playbook:implement .claude/plans/<slug>.md` against a paused run):
     the ledger read at (currently) line 259 would still see nothing.
     Placing it before the branch point makes it run on every invocation
-    of Step 1 regardless of which branch follows — production markdown
+    of Step 1 regardless of which branch follows: production markdown
   - `commands/brainstorm.md`: insert the snippet, markers included, as
     its own bash block placed before the prior-design scan described at
     (currently) line 114, inside Step 2, which the Adversarial Review
     confirmed already runs unconditionally regardless of idea-mode vs
-    ticket-mode — production markdown
-  - `shell/repo-local-storage-migration.test.sh` (new file) — test
+    ticket-mode: production markdown
+  - `shell/repo-local-storage-migration.test.sh` (new file): test
 - New test file, following the `ok`/`bad` PASS/FAIL accumulator pattern
   already established in `hooks/migration-check.test.sh` (own `mktemp -d`
   scratch git repo per case, not shared across cases), parameterized over
@@ -247,18 +247,18 @@ bootstraps.
 - Files:
   - `commands/scope.md`: argument-hint and example (lines 4, 26), design
     doc detection prose (lines 83, 85-86), plan-save bootstrap (lines
-    346-347, 355, 361, 364-365) — command markdown
+    346-347, 355, 361, 364-365): command markdown
   - `commands/implement.md`: help example (line 29), plan-file glob (line
     87), plan/blueprint prose (line 102), worktree add path (line 241),
     WU brief path (line 250), progress ledger path and prose (line 259),
-    bootstrap mkdir (line 263), gitignore lock loop (line 271) — command
+    bootstrap mkdir (line 263), gitignore lock loop (line 271): command
     markdown
   - `commands/brainstorm.md`: design doc path prose (line 44), prior-design
     scan (line 114), save prose and bootstrap (lines 182, 186, 194, 198,
-    223) — command markdown
+    223): command markdown
   - `.gitignore` (lines 60-63: `.claude/plans/`, `.claude/designs/`,
     `.claude/implement/`, `.claude/worktrees/` each rename to the
-    `.playbook/` equivalent) — config
+    `.playbook/` equivalent): config
 - Verification:
   `grep -rn '\.claude/plans\|\.claude/designs\|\.claude/implement\|\.claude/worktrees' commands/scope.md commands/implement.md commands/brainstorm.md .gitignore`
   returns nothing.
@@ -277,8 +277,8 @@ bootstraps.
   the new `.playbook/` paths, not the old `.claude/` ones. Historical ADRs
   are explicitly excluded (System Snapshot, above).
 - Files:
-  - `README.md` (line 166: `/playbook:scope` row) — docs
-  - `docs/guides/01-plan-and-implement.md` (lines 66, 101, 136) — docs
+  - `README.md` (line 166: `/playbook:scope` row): docs
+  - `docs/guides/01-plan-and-implement.md` (lines 66, 101, 136): docs
 - Verification:
   `grep -rn '\.claude/plans\|\.claude/designs\|\.claude/implement\|\.claude/worktrees' README.md docs/guides/`
   returns nothing.
