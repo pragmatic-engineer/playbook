@@ -57,7 +57,6 @@ fn run(tag: &str, trust: Trust, claude_json: Option<&str>) -> Case {
 /// Like `run`, with `~/.claude.json` content built from the home path.
 fn run_seeded(tag: &str, trust: Trust, seed: impl Fn(&std::path::Path) -> Option<String>) -> Case {
     let work = Work::new(tag);
-    let src = work.dir("src");
     let home = work.dir("home");
     let bindir = work.dir("bin");
     let tools = work.dir("tools");
@@ -98,9 +97,9 @@ fn run_seeded(tag: &str, trust: Trust, seed: impl Fn(&std::path::Path) -> Option
     }
     let out = Command::new("bash")
         .arg(repo_root().join("install.sh"))
-        .args(["--yes", "--skip-plugin"])
+        .arg("--yes")
         .env_remove("SHELL")
-        .env("PLAYBOOK_SRC", &src)
+        .env("PLAYBOOK_SKIP_DOWNLOAD", "1")
         .env("PLAYBOOK_BIN_DIR", &bindir)
         .env("CLAUDE_HOME", home.join(".claude"))
         .env("HOME", &home)
@@ -138,6 +137,7 @@ fn project_field(c: &Case, project: &str, field: &str) -> Value {
 fn no_claude_json_is_a_clean_noop() {
     let c = run("trust-none", Trust::Ok, None);
     assert_eq!(c.rc, 0, "{}", c.log);
+    assert!(c.log.contains("Running playbook init"), "{}", c.log);
     assert!(!c.home.join(".claude.json").exists(), "file was created");
     assert!(fs::read_to_string(&c.record).unwrap().is_empty());
     let _ = &c.work;

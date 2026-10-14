@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The hook fire matrix. `install.sh --yes --skip-plugin` wires settings.json
+//! The hook fire matrix. `install.sh --yes` wires settings.json
 //! through the real `playbook init`. Every distinct hook name found there must
 //! have a case below that fires the installed binary on a real payload and
 //! checks the observable effect, so a hook that is wired but dead, or wired
@@ -69,11 +69,12 @@ fn installed() -> Fire {
     let home = work.dir("home");
     let out = Command::new("bash")
         .arg(repo_root().join("install.sh"))
-        .args(["--yes", "--skip-plugin"])
+        .arg("--yes")
         .env("PLAYBOOK_HEADLESS", "0")
         .env("HOME", &home)
         .env("CLAUDE_HOME", home.join(".claude"))
-        .env("PLAYBOOK_SRC", repo_root())
+        .env_remove("CLAUDE_PLUGIN_ROOT")
+        .env("PLAYBOOK_SKIP_DOWNLOAD", "1")
         .env("PLAYBOOK_BIN_DIR", &bin)
         .output()
         .unwrap();

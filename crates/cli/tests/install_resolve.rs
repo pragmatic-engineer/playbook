@@ -39,14 +39,14 @@ impl Ctx {
         )
     }
 
-    /// Run `install.sh --no-setup` in a fresh home with `envs`. Returns
+    /// Run `install.sh --no-init` in a fresh home with `envs`. Returns
     /// (exit code, combined output, home, bin dir).
     fn install(&self, name: &str, envs: &[(&str, &str)]) -> (i32, String, PathBuf, PathBuf) {
         let home = self.work.dir(&format!("home-{name}"));
         let bindir = self.work.path(&format!("bin-{name}"));
         let mut cmd = Command::new("bash");
         cmd.arg(repo_root().join("install.sh"))
-            .arg("--no-setup")
+            .arg("--no-init")
             .env_remove("PLAYBOOK_REQUIRE_ATTESTATION")
             .env_remove("STUB_GH")
             .env_remove("GH_LOG")
@@ -80,11 +80,11 @@ impl Ctx {
 fn a_published_release_resolves_to_its_tag() {
     let c = Ctx::new("res-release");
     let (_, out, ..) = c.install("a", &[("STUB_CODE", "200"), ("STUB_BODY", RELEASE_BODY)]);
-    assert!(out.contains("refs/tags/v1.2.3"), "{out}");
+    assert!(out.contains("Installing release v1.2.3"), "{out}");
 }
 
 #[test]
-fn no_release_404_falls_back_to_main() {
+fn no_release_404_is_refused() {
     let c = Ctx::new("res-404");
     let (_, out, ..) = c.install(
         "a",
@@ -94,15 +94,15 @@ fn no_release_404_falls_back_to_main() {
         ],
     );
     assert!(
-        out.contains("refs/heads/main") && out.contains("published no release"),
+        out.contains("published no release") && out.contains("cannot be fetched"),
         "{out}"
     );
 }
 
 #[test]
-fn a_rate_limit_403_aborts_and_never_falls_back_to_main() {
+fn a_rate_limit_403_aborts_and_never_installs_anything() {
     let c = Ctx::new("res-403");
-    let (_, out, ..) = c.install(
+    let (rc, out, _, bindir) = c.install(
         "a",
         &[
             ("STUB_CODE", "403"),
@@ -110,29 +110,32 @@ fn a_rate_limit_403_aborts_and_never_falls_back_to_main() {
         ],
     );
     assert!(
-        !out.contains("refs/heads/main") && out.contains("HTTP 403"),
+        rc != 0 && !out.contains("Installing release") && out.contains("HTTP 403"),
         "{out}"
     );
+    assert!(!bindir.join("playbook").exists());
 }
 
 #[test]
-fn a_transport_failure_aborts_and_never_falls_back_to_main() {
+fn a_transport_failure_aborts_and_never_installs_anything() {
     let c = Ctx::new("res-transport");
-    let (_, out, ..) = c.install("a", &[("STUB_TRANSPORT_FAIL", "1")]);
+    let (rc, out, _, bindir) = c.install("a", &[("STUB_TRANSPORT_FAIL", "1")]);
     assert!(
-        !out.contains("refs/heads/main") && out.contains("HTTP 000"),
+        rc != 0 && !out.contains("Installing release") && out.contains("HTTP 000"),
         "{out}"
     );
+    assert!(!bindir.join("playbook").exists());
 }
 
 #[test]
-fn a_server_error_503_aborts_and_never_falls_back_to_main() {
+fn a_server_error_503_aborts_and_never_installs_anything() {
     let c = Ctx::new("res-503");
-    let (_, out, ..) = c.install("a", &[("STUB_CODE", "503"), ("STUB_BODY", "")]);
+    let (rc, out, _, bindir) = c.install("a", &[("STUB_CODE", "503"), ("STUB_BODY", "")]);
     assert!(
-        !out.contains("refs/heads/main") && out.contains("HTTP 503"),
+        rc != 0 && !out.contains("Installing release") && out.contains("HTTP 503"),
         "{out}"
     );
+    assert!(!bindir.join("playbook").exists());
 }
 
 #[test]
@@ -146,7 +149,7 @@ fn a_200_without_tag_name_refuses_to_guess() {
         ],
     );
     assert!(
-        !out.contains("refs/heads/main") && out.contains("no tag_name"),
+        !out.contains("Installing release") && out.contains("no tag_name"),
         "{out}"
     );
 }
@@ -308,7 +311,7 @@ fn without_shasum_or_sha256sum_it_stops_before_any_download() {
     let curl_log = c.work.path("no-cksum-curl.log");
     let out = Command::new("bash")
         .arg(repo_root().join("install.sh"))
-        .arg("--no-setup")
+        .arg("--no-init")
         .env("PATH", &dir)
         .env("CLAUDE_HOME", home.join(".claude"))
         .env("HOME", &home)
@@ -330,9 +333,9 @@ fn a_successful_install_places_the_binary_and_wires_path_once() {
     let (_, out, home, bindir) = c.good("a", &[]);
     // A second run must not add a second PATH line.
     let sums = format!("{}  {ASSET}", sha256_hex(GOOD_ASSET.as_bytes()));
-    let _ = Command::new("bash")
+    let second = Command::new("bash")
         .arg(repo_root().join("install.sh"))
-        .arg("--no-setup")
+        .arg("--no-init")
         .env("PATH", c.path())
         .env("CLAUDE_HOME", home.join(".claude"))
         .env("HOME", &home)
@@ -342,7 +345,9 @@ fn a_successful_install_places_the_binary_and_wires_path_once() {
         .env("STUB_BODY", RELEASE_BODY)
         .env("STUB_ASSET_BODY", GOOD_ASSET)
         .env("STUB_SUMS_BODY", sums)
-        .output();
+        .output()
+        .expect("bash spawns");
+    assert!(second.status.success(), "{}", both(&second));
     let bashrc = fs::read_to_string(home.join(".bashrc")).unwrap_or_default();
     let lines = bashrc
         .lines()

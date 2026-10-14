@@ -7,10 +7,8 @@
 //!
 //! A stub `curl` serves a fake release and a stub `uname` pins the platform,
 //! both ahead of the real tools on a scratch `PATH`, so the shipped functions
-//! run unmodified. Every install run exits non-zero after the binary is
-//! placed, because the stub serves no source tarball; the binary and its
-//! backup are written before that point, so installs are checked for their
-//! `Installed playbook` line instead of an exit status. `$HOME` and
+//! run unmodified. Every install runs with `--no-init`, so it ends once the
+//! binary is placed; installs are checked for their `Installed playbook` line. `$HOME` and
 //! `$PLAYBOOK_BIN_DIR` are scratch directories and every inherited
 //! `PLAYBOOK_*`, `CLAUDE_*`, `XDG_*` and `CI` variable is removed, so a
 //! developer's real install can never be read or modified.
@@ -158,7 +156,7 @@ impl Sandbox {
         ));
         let mut command = self.script_command("install.sh");
         command
-            .args(["--no-setup", "--skip-plugin"])
+            .arg("--no-init")
             .env(
                 "PATH",
                 std::env::join_paths(path).expect("PATH should join"),

@@ -4,13 +4,11 @@
 //! `install.sh` places the binary and one PATH marker per shell, hands the
 //! right flags to `playbook init`, and copes with a release binary older than
 //! the script. Removal is `playbook uninstall`, covered by tests/uninstall.rs.
-//! The script is sourced from `git archive HEAD` so untracked build output
-//! cannot leak in.
 
 #[path = "support/shell_fixture.rs"]
 mod fx;
 
-use fx::{archive_head, both, install_stubs, repo_root, sha256_hex, write_exec, Work};
+use fx::{both, install_stubs, repo_root, sha256_hex, write_exec, Work};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -20,9 +18,8 @@ const ASSET: &str = "playbook-1.2.3-x86_64-unknown-linux-musl";
 const GOOD_ASSET: &str = "#!/usr/bin/env bash\necho \"playbook 1.2.3\"\n";
 const MARKER: &str = "# playbook binary";
 
-/// Install through the stubbed network path (`--no-setup --skip-plugin`). The
-/// stub serves no source tarball, so the script dies after the binary and PATH
-/// work, which is all these scenarios look at.
+/// Install through the stubbed network path (`--no-init`), which ends once the
+/// binary and PATH work are done, all these scenarios look at.
 fn binary_install(work: &Work, stubs: &Path, home: &Path, bindir: &Path, shell: &str) {
     let sums = format!("{}  {ASSET}", sha256_hex(GOOD_ASSET.as_bytes()));
     let path = format!(
@@ -31,9 +28,9 @@ fn binary_install(work: &Work, stubs: &Path, home: &Path, bindir: &Path, shell: 
         std::env::var("PATH").unwrap_or_default()
     );
     let _ = work;
-    let _ = Command::new("bash")
+    let out = Command::new("bash")
         .arg(repo_root().join("install.sh"))
-        .args(["--no-setup", "--skip-plugin"])
+        .arg("--no-init")
         .env("PATH", path)
         .env("CLAUDE_HOME", home.join(".claude"))
         .env("HOME", home)
@@ -43,7 +40,17 @@ fn binary_install(work: &Work, stubs: &Path, home: &Path, bindir: &Path, shell: 
         .env("STUB_BODY", RELEASE_BODY)
         .env("STUB_ASSET_BODY", GOOD_ASSET)
         .env("STUB_SUMS_BODY", sums)
-        .output();
+        .output()
+        .expect("bash spawns");
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.status.success() && text.contains("Installed playbook"),
+        "{text}"
+    );
 }
 
 fn markers(file: &Path) -> usize {
@@ -133,17 +140,10 @@ fn fish_gets_a_conf_d_file_with_fish_add_path() {
     );
 }
 
-fn source_tree(work: &Work) -> Option<PathBuf> {
-    let src = work.path("src");
-    archive_head(&src)?;
-    Some(src)
-}
-
-/// Run the installer from the archived tree with a stub `playbook` in the
-/// bin dir (no network path).
+/// Run the installer with `PLAYBOOK_SKIP_DOWNLOAD=1` and a stub `playbook` in
+/// the bin dir (no network path).
 fn local_install(
     work: &Work,
-    src: &Path,
     stub_dir: &Path,
     flags: &[&str],
     tag: &str,
@@ -152,7 +152,7 @@ fn local_install(
     let out = Command::new("bash")
         .arg(repo_root().join("install.sh"))
         .args(flags)
-        .env("PLAYBOOK_SRC", src)
+        .env("PLAYBOOK_SKIP_DOWNLOAD", "1")
         .env("CLAUDE_HOME", home.join(".claude"))
         .env("HOME", &home)
         .env("PLAYBOOK_BIN_DIR", stub_dir)
@@ -165,9 +165,6 @@ fn local_install(
 #[test]
 fn install_succeeds_against_a_release_binary_that_predates_an_optional_init_flag() {
     let work = Work::new("bp-strict");
-    let Some(src) = source_tree(&work) else {
-        return;
-    };
     let stub = work.dir("strict-init-bin");
     write_exec(
         &stub.join("playbook"),
@@ -199,7 +196,7 @@ esac
 exit 0
 "#,
     );
-    let (rc, home, out) = local_install(&work, &src, &stub, &["--yes", "--skip-plugin"], "strict");
+    let (rc, home, out) = local_install(&work, &stub, &["--yes"], "strict");
     assert_eq!(rc, 0, "{out}");
     assert!(home.join(".claude/settings.json").exists(), "{out}");
 }
@@ -241,15 +238,11 @@ exit 0
 #[test]
 fn aliases_and_system_prompt_flags_are_forwarded_to_init() {
     let work = Work::new("bp-forward");
-    let Some(src) = source_tree(&work) else {
-        return;
-    };
     let (stub, argv) = recording_stub(&work);
     local_install(
         &work,
-        &src,
         &stub,
-        &["--yes", "--aliases", "--system-prompt", "--skip-plugin"],
+        &["--yes", "--aliases", "--system-prompt"],
         "fwd",
     );
     let got = fs::read_to_string(&argv).unwrap_or_default();
@@ -260,14 +253,42 @@ fn aliases_and_system_prompt_flags_are_forwarded_to_init() {
 #[test]
 fn binary_only_does_not_opt_in_to_the_launcher_or_system_prompt() {
     let work = Work::new("bp-binonly");
-    let Some(src) = source_tree(&work) else {
-        return;
-    };
     let (stub, argv) = recording_stub(&work);
-    local_install(&work, &src, &stub, &["--yes", "--binary-only"], "bo");
+    let (rc, _, log) = local_install(&work, &stub, &["--yes", "--binary-only"], "bo");
+    assert_eq!(rc, 0, "{log}");
+    assert!(log.contains("Running playbook init"), "{log}");
     let got = fs::read_to_string(&argv).unwrap_or_default();
     assert!(
         !got.contains("--aliases") && !got.contains("--system-prompt"),
         "init received: '{got}'"
+    );
+}
+
+#[test]
+fn flags_from_older_commands_are_accepted_and_ignored() {
+    let work = Work::new("bp-legacy");
+    let (stub, argv) = recording_stub(&work);
+    let flags = [
+        "--no-init",
+        "--skip-plugin",
+        "--no-setup",
+        "--skip-deps",
+        "--skip-shell",
+    ];
+    let (rc, _, log) = local_install(&work, &stub, &flags, "legacy");
+    assert_eq!(rc, 0, "{log}");
+    assert!(!argv.exists(), "init ran: {log}");
+}
+
+#[test]
+fn skills_only_is_refused_with_the_plugin_commands() {
+    let work = Work::new("bp-skills-only");
+    let (stub, _) = recording_stub(&work);
+    let (rc, _, log) = local_install(&work, &stub, &["--skills-only"], "so");
+    assert_ne!(rc, 0, "{log}");
+    assert!(log.contains("--skills-only is gone"), "{log}");
+    assert!(
+        log.contains("claude plugin install playbook@pragmatic-engineer"),
+        "{log}"
     );
 }
