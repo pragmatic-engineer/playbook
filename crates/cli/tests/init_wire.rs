@@ -3,9 +3,10 @@
 
 //! Integration tests for `playbook::init::wire`, the module that writes
 //! every hook Claude Code can invoke into `settings.json` as a bare
-//! `playbook hook <name>` command, retiring both `hooks/hooks.json` and the
-//! safety guards' legacy `~/.claude/hooks/<name>.sh` commands. Every entry
-//! `wire` manages, hooks and guards alike, is upserted unconditionally.
+//! `playbook hook <name>` command, retiring `hooks/hooks.json`. Every entry
+//! `wire` manages, hooks and guards alike, is upserted unconditionally. Only
+//! a command that is exactly `playbook hook <name>` is ours: a user's own
+//! script command is never rewritten.
 //!
 //! **Test isolation:** every test here operates on a fresh scratch directory
 //! under the OS temp dir (`scratch_settings_path`), never on a real
@@ -22,9 +23,9 @@
 //!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
 //!   `pre_existing_user_hook_entry_is_preserved_not_clobbered`
-//! - No command anywhere under `.hooks` points under `~/.claude/hooks/`
-//!   after wiring:
-//!   `no_hook_command_points_under_claude_hooks_dir_after_wiring`
+//! - Every guard gets its bare command, and a user's script command under
+//!   `~/.claude/hooks/` stays:
+//!   `every_guard_gets_its_bare_command_and_a_user_script_command_stays`
 //! - The bare-name form survives a write-then-read round trip:
 //!   `bare_name_form_survives_write_then_read_round_trip`
 //! - Backup is timestamped and taken only when a change actually lands:
@@ -32,9 +33,9 @@
 //! - Regression pin for the defect itself: every hook name wired in binary
 //!   form has a real (non-stub) Rust implementation behind it:
 //!   `every_hook_wired_in_binary_form_has_a_non_stub_implementation`
-//! - A pre-existing legacy `~/.claude/hooks/<name>.sh` guard command is
-//!   REPLACED by the bare form, not left to coexist as a duplicate entry:
-//!   `legacy_guard_entry_is_replaced_by_bare_form_not_duplicated`
+//! - A user command named like a guard script (`<name>.sh`, `<name>.py`) is
+//!   kept, and the bare form is added next to it:
+//!   `a_user_command_named_like_a_guard_script_is_kept_and_the_bare_form_is_added`
 
 use clap::ValueEnum;
 use playbook::init::wire::{wire, wire_at};
@@ -102,10 +103,9 @@ fn all_hook_commands(settings: &Value) -> Vec<String> {
     commands
 }
 
-/// A `settings.json` shaped like the one `settings.shared.json` ships and a
-/// real, unwired `~/.claude/settings.json` has today: the four safety guards
-/// wired directly with legacy `~/.claude/hooks/*.sh` paths, and none of the
-/// functional hooks, which `wire` adds.
+/// A `settings.json` with four guards wired directly with script paths under
+/// `~/.claude/hooks/*.sh`, which `wire` treats as the user's own commands, and
+/// none of the functional hooks, which `wire` adds.
 fn unwired_fixture() -> Value {
     json!({
         "$schema": "https://json.schemastore.org/claude-code-settings.json",
@@ -316,7 +316,7 @@ fn pre_existing_user_hook_entry_is_preserved_not_clobbered() {
 fn every_guard_gets_its_bare_command_and_a_user_script_command_stays() {
     // Arrange: a fixture whose guards are the user's own scripts under
     // ~/.claude/hooks/.
-    let path = scratch_settings_path("no-hooks-dir-paths");
+    let path = scratch_settings_path("guard-bare-and-user-script");
     write_json(&path, &unwired_fixture());
 
     // Act
@@ -518,8 +518,8 @@ fn a_user_command_named_like_a_guard_script_is_kept_and_the_bare_form_is_added()
     }
 }
 
-/// A rename must heal an install already wired to the OLD bare name, not
-/// just the ancient `.sh` path: `also_replaces` makes that possible.
+/// A rename must heal an install already wired to the OLD bare name:
+/// `also_replaces` makes that possible.
 #[test]
 fn renamed_guard_replaces_an_already_bare_old_name_not_orphan_it() {
     // Arrange: a settings.json already wired to the pre-rename bare form.
