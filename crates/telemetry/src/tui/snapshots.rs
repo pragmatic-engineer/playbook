@@ -677,6 +677,54 @@ fn the_agents_view_lists_cost_per_agent_and_the_telemetry_share() {
 }
 
 #[test]
+fn the_agents_view_falls_back_to_transcript_counts_with_a_label() {
+    let mut a = agents_app(false);
+    let data = a.data.as_mut().unwrap();
+    data.agents.from_transcripts = true;
+    data.agents.rows = vec![crate::aggregate::Group {
+        key: "Explore".into(),
+        messages: 7,
+        ..Default::default()
+    }];
+
+    let text = draw(&a, 100, 30);
+
+    assert!(text.contains("from transcripts"), "{text}");
+    assert!(text.contains("Explore"), "{text}");
+    assert!(!text.contains("Telemetry off"), "{text}");
+}
+
+#[test]
+fn the_agents_panel_names_the_fix_for_the_current_telemetry_state() {
+    let mut a = agents_app(false);
+    a.telemetry = Some(crate::telemetry_status::Mode::OffNoEndpoint);
+
+    let text = draw(&a, 140, 30);
+
+    assert!(text.contains("OTEL_EXPORTER_OTLP_ENDPOINT"), "{text}");
+}
+
+#[test]
+fn transcript_agents_sort_by_count_when_the_cost_column_is_the_sort() {
+    let mut a = agents_app(false);
+    let data = a.data.as_mut().unwrap();
+    data.agents.from_transcripts = true;
+    let g = |key: &str, n: u64| crate::aggregate::Group {
+        key: key.into(),
+        messages: n,
+        ..Default::default()
+    };
+    data.agents.rows = vec![g("alpha", 1), g("zulu", 9)];
+
+    let text = draw(&a, 100, 30);
+
+    let zulu = text.find("zulu").unwrap();
+    let alpha = text.find("alpha").unwrap();
+    assert!(zulu < alpha, "{text}");
+    assert!(text.contains("n/a"), "{text}");
+}
+
+#[test]
 fn the_agents_view_says_telemetry_is_off_when_there_are_no_rows() {
     let text = draw(&agents_app(false), 100, 30);
     assert!(text.contains("Telemetry off"), "{text}");

@@ -263,6 +263,8 @@ pub struct AgentView {
     pub rows: Vec<super::aggregate::Group>,
     /// Telemetry cost over the range, all agents.
     pub cost_usd: f64,
+    /// The rows are invocation counts read from transcripts, with no cost.
+    pub from_transcripts: bool,
 }
 
 impl AgentView {
@@ -287,8 +289,15 @@ impl AgentView {
 pub fn load_agents(conn: &Connection, range: Range, now: i64) -> Result<AgentView, String> {
     let (since, until) = window_seconds(range, now);
     let rows = super::telemetry_db::agent_groups(conn, since, until)?;
+    if rows.is_empty() {
+        return transcript_view(conn, crate::ToolKind::Agent, since, until);
+    }
     let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
-    Ok(AgentView { rows, cost_usd })
+    Ok(AgentView {
+        rows,
+        cost_usd,
+        from_transcripts: false,
+    })
 }
 
 /// The name Claude Code reports for a skill of a non official plugin.
@@ -308,8 +317,32 @@ pub fn load_skills(conn: &Connection, range: Range, now: i64) -> Result<AgentVie
             row.key = "plugin skills (names hidden)".to_string();
         }
     }
+    if rows.is_empty() {
+        return transcript_view(conn, crate::ToolKind::Skill, since, until);
+    }
     let cost_usd = rows.iter().map(|g| g.cost_usd).sum();
-    Ok(AgentView { rows, cost_usd })
+    Ok(AgentView {
+        rows,
+        cost_usd,
+        from_transcripts: false,
+    })
+}
+
+/// Invocation counts of `kind`  read from transcripts,
+/// the fallback when telemetry has no request in the range. Counts only,
+/// since a transcript does not say which agent paid for a request.
+fn transcript_view(
+    conn: &Connection,
+    kind: crate::ToolKind,
+    since: i64,
+    until: i64,
+) -> Result<AgentView, String> {
+    let rows = super::telemetry_db::invocation_groups(conn, kind, since, until)?;
+    Ok(AgentView {
+        rows,
+        cost_usd: 0.0,
+        from_transcripts: true,
+    })
 }
 
 /// Tool latency and errors, API errors and retries, and busy time from
@@ -964,5 +997,70 @@ mod tests {
         let v = load_health(&conn, Range::LastDays(30), NOW).unwrap();
         assert_eq!(v.now.tool_calls, 3);
         assert!(v.before.is_none() && v.tools_before.is_empty());
+    }
+
+    fn transcript_db(tag: &str) -> (Connection, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("pbtop-q-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = crate::db::open_db(&dir.join("usage.db")).unwrap();
+        for (id, kind, name) in [
+            ("1", crate::ToolKind::Agent, "Explore"),
+            ("2", crate::ToolKind::Agent, "Explore"),
+            ("3", crate::ToolKind::Skill, "plan"),
+        ] {
+            let e = crate::ToolInvocationEvent {
+                event_id: id.into(),
+                timestamp: NOW,
+                session_id: "s".into(),
+                account: "a".into(),
+                kind,
+                name: name.into(),
+            };
+            crate::db::insert_tool_event(&conn, &e).unwrap();
+        }
+        (conn, dir)
+    }
+
+    #[test]
+    fn agents_and_skills_fall_back_to_transcript_counts_when_telemetry_is_empty() {
+        let (conn, dir) = transcript_db("fallback");
+
+        let agents = load_agents(&conn, Range::All, NOW).unwrap();
+        let skills = load_skills(&conn, Range::All, NOW).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(agents.from_transcripts && skills.from_transcripts);
+        assert_eq!(agents.rows.len(), 1);
+        assert_eq!(agents.rows[0].messages, 2);
+        assert_eq!(skills.rows[0].key, "plan");
+        assert!(agents.cost_usd.abs() < 1e-9);
+    }
+
+    #[test]
+    fn telemetry_rows_win_over_the_transcript_fallback() {
+        let (conn, dir) = transcript_db("wins");
+        let r = crate::telemetry_db::TelemetryRequest {
+            session_id: "s".into(),
+            request_id: "r".into(),
+            timestamp: NOW,
+            model: "m".into(),
+            effort: String::new(),
+            agent_name: "reviewer".into(),
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            cost_usd: 0.5,
+            skill_name: String::new(),
+            duration_ms: 0,
+        };
+        crate::telemetry_db::insert_request(&conn, &r).unwrap();
+
+        let agents = load_agents(&conn, Range::All, NOW).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(!agents.from_transcripts);
+        assert_eq!(agents.rows[0].key, "reviewer");
     }
 }

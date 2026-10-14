@@ -362,7 +362,8 @@ pub fn load(conn: &Connection, range: Range, filter: &str, now: i64) -> Result<D
     data.agents = query::load_agents(conn, range, now)?;
     data.skills = query::load_skills(conn, range, now)?;
     data.health = query::load_health(conn, range, now)?;
-    data.telemetry_rows = !data.agents.is_empty() || !data.health.now.is_empty();
+    data.telemetry_rows =
+        (!data.agents.is_empty() && !data.agents.from_transcripts) || !data.health.now.is_empty();
     data.store = crate::db::usage_span(conn)?;
     Ok(data)
 }
