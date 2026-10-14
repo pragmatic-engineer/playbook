@@ -422,7 +422,7 @@ fn a_stacked_branch_without_the_key_in_the_scope_is_refused_with_the_fix() {
 
     assert!(!o.status.success());
     let e = err(&o);
-    assert!(e.contains("feat(PROJ-9): add retry"), "{e}");
+    assert!(e.contains("`feat(PROJ-9): add c`"), "{e}");
     assert!(e.contains("Nothing was committed"), "{e}");
     assert_eq!(git(&r.work, &["rev-parse", "HEAD"]), before);
 }
@@ -451,7 +451,7 @@ fn a_branch_that_is_not_stacked_only_warns_about_a_missing_key() {
 
     assert!(o.status.success(), "{}{}", out(&o), err(&o));
     assert!(
-        out(&o).contains("WARN: commit title `feat(sync): add c` must carry the ticket in its scope, for example feat(PROJ-9)"),
+        out(&o).contains("WARN: commit title `feat(sync): add c` must carry the ticket in its scope, for example `feat(PROJ-9): add c`"),
         "{}",
         out(&o)
     );
@@ -469,4 +469,106 @@ fn no_known_ticket_means_no_ticket_rule_even_when_stacked() {
     let o = r.pb(&["commit", "run"], "feat(sync): add c\n");
 
     assert!(o.status.success(), "{}{}", out(&o), err(&o));
+}
+
+#[test]
+fn the_key_comes_from_the_commits_this_branch_added_and_not_from_the_parent() {
+    let r = Repo::new("stack-own");
+    git(&r.work, &["checkout", "-q", "-b", "stack-parent"]);
+    r.stage("p.txt", "p\n");
+    assert!(r
+        .pb(&["commit", "run"], "feat(PROJ-8): add p\n")
+        .status
+        .success());
+    git(&r.work, &["checkout", "-q", "-b", "stack-child"]);
+    r.stage("c.txt", "c\n");
+
+    let o = r.pb(&["commit", "run"], "feat(PROJ-9): add c\n");
+
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+}
+
+#[test]
+fn a_key_found_in_the_branchs_own_commit_scopes_blocks_a_stacked_commit_without_it() {
+    let r = Repo::new("stack-scopes");
+    git(&r.work, &["checkout", "-q", "-b", "stack-parent"]);
+    r.stage("p.txt", "p\n");
+    assert!(r
+        .pb(&["commit", "run"], "feat(PROJ-8): add p\n")
+        .status
+        .success());
+    git(&r.work, &["checkout", "-q", "-b", "stack-child"]);
+    r.stage("c.txt", "c\n");
+    assert!(r
+        .pb(&["commit", "run"], "feat(PROJ-9): add c\n")
+        .status
+        .success());
+    r.stage("d.txt", "d\n");
+
+    let o = r.pb(&["commit", "run"], "feat(sync): add d\n");
+
+    assert!(!o.status.success());
+    assert!(err(&o).contains("`feat(PROJ-9): add d`"), "{}", err(&o));
+}
+
+#[test]
+fn an_amend_is_judged_without_the_commit_it_replaces() {
+    let r = Repo::new("stack-amend");
+    git(&r.work, &["checkout", "-q", "-b", "stack-parent"]);
+    r.stage("p.txt", "p\n");
+    assert!(r
+        .pb(&["commit", "run"], "feat(PROJ-8): add p\n")
+        .status
+        .success());
+    git(&r.work, &["checkout", "-q", "-b", "stack-child"]);
+    r.stage("c.txt", "c\n");
+    assert!(r
+        .pb(&["commit", "run"], "feat(PROJ-8): add c\n")
+        .status
+        .success());
+
+    let o = r.pb(&["commit", "run", "-a"], "feat(PROJ-9): add c\n");
+
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+}
+
+#[test]
+fn turning_the_scope_rule_off_lets_a_stacked_commit_through() {
+    let r = Repo::new("stack-off");
+    assert!(r
+        .pb(&["config", "set", "--global", "pr.rules.scope", "off"], "")
+        .status
+        .success());
+    git(&r.work, &["checkout", "-q", "-b", "stack-parent"]);
+    r.stage("p.txt", "p\n");
+    assert!(r
+        .pb(&["commit", "run"], "feat(PROJ-9): add p\n")
+        .status
+        .success());
+    git(&r.work, &["checkout", "-q", "-b", "PROJ-9-child"]);
+    r.stage("c.txt", "c\n");
+
+    let o = r.pb(&["commit", "run"], "feat(sync): add c\n");
+
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert!(!out(&o).contains("WARN"), "{}", out(&o));
+}
+
+#[test]
+fn the_scope_rule_set_to_block_refuses_a_branch_that_is_not_stacked() {
+    let r = Repo::new("scope-block");
+    assert!(r
+        .pb(
+            &["config", "set", "--global", "pr.rules.scope", "block"],
+            ""
+        )
+        .status
+        .success());
+    git(&r.work, &["checkout", "-q", "-b", "PROJ-9-solo"]);
+    r.stage("c.txt", "c\n");
+
+    let o = r.pb(&["commit", "run"], "feat(sync): add c\n");
+
+    assert!(!o.status.success());
+    assert!(err(&o).contains("`feat(PROJ-9): add c`"), "{}", err(&o));
 }
