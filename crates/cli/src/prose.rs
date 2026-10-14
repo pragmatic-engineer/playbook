@@ -21,11 +21,15 @@ pub struct Report {
 
 fn line_for(path: &Path, finding: &Finding, github: bool) -> String {
     if github {
+        let message = finding
+            .render()
+            .replace('%', "%25")
+            .replace('\r', "%0D")
+            .replace('\n', "%0A");
         format!(
-            "::warning file={},line={}::{}",
+            "::warning file={},line={}::{message}",
             path.display(),
-            finding.line,
-            finding.render()
+            finding.line
         )
     } else {
         format!(
@@ -100,6 +104,19 @@ mod tests {
 
         assert!(report.lines[0].starts_with("::warning file="));
         assert!(report.lines[0].contains(",line=1::"));
+    }
+
+    #[test]
+    fn a_newline_inside_a_snippet_does_not_split_an_annotation() {
+        let path = file(
+            "prose-nl",
+            "Not because it is slow.\nBecause it is wrong.\n",
+        );
+
+        let report = check(&[path], true).unwrap();
+
+        assert_eq!(report.lines.len(), 1, "{:?}", report.lines);
+        assert!(!report.lines[0].contains('\n'));
     }
 
     #[test]

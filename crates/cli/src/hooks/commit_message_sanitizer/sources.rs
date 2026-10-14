@@ -659,7 +659,11 @@ pub fn apply(
             Rule::Lint => Vec::new(),
         };
         let label = group.first().map(|&i| sources[i].label.as_str());
-        let lint = crate::common::prose_lint::lint(&text);
+        let lint = if super::lint_mode() == "off" {
+            Vec::new()
+        } else {
+            crate::common::prose_lint::lint(&text)
+        };
         findings.lint_hard |= crate::common::prose_lint::has_hard(&lint);
         findings.lint.extend(
             lint.iter()

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Removes AI attribution from the messages a Bash call writes: a commit, tag,
-//! merge or PR title and body. It never blocks.
+//! merge or PR title and body. Removing attribution never blocks.
 //!
 //! On PreToolUse, when a message changes, the hook hands Claude Code the same
 //! call with the message cleaned and no permission decision, so the normal
@@ -58,12 +58,8 @@ fn pre(payload: &Payload, command: &str, dir: &Path) {
     for repo in &git::git_use(command, dir).commit_dirs {
         state::record_head(payload, repo);
     }
-    let mut rewritten = engine::rewrite(command, dir);
+    let rewritten = engine::rewrite(command, dir);
     let mode = lint_mode();
-    if mode == "off" {
-        rewritten.findings.lint.clear();
-        rewritten.findings.lint_hard = false;
-    }
     if mode == "block" && rewritten.findings.lint_hard {
         emit_pre_deny(&lint_denial(&rewritten.findings.lint));
         return;
@@ -103,7 +99,12 @@ fn start_dir(payload: &Payload) -> PathBuf {
 }
 
 /// The `hooks.proseLint.mode` setting: `warn` (the default), `block` or `off`.
-fn lint_mode() -> String {
+pub(crate) fn lint_mode() -> String {
+    static MODE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    MODE.get_or_init(read_lint_mode).clone()
+}
+
+fn read_lint_mode() -> String {
     let home = crate::common::home_dir();
     let slug = crate::common::repo_slug();
     let slug = (!slug.is_empty()).then_some(slug);
@@ -113,10 +114,30 @@ fn lint_mode() -> String {
         .unwrap_or_else(|| "warn".to_string())
 }
 
+/// The most findings put in front of the model, so a long message cannot
+/// flood its context.
+const MAX_LINT_SHOWN: usize = 20;
+
+fn lint_list(lint: &[String]) -> String {
+    let mut text = lint
+        .iter()
+        .take(MAX_LINT_SHOWN)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if lint.len() > MAX_LINT_SHOWN {
+        text.push_str(&format!(
+            " And {} more: run `playbook prose check` on a file for the full list.",
+            lint.len() - MAX_LINT_SHOWN
+        ));
+    }
+    text
+}
+
 fn lint_denial(lint: &[String]) -> String {
     format!(
         "prose-lint blocked this call, since hooks.proseLint.mode is block. Fix the text and run it again: {}",
-        lint.join(" ")
+        lint_list(lint)
     )
 }
 
@@ -145,7 +166,7 @@ fn context(findings: &engine::Findings) -> Option<String> {
     if !findings.lint.is_empty() {
         parts.push(format!(
             "prose-lint found writing-style problems, so fix them in the text you write next time or amend it: {}",
-            findings.lint.join(" ")
+            lint_list(&findings.lint)
         ));
     }
     (!parts.is_empty()).then(|| parts.join(" "))

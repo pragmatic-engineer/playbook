@@ -12,8 +12,8 @@
 //!
 //! Text that is not prose is masked before matching: fenced code, inline code,
 //! URLs, file paths, quoted lines (`> `), shell prompt lines (`$ `), indented
-//! code and trailers. A pattern never spans two lines, so a finding always
-//! has one line number.
+//! code and `Signed-off-by` and `Co-authored-by` trailers. A finding is
+//! reported on the line where its text starts.
 
 use super::prose::BANNED;
 use super::re::static_regex;
@@ -125,7 +125,7 @@ pub const PATTERNS: &[Pattern] = &[
     ),
     p(
         Class::Jargon,
-        r"(?i)\bnavigat\w* (?:the )?(?:challenges?|uncertaint\w+|complexit\w+|landscape)\b|\bunpack(?:s|ed|ing)?\b|\blean(?:s|ed|ing)? into\b|\blandscape\b|game-changer|\bdouble down\b|\bdeep dive\b|\btake a step back\b|\bmoving forward\b|\bcircle back\b|\bon the same page\b",
+        r"(?i)\bnavigat\w* (?:the )?(?:challenges?|uncertaint\w+|complexit\w+|landscape)\b|\bunpack (?:this|that|what)\b|\blean(?:s|ed|ing)? into\b|game-changer|\bdouble down\b|\bdeep dive\b|\btake a step back\b|\bmoving forward\b|\bcircle back\b|\bon the same page\b",
     ),
     p(
         Class::FillerAdverb,
@@ -142,7 +142,7 @@ pub const PATTERNS: &[Pattern] = &[
     ),
     p(
         Class::BinaryContrast,
-        r"(?i)\bnot because\b[^\n]{1,80}?[.;]\s+because\b|\b(?:answer|question|problem) (?:isn.t|is not) [^.\n]{1,60}\.\s+(?:it.s|the \w+ is)|\bit feels like [^.\n]{1,60}\.\s+it.s actually\b|(?:^|[.!?]\s)not [^.\n]{1,40}\.\s+but\b|\bit.s not [^.\n]{1,60}[.;]\s+it.s\b|\bstops? being\b[^.\n]{1,50}\band starts? being\b|\bnot just\b[^.\n]{0,80}\bbut (?:also )?\b|\b(?:it|this|that)(?:.s| is| was) not (?:about )?[^.\n;,]{1,60}[,;]\s+(?:it|this|that)(?:.s| is| was)\b|\b(?:it|this|that) (?:isn.t|wasn.t) (?:about )?[^.\n;,]{1,60}[,;]\s+(?:it|this|that)(?:.s| is| was)\b",
+        r"(?i)\bnot because\b[^\n]{1,80}?[.;]\s+because\b|\b(?:answer|question|problem) (?:isn.t|is not) [^.\n]{1,60}\.\s+(?:it.s|the \w+ is)|\bit feels like [^.\n]{1,60}\.\s+it.s actually\b|(?:^|[.!?]\s)not [^.\n]{1,40}\.\s+but\b|\bit.s not [^.\n]{1,60}[.;]\s+it.s\b|\bstops? being\b[^.\n]{1,50}\band starts? being\b|\bnot just\b[^.\n]{0,80}\bbut (?:also )?\b|(?:^|[.!?]\s)(?:it|this|that)(?:.s| is| was) not (?:about )?[^.\n;,]{1,60}[,;]\s+(?:it|this|that)(?:.s| is| was)\b|(?:^|[.!?]\s)(?:it|this|that) (?:isn.t|wasn.t) (?:about )?[^.\n;,]{1,60}[,;]\s+(?:it|this|that)(?:.s| is| was)\b",
     ),
     p(
         Class::DramaticFragmentation,
@@ -150,7 +150,7 @@ pub const PATTERNS: &[Pattern] = &[
     ),
     p(
         Class::DramaticFragmentation,
-        r"(?:^|\.\s)[A-Z][\w']*(?: [\w']+){0,2}\.\s+[A-Z][\w']*(?: [\w']+){0,2}\.\s+[A-Z][\w']*(?: [\w']+){0,2}\.",
+        r"(?:^|[.!?][ \t])[A-Z][\w']*\.[ \t]+[A-Z][\w']*\.[ \t]+[A-Z][\w']*\.",
     ),
     p(
         Class::RhetoricalSetup,
@@ -269,10 +269,14 @@ fn mask(text: &str) -> String {
 /// Every problem in `text`, in line order. Empty when the text is clean.
 pub fn lint(text: &str) -> Vec<Finding> {
     let masked = mask(text);
+    let newlines: Vec<usize> = masked.match_indices('\n').map(|(i, _)| i).collect();
     let mut found: Vec<Finding> = Vec::new();
     for entry in TABLE.iter() {
         for m in entry.regex.find_iter(&masked) {
-            let line = masked[..m.start()].matches('\n').count() + 1;
+            // A pattern can start on the separator before its words, so the
+            // line is where the first word starts.
+            let at = m.start() + m.as_str().find(char::is_alphanumeric).unwrap_or(0);
+            let line = newlines.partition_point(|&n| n < at) + 1;
             let snippet: String = m.as_str().trim().chars().take(48).collect();
             found.push(Finding {
                 line,
@@ -402,10 +406,41 @@ mod tests {
     }
 
     #[test]
-    fn stacked_short_sentences_are_dramatic_fragmentation() {
+    fn stacked_one_word_sentences_are_dramatic_fragmentation() {
         let text = "Speed. Quality. Cost. Pick two.";
+        let phrase = "The tool works. That's it. That's the fix.";
 
         assert!(classes(text).contains(&Class::DramaticFragmentation));
+        assert!(classes(phrase).contains(&Class::DramaticFragmentation));
+    }
+
+    #[test]
+    fn short_imperative_sentences_are_not_dramatic_fragmentation() {
+        let text = "Add the flag. Wire it up. Update the docs.";
+
+        assert!(!classes(text).contains(&Class::DramaticFragmentation));
+    }
+
+    #[test]
+    fn a_conditional_with_a_comma_is_not_a_binary_contrast() {
+        let text = "If it is not set, it is read from the environment.";
+
+        assert!(
+            !classes(text).contains(&Class::BinaryContrast),
+            "{:?}",
+            lint(text)
+        );
+    }
+
+    #[test]
+    fn a_finding_is_reported_on_the_line_where_its_words_start() {
+        let so = "Done.\n\nSo we changed the order.";
+        let look = "The lock is held.\nLook, it is wrong.";
+
+        let (a, b) = (lint(so), lint(look));
+
+        assert_eq!(a[0].line, 3);
+        assert_eq!(b[0].line, 2);
     }
 
     #[test]
@@ -455,8 +490,7 @@ mod tests {
 
         let found = lint(text);
 
-        assert_eq!(found.len(), 2);
-        assert!(found.iter().all(|f| !f.class.hard()));
+        assert_eq!(classes(text), vec![Class::AbsoluteWord, Class::Intensifier]);
         assert!(!has_hard(&found));
     }
 

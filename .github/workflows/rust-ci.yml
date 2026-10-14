@@ -230,7 +230,7 @@ jobs:
       # Warn-only for now: the findings show as annotations and never fail the
       # job. `--strict` would fail it on a hard finding.
       - name: Check the docs prose
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: needs.changes.outputs.docs_only != 'true' && runner.os == 'Linux'
         continue-on-error: true
         run: ./target/debug/playbook prose check docs/adr/*.md
 
@@ -323,6 +323,12 @@ jobs:
 
       - name: cargo test (doc-reading tests only)
         run: cargo test -p playbook --test reference_docs
+
+      # Warn-only, like the same check in the build lane: an ADR-only change
+      # takes this lane, so it needs the check too.
+      - name: Check the docs prose
+        continue-on-error: true
+        run: cargo run -q -p playbook -- prose check docs/adr/*.md
 
   # release.yml builds five targets, but nothing else ever compiled for
   # Windows, so `std::os::unix` reached the lib unnoticed and every Windows

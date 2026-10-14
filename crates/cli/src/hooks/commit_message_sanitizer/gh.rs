@@ -32,27 +32,13 @@ const PR_WRITE: Spec = Spec {
     other_long: &[],
     abbreviate: false,
 };
+/// `gh pr comment` and `gh issue comment`: `-b`, `-F` and `-R` take a value,
+/// the rest are switches.
 const COMMENT_WRITE: Spec = Spec {
-    short_values: "tbFaBHlmprRT",
+    short_values: "bFR",
     short_attached: "",
-    long_values: &[
-        "title",
-        "body",
-        "body-file",
-        "assignee",
-        "base",
-        "head",
-        "label",
-        "milestone",
-        "project",
-        "reviewer",
-        "repo",
-        "template",
-    ],
+    long_values: &["body", "body-file", "repo"],
     long_flags: &[
-        "approve",
-        "comment",
-        "request-changes",
         "edit-last",
         "delete-last",
         "create-if-none",
@@ -60,6 +46,15 @@ const COMMENT_WRITE: Spec = Spec {
         "editor",
         "web",
     ],
+    other_long: &[],
+    abbreviate: false,
+};
+/// `gh pr review`: `-a`, `-c` and `-r` are switches here, not values.
+const REVIEW_WRITE: Spec = Spec {
+    short_values: "bFR",
+    short_attached: "",
+    long_values: &["body", "body-file", "repo"],
+    long_flags: &["approve", "comment", "request-changes"],
     other_long: &[],
     abbreviate: false,
 };
@@ -97,7 +92,7 @@ pub fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
             verb.as_str(),
             "create" | "new" | "edit" | "comment" | "review"
         ) {
-            lint_text(call, rest, plan, findings);
+            lint_text(call, rest, verb, plan, findings);
         }
         return;
     }
@@ -137,9 +132,14 @@ pub fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
 }
 
 /// Lints the title and body of an issue or a comment. Nothing is rewritten.
-fn lint_text(call: &Call, rest: usize, plan: &mut Plan, findings: &mut Findings) {
+fn lint_text(call: &Call, rest: usize, verb: &str, plan: &mut Plan, findings: &mut Findings) {
     let words = &call.cmd().words;
-    let opts = COMMENT_WRITE.scan(&words[rest..]);
+    let spec = match verb {
+        "review" => &REVIEW_WRITE,
+        "comment" => &COMMENT_WRITE,
+        _ => &PR_WRITE,
+    };
+    let opts = spec.scan(&words[rest..]);
     let title = text_sources(call, rest, &opts, &["t", "title"], "the title", findings);
     let body = text_sources(
         call,

@@ -1520,22 +1520,47 @@ fn pr_and_issue_comments_are_linted_but_never_rewritten() {
 }
 
 #[test]
-fn block_mode_denies_a_hard_finding_and_off_mode_stays_silent() {
+fn block_mode_denies_a_hard_finding() {
     let lab = Lab::new("prose-lint-block");
-    let command = "gh pr comment 3 --body 'Let that sink in.'";
-
     lab.write_global_config(r#"{"hooks":{"proseLint":{"mode":"block"}}}"#);
-    let blocked = lab.hook(command);
-    let off = Lab::new("prose-lint-off");
-    off.write_global_config(r#"{"hooks":{"proseLint":{"mode":"off"}}}"#);
-    let silent = off.hook(command);
+
+    let out = lab.hook("gh pr comment 3 --body 'Let that sink in.'");
+
+    assert!(out.contains("\"permissionDecision\":\"deny\""), "{out}");
+    assert!(out.contains("prose-lint blocked"), "{out}");
+}
+
+#[test]
+fn off_mode_stays_silent() {
+    let lab = Lab::new("prose-lint-off");
+    lab.write_global_config(r#"{"hooks":{"proseLint":{"mode":"off"}}}"#);
+
+    let out = lab.hook("gh pr comment 3 --body 'Let that sink in.'");
+
+    assert!(out.trim().is_empty(), "{out}");
+}
+
+#[test]
+fn pr_bodies_and_tag_messages_are_linted() {
+    let lab = Lab::new("prose-lint-pr-body");
+
+    let pr = lab.hook("gh pr create --title t --body 'Let that sink in.'");
+    let tag = lab.hook("git tag -a v1 -m 'Let that sink in.'");
 
     assert!(
-        blocked.contains("\"permissionDecision\":\"deny\""),
-        "{blocked}"
+        context_of(&pr).contains("the PR body line 1: emphasis crutch"),
+        "{pr}"
     );
-    assert!(blocked.contains("prose-lint blocked"), "{blocked}");
-    assert!(silent.trim().is_empty(), "{silent}");
+    assert!(context_of(&tag).contains("emphasis crutch"), "{tag}");
+}
+
+#[test]
+fn a_review_with_request_changes_switch_still_finds_its_body() {
+    let lab = Lab::new("prose-lint-review");
+
+    let out = lab.hook("gh pr review 12 -r -b 'Let that sink in.'");
+
+    assert!(context_of(&out).contains("emphasis crutch"), "{out}");
 }
 
 #[test]
