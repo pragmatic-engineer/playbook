@@ -20,7 +20,6 @@ pub const KNOWN_KEYS: &[&str] = &[
     "pr.rules.issue",
     "pr.rules.ticketLine",
     "pr.rules.scope",
-    "pr.rules.prose",
     "pr.bodyMaxChars",
     "pr.ticketPatterns",
     "worktreeCleanup.enabled",
@@ -105,7 +104,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "commit.signOff" => Some(Value::Bool(true)),
         "pr.draft" => Some(Value::Bool(true)),
         "pr.rules.template" | "pr.rules.ticketLine" => Some(Value::String("block".to_string())),
-        "pr.rules.length" | "pr.rules.issue" | "pr.rules.scope" | "pr.rules.prose" => {
+        "pr.rules.length" | "pr.rules.issue" | "pr.rules.scope" => {
             Some(Value::String("warn".to_string()))
         }
         "pr.bodyMaxChars" => Some(Value::Number(1200.into())),
@@ -180,8 +179,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         | "pr.rules.length"
         | "pr.rules.issue"
         | "pr.rules.ticketLine"
-        | "pr.rules.scope"
-        | "pr.rules.prose" => Some(&["off", "warn", "block"]),
+        | "pr.rules.scope" => Some(&["off", "warn", "block"]),
         _ => None,
     }
 }

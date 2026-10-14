@@ -35,8 +35,7 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `pr.rules.length` | `warn` | `off`, `warn`, `block` | The PR body stays under `pr.bodyMaxChars`. |
 | `pr.rules.issue` | `warn` | `off`, `warn`, `block` | When `--issue` or the branch names a GitHub issue, the body needs `Closes #N` or `Refs #N`. |
 | `pr.rules.ticketLine` | `block` | `off`, `warn`, `block` | When a ticket key is known, the first body line carries it. |
-| `pr.rules.scope` | `warn` | `off`, `warn`, `block` | When a ticket key is known, the PR title and every commit title carry it in the scope, as in `feat(PROJ-123): add retry`. At `pr create`, a PR that targets a non-default branch (a stack) blocks unless the rule is `off`; at commit time the rule only warns. `playbook pr create`, `playbook deliver` and `playbook commit run` apply the rules. |
-| `pr.rules.prose` | `warn` | `off`, `warn`, `block` | Runs the writing-rules lint over the PR body. |
+| `pr.rules.scope` | `warn` | `off`, `warn`, `block` | When a ticket key is known, the PR title and every commit title carry it in the scope, as in `feat(PROJ-123): add retry`. On a stacked branch (built on another remote branch, or a PR that targets a non-default branch) a miss blocks at `commit run`, `deliver` and `pr create` unless the rule is `off`. Otherwise this level decides. The PR body prose lint follows `hooks.proseLint.mode`. |
 | `pr.bodyMaxChars` | `1200` | a whole number, 1 or more | The body length cap. The last 100 merged bodies had a median of 1145 characters and a p90 of 1907. |
 | `pr.ticketPatterns` | `["[A-Z][A-Z0-9]+-[0-9]+"]` | a list of regexes | The accepted ticket key shapes. |
 | `worktreeCleanup.enabled` | `true` | `true`, `false` | Lets the worktree sweep remove worktrees whose work has landed. Turn it off to keep every worktree. |

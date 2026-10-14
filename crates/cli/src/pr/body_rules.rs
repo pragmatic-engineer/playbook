@@ -99,7 +99,7 @@ impl Rules {
         rules.issue = level("pr.rules.issue", rules.issue);
         rules.ticket_line = level("pr.rules.ticketLine", rules.ticket_line);
         rules.scope = level("pr.rules.scope", rules.scope);
-        rules.prose = level("pr.rules.prose", rules.prose);
+        rules.prose = level("hooks.proseLint.mode", rules.prose);
         if let Some(n) = get("pr.bodyMaxChars").and_then(|v| v.as_u64()) {
             if n > 0 {
                 rules.max_chars = usize::try_from(n).unwrap_or(DEFAULT_MAX_CHARS);
@@ -389,6 +389,16 @@ pub fn check_body(body: &str, rules: &Rules, ctx: &Context) -> Findings {
     out
 }
 
+/// `title` with `ticket` as its scope, or an example title when `title` is
+/// not a conventional one.
+fn with_ticket_scope(title: &str, ticket: &str) -> String {
+    let head = static_regex(r"^(\w+)(?:\([^)]*\))?(!?):\s*(.+)$");
+    match head.captures(title) {
+        Some(c) => format!("{}({ticket}){}: {}", &c[1], &c[2], &c[3]),
+        None => format!("feat({ticket}): add retry to the sync job"),
+    }
+}
+
 /// Checks that the conventional scope of a PR title or commit title carries
 /// the ticket. Stacked work always blocks.
 pub fn check_scope(label: &str, title: &str, rules: &Rules, ctx: &Context) -> Findings {
@@ -409,7 +419,10 @@ pub fn check_scope(label: &str, title: &str, rules: &Rules, ctx: &Context) -> Fi
         };
         out.add(
             level,
-            format!("{label} must carry the ticket in its scope, for example feat({ticket}): add retry to the sync job"),
+            format!(
+                "{label} must carry the ticket in its scope, for example `{}`",
+                with_ticket_scope(title, ticket)
+            ),
         );
     }
     out

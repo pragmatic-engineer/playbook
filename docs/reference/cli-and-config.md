@@ -24,7 +24,6 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `pr.rules.issue` | `warn` | `off`, `warn`, `block` |
 | `pr.rules.ticketLine` | `block` | `off`, `warn`, `block` |
 | `pr.rules.scope` | `warn` | `off`, `warn`, `block` |
-| `pr.rules.prose` | `warn` | `off`, `warn`, `block` |
 | `pr.bodyMaxChars` | `1200` | a number, see the config keys guide for the range |
 | `pr.ticketPatterns` | `["[A-Z][A-Z0-9]+-[0-9]+"]` | see the config keys guide |
 | `worktreeCleanup.enabled` | `true` | `true`, `false` |

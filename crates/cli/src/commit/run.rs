@@ -102,29 +102,90 @@ fn show(out: &std::process::Output) -> String {
     t.trim_end().to_string()
 }
 
+/// The default branch as a remote ref: `origin/HEAD`, else `origin/main` or
+/// `origin/master`.
+fn default_ref(dir: &Path) -> Option<String> {
+    git_text(
+        dir,
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    )
+    .filter(|r| !r.is_empty())
+    .or_else(|| base_ref(dir).map(str::to_string))
+}
+
+/// A remote branch the current one is built on: an ancestor of HEAD that the
+/// default branch does not contain yet. That is what a stacked PR is.
+fn stack_parent(dir: &Path, branch: &str, default: &str) -> Option<String> {
+    let own = format!("origin/{branch}");
+    let merged = git_text(
+        dir,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "--merged=HEAD",
+            &format!("--no-merged={default}"),
+            "refs/remotes/origin",
+        ],
+    )
+    .unwrap_or_default();
+    merged
+        .lines()
+        .find(|r| r.starts_with("origin/") && !r.ends_with("/HEAD") && *r != default && **r != *own)
+        .map(str::to_string)
+}
+
 /// Checks that the commit title carries the branch's ticket in its scope.
-/// The ticket comes from the branch name only. A block is the `Err`; a warning
-/// is returned to print. Stacked work is enforced at `pr create`.
-fn scope_findings(branch: &str, message: &str) -> Result<Option<String>, String> {
-    use crate::pr::body_rules::{check_scope, detect_ticket, Context, Rules};
+/// The ticket comes from the branch name, then the scopes of the commits
+/// this branch added (not the parent's, and not the commit being amended).
+/// A stacked branch blocks, with the exact fix, before anything is
+/// committed; otherwise the rule's level decides. `Err` is a block, `Ok` an
+/// optional warning to print.
+fn scope_findings(
+    dir: &Path,
+    branch: &str,
+    message: &str,
+    amend: bool,
+) -> Result<Option<String>, String> {
+    use crate::pr::body_rules::{detect_ticket, enforce, Input, Rules};
     let slug = crate::common::repo_slug();
     let rules = Rules::load(
         &crate::common::home_dir(),
         (!slug.is_empty()).then_some(slug.as_str()),
     );
-    let ctx = Context {
-        ticket: detect_ticket(None, branch, &[], &rules.patterns),
-        ..Context::default()
+    let default = default_ref(dir);
+    let parent = default
+        .as_deref()
+        .and_then(|d| stack_parent(dir, branch, d));
+    let tip = if amend { "HEAD~1" } else { "HEAD" };
+    let mut log = vec![
+        "log".to_string(),
+        tip.to_string(),
+        "--format=%s".to_string(),
+    ];
+    log.push("--not".to_string());
+    log.extend(default.iter().chain(parent.iter()).cloned());
+    let log: Vec<&str> = log.iter().map(String::as_str).collect();
+    let prior: Vec<String> = git_text(dir, &log)
+        .map(|out| out.lines().map(str::to_string).collect())
+        .unwrap_or_default();
+    let ticket = detect_ticket(None, branch, &prior, &rules.patterns);
+    let title = message.lines().next().unwrap_or("").trim().to_string();
+    let input = Input {
+        title: None,
+        body: None,
+        branch,
+        subjects: std::slice::from_ref(&title),
+        stacked: ticket.is_some() && parent.is_some(),
+        ticket_arg: ticket.as_deref(),
+        issue_arg: None,
     };
-    let title = message.lines().next().unwrap_or("").trim();
-    let found = check_scope("commit title", title, &rules, &ctx);
-    if !found.blocks.is_empty() {
-        return Err(format!(
-            "{}\nNothing was committed.",
-            found.blocks.join("\n")
-        ));
+    match enforce(&input, &rules) {
+        Ok(warns) => Ok(warns.first().map(|w| format!("WARN: {w}"))),
+        Err(blocks) => Err(format!(
+            "{}\nFix the first line of the message and run again. Nothing was committed.",
+            blocks.join("\n")
+        )),
     }
-    Ok(found.warns.first().map(|w| format!("WARN: {w}")))
 }
 
 /// Commit, rebase when behind, push. `Ok` is the text to print, `Err` the
@@ -150,7 +211,7 @@ pub fn run(
         }
     }
 
-    if let Some(warning) = scope_findings(&branch, &message)? {
+    if let Some(warning) = scope_findings(dir, &branch, &message, opts.amend)? {
         log.push(warning);
     }
 
