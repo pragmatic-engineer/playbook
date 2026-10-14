@@ -99,7 +99,7 @@ impl Rules {
         rules.issue = level("pr.rules.issue", rules.issue);
         rules.ticket_line = level("pr.rules.ticketLine", rules.ticket_line);
         rules.scope = level("pr.rules.scope", rules.scope);
-        rules.prose = level("pr.rules.prose", rules.prose);
+        rules.prose = level("hooks.proseLint.mode", rules.prose);
         if let Some(n) = get("pr.bodyMaxChars").and_then(|v| v.as_u64()) {
             if n > 0 {
                 rules.max_chars = usize::try_from(n).unwrap_or(DEFAULT_MAX_CHARS);

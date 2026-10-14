@@ -406,3 +406,67 @@ fn run_skips_the_prose_check_on_request() {
     );
     assert!(o.status.success(), "{}{}", out(&o), err(&o));
 }
+
+#[test]
+fn a_stacked_branch_without_the_key_in_the_scope_is_refused_with_the_fix() {
+    let r = Repo::new("stack-block");
+    git(&r.work, &["checkout", "-q", "-b", "stack-parent"]);
+    r.stage("p.txt", "p\n");
+    let first = r.pb(&["commit", "run"], "feat(PROJ-9): add p\n");
+    assert!(first.status.success(), "{}{}", out(&first), err(&first));
+    git(&r.work, &["checkout", "-q", "-b", "PROJ-9-child"]);
+    r.stage("c.txt", "c\n");
+    let before = git(&r.work, &["rev-parse", "HEAD"]);
+
+    let o = r.pb(&["commit", "run"], "feat(sync): add c\n");
+
+    assert!(!o.status.success());
+    let e = err(&o);
+    assert!(e.contains("feat(PROJ-9): add retry"), "{e}");
+    assert!(e.contains("Nothing was committed"), "{e}");
+    assert_eq!(git(&r.work, &["rev-parse", "HEAD"]), before);
+}
+
+#[test]
+fn a_stacked_branch_with_the_key_in_the_scope_commits() {
+    let r = Repo::new("stack-ok");
+    git(&r.work, &["checkout", "-q", "-b", "stack-parent"]);
+    r.stage("p.txt", "p\n");
+    r.pb(&["commit", "run"], "feat(PROJ-9): add p\n");
+    git(&r.work, &["checkout", "-q", "-b", "PROJ-9-child"]);
+    r.stage("c.txt", "c\n");
+
+    let o = r.pb(&["commit", "run"], "feat(PROJ-9): add c\n");
+
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+}
+
+#[test]
+fn a_branch_that_is_not_stacked_only_warns_about_a_missing_key() {
+    let r = Repo::new("stack-warn");
+    git(&r.work, &["checkout", "-q", "-b", "PROJ-9-solo"]);
+    r.stage("c.txt", "c\n");
+
+    let o = r.pb(&["commit", "run"], "feat(sync): add c\n");
+
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert!(
+        out(&o).contains("WARN: commit title `feat(sync): add c` must carry the ticket in its scope, for example feat(PROJ-9)"),
+        "{}",
+        out(&o)
+    );
+}
+
+#[test]
+fn no_known_ticket_means_no_ticket_rule_even_when_stacked() {
+    let r = Repo::new("stack-none");
+    git(&r.work, &["checkout", "-q", "-b", "stack-parent"]);
+    r.stage("p.txt", "p\n");
+    r.pb(&["commit", "run"], "feat(sync): add p\n");
+    git(&r.work, &["checkout", "-q", "-b", "stack-child"]);
+    r.stage("c.txt", "c\n");
+
+    let o = r.pb(&["commit", "run"], "feat(sync): add c\n");
+
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+}
