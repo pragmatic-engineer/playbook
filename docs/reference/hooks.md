@@ -38,7 +38,7 @@ A hook that fails or cannot read its input allows the call. Only the hooks marke
 | `Stop` | none | `playbook hook session-clean-exit` | Records that the session ended cleanly after each turn, so the next start can spot a crash. | Never blocks. | Writes `last-clean-ts` in the session directory and may queue an auto-learn entry under `runtime/to-learn/`. | `AUTO_LEARN_NUDGE=0` stops the queue entry. |
 | `SessionEnd` | none | `playbook hook session-clean-exit` | Writes the clean-exit marker when the session truly ends. | Never blocks. | Writes `clean-exit` in the session directory. Reads `edit-count`. | `AUTO_LEARN_NUDGE=0` stops the queue entry. |
 | `PreCompact` | none | `playbook hook precompact-warn` | Warns you that the context is about to be compacted and logs the event. | Warns only. Never blocks. | Appends a timestamp line to `~/.config/playbook/runtime/compactions.log`. | Entry only. |
-| `SessionStart` | none | `playbook hook migration-check` | Tells you to re-run `playbook init` when a plugin update arrived without it. Silent once settings are wired. | Shows a warning. Never blocks. | Reads `~/.claude/settings.json`. Writes nothing. | Disable or remove the plugin. |
+| `SessionStart` | none | `playbook hook migration-check` | Tells you to re-run `playbook init` when a plugin update arrived without it. Silent once settings are wired. | Shows a warning. Never blocks. | Reads `~/.claude/settings.json`. Writes nothing. | Entry only. |
 
 ## Usage tracking and auto mode
 
@@ -75,9 +75,9 @@ The usage store is filled by `playbook usage` itself, by the `usage-warm` hook i
 
 ## Worktree
 
-These two come from the plugin's `hooks/hooks.json`, not from `settings.json`. They exist only while the plugin is installed. `playbook init` does not wire them. The `migration-check` hook in Session lifecycle comes from the plugin too.
+`playbook init` writes these two into `settings.json` like every other hook.
 
 | Event | Matcher | Command | What it does | Can block or change | Reads and writes | Turn off |
 | :- | :- | :- | :- | :- | :- | :- |
-| `WorktreeCreate` | none | `playbook hook worktree-create` | Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude` and keeps `origin/HEAD` at most a day old. | Replaces Claude Code's default worktree creation. | Runs git in your repo. Writes the new worktree and a refresh stamp inside the git directory. | Disable or remove the plugin. |
-| `WorktreeRemove` | none | `playbook hook worktree-remove` | Removes a worktree only when nothing would be lost. Dirty trees and unpublished commits keep it; squash-merged branches count as published. | Never forces a removal. | Runs git in your repo. | Disable or remove the plugin. |
+| `WorktreeCreate` | none | `playbook hook worktree-create` | Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude` and keeps `origin/HEAD` at most a day old. | Replaces Claude Code's default worktree creation. | Runs git in your repo. Writes the new worktree and a refresh stamp inside the git directory. | Entry only. |
+| `WorktreeRemove` | none | `playbook hook worktree-remove` | Removes a worktree only when nothing would be lost. Dirty trees and unpublished commits keep it; squash-merged branches count as published. | Never forces a removal. | Runs git in your repo. | Entry only. |

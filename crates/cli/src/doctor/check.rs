@@ -107,7 +107,7 @@ const PROBES: [Probe; 14] = [
     worktree_rows,
     migration_rows,
     data_rows,
-    plugin_only_rows,
+    hooks_rows,
     atlassian_rows,
     old_launcher_rows,
 ];
@@ -624,19 +624,111 @@ fn migration_rows(env: &Env) -> Vec<Row> {
         .collect()
 }
 
-/// A `settings.json` with no playbook hooks means a plugin-only install: the
-/// binary runs this check but nothing is wired. One row names it and gives the
-/// single fix. (With no binary at all, commands/doctor.md prints the message.)
-fn plugin_only_rows(env: &Env) -> Vec<Row> {
-    if crate::hooks::migration_check::is_wired(&env.settings()) {
-        return Vec::new();
+/// The hooks `playbook init` writes into `settings.json`: present, current,
+/// known to the binary on PATH, and reachable the way Claude Code reaches them.
+/// Hook commands are the bare `playbook hook <name>`, so the last probe runs a
+/// login shell with a minimal PATH, the way a GUI-launched Claude Code starts
+/// its commands, and asks it where `playbook` is. None of these rows fails:
+/// the binary and its hooks are optional.
+fn hooks_rows(env: &Env) -> Vec<Row> {
+    use crate::init::wire::{audit, wired_hooks};
+    let total = wired_hooks().count();
+    let found = audit(&env.settings());
+    let mut rows = Vec::new();
+    if found.present == 0 {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                "playbook hooks are not in settings.json, so the guards and worktree hooks do not run",
+            )
+            .hint("run: playbook init"),
+        );
+    } else if !found.missing.is_empty() {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                format!(
+                    "{} of {total} playbook hooks are missing from settings.json: {}",
+                    found.missing.len(),
+                    found.missing.join(", ")
+                ),
+            )
+            .hint("run: playbook init"),
+        );
+    } else {
+        rows.push(Row::new(
+            "-",
+            Level::Pass,
+            format!("playbook hooks in settings.json ({total} of {total})"),
+        ));
     }
-    vec![Row::new(
-        "-",
-        Level::Warn,
-        "plugin only: playbook hooks and guards are not wired in settings.json, so they do not run",
-    )
-    .hint("run /playbook:setup")]
+    for cmd in &found.stale {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                format!("settings.json has a hook the binary no longer writes: {cmd}"),
+            )
+            .hint("delete the entry from ~/.claude/settings.json by hand"),
+        );
+    }
+    if found.present > 0 {
+        rows.extend(hook_binary_rows(env));
+    }
+    rows
+}
+
+/// The two ways a present hook entry can fail to run: the first `playbook` on
+/// PATH does not know the hook name, or a minimal-PATH login shell cannot find
+/// `playbook` at all.
+fn hook_binary_rows(env: &Env) -> Vec<Row> {
+    use crate::init::wire::wired_hooks;
+    let mut rows = Vec::new();
+    if let Some(first) = pathcheck::scan(&env.path_var).first() {
+        let mut cmd = Command::new(first);
+        cmd.args(["hook", "--help"]);
+        if let Some(help) = output_of(cmd) {
+            let unknown: Vec<&str> = wired_hooks()
+                .map(|s| s.name)
+                .filter(|n| !help.contains(n))
+                .collect();
+            if !unknown.is_empty() {
+                rows.push(
+                    Row::new(
+                        "-",
+                        Level::Warn,
+                        format!(
+                            "{} does not know these hooks, so they fail every time: {}",
+                            first.display(),
+                            unknown.join(", ")
+                        ),
+                    )
+                    .hint("run: playbook update"),
+                );
+            }
+        }
+    }
+    if !env.shell.is_empty() {
+        let mut cmd = Command::new(&env.shell);
+        cmd.args(["-lc", "command -v playbook"])
+            .env_clear()
+            .env("HOME", &env.home)
+            .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+        let resolved = output_of(cmd).is_some_and(|t| !t.trim().is_empty());
+        if !resolved {
+            rows.push(
+                Row::new(
+                    "-",
+                    Level::Warn,
+                    "a login shell with a minimal PATH cannot find playbook, so hooks fail when Claude Code starts from a launcher or an IDE",
+                )
+                .hint("run: playbook init, which puts the binary's directory on PATH for every shell start"),
+            );
+        }
+    }
+    rows
 }
 
 /// The lines under the table: what to run for each failed layer, or that all

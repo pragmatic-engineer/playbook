@@ -17,7 +17,7 @@
 //!   `running_wire_twice_writes_nothing_the_second_time`
 //! - Every written command for a ported hook resolves to a real `HookName`,
 //!   and is a bare name rather than a path (the "bare-name assumption"),
-//!   and all 20 ported hooks (the 14 functional hooks plus the 6 safety
+//!   and all 22 ported hooks (the 16 functional hooks plus the 6 safety
 //!   guards) are exactly the ones wired that way:
 //!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
@@ -105,9 +105,7 @@ fn all_hook_commands(settings: &Value) -> Vec<String> {
 /// A `settings.json` shaped like the one `settings.shared.json` ships and a
 /// real, unwired `~/.claude/settings.json` has today: the four safety guards
 /// wired directly with legacy `~/.claude/hooks/*.sh` paths, and none of the
-/// 11 functional hooks `hooks/hooks.json` used to register, since those
-/// only ever lived in the retired plugin registry, never in `settings.json`
-/// itself.
+/// functional hooks, which `wire` adds.
 fn unwired_fixture() -> Value {
     json!({
         "$schema": "https://json.schemastore.org/claude-code-settings.json",
@@ -252,6 +250,8 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "context-hygiene",
         "doc-read-hint",
         "usage-warm",
+        "worktree-create",
+        "worktree-remove",
         "rm-workspace-guard",
         "bg-await-guard",
         "no-slop-guard",
@@ -265,7 +265,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         resolved_names.iter().map(String::as_str).collect();
     assert_eq!(
         resolved_names, expected,
-        "wiring should register exactly all 20 ported HookName variants in binary form"
+        "wiring should register exactly all 22 ported HookName variants in binary form"
     );
 }
 

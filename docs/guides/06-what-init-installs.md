@@ -83,7 +83,7 @@ Three steps run every time and have no flag: the memory migration, the trust ste
 
 ### Hooks
 
-Init adds 29 hook entries to `~/.claude/settings.json`. They run 22 different `playbook hook <name>` commands. The [hook reference](../reference/hooks.md) lists each one with its event, matcher, what it reads and writes, whether it can block a tool call, and how to turn it off.
+Init adds 31 hook entries to `~/.claude/settings.json`. They run 24 different `playbook hook <name>` commands. The [hook reference](../reference/hooks.md) lists each one with its event, matcher, what it reads and writes, whether it can block a tool call, and how to turn it off.
 
 The entries fall into five groups: safety guards, session lifecycle, usage tracking and auto mode, memory, and hygiene. Only a few hooks can stop a tool call: `rm-workspace-guard`, `no-slop-guard`, `policy-guard`, `preread-size-check`, and (in `auto` mode) `auto-guard` and `auto-cost`. `memory-capture` can pause a stop. The rest add context or warn.
 
