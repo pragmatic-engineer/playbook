@@ -1154,6 +1154,12 @@ pub enum PrCommand {
         /// Work in this directory instead of the current one
         #[arg(long)]
         dir: Option<String>,
+        /// Ticket key for the branch (`none` turns the ticket rules off)
+        #[arg(long)]
+        ticket: Option<String>,
+        /// GitHub issue number the PR handles
+        #[arg(long)]
+        issue: Option<String>,
     },
     /// Choose a quick or deep self-review for a PR
     ///

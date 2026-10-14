@@ -194,9 +194,14 @@ fn ticket(branch: &str, ticket_arg: Option<&str>) -> String {
     if let Some(arg) = ticket_arg.filter(|t| !t.is_empty()) {
         return arg.to_string();
     }
-    crate::json::statusline::jira_key(branch)
-        .unwrap_or_default()
-        .to_string()
+    // The same detection `pr create` enforces, so the drafter is told the
+    // ticket that will be checked.
+    let slug = crate::common::repo_slug();
+    let rules = crate::pr::body_rules::Rules::load(
+        &crate::common::home_dir(),
+        (!slug.is_empty()).then_some(slug.as_str()),
+    );
+    crate::pr::body_rules::detect_ticket(None, branch, &[], &rules.patterns).unwrap_or_default()
 }
 
 #[cfg(test)]
