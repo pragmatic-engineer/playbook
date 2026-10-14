@@ -597,6 +597,7 @@ fn a_fully_wired_settings_file_passes() {
         )),
         "{rows:?}"
     );
+    assert!(rows[0].contains("including session-init"), "{rows:?}");
     assert!(
         !rows
             .iter()

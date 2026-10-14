@@ -345,12 +345,15 @@ fn a_crossing_fires_once_with_a_short_message_naming_the_save_command() {
     let msg = v["hookSpecificOutput"]["additionalContext"]
         .as_str()
         .unwrap();
-    assert!(msg.chars().count() < 300, "{}", msg.chars().count());
+    assert!(msg.chars().count() < 400, "{}", msg.chars().count());
     assert!(
         msg.contains("playbook handoff save --session sess1"),
         "{msg}"
     );
     assert!(msg.contains("/clear"), "{msg}");
+    assert!(msg.contains("/playbook:session-start"), "{msg}");
+    assert!(msg.contains("needs the SessionStart hook"), "{msg}");
+    assert!(!msg.contains("to resume from the handoff"), "{msg}");
     assert_eq!(second.trim(), "", "must not fire again at the same level");
 }
 

@@ -587,7 +587,8 @@ pub enum Command {
     /// Save and show notes that carry a session over to the next one
     ///
     /// A handoff is a markdown note for one directory. The next session started
-    /// there loads it.
+    /// there loads it when the SessionStart hook is installed and runs, and
+    /// `/playbook:session-start` loads it on demand.
     Handoff {
         #[command(subcommand)]
         sub: HandoffCommand,

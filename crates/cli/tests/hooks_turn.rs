@@ -671,6 +671,7 @@ mod precompact_warn {
             stdout.contains("(auto)"),
             "expected the trigger interpolated, got: {stdout}"
         );
+        assert!(stdout.contains("/playbook:session-start"), "{stdout}");
     }
 
     #[test]
