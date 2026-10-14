@@ -450,22 +450,6 @@ fn uninstall_lists_the_plugin_and_marketplace_steps_that_still_apply() {
 }
 
 #[test]
-fn uninstall_lists_the_hooks_plugin_too() {
-    let sb = Sandbox::new("manual-hooks-plugin");
-    sb.write(
-        ".claude/plugins/installed_plugins.json",
-        r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{}],"playbook-hooks@pragmatic-engineer":[{}]}}"#,
-    );
-
-    let shown = text(&sb.run(&["uninstall", "--yes"]));
-
-    assert!(
-        shown.contains("claude plugin uninstall playbook-hooks@pragmatic-engineer"),
-        "{shown}"
-    );
-}
-
-#[test]
 fn uninstall_lists_only_the_steps_that_apply() {
     // Arrange: the plugin is gone but the marketplace entry remains.
     let sb = Sandbox::new("manual-marketplace-only");

@@ -146,7 +146,6 @@ Older installs placed `~/.config/playbook/hooks/lib/config-hash.sh`. The config 
 ## Undo
 
 - `playbook uninstall` removes the hook entries and status line init wrote, the launcher block, and the files init placed under `~/.config/playbook`. Run it with `--dry-run` first to see the list. Add `--remove-binary` to remove the binary and its PATH block too.
-- If you remove the plugin and leave the hooks behind, the status line and the session start add one hint line that tells you to run `playbook uninstall --yes`. Set `playbook config set --global hints.pluginRemoved false` to hide it. Nothing is removed for you.
 - Memory, your own settings, sessions, history and earlier backups are never removed.
 - Backups of `settings.json` are timestamped files next to it, named `settings.json.bak.<time>`.
 - Any single part can be turned off by running `init` again with its `--no-` flag, then removing the entries by hand. Init never deletes a value you have.

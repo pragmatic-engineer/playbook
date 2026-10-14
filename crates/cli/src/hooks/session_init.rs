@@ -108,19 +108,6 @@ pub fn run(payload: &Payload) {
 
     if !headless {
         append_auto_learn_nudge(&mut extra_context, &repo_root);
-        // Not on compaction, which is the same session again.
-        if payload.field(".source") != "compact" {
-            let home = home_dir();
-            for hint in [
-                crate::common::plugin_state::removed_hint(&home),
-                crate::common::plugin_state::hooks_missing_hint(&home),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                push_context(&mut extra_context, hint);
-            }
-        }
     }
     let injected = if headless {
         0

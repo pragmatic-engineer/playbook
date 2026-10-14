@@ -163,8 +163,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         self_root: skills_root.clone(),
         repo: paths.repo.clone(),
     };
-    // Remember that the plugin is installed, so a later removal can be noticed.
-    crate::common::plugin_state::record_seen(&paths.home);
     let migrated = migrate::run_pending_for(&ctx, paths.statusline);
 
     let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);
@@ -205,7 +203,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         &paths.home,
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
-    steps.extend(hooks_plugin_step(&paths.home));
     InitOutcome {
         steps,
         warnings: migrated.warnings,
@@ -840,18 +837,6 @@ pub(crate) fn old_launcher_steps(home: &Path, path: &std::ffi::OsStr) -> Vec<Ste
         .iter()
         .map(|f| StepReport::skipped("old-launcher", crate::doctor::launchers::describe(f)))
         .collect()
-}
-
-/// Names the one command that adds the hooks plugin when only the `playbook`
-/// plugin is installed. Init only reads Claude Code's plugin list; adding a
-/// plugin stays the user's call.
-pub(crate) fn hooks_plugin_step(home: &Path) -> Option<StepReport> {
-    crate::common::plugin_state::hooks_plugin_missing(home).then(|| {
-        StepReport::skipped(
-            "hooks-plugin",
-            crate::common::plugin_state::HOOKS_MISSING_HINT,
-        )
-    })
 }
 
 /// Patch the rc file. Gated on `aliases`, then `$SHELL`.

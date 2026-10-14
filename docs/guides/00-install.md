@@ -199,10 +199,6 @@ If a run is interrupted between writing `settings.json` and the baseline, delete
 
 Disabling `playbook@pragmatic-engineer` in Claude Code pauses playbook. Every hook, including the safety guards, exits as a silent success and the status line prints nothing, while the entries `playbook init` wrote stay in `settings.json`. Enable the plugin again to resume. Only an explicit `false` pauses: with no entry (Homebrew only), `true`, or a `settings.json` that cannot be read, playbook runs as usual. To run hooks anyway, set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` in the environment Claude Code starts in. See [Launcher and hooks](../internals/01-launcher-and-hooks.md#pausing-when-the-plugin-is-disabled).
 
-## When the plugin was removed
-
-`playbook init` notes in `~/.config/playbook/plugin-seen` that it saw the plugin installed. If the plugin later leaves Claude Code's `installed_plugins.json` (removed, which differs from disabled), the status line shows `playbook plugin was removed, run \`playbook uninstall --yes\` to clean up` and the SessionStart hook adds the same line once per session start. Nothing is deleted for you. Homebrew-only users never had the plugin and never see the line. Set `hints.pluginRemoved` to `false` to hide it (see [config keys](04-config-keys.md)).
-
 ## Uninstall
 
 ```bash
