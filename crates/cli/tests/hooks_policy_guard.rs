@@ -254,7 +254,7 @@ fn the_rm_guard_allowance_cannot_be_changed_by_the_model() {
 }
 
 #[test]
-fn the_hook_entries_in_settings_cannot_be_dropped_by_the_model() {
+fn a_claude_settings_file_cannot_be_written_by_the_model() {
     let dir =
         std::env::temp_dir().join(format!("pb-guard-entries-{}", playbook::testing::run_id()));
     std::fs::create_dir_all(dir.join(".claude")).expect("scratch dir");
@@ -262,58 +262,44 @@ fn the_hook_entries_in_settings_cannot_be_dropped_by_the_model() {
     let kept = r#"{"model":"opus","hooks":{"Stop":[{"hooks":[{"command":"playbook hook session-clean-exit"}]}]}}"#;
     std::fs::write(&file, kept).expect("settings");
     let path = file.to_string_lossy().into_owned();
+    let local = dir
+        .join(".claude/settings.local.json")
+        .to_string_lossy()
+        .into_owned();
     let reason_of = |input: String| denial(&run(&input, &[]).0);
     let tool =
         |name: &str, input: Value| json!({"tool_name": name, "tool_input": input}).to_string();
 
-    // A Write that drops the entry, an Edit that renames the key, and an uninstall.
-    let dropped = tool(
-        "Write",
-        json!({"file_path": &path, "content": r#"{"model":"opus"}"#}),
-    );
-    let renamed = tool(
-        "Edit",
-        json!({"file_path": &path, "old_string": "\"hooks\"", "new_string": "\"off\""}),
-    );
-    let uninstall = bash("playbook uninstall --yes");
-    for input in [dropped, renamed, uninstall] {
+    let writes = [
+        tool(
+            "Write",
+            json!({"file_path": &path, "content": kept.replace("opus", "sonnet")}),
+        ),
+        tool("Write", json!({"file_path": &local, "content": "{}"})),
+        tool(
+            "Edit",
+            json!({"file_path": &path, "old_string": "opus", "new_string": "sonnet"}),
+        ),
+        tool("MultiEdit", json!({"file_path": &path, "edits": []})),
+        bash(&format!("echo '{{}}' > {path}")),
+        bash(&format!("sed -i s/opus/sonnet/ {path}")),
+        bash("playbook uninstall --yes"),
+    ];
+    for input in writes {
         let reason = reason_of(input.clone()).unwrap_or_default();
         assert!(reason.contains("playbook init"), "{input}: {reason}");
     }
 
-    // The first "policy-guard" is a harmless note, the second is the entry, so
-    // only an Edit that replaces all of them drops the hook.
-    let local = dir.join(".claude/settings.local.json");
-    std::fs::write(
-        &local,
-        r#"{"note":"policy-guard","hooks":{"Stop":[{"hooks":[{"command":"playbook hook policy-guard"}]}]}}"#,
-    )
-    .expect("local settings");
-    let local = local.to_string_lossy().into_owned();
-    let replace = |all: bool| {
+    // A read, a dry run, a copy out of the file and an edit of another file pass.
+    let other = dir.join(".claude/agents.md").to_string_lossy().into_owned();
+    for input in [
+        bash(&format!("cat {path}")),
+        bash(&format!("cp {path} /tmp/settings-backup.json")),
+        bash("playbook uninstall --dry-run"),
         tool(
             "Edit",
-            json!({"file_path": &local, "old_string": "policy-guard", "new_string": "x", "replace_all": all}),
-        )
-    };
-    let reason = reason_of(replace(true)).unwrap_or_default();
-    assert!(reason.contains("playbook init"), "{reason}");
-    assert!(reason_of(replace(false)).is_none());
-
-    // A change that keeps the entry, a read, and a dry run all pass.
-    let kept_write = tool(
-        "Write",
-        json!({"file_path": &path, "content": kept.replace("opus", "sonnet")}),
-    );
-    let kept_edit = tool(
-        "Edit",
-        json!({"file_path": &path, "old_string": "opus", "new_string": "sonnet"}),
-    );
-    for input in [
-        kept_write,
-        kept_edit,
-        bash(&format!("cat {path}")),
-        bash("playbook uninstall --dry-run"),
+            json!({"file_path": &other, "old_string": "a", "new_string": "b"}),
+        ),
     ] {
         let (out, code, _) = run(&input, &[]);
         assert_eq!((out.as_str(), code), ("", 0), "{input}");

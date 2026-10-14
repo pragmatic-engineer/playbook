@@ -435,7 +435,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Edit|Write"),
         name: "policy-guard",
         group: Group::Safety,
-        purpose: "Denies writes to Claude Code's own memory paths, to playbook's config files, and any Claude Code settings file that gains a `PLAYBOOK_SAFE_ROOTS`, `WORKTREE_BASE_DIR` or `POLICY_GUARD` entry. Shows the fact format when a fact file is written to playbook's store. Also denies an edit or write that would drop a `playbook hook` entry, set `disableAllHooks` or switch the playbook plugin off; other settings changes pass.",
+        purpose: "Denies writes to Claude Code's own memory paths and to playbook's config files, and any Edit or Write on a Claude Code settings file (`settings.json` or `settings.local.json`, user or project). Settings change through the `playbook` binary only. Shows the fact format when a fact file is written to playbook's store.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,

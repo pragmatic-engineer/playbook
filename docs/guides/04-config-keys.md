@@ -124,3 +124,5 @@ Off by default. Set it with `playbook config set --global effort.auto suggest` (
 - [Worktree engine](../internals/03-worktree.md): the sweep that the `worktreeCleanup.*` keys control.
 
 The model cannot change `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars` or `pr.ticketPatterns`. The policy guard refuses a model-run `config set`, `import`, `unset` or `edit` on them. Run the change yourself in the prompt with `!`.
+
+The model cannot write Claude Code's `settings.json` or `settings.local.json` (user or project) with the Edit or Write tools or with a Bash command. Settings change through `playbook init`, `uninstall`, `config set` and `doctor`, or by you in the prompt with `!`.
