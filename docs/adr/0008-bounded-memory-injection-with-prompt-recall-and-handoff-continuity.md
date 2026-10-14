@@ -74,7 +74,7 @@ persisted handoff at `SessionStart` requires no new hook event: it rides the
 event and code path that the documentation says fire on `/clear`. The
 documentation is not proof for a given install: the hook must be installed and
 Claude Code must run it, so user-facing text must not promise an automatic
-resume and points to `/playbook:session-start` as the on-demand path.
+resume and must point to `/playbook:session-start` as the on-demand path.
 
 A precedent for a cross-session, auto-pruned artifact already exists in this
 codebase: `to-learn/<repo-slug>.json`, written by
@@ -205,7 +205,8 @@ unbounded slice growth, edit-only anchor matching, and ephemeral handoffs.
 - A turn that only asks about a file, without editing it, can now surface the
   fact bodies anchored to it, not just their one-line descriptions.
 - `/clear` no longer discards a session's synthesized understanding; a
-  user-triggered handoff survives into the next session automatically,
+  user-triggered handoff survives into the next session (automatically when
+  the `SessionStart` hook is installed and runs, otherwise on demand),
   worktree-safe.
 - No new hook event: everything rides `UserPromptSubmit` and `SessionStart`,
   both already wired and already firing unconditionally.

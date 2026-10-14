@@ -5,7 +5,7 @@
 //! grows large. A long session replays its whole context on every message, so
 //! cache reads dominate the bill. Past `hygiene.thresholdTokens` this injects
 //! one short message per crossing that tells the model to save a session
-//! handoff itself, then tell the user where it is saved and how to continue
+//! handoff itself, then tell the user it is saved and how to continue
 //! (`/clear`, then `/playbook:session-start`). It never clears or compacts
 //! anything. The message does not promise an automatic resume: that happens
 //! only when the SessionStart hook is installed and Claude Code runs it.
@@ -19,7 +19,7 @@
 //! level fired, where level is the size divided by the threshold. A higher
 //! level fires once and is stored. A lower one is stored without firing, so
 //! a session that shrinks and grows again is nudged again. The next session
-//! start loads the handoff the nudge asked for (see `crate::handoff`).
+//! start loads the handoff the nudge asked for when the SessionStart hook runs (see `crate::handoff`).
 
 use crate::common::{emit_prompt_context, home_dir, session_dir, session_id, Payload};
 use serde_json::Value;
@@ -76,11 +76,10 @@ pub fn run(payload: &Payload) {
 /// The nudge, kept under 400 characters.
 fn message(tokens: u64, session: &str) -> String {
     format!(
-        "Context is large (~{}K tokens). Run /playbook:session-handoff yourself now and save it \
-         with `playbook handoff save --session {session}`. Then tell the user in one line: \
-         the handoff is saved; to continue in a fresh session run /clear, then \
-         /playbook:session-start. The automatic load after /clear needs the SessionStart \
-         hook installed (check with `playbook doctor`).",
+        "Context is large (~{}K tokens). Run /playbook:session-handoff now and save it with \
+         `playbook handoff save --session {session}`. Then tell the user in one line: the \
+         handoff is saved; run /clear, then /playbook:session-start if it did not load on its \
+         own (the automatic load needs the SessionStart hook; check `playbook doctor`).",
         tokens / 1000
     )
 }
