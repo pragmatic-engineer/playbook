@@ -271,8 +271,10 @@ fn l4_warns_when_the_system_prompt_is_unreadable() {
     if fs::File::open(&file).is_ok() {
         return; // running as root, the file stays readable
     }
-    let row = layer(&b.run(&[], "/bin/zsh", None), "4");
-    assert_eq!(row[0]["level"], "WARN");
+    assert_eq!(
+        layer(&b.run(&[], "/bin/zsh", None), "4")[0]["level"],
+        "WARN"
+    );
 }
 
 // Layer 5

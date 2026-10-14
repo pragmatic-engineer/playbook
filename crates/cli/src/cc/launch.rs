@@ -534,10 +534,6 @@ mod tests {
 
     use super::*;
 
-    fn v(items: &[&str]) -> Vec<String> {
-        items.iter().map(|s| s.to_string()).collect()
-    }
-
     #[test]
     fn value_taking_flag_does_not_leak_its_value_as_the_subcommand() {
         let (flags, rest) = split_flags(&v(&["--model", "opus", "clean", "x"]));
