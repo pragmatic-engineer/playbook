@@ -724,6 +724,7 @@ fn telemetry_off(app: &App) -> String {
     match app.telemetry {
         Some(mode) => match mode.fix() {
             Some(fix) => format!("{} Fix: {fix}.", mode.text()),
+            None if mode == crate::telemetry_status::Mode::OffOwnSetup => mode.text().to_string(),
             None => format!("{} but no rows in this range yet.", mode.text()),
         },
         None => "Telemetry off. Run `playbook init --telemetry`, or start sessions with `cc`."
@@ -761,7 +762,12 @@ fn telemetry_split(
     } else {
         view.cost_usd
     };
-    let sorted = group_rows(&view.rows, app.sort(Panel::Projects));
+    // Transcript rows have no cost, so the cost column sorts by count instead.
+    let mut sort = app.sort(Panel::Projects);
+    if from_transcripts && sort.col == 3 {
+        sort.col = 1;
+    }
+    let sorted = group_rows(&view.rows, sort);
     let cols = [
         col(label, Constraint::Fill(1), 0),
         col(">reqs", Constraint::Length(5), 0),

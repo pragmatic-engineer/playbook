@@ -636,7 +636,7 @@ pub fn skill_groups(
 /// sorted by name. `messages` holds the count; tokens and cost stay zero.
 pub fn invocation_groups(
     conn: &Connection,
-    kind: &str,
+    kind: crate::ToolKind,
     since: i64,
     until: i64,
 ) -> Result<Vec<super::aggregate::Group>, String> {
@@ -648,7 +648,7 @@ pub fn invocation_groups(
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map((kind, since, until), |r| {
+        .query_map((kind.as_str(), since, until), |r| {
             Ok(super::aggregate::Group {
                 key: r.get(0)?,
                 messages: r.get::<_, i64>(1)?.max(0) as u64,
@@ -1139,6 +1139,7 @@ mod tests {
     #[test]
     fn invocation_groups_count_transcript_agents_inside_the_window_by_kind() {
         let dir = std::env::temp_dir().join(format!("pbtop-inv-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let conn = crate::db::open_db(&dir.join("usage.db")).unwrap();
         let tool =
@@ -1160,7 +1161,7 @@ mod tests {
             crate::db::insert_tool_event(&conn, &e).unwrap();
         }
 
-        let groups = invocation_groups(&conn, "agent", 0, 1_000).unwrap();
+        let groups = invocation_groups(&conn, crate::ToolKind::Agent, 0, 1_000).unwrap();
 
         let got: Vec<(&str, u64)> = groups
             .iter()

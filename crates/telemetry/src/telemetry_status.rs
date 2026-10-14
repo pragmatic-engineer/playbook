@@ -95,6 +95,19 @@ pub struct Signals {
     pub endpoint_missing: bool,
 }
 
+/// Telemetry is switched on but no OTLP endpoint (generic or per signal) is set.
+fn endpoint_is_missing(vars: &std::collections::BTreeMap<String, String>) -> bool {
+    let on = vars.contains_key("CLAUDE_CODE_ENABLE_TELEMETRY");
+    let endpoint = [
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+    ]
+    .iter()
+    .any(|k| vars.contains_key(*k));
+    on && !endpoint
+}
+
 /// Whether the usage database holds a telemetry request from the last day.
 fn rows_recent(paths: &Paths) -> bool {
     let Ok(conn) = rusqlite::Connection::open_with_flags(
@@ -103,6 +116,7 @@ fn rows_recent(paths: &Paths) -> bool {
     ) else {
         return false;
     };
+    let _ = conn.busy_timeout(std::time::Duration::from_millis(2000));
     let since = super::util::time::now_secs() - 86_400;
     conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM telemetry_requests WHERE timestamp >= ?1)",
@@ -144,7 +158,7 @@ pub fn detect(home: &Path, cwd: &Path, paths: &Paths) -> Mode {
     let state: Option<State> = read_state(&state_path(paths));
     let kind = configured(home, cwd, state.as_ref().map(|s| s.port));
     let endpoint_missing = super::telemetry_detect::merged_vars(home, cwd, true)
-        .is_some_and(|v| !v.contains_key("OTEL_EXPORTER_OTLP_ENDPOINT"));
+        .is_some_and(|v| endpoint_is_missing(&v));
     let signals = Signals {
         rows_recent: rows_recent(paths),
         endpoint_missing,
@@ -267,5 +281,51 @@ mod tests {
         let paths = Paths::from_home(Path::new("/nonexistent-home-for-test"));
 
         assert!(!rows_recent(&paths));
+    }
+
+    fn vars(keys: &[&str]) -> std::collections::BTreeMap<String, String> {
+        keys.iter()
+            .map(|k| (k.to_string(), "1".to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn the_endpoint_is_missing_only_when_telemetry_is_on_and_no_endpoint_is_set() {
+        let on = vars(&["CLAUDE_CODE_ENABLE_TELEMETRY"]);
+        let per_signal = vars(&[
+            "CLAUDE_CODE_ENABLE_TELEMETRY",
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        ]);
+        let unrelated = vars(&["OTEL_SERVICE_NAME"]);
+
+        assert!(endpoint_is_missing(&on));
+        assert!(!endpoint_is_missing(&per_signal));
+        assert!(!endpoint_is_missing(&unrelated));
+    }
+
+    #[test]
+    fn rows_from_the_last_day_count_and_older_rows_do_not() {
+        let dir = std::env::temp_dir().join(format!("pbtop-rows-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = Paths::from_home(&dir);
+        std::fs::create_dir_all(paths.db.parent().unwrap()).unwrap();
+        let conn = crate::db::open_db(&paths.db).unwrap();
+        let now = crate::util::time::now_secs();
+        let insert = |id: &str, ts: i64| {
+            conn.execute(
+                "INSERT INTO telemetry_requests (session_id, request_id, timestamp, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd) VALUES ('s', ?1, ?2, 'm', 0, 0, 0, 0, 0)",
+                (id, ts),
+            )
+            .unwrap();
+        };
+        insert("old", now - 2 * 86_400);
+        let before = rows_recent(&paths);
+        insert("new", now - 3_600);
+        let after = rows_recent(&paths);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(!before);
+        assert!(after);
     }
 }

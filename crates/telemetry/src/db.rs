@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS tool_invocation_events (
     kind TEXT NOT NULL CHECK(kind IN ('skill','agent')),
     name TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS tool_invocation_events_by_kind_time
+    ON tool_invocation_events (kind, timestamp, name);
 CREATE TABLE IF NOT EXISTS usage_backfill_files (
     path TEXT PRIMARY KEY,
     mtime INTEGER NOT NULL
