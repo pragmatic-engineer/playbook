@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 
 /// Characters. Loaded on every turn, so growth should be a deliberate edit.
-const PROMPT_BUDGET_CHARS: usize = 8000;
+const PROMPT_BUDGET_CHARS: usize = 9500;
 
 fn prompt() -> String {
     let path = Path::new(env!("PLAYBOOK_REPO_ROOT")).join("prompts/SYSTEM_PROMPT.md");

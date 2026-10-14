@@ -10,7 +10,11 @@ The `playbook cc` launcher (`playbook cc launch`) passes the file to `claude` vi
 claude --system-prompt-file "$HOME/.config/playbook/prompts/SYSTEM_PROMPT.md" ...
 ```
 
-Both `playbook cc` and `playbook ccd` carry the flag. `playbook ccd` adds `--dangerously-skip-permissions` for unattended work; otherwise they're identical. If you invoke `claude` directly (bypassing `playbook cc`), the system prompt won't load.
+Both `playbook cc` and `playbook ccd` (and `pb cc`, `pb ccd`) carry the flag.
+
+**Warning.** The flag replaces Claude Code's whole built-in system prompt. It never appends to it. The built-in tool guidance, safety text, git and PR conventions and environment block are gone for these launchers, so `SYSTEM_PROMPT.md` carries the important parts itself (the Tools and environment and Safe actions sections). Plain `claude` is not affected and keeps its built-in prompt.
+
+Your own flags: `--system-prompt` or `--system-prompt-file` in the launcher arguments wins and playbook loads nothing. An interactive run prints one line to stderr saying so. `--append-system-prompt` and `--append-system-prompt-file` are refused with exit code 2, because the launcher only replaces. If the prompt file is not installed, the session starts with Claude Code's own prompt. `playbook ccd` adds `--dangerously-skip-permissions` for unattended work; otherwise they're identical. If you invoke `claude` directly (bypassing `playbook cc`), the system prompt won't load.
 
 The prompt locks in once, at the start of a fresh session. Resumed sessions inherit whatever was loaded when they started. That's the main tradeoff: changes to `SYSTEM_PROMPT.md` don't take effect until you start fresh. Use `playbook cc fresh` to open a new session, or `playbook cc clean` to fork the current conversation history into a new one with config reloaded.
 

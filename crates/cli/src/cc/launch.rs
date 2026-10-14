@@ -68,30 +68,54 @@ fn playbook_memory_only(home: &Path) -> bool {
     )
 }
 
-/// Flags that set the system prompt text. Any of them in the user's arguments
-/// means the playbook prompt is not added.
-const SYSTEM_PROMPT_FLAGS: [&str; 4] = [
-    "--system-prompt",
-    "--system-prompt-file",
-    "--append-system-prompt",
-    "--append-system-prompt-file",
-];
+/// Flags that replace Claude Code's system prompt.
+const REPLACE_FLAGS: [&str; 2] = ["--system-prompt", "--system-prompt-file"];
 
-fn has_system_prompt_flag(args: &[String]) -> bool {
+/// Flags that append to it. The launcher's contract is replace, so these are refused.
+const APPEND_FLAGS: [&str; 2] = ["--append-system-prompt", "--append-system-prompt-file"];
+
+fn has_flag(args: &[String], flags: &[&str]) -> bool {
     args.iter().any(|a| {
-        SYSTEM_PROMPT_FLAGS
+        flags
             .iter()
             .any(|f| a == f || a.strip_prefix(f).is_some_and(|r| r.starts_with('=')))
     })
 }
 
-/// The flag that loads the playbook prompt: `launcher.systemPromptMode`
-/// `append` (default) keeps Claude Code's own prompt, `replace` swaps it out.
-fn prompt_flag(home: &Path) -> &'static str {
-    match crate::config::resolve("launcher.systemPromptMode", home, None) {
-        Ok((serde_json::Value::String(v), _)) if v == "replace" => "--system-prompt-file",
-        _ => "--append-system-prompt-file",
+/// The system prompt arguments to add, or the exit code when the launch is refused.
+///
+/// Rule: playbook always replaces Claude Code's prompt with its own file and
+/// never appends. A replace flag from the user wins and playbook adds none
+/// (one stderr line, interactive runs only). An append flag from the user is
+/// refused with exit code 2.
+fn prompt_args(args: &[String], prompt: &Path, interactive: bool) -> Result<Vec<String>, i32> {
+    if has_flag(args, &APPEND_FLAGS) {
+        eprintln!(
+            "playbook: --append-system-prompt and --append-system-prompt-file are not allowed here. \
+             This launcher replaces Claude Code's system prompt and never appends to it. \
+             Use --system-prompt-file to supply your own, or run plain claude."
+        );
+        return Err(2);
     }
+    if has_flag(args, &REPLACE_FLAGS) {
+        if interactive {
+            eprintln!("playbook: using your system prompt flag, the playbook prompt is not loaded");
+        }
+        return Ok(Vec::new());
+    }
+    if !prompt.is_file() {
+        if interactive {
+            eprintln!(
+                "playbook: system prompt not found at {}, starting with Claude Code's own (run /playbook:setup)",
+                prompt.display()
+            );
+        }
+        return Ok(Vec::new());
+    }
+    Ok(vec![
+        "--system-prompt-file".into(),
+        prompt.to_string_lossy().into_owned(),
+    ])
 }
 
 /// Runs the launcher and returns the exit code of the session (or the failure).
@@ -101,10 +125,13 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         all.push("--dangerously-skip-permissions".into());
     }
     let prompt = crate::common::paths::playbook_root().join(SYSTEM_PROMPT_REL);
-    // The user's own system prompt flags win: playbook adds nothing then.
-    if prompt.is_file() && !has_system_prompt_flag(args) {
-        all.push(prompt_flag(&crate::common::home_dir()).into());
-        all.push(prompt.to_string_lossy().into_owned());
+    {
+        use std::io::IsTerminal;
+        let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+        match prompt_args(args, &prompt, interactive) {
+            Ok(extra) => all.extend(extra),
+            Err(code) => return code,
+        }
     }
     let cwd_now = PathBuf::from(super::logical_cwd());
     let has_settings = args

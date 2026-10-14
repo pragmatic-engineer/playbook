@@ -264,26 +264,77 @@ fn skip_permissions_and_the_system_prompt_lead_the_command_line() {
     assert_eq!(
         e.calls()[0],
         format!(
-            "--dangerously-skip-permissions --append-system-prompt-file {} -n proj",
+            "--dangerously-skip-permissions --system-prompt-file {} -n proj",
+            prompt.display()
+        )
+    );
+}
+
+fn install_prompt(e: &Env) -> PathBuf {
+    let prompt = e.home.join(".config/playbook/prompts/SYSTEM_PROMPT.md");
+    fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+    fs::write(&prompt, "p").unwrap();
+    prompt
+}
+
+#[test]
+fn the_prompt_is_only_ever_passed_through_the_replace_flag() {
+    let e = env("replace");
+    let prompt = install_prompt(&e);
+    let out = e.launch_with(&["--"], &["fresh"], &[]);
+    assert!(out.status.success());
+    let call = e.calls()[0].clone();
+    assert_eq!(
+        call,
+        format!("--system-prompt-file {} -n proj", prompt.display())
+    );
+    assert!(!call.contains("--append-system-prompt"), "{call}");
+    assert!(!call.contains("--settings"), "{call}");
+}
+
+#[test]
+fn ccd_adds_only_skip_permissions_on_top() {
+    let e = env("ccdonly");
+    let prompt = install_prompt(&e);
+    let out = e.launch_with(&["--skip-permissions", "--"], &["fresh"], &[]);
+    assert!(out.status.success());
+    assert_eq!(
+        e.calls()[0],
+        format!(
+            "--dangerously-skip-permissions --system-prompt-file {} -n proj",
             prompt.display()
         )
     );
 }
 
 #[test]
-fn replace_mode_keeps_the_system_prompt_file_flag() {
-    let e = env("replace");
-    let prompt = e.home.join(".config/playbook/prompts/SYSTEM_PROMPT.md");
-    fs::create_dir_all(prompt.parent().unwrap()).unwrap();
-    fs::write(&prompt, "p").unwrap();
-    let cfg = e.home.join(".config/playbook/config.json");
-    fs::write(&cfg, r#"{"launcher":{"systemPromptMode":"replace"}}"#).unwrap();
+fn a_user_append_flag_is_refused_and_claude_is_not_started() {
+    let e = env("appendrefused");
+    install_prompt(&e);
+    for args in [
+        vec!["--append-system-prompt", "x", "fresh"],
+        vec!["--append-system-prompt=x", "fresh"],
+        vec!["--append-system-prompt-file", "/x", "fresh"],
+        vec![
+            "--system-prompt-file=/y",
+            "--append-system-prompt=x",
+            "fresh",
+        ],
+    ] {
+        let out = e.launch_with(&["--"], &args, &[]);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("never appends"), "{err}");
+    }
+    assert!(e.raw_calls().is_empty());
+}
+
+#[test]
+fn a_missing_prompt_file_adds_no_system_prompt_flag() {
+    let e = env("noprompt");
     let out = e.launch_with(&["--"], &["fresh"], &[]);
     assert!(out.status.success());
-    assert_eq!(
-        e.calls()[0],
-        format!("--system-prompt-file {} -n proj", prompt.display())
-    );
+    assert_eq!(e.calls()[0], "-n proj");
 }
 
 #[test]
@@ -292,7 +343,7 @@ fn a_user_system_prompt_flag_means_playbook_adds_no_prompt() {
     let prompt = e.home.join(".config/playbook/prompts/SYSTEM_PROMPT.md");
     fs::create_dir_all(prompt.parent().unwrap()).unwrap();
     fs::write(&prompt, "p").unwrap();
-    for flag in ["--system-prompt=x", "--append-system-prompt-file=/x"] {
+    for flag in ["--system-prompt=x", "--system-prompt-file=/x"] {
         let out = e.launch_with(&["--"], &[flag, "fresh"], &[]);
         assert!(out.status.success());
         let call = e.calls().pop().unwrap();
