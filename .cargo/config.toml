@@ -8,3 +8,6 @@ LIBSQLITE3_FLAGS = "-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLI
 # Repo root for tests and embedded reads. `relative = true` resolves against the
 # directory that holds `.cargo`, so it stays right wherever a crate lives.
 PLAYBOOK_REPO_ROOT = { value = ".", relative = true }
+
+# The plugin root, for the checks in crates/plugin-checks.
+PLAYBOOK_PLUGIN_ROOT = { value = "plugins/playbook", relative = true }
