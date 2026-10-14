@@ -193,12 +193,6 @@ jobs:
         if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: cargo clippy ${{ needs.changes.outputs.pkgs || '--workspace' }} --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
 
-      # `tests/plugin_archive.rs` runs `claude plugin validate`, and fails in CI
-      # when the CLI is missing. Pinned to a release older than two weeks.
-      - name: Install the Claude Code CLI
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
-        run: npm install --global @anthropic-ai/claude-code@2.1.282
-
       # nextest schedules every test across all test binaries, where
       # `cargo test` runs the binaries one after another. Pinned like the
       # other tools: the action to a commit SHA, the tool to a release older
@@ -362,7 +356,7 @@ jobs:
   # the binary installed runs every hook successfully, asserted by CI, not
   # by inspection. The hooks in `HookName` (the list is read from
   # `playbook hook --help`, so a new hook is covered automatically) are the
-  # whole contract `settings.json` and hooks.json invoke as a bare
+  # whole contract `settings.json` invokes as a bare
   # `playbook hook <name>` command; if any of them needed something
   # the old shell installers used to provide (a shared library, a Python interpreter, anything beyond
   # `git`), this job is where that would show up, on the platform the tool
