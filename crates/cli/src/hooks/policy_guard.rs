@@ -26,8 +26,10 @@
 //!   `playbook` binary (`init`, `uninstall`, `config set`, `doctor`), which asks
 //!   for consent, merges and marks its entries. An Edit, Write or MultiEdit on
 //!   the file is denied, and so is a Bash command that writes it: a redirect,
-//!   `tee`, `sed -i`, `perl -pi`, `cp`, `mv`, `install`, `dd` or an interpreter
-//!   one-liner. Reading the file is fine. Bash is also denied when it runs
+//!   `tee`, `sed -i`, `perl -pi`, `cp`, `mv`, `install`, `rsync`, `ln`, `dd`,
+//!   `rm`, `truncate` or an interpreter one-liner. The check is lexical, so
+//!   heredoc and script-file interpreters, `git checkout` of the file and a
+//!   path built at run time get through. Reading the file is fine. Bash is also denied when it runs
 //!   `playbook uninstall --yes`. An agent that could drop the guard entries
 //!   could run without them, so this holds in `ask` mode too.
 //!
@@ -428,9 +430,9 @@ fn uninstalls_playbook(words: &[String], program_at: usize, depth: usize) -> boo
         && !args.iter().any(|w| w == "--dry-run")
 }
 
-/// Whether a lower-case file name is `settings*.json`.
+/// Whether a lower-case file name is `settings.json` or `settings.local.json`.
 fn is_settings_name(name: &str) -> bool {
-    name.starts_with("settings") && name.ends_with(".json")
+    name == "settings.json" || name == "settings.local.json"
 }
 
 /// Whether `word` is a cluster of short options (one dash) that includes `flag`.
@@ -443,8 +445,22 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
     if !mentions_a_guarded_program(command) {
         return None;
     }
+    let mut in_claude_dir = false;
+    let mut previous: Option<Vec<String>> = None;
     for words in simple_commands(command) {
+        if settings_writes::is_open_redirect_target(
+            previous.as_deref(),
+            &words,
+            home,
+            in_claude_dir,
+        ) {
+            return Some(SETTINGS_WRITE_REASON);
+        }
+        previous = Some(words.clone());
         let Some(at) = program_index(&words) else {
+            if settings_writes::redirects_to_settings(&words, home, in_claude_dir) {
+                return Some(SETTINGS_WRITE_REASON);
+            }
             continue;
         };
         let args = &words[at + 1..];
@@ -462,12 +478,13 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
         if found.is_some() {
             return found;
         }
-        if settings_writes::writes_claude_settings(&words, at, home) {
+        if settings_writes::writes_claude_settings(&words, at, home, in_claude_dir) {
             return Some(SETTINGS_WRITE_REASON);
         }
         if writes_claude_memory(&words, at, home) {
             return Some(MEMORY_REASON);
         }
+        in_claude_dir |= settings_writes::enters_claude_dir(&words, at, home);
     }
     None
 }
@@ -795,14 +812,12 @@ mod tests {
         assert_eq!(check_path(&format!("{root}/memory/a.md"), HOME), None);
     }
 
-    const ENTRIES: &str = r#"{"model":"opus","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"playbook hook policy-guard"}]}],"Stop":[{"hooks":[{"command":"playbook hook session-clean-exit"},{"command":"echo mine"}]}]}}"#;
-
     /// A scratch `.claude` folder holding `body` as settings.json.
-    fn settings_with(tag: &str, body: &str) -> PathBuf {
+    fn settings_with(tag: &str) -> PathBuf {
         let dir = crate::common::test_support::scratch_dir(tag).join(".claude");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
-        std::fs::write(&path, body).unwrap();
+        std::fs::write(&path, "{}").unwrap();
         path
     }
 
@@ -831,7 +846,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_link_to_a_settings_file_is_followed_both_ways() {
-        let real = settings_with("hook-link", ENTRIES);
+        let real = settings_with("hook-link");
         let link = real.parent().unwrap().parent().unwrap().join("link.json");
         std::os::unix::fs::symlink(&real, &link).unwrap();
         assert!(settings_path(&link.to_string_lossy(), "").is_some());
@@ -840,7 +855,7 @@ mod tests {
         let home = crate::common::test_support::scratch_dir("dotfiles-home");
         std::fs::create_dir_all(home.join(".claude")).unwrap();
         let dotfile = home.join("dotfiles-claude.json");
-        std::fs::write(&dotfile, ENTRIES).unwrap();
+        std::fs::write(&dotfile, "{}").unwrap();
         std::os::unix::fs::symlink(&dotfile, home.join(".claude/settings.json")).unwrap();
         let home = home.to_string_lossy().into_owned();
         assert!(settings_path(&dotfile.to_string_lossy(), &home).is_some());

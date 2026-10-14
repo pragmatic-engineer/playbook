@@ -256,10 +256,10 @@ fn the_rm_guard_allowance_cannot_be_changed_by_the_model() {
 #[test]
 fn a_claude_settings_file_cannot_be_written_by_the_model() {
     let dir =
-        std::env::temp_dir().join(format!("pb-guard-entries-{}", playbook::testing::run_id()));
+        std::env::temp_dir().join(format!("pb-guard-settings-{}", playbook::testing::run_id()));
     std::fs::create_dir_all(dir.join(".claude")).expect("scratch dir");
     let file = dir.join(".claude/settings.json");
-    let kept = r#"{"model":"opus","hooks":{"Stop":[{"hooks":[{"command":"playbook hook session-clean-exit"}]}]}}"#;
+    let kept = r#"{"model":"opus"}"#;
     std::fs::write(&file, kept).expect("settings");
     let path = file.to_string_lossy().into_owned();
     let local = dir
@@ -270,24 +270,41 @@ fn a_claude_settings_file_cannot_be_written_by_the_model() {
     let tool =
         |name: &str, input: Value| json!({"tool_name": name, "tool_input": input}).to_string();
 
-    let writes = [
-        tool(
-            "Write",
-            json!({"file_path": &path, "content": kept.replace("opus", "sonnet")}),
+    let tool_reason = "not with the Edit or Write tool";
+    let shell_reason = "not by writing the file";
+    let cases = [
+        (
+            tool(
+                "Write",
+                json!({"file_path": &path, "content": kept.replace("opus", "sonnet")}),
+            ),
+            tool_reason,
         ),
-        tool("Write", json!({"file_path": &local, "content": "{}"})),
-        tool(
-            "Edit",
-            json!({"file_path": &path, "old_string": "opus", "new_string": "sonnet"}),
+        (
+            tool("Write", json!({"file_path": &local, "content": "{}"})),
+            tool_reason,
         ),
-        tool("MultiEdit", json!({"file_path": &path, "edits": []})),
-        bash(&format!("echo '{{}}' > {path}")),
-        bash(&format!("sed -i s/opus/sonnet/ {path}")),
-        bash("playbook uninstall --yes"),
+        (
+            tool(
+                "Edit",
+                json!({"file_path": &path, "old_string": "opus", "new_string": "sonnet"}),
+            ),
+            tool_reason,
+        ),
+        (
+            tool("MultiEdit", json!({"file_path": &path, "edits": []})),
+            tool_reason,
+        ),
+        (bash(&format!("echo '{{}}' > {path}")), shell_reason),
+        (bash(&format!("sed -i s/opus/sonnet/ {path}")), shell_reason),
+        (
+            bash("playbook uninstall --yes"),
+            "The hook entries in settings.json",
+        ),
     ];
-    for input in writes {
+    for (input, expected) in cases {
         let reason = reason_of(input.clone()).unwrap_or_default();
-        assert!(reason.contains("playbook init"), "{input}: {reason}");
+        assert!(reason.contains(expected), "{input}: {reason}");
     }
 
     // A read, a dry run, a copy out of the file and an edit of another file pass.
