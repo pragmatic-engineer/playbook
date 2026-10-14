@@ -1,0 +1,78 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# Guards for the playbook plugin in plugins/playbook, which the marketplace
+# serves as it is.
+#   payload-guard: the directory holds only markdown and the manifest.
+#   version-bump: a plugin change comes with a higher version in plugin.json
+#   and a matching "## playbook <version>" section at the top of CHANGELOG.md.
+# Both run only when the plugin, the changelog or the script changes.
+
+name: plugin-guards
+
+on:
+  pull_request:
+    paths:
+      - "plugins/**"
+      - "CHANGELOG.md"
+      - "scripts/check-plugin.sh"
+      - ".github/workflows/plugin-guards.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: plugin-guards-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  payload-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Lint the script
+        run: shellcheck --severity=warning scripts/check-plugin.sh
+
+      - name: Check the plugin payload
+        run: scripts/check-plugin.sh payload
+
+  version-bump:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Fetch the base commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "$BASE_SHA"
+
+      - name: Check the version and the changelog
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: scripts/check-plugin.sh version "$BASE_SHA"
