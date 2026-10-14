@@ -21,20 +21,23 @@
 //!   `auto.*` and `fix.*` in `auto` mode only. The inline assignments cannot
 //!   reach the hook process, so denying them is defense in depth.
 //!
-//! - dropping the hook entries `playbook init` writes into Claude Code's
-//!   `settings.json`. An Edit or Write is denied when the file it would
-//!   produce (worked out from the file on disk) lacks a `playbook hook`
-//!   command the file has now, sets `disableAllHooks`, or switches the
-//!   playbook plugin off. Bash is denied when it runs `playbook uninstall
-//!   --yes`. An agent that could drop the guard entries could run without
-//!   them, so these are the user's to change, in `ask` mode too. Other
-//!   settings changes pass.
+//! - writing a Claude Code settings file (`settings.json` or
+//!   `settings.local.json`, user or project). Settings change only through the
+//!   `playbook` binary (`init`, `uninstall`, `config set`, `doctor`), which asks
+//!   for consent, merges and marks its entries. An Edit, Write or MultiEdit on
+//!   the file is denied, and so is a Bash command that writes it: a redirect,
+//!   `tee`, `sed -i`, `perl -pi`, `cp`, `mv`, `install`, `rsync`, `ln`, `dd`,
+//!   `rm`, `truncate` or an interpreter one-liner. The check is lexical, so
+//!   heredoc and script-file interpreters, `git checkout` of the file and a
+//!   path built at run time get through. Reading the file is fine. Bash is also denied when it runs
+//!   `playbook uninstall --yes`. An agent that could drop the guard entries
+//!   could run without them, so this holds in `ask` mode too.
 //!
 //! It also shows the memory fact format (`MEMORY_SCHEMA`) when a fact file is
 //! written to playbook's store, so the system prompt does not carry it.
 //!
 //! One hook on two matchers: Bash looks at the command, Edit and Write look at
-//! the target path, and for a settings file also the file on disk. It fails safe: a payload it cannot read, a command the
+//! the target path. It fails safe: a payload it cannot read, a command the
 //! reader cannot split, or anything unexpected allows the call, and it never
 //! spawns a process. `POLICY_GUARD=0` turns it off. It only denies, it never
 //! writes anything.
@@ -42,10 +45,11 @@
 //! A guardrail against an agent drifting, not a security boundary: it does not
 //! expand variables, aliases or scripts, so an obfuscated spelling passes.
 
+mod settings_writes;
+
 use crate::common::payload::Payload;
 use crate::common::shell::{program_index, program_name, simple_commands};
 use crate::common::{emit_pre_context, emit_pre_deny};
-use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
 /// Subcommands that run git hooks, so `--no-verify` matters.
@@ -113,10 +117,11 @@ owner or repo in the text.";
 
 const RM_GUARD_CONFIG_REASON: &str = "The rm guard's allowed roots, the prose lint mode and the pull request rules are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Until then, work within the current setting and say so.";
 
-const HOOK_ENTRIES_REASON: &str = "The hook entries in settings.json are the user's to change, not the model's. They are the guards that keep this session safe. Ask the user to run `playbook init --yes` (to add them) or `playbook uninstall` (to remove them) themselves in the prompt with `!`, or to edit settings.json by hand. Until then, leave the hook entries as they are and say so; in an unattended run, report this and stop. A settings change that keeps every hook entry is fine with the Edit tool.";
+const SETTINGS_WRITE_REASON: &str = "Claude Code settings files (settings.json and settings.local.json, user or project) are changed through playbook, not by writing the file. Use `playbook init --yes` to add the hooks, `playbook uninstall` to remove them, `playbook config set <key> <value>` for a playbook setting, or `playbook doctor` to check and fix the setup. For any other settings change, ask the user to make it themselves in the prompt with `!`. Reading the file is fine.";
 
-/// What marks an entry `playbook init` owns.
-const HOOK_MARK: &str = crate::init::wire::HOOK_COMMAND_PREFIX;
+const HOOK_ENTRIES_REASON: &str = "The hook entries in settings.json are the user's to change, not the model's. They are the guards that keep this session safe. Ask the user to run `playbook init --yes` (to add them) or `playbook uninstall` (to remove them) themselves in the prompt with `!`, or to edit settings.json by hand. Until then, leave the hook entries as they are and say so; in an unattended run, report this and stop.";
+
+const SETTINGS_EDIT_REASON: &str = "Claude Code settings files (settings.json and settings.local.json, user or project) are changed through playbook, not with the Edit or Write tool. Use `playbook init --yes` to add the hooks, `playbook uninstall` to remove them, `playbook config set <key> <value>` for a playbook setting, or `playbook doctor` to check and fix the setup. For any other settings change, ask the user to make it themselves in the prompt with `!`. Reading the file is fine.";
 
 const MEMORY_REASON: &str = "Claude Code's own memory is off limits here. Save the fact in playbook's store instead: ~/.config/playbook/memory/ for a global fact, <owner>/<repo>/ under it for a project fact.";
 
@@ -127,28 +132,24 @@ pub fn run(payload: &Payload) {
     let home = std::env::var("HOME").unwrap_or_default();
     let command = payload.field(".tool_input.command");
     let path = payload.field(".tool_input.file_path");
-    let mut new = payload.field(".tool_input.content");
-    if new.is_empty() {
-        new = payload.field(".tool_input.new_string");
-    }
-    let reason = if !command.is_empty() {
-        check_command(&command, &home)
-    } else if let Some(settings) = settings_path(&path, &home) {
-        let edit = SettingsEdit {
-            old: payload.field(".tool_input.old_string"),
-            replace_all: payload.field(".tool_input.replace_all") == "true",
-            whole_file: payload.field(".tool_name") == "Write",
-        };
-        check_settings_edit(&settings, &edit, &new).or_else(|| check_path(&path, &home, &new))
-    } else {
-        check_path(&path, &home, &new)
-    };
+    let reason = decide(&command, &path, &home);
     if let Some(reason) = reason {
         emit_pre_deny(reason);
     } else if payload.field(".tool_name") == "Write"
         && is_fact_file(&path, &crate::common::paths::memory_dir())
     {
         emit_pre_context("PreToolUse", MEMORY_SCHEMA);
+    }
+}
+
+/// The reason to deny a Bash `command`, or an Edit or Write to `path`.
+fn decide(command: &str, path: &str, home: &str) -> Option<&'static str> {
+    if !command.is_empty() {
+        check_command(command, home)
+    } else if settings_path(path, home).is_some() {
+        Some(SETTINGS_EDIT_REASON)
+    } else {
+        check_path(path, home)
     }
 }
 
@@ -380,140 +381,6 @@ fn lexical(path: &Path) -> PathBuf {
     out
 }
 
-/// The text of a settings file, or `None` when it is missing, not a regular
-/// file or larger than a settings file can sensibly be.
-fn read_settings(path: &Path) -> Option<String> {
-    const LIMIT: u64 = 1 << 20;
-    let meta = std::fs::metadata(path).ok()?;
-    if !meta.is_file() || meta.len() > LIMIT {
-        return None;
-    }
-    std::fs::read_to_string(path).ok()
-}
-
-/// What the guard watches in a settings file.
-#[derive(Debug, Default)]
-struct Guarded {
-    /// Event, matcher, command, `type` and `if` of every `playbook hook`
-    /// entry. Changing any of them can stop the hook from running.
-    entries: BTreeSet<(String, String, String, String, String)>,
-    /// `disableAllHooks` is on.
-    all_off: bool,
-    /// The playbook plugin is switched off, which pauses the hooks.
-    paused: bool,
-}
-
-/// The guarded parts of a settings text, or `None` when it is not JSON.
-fn guarded_state(text: &str) -> Option<Guarded> {
-    let root: serde_json::Value = serde_json::from_str(text).ok()?;
-    let mut state = Guarded {
-        all_off: !matches!(
-            root.get("disableAllHooks"),
-            None | Some(serde_json::Value::Null | serde_json::Value::Bool(false))
-        ),
-        paused: crate::common::plugin_state::disables_plugin(&root),
-        ..Guarded::default()
-    };
-    let events = root.get("hooks").and_then(serde_json::Value::as_object);
-    for (event, groups) in events.into_iter().flatten() {
-        for group in groups.as_array().into_iter().flatten() {
-            let matcher = group.get("matcher").and_then(serde_json::Value::as_str);
-            let hooks = group.get("hooks").and_then(serde_json::Value::as_array);
-            for hook in hooks.into_iter().flatten() {
-                let command = hook.get("command").and_then(serde_json::Value::as_str);
-                if let Some(command) = command.filter(|c| c.starts_with(HOOK_MARK)) {
-                    let text = |key: &str| {
-                        hook.get(key)
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or_default()
-                            .to_string()
-                    };
-                    state.entries.insert((
-                        event.clone(),
-                        matcher.unwrap_or_default().to_string(),
-                        command.to_string(),
-                        text("type"),
-                        text("if"),
-                    ));
-                }
-            }
-        }
-    }
-    Some(state)
-}
-
-/// Whether going from `before` to `after` drops a `playbook hook` entry,
-/// switches all hooks off or pauses the playbook plugin. A `before` that is
-/// not JSON has nothing to lose.
-fn loses_guard(before: &str, after: &str) -> bool {
-    let Some(was) = guarded_state(before) else {
-        return false;
-    };
-    let Some(now) = guarded_state(after) else {
-        // Claude Code stops reading a settings file that is not JSON.
-        return !was.entries.is_empty();
-    };
-    !was.entries.is_subset(&now.entries)
-        || (now.all_off && !was.all_off)
-        || (now.paused && !was.paused)
-}
-
-/// The parts of an Edit or Write the settings check needs besides the new text.
-struct SettingsEdit {
-    /// The text an Edit replaces.
-    old: String,
-    replace_all: bool,
-    /// A Write replaces the whole file.
-    whole_file: bool,
-}
-
-/// An Edit or Write on a settings file that drops a `playbook hook` entry,
-/// turns hooks off or pauses the plugin. The result of the edit is worked out
-/// from the file on disk, so an edit that never names the entry (renaming the
-/// `hooks` key, say) is caught, and one that keeps every entry is allowed.
-fn check_settings_edit(path: &Path, edit: &SettingsEdit, new: &str) -> Option<&'static str> {
-    let on_disk = read_settings(path);
-    // A file that is there but cannot be read (a device, or too large to be
-    // settings) cannot be judged, so it is not touched.
-    if on_disk.is_none() && std::fs::metadata(path).is_ok() {
-        return Some(HOOK_ENTRIES_REASON);
-    }
-    let loses = match on_disk {
-        Some(before) if edit.whole_file => loses_guard(&before, new),
-        // An Edit always names text; do not guess at the result of an empty one.
-        Some(_) if edit.old.is_empty() => false,
-        Some(before) => {
-            // JSON does not care about line endings, so replay on LF text.
-            let (before, old) = (before.replace("\r\n", "\n"), edit.old.replace("\r\n", "\n"));
-            if !before.contains(&old) {
-                // The text the Edit names is not in the file, so the result
-                // cannot be replayed. Judge the text of the edit.
-                edit_names_the_guard(&edit.old, new)
-            } else {
-                let after = if edit.replace_all {
-                    before.replace(&old, new)
-                } else {
-                    before.replacen(&old, new, 1)
-                };
-                loses_guard(&before, &after)
-            }
-        }
-        // A new file has nothing to lose, but may still switch hooks off.
-        None if edit.whole_file => loses_guard("{}", new),
-        // No file to read: fall back to the text of the edit.
-        None => edit_names_the_guard(&edit.old, new),
-    };
-    loses.then_some(HOOK_ENTRIES_REASON)
-}
-
-/// Whether the text of an Edit names a `playbook hook` entry or
-/// `disableAllHooks`, used when the file cannot be replayed.
-fn edit_names_the_guard(old: &str, new: &str) -> bool {
-    [old, new]
-        .iter()
-        .any(|text| text.contains(HOOK_MARK) || text.contains("disableAllHooks"))
-}
-
 /// The simple commands inside a shell `-c` script or behind a runner program
 /// (`nohup`, `xargs`), each as a word list starting at its program.
 fn wrapped_commands(words: &[String], program_at: usize) -> Vec<Vec<String>> {
@@ -563,9 +430,9 @@ fn uninstalls_playbook(words: &[String], program_at: usize, depth: usize) -> boo
         && !args.iter().any(|w| w == "--dry-run")
 }
 
-/// Whether a lower-case file name is `settings*.json`.
+/// Whether a lower-case file name is `settings.json` or `settings.local.json`.
 fn is_settings_name(name: &str) -> bool {
-    name.starts_with("settings") && name.ends_with(".json")
+    name == "settings.json" || name == "settings.local.json"
 }
 
 /// Whether `word` is a cluster of short options (one dash) that includes `flag`.
@@ -578,8 +445,22 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
     if !mentions_a_guarded_program(command) {
         return None;
     }
+    let mut in_claude_dir = false;
+    let mut previous: Option<Vec<String>> = None;
     for words in simple_commands(command) {
+        if settings_writes::is_open_redirect_target(
+            previous.as_deref(),
+            &words,
+            home,
+            in_claude_dir,
+        ) {
+            return Some(SETTINGS_WRITE_REASON);
+        }
+        previous = Some(words.clone());
         let Some(at) = program_index(&words) else {
+            if settings_writes::redirects_to_settings(&words, home, in_claude_dir) {
+                return Some(SETTINGS_WRITE_REASON);
+            }
             continue;
         };
         let args = &words[at + 1..];
@@ -597,9 +478,13 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
         if found.is_some() {
             return found;
         }
+        if settings_writes::writes_claude_settings(&words, at, home, in_claude_dir) {
+            return Some(SETTINGS_WRITE_REASON);
+        }
         if writes_claude_memory(&words, at, home) {
             return Some(MEMORY_REASON);
         }
+        in_claude_dir |= settings_writes::enters_claude_dir(&words, at, home);
     }
     None
 }
@@ -736,10 +621,7 @@ fn redirects(word: &str) -> bool {
 }
 
 /// The reason to deny a write to `path`, or `None` to allow it.
-fn check_path(path: &str, home: &str, content: &str) -> Option<&'static str> {
-    if writes_guard_env_to_settings(path, home, content) {
-        return Some(RM_GUARD_CONFIG_REASON);
-    }
+fn check_path(path: &str, home: &str) -> Option<&'static str> {
     if !home.is_empty()
         && super::auto_cost::is_config_file(
             Path::new(path),
@@ -749,15 +631,6 @@ fn check_path(path: &str, home: &str, content: &str) -> Option<&'static str> {
         return Some(RM_GUARD_CONFIG_REASON);
     }
     is_claude_memory_path(path, home).then_some(MEMORY_REASON)
-}
-
-/// A Claude Code settings file that is given an `env` entry able to move the
-/// `rm` guard's roots or switch the guards off. Other edits to settings pass.
-fn writes_guard_env_to_settings(path: &str, home: &str, content: &str) -> bool {
-    settings_path(path, home).is_some()
-        && ["PLAYBOOK_SAFE_ROOTS", "WORKTREE_BASE_DIR", "POLICY_GUARD"]
-            .iter()
-            .any(|key| content.contains(key))
 }
 
 /// Whether `path` is inside Claude Code's auto memory
@@ -882,24 +755,43 @@ mod tests {
     }
 
     #[test]
-    fn settings_files_may_not_gain_a_guard_env_entry() {
-        let settings = format!("{HOME}/.claude/settings.json");
-        let local = "/work/repo/.claude/settings.local.json";
-        for path in [settings.as_str(), local] {
-            assert_eq!(
-                check_path(path, HOME, r#"{"env":{"WORKTREE_BASE_DIR":"/"}}"#),
-                Some(RM_GUARD_CONFIG_REASON)
-            );
-            assert_eq!(
-                check_path(path, HOME, r#"{"env":{"POLICY_GUARD":"0"}}"#),
-                Some(RM_GUARD_CONFIG_REASON)
-            );
-            assert_eq!(check_path(path, HOME, r#"{"model":"opus"}"#), None);
+    fn the_edit_tools_may_not_touch_a_settings_file() {
+        let user = format!("{HOME}/.claude/settings.json");
+        for path in [
+            user.as_str(),
+            "/work/repo/.claude/settings.json",
+            "/work/repo/.claude/settings.local.json",
+            "/work/repo/.claude/agents/../settings.json",
+            "/work/repo/.CLAUDE/Settings.json",
+        ] {
+            let reason = decide("", path, HOME);
+
+            assert_eq!(reason, Some(SETTINGS_EDIT_REASON), "{path}");
         }
-        assert_eq!(
-            check_path("/work/notes/settings.json", HOME, "WORKTREE_BASE_DIR"),
-            None
-        );
+    }
+
+    #[test]
+    fn other_files_under_claude_stay_editable() {
+        for path in [
+            "/work/repo/.claude/agents/x.md",
+            "/work/repo/.claude/commands/y.md",
+            "/work/repo/CLAUDE.md",
+            "/work/notes/settings.json",
+        ] {
+            assert_eq!(decide("", path, HOME), None, "{path}");
+        }
+    }
+
+    #[test]
+    fn a_bash_write_to_a_settings_file_gets_the_settings_reason() {
+        for command in [
+            "echo '{}' > ~/.claude/settings.json",
+            "sed -i s/a/b/ \"$HOME/.claude/settings.json\"",
+            "cd repo && tee .claude/settings.local.json < x.json",
+            "bash -c 'cp /tmp/x.json ~/.claude/settings.json'",
+        ] {
+            assert_eq!(deny(command), Some(SETTINGS_WRITE_REASON), "{command}");
+        }
     }
 
     #[test]
@@ -912,155 +804,21 @@ mod tests {
             format!("{root}/x/../playbook.db"),
         ] {
             assert_eq!(
-                check_path(&path, HOME, "x"),
+                check_path(&path, HOME),
                 Some(RM_GUARD_CONFIG_REASON),
                 "{path}"
             );
         }
-        assert_eq!(check_path(&format!("{root}/memory/a.md"), HOME, "x"), None);
+        assert_eq!(check_path(&format!("{root}/memory/a.md"), HOME), None);
     }
 
-    const ENTRIES: &str = r#"{"model":"opus","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"playbook hook policy-guard"}]}],"Stop":[{"hooks":[{"command":"playbook hook session-clean-exit"},{"command":"echo mine"}]}]}}"#;
-
     /// A scratch `.claude` folder holding `body` as settings.json.
-    fn settings_with(tag: &str, body: &str) -> PathBuf {
+    fn settings_with(tag: &str) -> PathBuf {
         let dir = crate::common::test_support::scratch_dir(tag).join(".claude");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
-        std::fs::write(&path, body).unwrap();
+        std::fs::write(&path, "{}").unwrap();
         path
-    }
-
-    fn edit(old: &str) -> SettingsEdit {
-        SettingsEdit {
-            old: old.to_string(),
-            replace_all: false,
-            whole_file: false,
-        }
-    }
-
-    fn write() -> SettingsEdit {
-        SettingsEdit {
-            old: String::new(),
-            replace_all: false,
-            whole_file: true,
-        }
-    }
-
-    #[test]
-    fn a_change_that_drops_or_disables_an_entry_is_caught() {
-        for after in [
-            ENTRIES.replace("\"hooks\":{", "\"hooks_off\":{"),
-            ENTRIES.replace("playbook hook policy-guard", "playbook hook policy-guardx"),
-            ENTRIES.replace("\"matcher\":\"Bash\"", "\"matcher\":\"Nope\""),
-            ENTRIES.replace("\"PreToolUse\"", "\"PreToolUseOff\""),
-            ENTRIES.replace("{\"model\"", "{\"disableAllHooks\":true,\"model\""),
-            ENTRIES.replace("{\"model\"", "{\"disable\\u0041llHooks\":true,\"model\""),
-            ENTRIES.replace(
-                "{\"model\"",
-                "{\"enabledPlugins\":{\"playbook@pragmatic-engineer\":false},\"model\"",
-            ),
-            r#"{"model":"opus"}"#.to_string(),
-            "not json".to_string(),
-        ] {
-            assert!(loses_guard(ENTRIES, &after), "{after}");
-        }
-    }
-
-    #[test]
-    fn a_change_that_keeps_every_entry_is_allowed() {
-        for after in [
-            ENTRIES.replace("opus", "sonnet"),
-            ENTRIES.replace("echo mine", "echo yours"),
-            ENTRIES.replace(
-                "{\"model\"",
-                "{\"permissions\":{\"allow\":[\"Bash(ls)\"]},\"model\"",
-            ),
-            ENTRIES.replace("{\"model\"", "{\"disableAllHooks\":false,\"model\""),
-            ENTRIES.replace(
-                "]}]}}",
-                "]}],\"Notification\":[{\"hooks\":[{\"command\":\"playbook hook x\"}]}]}}",
-            ),
-        ] {
-            assert!(!loses_guard(ENTRIES, &after), "{after}");
-        }
-        // Nothing to lose when the file was not ours or not JSON.
-        assert!(!loses_guard("not json", "{}"));
-        assert!(!loses_guard(r#"{"model":"opus"}"#, r#"{"model":"sonnet"}"#));
-    }
-
-    #[test]
-    fn an_edit_is_judged_by_the_file_it_produces() {
-        let path = settings_with("hook-edit", ENTRIES);
-
-        // Renames the key without naming an entry.
-        assert_eq!(
-            check_settings_edit(&path, &edit("\"hooks\":{"), "\"hooks_off\":{"),
-            Some(HOOK_ENTRIES_REASON)
-        );
-        // Removes the entry by name.
-        assert_eq!(
-            check_settings_edit(&path, &edit("playbook hook policy-guard"), "true"),
-            Some(HOOK_ENTRIES_REASON)
-        );
-        // Unrelated changes pass, and an Edit with no text to match is left alone.
-        assert_eq!(check_settings_edit(&path, &edit("opus"), "sonnet"), None);
-        assert_eq!(check_settings_edit(&path, &edit(""), "x"), None);
-    }
-
-    #[test]
-    fn replace_all_decides_whether_a_later_match_is_reached() {
-        // The first "policy-guard" is a harmless note, the second is the entry.
-        let body = r#"{"note":"policy-guard","hooks":{"Stop":[{"hooks":[{"command":"playbook hook policy-guard"}]}]}}"#;
-        let path = settings_with("replace-all", body);
-        let all = SettingsEdit {
-            replace_all: true,
-            ..edit("policy-guard")
-        };
-
-        assert_eq!(check_settings_edit(&path, &edit("policy-guard"), "x"), None);
-        assert_eq!(
-            check_settings_edit(&path, &all, "x"),
-            Some(HOOK_ENTRIES_REASON)
-        );
-    }
-
-    #[test]
-    fn an_edit_that_does_not_match_the_file_is_judged_by_its_text() {
-        // CRLF on disk, LF in the edit: the edit is replayed on LF text, so a
-        // key rename that spans a line break is still caught.
-        let path = settings_with("edit-nomatch", &ENTRIES.replace(',', ",\r\n"));
-        assert_eq!(
-            check_settings_edit(&path, &edit("\"opus\",\n\"hooks\""), "\"opus\",\n\"off\""),
-            Some(HOOK_ENTRIES_REASON)
-        );
-
-        assert_eq!(
-            check_settings_edit(
-                &path,
-                &edit("\"type\":\"command\",\n\"command\":\"playbook hook policy-guard\""),
-                ""
-            ),
-            Some(HOOK_ENTRIES_REASON)
-        );
-        assert_eq!(check_settings_edit(&path, &edit("no such text"), "x"), None);
-    }
-
-    #[test]
-    fn a_settings_file_that_cannot_be_read_is_left_alone() {
-        let dir = crate::common::test_support::scratch_dir("settings-big");
-        std::fs::create_dir_all(dir.join(".claude")).unwrap();
-        let big = dir.join(".claude/settings.json");
-        std::fs::write(&big, vec![b' '; (1 << 20) + 1]).unwrap();
-
-        assert_eq!(
-            check_settings_edit(&big, &write(), r#"{"model":"opus"}"#),
-            Some(HOOK_ENTRIES_REASON)
-        );
-        assert_eq!(
-            check_settings_edit(&big, &edit(" "), "x"),
-            Some(HOOK_ENTRIES_REASON)
-        );
     }
 
     #[test]
@@ -1071,54 +829,6 @@ mod tests {
 
         assert!(settings_path(&sneaky, "").is_some());
         assert_eq!(lexical(Path::new("/a/b/../c/./d")), PathBuf::from("/a/c/d"));
-    }
-
-    #[test]
-    fn a_file_that_is_not_a_regular_small_file_is_not_read() {
-        let dir = crate::common::test_support::scratch_dir("settings-read");
-        std::fs::create_dir_all(&dir).unwrap();
-        assert!(read_settings(&dir).is_none());
-        let big = dir.join("big.json");
-        std::fs::write(&big, vec![b' '; (1 << 20) + 1]).unwrap();
-        assert!(read_settings(&big).is_none());
-        let ok = dir.join("ok.json");
-        std::fs::write(&ok, "{}").unwrap();
-        assert_eq!(read_settings(&ok).as_deref(), Some("{}"));
-    }
-
-    #[test]
-    fn a_write_is_judged_against_the_file_on_disk() {
-        let path = settings_with("hook-write", ENTRIES);
-
-        assert_eq!(
-            check_settings_edit(&path, &write(), r#"{"model":"opus"}"#),
-            Some(HOOK_ENTRIES_REASON)
-        );
-        assert_eq!(
-            check_settings_edit(&path, &write(), &ENTRIES.replace("opus", "sonnet")),
-            None
-        );
-    }
-
-    #[test]
-    fn a_file_without_our_entries_can_be_written_but_not_used_to_turn_hooks_off() {
-        let plain = settings_with("hook-plain", r#"{"model":"opus"}"#);
-        let missing = plain.with_file_name("settings.local.json");
-
-        for path in [&plain, &missing] {
-            assert_eq!(
-                check_settings_edit(path, &write(), r#"{"model":"sonnet"}"#),
-                None
-            );
-        }
-        assert_eq!(
-            check_settings_edit(&missing, &write(), r#"{"disableAllHooks":true}"#),
-            Some(HOOK_ENTRIES_REASON)
-        );
-        assert_eq!(
-            check_settings_edit(&missing, &edit("a"), "playbook hook x"),
-            Some(HOOK_ENTRIES_REASON)
-        );
     }
 
     #[test]
@@ -1136,7 +846,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_link_to_a_settings_file_is_followed_both_ways() {
-        let real = settings_with("hook-link", ENTRIES);
+        let real = settings_with("hook-link");
         let link = real.parent().unwrap().parent().unwrap().join("link.json");
         std::os::unix::fs::symlink(&real, &link).unwrap();
         assert!(settings_path(&link.to_string_lossy(), "").is_some());
@@ -1145,7 +855,7 @@ mod tests {
         let home = crate::common::test_support::scratch_dir("dotfiles-home");
         std::fs::create_dir_all(home.join(".claude")).unwrap();
         let dotfile = home.join("dotfiles-claude.json");
-        std::fs::write(&dotfile, ENTRIES).unwrap();
+        std::fs::write(&dotfile, "{}").unwrap();
         std::os::unix::fs::symlink(&dotfile, home.join(".claude/settings.json")).unwrap();
         let home = home.to_string_lossy().into_owned();
         assert!(settings_path(&dotfile.to_string_lossy(), &home).is_some());
@@ -1310,7 +1020,7 @@ mod tests {
             "/Users/me/.claude/projects/p/x/../memory/a.md",
         ];
         for path in inside {
-            assert_eq!(check_path(path, HOME, "x"), Some(MEMORY_REASON), "{path}");
+            assert_eq!(check_path(path, HOME), Some(MEMORY_REASON), "{path}");
         }
         let outside = [
             "/Users/me/.config/playbook/memory/a.md",
@@ -1323,7 +1033,7 @@ mod tests {
             "",
         ];
         for path in outside {
-            assert_eq!(check_path(path, HOME, "x"), None, "{path}");
+            assert_eq!(check_path(path, HOME), None, "{path}");
         }
     }
 
@@ -1373,7 +1083,7 @@ mod tests {
     #[test]
     fn an_empty_home_never_denies_a_path() {
         // Arrange / Act / Assert
-        assert_eq!(check_path("/.claude/memory/a.md", "", "x"), None);
+        assert_eq!(check_path("/.claude/memory/a.md", ""), None);
     }
 
     #[test]
