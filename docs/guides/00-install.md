@@ -14,7 +14,7 @@ The quickest route is one command. This page covers every route, requirements, h
 
 The skills are a Claude Code plugin and work on their own. The binary is optional. Installing one never installs the other, and playbook never installs or removes a plugin for you.
 
-When the binary is installed, `playbook init` adds its hook entries to `~/.claude/settings.json`. It asks first, never silently. It merges with the entries you already have, never overwrites them, and marks the ones it owns so `playbook uninstall` removes only those. The old `playbook-hooks` plugin is retired. If it is still installed, remove it with `claude plugin uninstall playbook-hooks@pragmatic-engineer`, because its hooks would run next to the ones in `settings.json`.
+When the binary is installed, `playbook init` adds its hook entries to `~/.claude/settings.json`. In a terminal it asks first. With no terminal and no `--no-hooks`, it applies the defaults, which include the hooks. It merges with the entries you already have. An entry counts as playbook's when its command is exactly one of the `playbook hook <name>` commands `init` writes, and `playbook uninstall` removes only those. The old `playbook-hooks` plugin is retired. If it is still installed, remove it with `claude plugin uninstall playbook-hooks@pragmatic-engineer`, because its hooks would run next to the ones in `settings.json`.
 
 Which one? Choose skills only if you want to read the skills and nothing else runs on your machine. Choose both for everything else. The binary is a hard dependency of the hooks, guards, status line and usage. Only the skill text works without it. See [Skills without the binary](#skills-without-the-binary).
 
@@ -38,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/in
 
 It installs only the `playbook` binary, into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`), after checking its SHA256, its build attestation when `gh` can check it, and a `--version` smoke test. It puts that directory on `PATH`. It does not touch Claude Code's plugins or settings.
 
-Then it asks "Run playbook init now?". Only a typed `y` counts, so a bare Enter is a no. On yes it runs `playbook init`, which adds the hook entries and the status line to `settings.json` and offers the launcher and system prompt. On no, or with no terminal and no `--yes`, it skips `init` and prints the command to run later, with any `--aliases` or `--system-prompt` you passed. Open a new terminal afterward.
+Then it asks "Run playbook init now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the launcher and the system prompt (Enter means yes for these two), then runs `playbook init --yes`, which adds the hook entries and the status line to `settings.json`. On no, or with no terminal and no `--yes`, it skips `init` and prints the command to run later, with any `--aliases` or `--system-prompt` you passed. Open a new terminal afterward.
 
 Pass `--yes` to say yes to every question, including `playbook init`. Flags go after `-s --` when piping:
 
@@ -124,7 +124,7 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 
    In a terminal, `init` asks about hooks, settings, the status line, `PATH`, the launcher and the system prompt. The status line question reads "Use the playbook status line?" and has `--statusline` and `--no-statusline`. Answering no leaves `statusLine` in `settings.json` as it is, and an existing playbook status line stays until `playbook uninstall`. Each part has `--x` and `--no-x` flags. With `--yes`, or without a terminal, hooks, settings, the status line and `PATH` are on and the launcher and system prompt are off. Every step is safe to repeat.
 
-5. For the skills, run the two plugin commands from [Pick an install mode](#pick-an-install-mode). Then run `/playbook:doctor`.
+5. For the skills, run the two plugin commands from [Pick an install mode](#pick-an-install-mode). Then run `/playbook:doctor`, or `playbook doctor check` without the skills.
 
 ## Upgrade
 
@@ -161,9 +161,11 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 - **Started with `playbook cc` or `playbook ccd`:** the launcher adds the binary's directory when it is missing.
 - **Started from a desktop app or IDE:** hooks find `playbook` only if its directory is already on that `PATH`. Use `playbook cc`, or install with `PLAYBOOK_BIN_DIR` set to a directory that environment has.
 
-## Skills without the binary
+## Init flags
 
 `playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override` and `--short-name`, each with a `--no-` form. Hooks, status line and `PATH` are on by default, the permissions rules (`--security`), launcher and system prompt are off.
+
+## Skills without the binary
 
 With the skills plugin alone, some commands call the `playbook` binary. They fall back to plain git, gh and file steps where they can. No hook runs, so the guards and status line are not active, and `/playbook:doctor` reports the binary and the hook entries as missing. Install the binary and run `playbook init` to add them.
 
@@ -181,7 +183,7 @@ If a run is interrupted between writing `settings.json` and the baseline, delete
 
 ## Disabling the plugin
 
-Disabling `playbook@pragmatic-engineer` in Claude Code pauses playbook. Every hook, including the safety guards, exits as a silent success and the status line prints nothing, while the entries `playbook init` wrote stay in `settings.json`. Enable the plugin again to resume. Only an explicit `false` pauses: with no entry (Homebrew only), `true`, or a `settings.json` that cannot be read, playbook runs as usual. To run hooks anyway, set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` in the environment Claude Code starts in. See [Launcher and hooks](../internals/01-launcher-and-hooks.md#pausing-when-the-plugin-is-disabled).
+Disabling `playbook@pragmatic-engineer` in Claude Code pauses playbook. Every hook, including the safety guards, exits as a silent success and the status line prints nothing, while the entries `playbook init` wrote stay in `settings.json`. Enable the plugin again to resume. Only an explicit `false` pauses: with no entry (a binary-only install), `true`, or a `settings.json` that cannot be read, playbook runs as usual. To run hooks anyway, set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` in the environment Claude Code starts in. See [Launcher and hooks](../internals/01-launcher-and-hooks.md#pausing-when-the-plugin-is-disabled).
 
 ## Uninstall
 
@@ -190,7 +192,7 @@ playbook uninstall --dry-run   # list what would go, change nothing
 playbook uninstall --yes       # remove it
 ```
 
-It removes only what playbook placed: the hook entries it owns (the `playbook hook ...` commands, never your own) and status line in `settings.json`, the launcher block in your rc files, and the files under `~/.config/playbook` that playbook copied (such as the system prompt). Without `--yes` it lists the plan and exits with status 1.
+It removes only what playbook placed: the hook entries whose command is exactly one `playbook hook <name>` command that `init` writes and status line in `settings.json`, the launcher block in your rc files, and the files under `~/.config/playbook` that playbook copied (such as the system prompt). Without `--yes` it lists the plan and exits with status 1.
 
 Everything else stays: the rest of `settings.json` and your rc files, `.settings.base.json`, `backups/`, memory, the [data folder](../internals/11-data-folder.md) with every database, and all runtime state. Each changed file is backed up first (`settings.json.bak.<epoch>`). A status line script or system prompt you edited by hand is kept. If `settings.json` cannot be edited, such as invalid JSON, the placed files and the binary stay too.
 

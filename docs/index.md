@@ -57,7 +57,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | ADR | Title | Status | Date |
 |---|---|---|---|
 | [0001](adr/0001-package-toolkit-as-plugin.md) | Package the toolkit as an opt-in Claude Code plugin | Accepted, amended by 0002, 0006, 0007 | 2026-07-23 |
-| [0002](adr/0002-plugin-based-install-safety-hooks.md) | Plugin based install with always-on safety hooks | Accepted, amended by 0006, 0007 | 2026-07-30 |
+| [0002](adr/0002-plugin-based-install-safety-hooks.md) | Plugin based install with always-on safety hooks | Accepted, amended by 0006, 0007, 0031 | 2026-07-30 |
 | [0003](adr/0003-purpose-built-subagents.md) | Purpose-built subagents over generic fallbacks | Accepted | 2026-08-07 |
 | [0004](adr/0004-graph-first-memory.md) | Graph-first memory retrieval and triggered capture | Accepted | 2026-08-10 |
 | [0005](adr/0005-python-hooks-and-config-scripts.md) | Migrate the hooks and the config scripts from shell to Python | Superseded by 0007 | 2026-08-11 |

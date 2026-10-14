@@ -26,7 +26,7 @@ brew install pragmatic-engineer/tap/playbook
 playbook init
 ```
 
-`playbook init` adds the hook entries to `~/.claude/settings.json`. It asks first, keeps your own entries, and marks the ones it owns so `playbook uninstall` removes only those. Then open a Claude Code session and run `/playbook:doctor`. It checks every layer and tells you how to fix a miss.
+`playbook init` adds the hook entries to `~/.claude/settings.json`. In a terminal it asks first, and it keeps your own entries. `playbook uninstall` removes only the entries whose command is exactly one `playbook hook <name>` command that `init` writes. Run `playbook doctor check` to see what is in place. If you also installed the skills, open a Claude Code session and run `/playbook:doctor`. It checks every layer and tells you how to fix a miss.
 
 The installer only installs the `playbook` binary (checksum verified) and puts it on `PATH`. It never installs or removes a plugin. `playbook init` also sets the status line and asks before adding the launcher and system prompt. Pass `--yes` to the installer to say yes to every question.
 
@@ -39,7 +39,7 @@ Pin a version with `PLAYBOOK_REF=v0.25.0`. Update later with `playbook update`. 
 | Mode | What you get | Commands |
 |---|---|---|
 | Skills only | Skills, commands and subagents. No guards, hooks or status line. | The two `claude plugin` commands above |
-| Binary only | The `playbook` command, hooks, guards, status line and usage | The install script, or Homebrew then `playbook init` |
+| Binary only | The `playbook` command, hooks, guards, status line, memory and usage | The install script, or Homebrew then `playbook init` |
 | Both (recommended) | Everything | Both of the above |
 
 The hooks, guards, status line and usage need the binary. Only the skill text works without it. See [Pick an install mode](docs/guides/00-install.md#pick-an-install-mode).

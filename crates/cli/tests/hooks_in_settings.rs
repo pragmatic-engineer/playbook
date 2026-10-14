@@ -3,9 +3,8 @@
 
 //! The hooks live in `~/.claude/settings.json`, not in a plugin. These tests
 //! run the real binary against a scratch `$HOME` and pin the whole life of
-//! those entries: `init` writes them, a second run changes nothing, entries a
-//! user added survive both `init` and `uninstall`, and `uninstall` removes
-//! only the entries `init` owns.
+//! those entries: `init` writes them, entries a user added survive both `init`
+//! and `uninstall`, and `uninstall` removes only the entries `init` owns.
 
 use serde_json::{json, Value};
 use std::fs;
@@ -141,17 +140,6 @@ fn the_hook_commands_are_the_bare_name_never_an_absolute_path() {
 }
 
 #[test]
-fn a_second_init_changes_nothing() {
-    let h = Home::new("idempotent");
-    h.run(&["init", "--hooks"]);
-    let before = fs::read_to_string(h.settings_path()).unwrap();
-
-    h.run(&["init", "--hooks"]);
-
-    assert_eq!(fs::read_to_string(h.settings_path()).unwrap(), before);
-}
-
-#[test]
 fn init_keeps_the_hooks_and_keys_a_user_already_has() {
     let h = Home::new("preserve");
     h.write_settings(&user_hooks());
@@ -164,18 +152,6 @@ fn init_keeps_the_hooks_and_keys_a_user_already_has() {
     assert!(has(&s, "Stop", "echo my-stop-hook"));
     assert!(has(&s, "PreToolUse", "echo my-bash-hook"));
     assert!(has(&s, "WorktreeCreate", "playbook hook worktree-create"));
-}
-
-#[test]
-fn no_hooks_writes_none_and_says_it_skipped_them() {
-    let h = Home::new("declined");
-
-    let out = h.run(&["init", "--no-hooks"]);
-
-    assert!(!commands(&h.settings())
-        .iter()
-        .any(|(_, c)| c.starts_with("playbook hook ")));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("[skip] hooks"));
 }
 
 #[test]

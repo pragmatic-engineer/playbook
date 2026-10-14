@@ -257,7 +257,7 @@ fn binary_only_does_not_opt_in_to_the_launcher_or_system_prompt() {
     let (rc, _, log) = local_install(&work, &stub, &["--yes", "--binary-only"], "bo");
     assert_eq!(rc, 0, "{log}");
     assert!(log.contains("Running playbook init"), "{log}");
-    let got = fs::read_to_string(&argv).unwrap_or_default();
+    let got = fs::read_to_string(&argv).expect("the stub records the init arguments");
     assert!(
         !got.contains("--aliases") && !got.contains("--system-prompt"),
         "init received: '{got}'"

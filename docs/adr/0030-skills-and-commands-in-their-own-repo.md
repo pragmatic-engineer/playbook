@@ -2,7 +2,7 @@
 
 - **Status:** Accepted. Decisions 2 and 3, the parts about the `playbook-hooks` plugin, are superseded by [ADR 0031](0031-hooks-in-settings-json.md)
 - **Date created:** 2026-10-13
-- **Date modified:** 2026-10-13
+- **Date modified:** 2026-10-14
 
 ## Context
 

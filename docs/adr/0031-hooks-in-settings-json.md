@@ -7,6 +7,8 @@
 
 ## Context
 
+This returns to the decision of [ADR 0007](0007-rust-binary-for-hooks-and-launcher.md) to wire every hook through `settings.json`, which ADR 0030 had reversed for the hooks plugin.
+
 ADR 0030 split the repository into a binary with its hooks, and a skills plugin. The hooks traveled in a second plugin, `playbook-hooks`, built as a zip on every release, pinned by hash in the marketplace and fronted by a `bin/playbook` shim.
 
 That plugin cost more than it gave:
@@ -20,11 +22,11 @@ Claude Code already reads hooks from `~/.claude/settings.json`, and `playbook in
 ## Decision
 
 1. **The hooks live in `~/.claude/settings.json`.** `playbook init` writes one entry per hook, for every event, including the worktree hooks and the session start tool map. The commands use the bare form `playbook hook <name>`.
-2. **Writing the entries needs a yes.** `init` asks, or takes `--yes`. It never writes them silently, and it never passes them through `--settings`.
-3. **The merge keeps the user's entries.** `init` adds its own entries next to existing ones and leaves the rest alone. An entry is ours when its command is exactly one of the `playbook hook <name>` commands `init` writes. A second run changes nothing.
+2. **Writing the entries is a choice the user can make.** In a terminal `init` asks. Without a terminal it applies its defaults, which include the hooks, and `--no-hooks` turns them off. `install.sh` asks for a typed yes before it runs `init`. The entries never go through `--settings`.
+3. **The merge keeps the user's entries.** `init` adds its own entries next to existing ones and leaves the rest alone. An entry is ours when its command is exactly one of the `playbook hook <name>` commands `init` writes. `init` also rewrites in place a legacy entry whose script is named `<hook>.sh` or `<hook>.py` in the same event and matcher group. A second run changes nothing.
 4. **Uninstall removes only the owned entries.** `playbook uninstall` deletes the entries that match those commands and keeps every entry the user wrote.
 5. **The doctor checks the entries.** `playbook doctor` reports whether each entry is present and whether the command resolves to a working binary.
-6. **The guard protects the entries.** The `policy-guard` hook denies an edit or write to a Claude Code settings file that would drop a `playbook hook` entry, set `disableAllHooks` or turn the playbook plugin off. It also denies `playbook uninstall --yes`. The user can still run `playbook init` and `playbook uninstall` themselves.
+6. **The guard protects the entries.** The `policy-guard` hook denies an edit or write to a Claude Code settings file that would drop a `playbook hook` entry, set `disableAllHooks` or turn the playbook plugin off. It also denies `playbook uninstall --yes`. A Bash command that rewrites the file is not covered yet. The user can still run `playbook init` and `playbook uninstall` themselves.
 7. **The installer installs only the binary.** `install.sh` puts the verified binary on `PATH` and then asks whether to run `playbook init`. With no terminal and no `--yes` it skips `init` and prints the command. It never installs or removes a Claude Code plugin.
 8. **The hooks plugin is retired.** The `hooks.json` file, the zip and its allowlist, the `bin/playbook` shim, the pin step, `--skills-only` and the matching hints are removed. A user who still has `playbook-hooks` installed gets a doctor hint to uninstall it, because its hooks would run next to the ones in `settings.json`.
 
