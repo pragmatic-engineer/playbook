@@ -515,8 +515,9 @@ mod tests {
 
     #[test]
     #[rustfmt::skip]
+    #[allow(clippy::type_complexity, reason = "a case table: name, title, ticket, stacked, warn, block")]
     fn scope_cases() {
-        let cases: &[(&str, &str, Option<&str>, bool, bool, bool)] = &[ // name, title, ticket, stacked, expect warn, expect block ("scoped", "feat(PROJ-1): add retry", Some("PROJ-1"), false, false, false),
+        let cases: &[(&str, &str, Option<&str>, bool, bool, bool)] = &[("scoped", "feat(PROJ-1): add retry", Some("PROJ-1"), false, false, false),
             ("scoped and stacked", "feat(PROJ-1): add retry", Some("PROJ-1"), true, false, false),
             ("missing, not stacked", "feat(sync): add retry", Some("PROJ-1"), false, true, false),
             ("missing, stacked", "feat(sync): add retry", Some("PROJ-1"), true, false, true),
@@ -538,6 +539,7 @@ mod tests {
 
     #[test]
     #[rustfmt::skip]
+    #[allow(clippy::type_complexity, reason = "a case table")]
     fn ticket_detection_follows_the_documented_order() {
         let patterns = vec![DEFAULT_TICKET_PATTERN.to_string()];
         let subjects = vec!["feat(OPS-9): older".to_string()];
