@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# The contract between the plugin and the binary. intents.json lists the
+# intents the plugin relies on. This job builds the playbook binary from the
+# same commit and compares `playbook tools map --json` with the list. A listed
+# intent the binary lacks is a warning, and a failure only when intents.json
+# marks it required. The job runs only when one of the two sides changes.
+
+name: intents-contract
+
+on:
+  pull_request:
+    paths:
+      - "intents.json"
+      - "scripts/check-intents.sh"
+      - "plugins/**"
+      - "crates/cli/**"
+      - ".github/workflows/intents-contract.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: intents-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            crates.io:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Restore the cargo cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-build-test-v2-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-build-test-v2-${{ runner.os }}-
+
+      - name: Build the playbook binary
+        run: cargo build --locked -p playbook
+
+      - name: Compare intents.json with the tool map
+        env:
+          INTENTS_STRICT: "1"
+        run: scripts/check-intents.sh target/debug/playbook
