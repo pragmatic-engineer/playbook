@@ -127,7 +127,13 @@ fn prompt_args(
 }
 
 /// The one-line prompt notice, held until the screen is cleared so it stays visible.
-static PROMPT_NOTICE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static NOTICES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn hold_notice(note: String) {
+    if let Ok(mut notes) = NOTICES.lock() {
+        notes.push(note);
+    }
+}
 
 /// What became of `CLAUDE_CODE_EFFORT_LEVEL` for this launch.
 struct EnvEffort {
@@ -179,10 +185,10 @@ fn take_effort_env(args: &[String], all: &mut Vec<String>) -> EnvEffort {
     } else {
         "dropped (not a level), the model default applies".to_string()
     };
-    eprintln!(
+    hold_notice(format!(
         "playbook: {}={value} {note}, so playbook skills, commands and agents keep their own effort",
         crate::models::EFFORT_ENV
-    );
+    ));
     all.extend(flag.iter().cloned());
     EnvEffort {
         was_set: true,
@@ -203,9 +209,7 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         match prompt_args(args, &prompt, interactive) {
             Ok((extra, note)) => {
                 all.extend(extra);
-                if let Ok(mut slot) = PROMPT_NOTICE.lock() {
-                    *slot = note;
-                }
+                note.into_iter().for_each(hold_notice);
             }
             Err(code) => return code,
         }
@@ -221,7 +225,9 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
     let mut effort = crate::models::effort_in_force(
         &[&env_effort.flag[..], args].concat(),
         &user_settings,
-        ceiling.effective.as_deref(),
+        // Only Claude Code's own cap lowers a stated level: playbook passes no
+        // `--settings`, so the session really runs at the level it states.
+        ceiling.claude.as_deref(),
     );
     // Playbook owns this command line, not Claude Code's settings: a session
     // that stated no effort runs at medium, and one that did is left alone.
@@ -306,7 +312,11 @@ fn with_sigint_held<T>(f: impl FnOnce() -> T) -> T {
 fn dispatch(cwd: &mut PathBuf, args: &[String]) -> i32 {
     bust_cache::bust();
     clear_screen();
-    if let Some(note) = PROMPT_NOTICE.lock().ok().and_then(|mut slot| slot.take()) {
+    for note in NOTICES
+        .lock()
+        .map(|mut notes| std::mem::take(&mut *notes))
+        .unwrap_or_default()
+    {
         eprintln!("{note}");
     }
     let (flags, rest) = split_flags(args);

@@ -446,9 +446,10 @@ pub enum Command {
     /// values and the one that wins.
     ///
     /// The ceiling caps the agent variants the launcher renders, the default
-    /// effort it adds and what the binary reports. It does not cap a command
-    /// or skill that ships its own effort, because only Claude Code's
-    /// `maxEffortLevel` setting can, and playbook never writes it.
+    /// effort it adds and what the binary reports. It does not cap a command,
+    /// skill or base agent that ships its own effort, or a level you state for
+    /// the session, because only Claude Code's `maxEffortLevel` setting can,
+    /// and playbook never writes it.
     ///
     /// Example: `playbook effort xhigh`
     #[command(args_conflicts_with_subcommands = true)]

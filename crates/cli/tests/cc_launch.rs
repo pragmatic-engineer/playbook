@@ -513,11 +513,8 @@ fn set_effort(e: &Env, level: &str) {
     assert!(out.status.success(), "{out:?}");
 }
 
-fn hash_of(path: &Path) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    fs::read(path).unwrap_or_default().hash(&mut h);
-    format!("{:x}", h.finish())
+fn hash_of(path: &Path) -> Vec<u8> {
+    fs::read(path).unwrap_or_default()
 }
 
 fn seed_settings(e: &Env, body: &str) -> PathBuf {
@@ -536,14 +533,14 @@ fn child_effort_env(e: &Env) -> Vec<String> {
 }
 
 #[test]
-fn the_ceiling_lowers_the_launchers_effort_and_no_path_writes_claude_settings_or_passes_settings() {
+fn no_effort_or_config_path_writes_claude_settings_or_passes_settings() {
     let e = env("effort-ceiling");
     let settings = seed_settings(&e, r#"{"theme":"dark","effortLevel":"xhigh"}"#);
     let before = hash_of(&settings);
 
     set_effort(&e, "low");
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .args(["config", "set", "--global", "maxEffortLevel", "medium"])
+        .args(["config", "set", "--global", "maxEffortLevel", "low"])
         .current_dir(&e.work)
         .env("HOME", &e.home)
         .output()
@@ -555,6 +552,12 @@ fn the_ceiling_lowers_the_launchers_effort_and_no_path_writes_claude_settings_or
     for raw in e.raw_calls() {
         assert!(!raw.contains("--settings"), "{raw}");
     }
+    // A level stated in settings is the user's own and is left alone.
+    assert!(
+        !e.raw_calls()[0].contains("--effort"),
+        "{:?}",
+        e.raw_calls()
+    );
     assert_eq!(hash_of(&settings), before, "settings.json was modified");
 }
 
@@ -601,6 +604,40 @@ fn an_effort_env_of_max_moves_to_the_flag_so_a_component_set_to_low_stays_low() 
 }
 
 #[test]
+fn the_env_level_is_trimmed_and_an_equals_form_flag_still_wins() {
+    let e = env("effort-env-forms");
+    e.launch_with(
+        &["--"],
+        &["fresh"],
+        &[("CLAUDE_CODE_EFFORT_LEVEL", " MAX ")],
+    );
+    e.launch_with(
+        &["--"],
+        &["--effort=low", "fresh"],
+        &[("CLAUDE_CODE_EFFORT_LEVEL", "max")],
+    );
+    let raw = e.raw_calls();
+    assert!(raw[0].contains("--effort max"), "{raw:?}");
+    assert_eq!(raw[1].matches("--effort").count(), 1, "{raw:?}");
+    assert!(raw[1].contains("--effort=low"), "{raw:?}");
+}
+
+#[test]
+fn a_playbook_ceiling_does_not_change_a_level_the_session_states() {
+    let e = env("effort-env-over-ceiling");
+    set_effort(&e, "low");
+    e.launch_with(&["--"], &["fresh"], &[("CLAUDE_CODE_EFFORT_LEVEL", "max")]);
+    let raw = e.raw_calls();
+    assert!(raw[0].contains("--effort max"), "{raw:?}");
+    assert!(!raw[0].contains("--effort low"), "{raw:?}");
+    // Nothing caps the session here, so the fallback chain still knows max is in use.
+    assert!(
+        raw[0].contains("--fallback-model claude-haiku-4-5 "),
+        "{raw:?}"
+    );
+}
+
+#[test]
 fn an_effort_env_that_is_not_a_level_is_dropped_without_a_flag() {
     let e = env("effort-env-auto");
     e.launch_with(&["--"], &["fresh"], &[("CLAUDE_CODE_EFFORT_LEVEL", "auto")]);
@@ -628,7 +665,11 @@ fn no_effort_env_leaves_the_child_environment_alone() {
     let e = env("effort-no-env");
     let out = e.launch(&["fresh"]);
     assert!(!String::from_utf8_lossy(&out.stderr).contains("CLAUDE_CODE_EFFORT_LEVEL"));
-    assert_eq!(child_effort_env(&e), vec!["unset"]);
+    assert!(
+        e.raw_calls()[0].contains("--effort medium"),
+        "{:?}",
+        e.raw_calls()
+    );
 }
 
 #[test]

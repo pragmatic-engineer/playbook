@@ -30,7 +30,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// What the playbook ceiling does not cap. Shown by `playbook effort` and `playbook doctor`.
-pub const LIMIT: &str = "playbook's ceiling caps agent variants, the launcher's default effort and what the binary reports. It does not cap a command or skill that ships its own effort, because only Claude Code's maxEffortLevel setting can, and playbook never writes it";
+pub const LIMIT: &str = "playbook's ceiling caps agent variants, the launcher's default effort and what the binary reports. It does not cap a command, skill or base agent that ships its own effort, or a level you state for the session (--effort, effortLevel, CLAUDE_CODE_EFFORT_LEVEL, /effort), because only Claude Code's maxEffortLevel setting can, and playbook never writes it";
 
 /// The config key.
 pub const KEY: &str = "maxEffortLevel";
@@ -164,7 +164,7 @@ pub fn run_set(home: &Path, level: &str) -> Result<String, String> {
         format!("maxEffortLevel set to {level}, playbook sets no ceiling and Claude Code's applies")
     } else {
         format!(
-            "playbook maxEffortLevel set to {level}. Sessions started with playbook cc or playbook ccd stay at or below it, \
+            "playbook maxEffortLevel set to {level}. Agent variants and the launcher's default effort stay at or below it, \
              and never above your Claude Code maxEffortLevel. Claude Code's settings are not changed. {LIMIT}."
         )
     })
