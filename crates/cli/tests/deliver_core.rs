@@ -650,8 +650,13 @@ fn with_rules(mut opts: Options) -> Options {
     opts
 }
 
+fn pushed(rig: &Rig, branch: &str) -> bool {
+    !rig.git(&["ls-remote", "origin", &format!("refs/heads/{branch}")])
+        .is_empty()
+}
+
 #[test]
-fn a_body_that_breaks_the_template_is_refused_with_the_rules_on() {
+fn a_body_that_breaks_the_template_is_refused_before_anything_is_pushed() {
     let rig = Rig::new();
     let mut opts = with_rules(dirty(&rig));
     opts.body = Some("## Test plan\n\n- run it\n".into());
@@ -663,23 +668,32 @@ fn a_body_that_breaks_the_template_is_refused_with_the_rules_on() {
         "got {:?}",
         err.details
     );
+    assert!(!pushed(&rig, "feat/x"), "nothing is pushed");
+    assert!(
+        rig.git(&["status", "--porcelain"]).contains("b.txt"),
+        "nothing is committed"
+    );
 }
 
 #[test]
-fn the_composed_body_passes_the_rules_and_leads_with_the_ticket() {
+fn the_composed_body_leads_with_the_ticket_and_names_the_issue() {
     let rig = Rig::new();
     rig.git(&["checkout", "-q", "-b", "feat/PROJ-9-b"]);
     let mut opts = with_rules(dirty(&rig));
     opts.message = Some("feat(PROJ-9): add b".into());
+    opts.issue = Some("12".into());
 
-    let report = deliver::run(&opts).expect("delivered");
+    deliver::run(&opts).expect("delivered");
 
-    assert_eq!(report.pr_number, Some(7));
+    let body = fs::read_to_string(rig.fake.join("body")).expect("body");
+    assert!(body.starts_with("PROJ-9\n\n## Summary\n"), "got {body}");
+    assert!(body.contains("Refs #12"), "got {body}");
 }
 
 #[test]
 fn a_commit_title_without_the_key_is_refused_before_committing_on_a_stacked_branch() {
     let rig = Rig::new();
+    rig.git(&["push", "-q", "origin", "main:refs/heads/feat/parent"]);
     rig.git(&["checkout", "-q", "-b", "feat/PROJ-9-b"]);
     let mut opts = with_rules(dirty(&rig));
     opts.base = Some("feat/parent".into());
@@ -695,5 +709,63 @@ fn a_commit_title_without_the_key_is_refused_before_committing_on_a_stacked_bran
     assert!(
         rig.git(&["status", "--porcelain"]).contains("b.txt"),
         "nothing is committed"
+    );
+}
+
+#[test]
+fn a_title_only_update_of_an_open_pr_keeps_the_scope_rule_on_a_stacked_branch() {
+    let rig = Rig::new();
+    rig.git(&["checkout", "-q", "-b", "feat/PROJ-9-b"]);
+    let mut first = with_rules(dirty(&rig));
+    first.message = Some("feat(PROJ-9): add b".into());
+    first.base = Some("main".into());
+    deliver::run(&first).expect("opened");
+    rig.git(&["push", "-q", "origin", "main:refs/heads/feat/parent"]);
+    fs::write(rig.fake.join("base"), "feat/parent\n").unwrap();
+    let mut update = with_rules(rig.opts());
+    update.title = Some("feat(sync): rename".into());
+
+    let err = deliver::run(&update).expect_err("refused");
+
+    assert!(
+        err.details
+            .iter()
+            .any(|d| d.contains("PR title must carry")),
+        "got {:?}",
+        err.details
+    );
+}
+
+#[test]
+fn a_dry_run_reports_the_same_refusal_as_a_real_update() {
+    let rig = Rig::new();
+    deliver::run(&dirty(&rig)).expect("opened");
+    let mut update = with_rules(rig.opts());
+    update.body = Some("no sections here\n".into());
+    update.dry_run = true;
+
+    let err = deliver::run(&update).expect_err("refused");
+
+    assert!(
+        err.details.iter().any(|d| d.contains("## Summary")),
+        "got {:?}",
+        err.details
+    );
+}
+
+#[test]
+fn an_unreadable_issue_is_refused() {
+    let rig = Rig::new();
+    let mut opts = with_rules(dirty(&rig));
+    opts.issue = Some("PROJ-12".into());
+
+    let err = deliver::run(&opts).expect_err("refused");
+
+    assert!(
+        err.details
+            .iter()
+            .any(|d| d.contains("--issue must be a number")),
+        "got {:?}",
+        err.details
     );
 }

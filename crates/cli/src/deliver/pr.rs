@@ -282,6 +282,7 @@ pub fn compose_body(
     messages: &[String],
     template: Option<&str>,
     ticket: Option<&str>,
+    issue: Option<u64>,
 ) -> String {
     let mut body = String::new();
     if let Some(ticket) = ticket {
@@ -300,6 +301,12 @@ pub fn compose_body(
         .into_iter()
         .filter(|l| ticket.is_none() || !l.to_lowercase().starts_with("ticket:"))
         .collect();
+    let mut kept = kept;
+    if let Some(n) = issue {
+        if !kept.iter().any(|l| l.contains(&format!("#{n}"))) {
+            kept.push(format!("Refs #{n}"));
+        }
+    }
     if !kept.is_empty() {
         body.push('\n');
         body.push_str(&kept.join("\n"));
@@ -340,6 +347,7 @@ mod tests {
             &["feat: one".to_string()],
             &["feat: one\n\nTicket: ABC-1".to_string()],
             Some("## Test plan\n"),
+            None,
             None,
         );
 

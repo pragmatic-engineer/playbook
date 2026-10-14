@@ -273,7 +273,13 @@ fn is_empty_section(content: &str) -> bool {
         )
 }
 
-fn template_findings(body: &str, level: Level, patterns: &[String], out: &mut Findings) {
+fn template_findings(
+    body: &str,
+    level: Level,
+    patterns: &[String],
+    ticket: Option<&str>,
+    out: &mut Findings,
+) {
     let (head, secs) = sections(body);
     let fix = "use the template: optional ticket line, ## Summary, optional ## Notes for reviewers, optional ## Related work";
     if secs.is_empty() || secs[0].name != "Summary" {
@@ -319,9 +325,10 @@ fn template_findings(body: &str, level: Level, patterns: &[String], out: &mut Fi
     }
     let head_lines: Vec<&str> = head.lines().filter(|l| !l.trim().is_empty()).collect();
     let ticket_like = head_lines.len() == 1
-        && pattern_regexes(patterns)
+        && (pattern_regexes(patterns)
             .iter()
-            .any(|re| re.is_match(head_lines[0]));
+            .any(|re| re.is_match(head_lines[0]))
+            || ticket.is_some_and(|t| has_ticket(head_lines[0], t)));
     if head_lines.len() > 1 || (head_lines.len() == 1 && !ticket_like) {
         out.add(
             level,
@@ -333,7 +340,13 @@ fn template_findings(body: &str, level: Level, patterns: &[String], out: &mut Fi
 /// Checks a PR body against the rules.
 pub fn check_body(body: &str, rules: &Rules, ctx: &Context) -> Findings {
     let mut out = Findings::default();
-    template_findings(body, rules.template, &rules.patterns, &mut out);
+    template_findings(
+        body,
+        rules.template,
+        &rules.patterns,
+        ctx.ticket.as_deref(),
+        &mut out,
+    );
 
     let length = body.chars().count();
     if length > rules.max_chars {
@@ -404,8 +417,10 @@ pub fn check_scope(label: &str, title: &str, rules: &Rules, ctx: &Context) -> Fi
 
 /// Everything one PR needs checked, for every path that opens one.
 pub struct Input<'a> {
-    pub title: &'a str,
-    pub body: &'a str,
+    /// `None` skips the title check (an unchanged PR title).
+    pub title: Option<&'a str>,
+    /// `None` skips the body checks (an update that leaves the body alone).
+    pub body: Option<&'a str>,
     pub branch: &'a str,
     /// The subject line of every commit in the PR.
     pub subjects: &'a [String],
@@ -434,8 +449,13 @@ pub fn enforce(input: &Input<'_>, rules: &Rules) -> Result<Vec<String>, Vec<Stri
         issue: detect_issue(input.issue_arg, input.branch),
         stacked: input.stacked,
     };
-    let mut found = check_body(input.body, rules, &ctx);
-    found.extend(check_scope("PR title", input.title, rules, &ctx));
+    let mut found = Findings::default();
+    if let Some(body) = input.body {
+        found.extend(check_body(body, rules, &ctx));
+    }
+    if let Some(title) = input.title {
+        found.extend(check_scope("PR title", title, rules, &ctx));
+    }
     for subject in input.subjects {
         found.extend(check_scope(
             &format!("commit title `{subject}`"),
@@ -446,21 +466,6 @@ pub fn enforce(input: &Input<'_>, rules: &Rules) -> Result<Vec<String>, Vec<Stri
     }
     if found.blocks.is_empty() {
         Ok(found.warns)
-    } else {
-        Err(found.blocks)
-    }
-}
-
-/// The scope rule alone, for a commit title checked before the commit.
-pub fn enforce_commit(input: &Input<'_>, rules: &Rules) -> Result<(), Vec<String>> {
-    let ctx = Context {
-        ticket: detect_ticket(input.ticket_arg, input.branch, &[], &rules.patterns),
-        issue: None,
-        stacked: input.stacked,
-    };
-    let found = check_scope("commit title", input.title, rules, &ctx);
-    if found.blocks.is_empty() {
-        Ok(())
     } else {
         Err(found.blocks)
     }

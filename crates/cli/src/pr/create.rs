@@ -113,8 +113,8 @@ fn apply_rules(
     let log = git(&["log", &format!("origin/{base}..HEAD"), "--format=%s"])?;
     let subjects: Vec<String> = log.lines().map(str::to_string).collect();
     let input = Input {
-        title,
-        body,
+        title: Some(title),
+        body: Some(body),
         branch,
         subjects: &subjects,
         stacked: gh
