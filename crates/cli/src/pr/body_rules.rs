@@ -402,6 +402,70 @@ pub fn check_scope(label: &str, title: &str, rules: &Rules, ctx: &Context) -> Fi
     out
 }
 
+/// Everything one PR needs checked, for every path that opens one.
+pub struct Input<'a> {
+    pub title: &'a str,
+    pub body: &'a str,
+    pub branch: &'a str,
+    /// The subject line of every commit in the PR.
+    pub subjects: &'a [String],
+    pub stacked: bool,
+    pub ticket_arg: Option<&'a str>,
+    pub issue_arg: Option<&'a str>,
+}
+
+/// The one rule path for `pr create` and `deliver`: the body, the title and
+/// every commit title. `Ok` carries the warnings; `Err` the blocks.
+pub fn enforce(input: &Input<'_>, rules: &Rules) -> Result<Vec<String>, Vec<String>> {
+    if let Some(raw) = input.issue_arg {
+        if detect_issue(Some(raw), "").is_none() {
+            return Err(vec![format!(
+                "--issue must be a number such as 12 or #12, got `{raw}`"
+            )]);
+        }
+    }
+    let ctx = Context {
+        ticket: detect_ticket(
+            input.ticket_arg,
+            input.branch,
+            input.subjects,
+            &rules.patterns,
+        ),
+        issue: detect_issue(input.issue_arg, input.branch),
+        stacked: input.stacked,
+    };
+    let mut found = check_body(input.body, rules, &ctx);
+    found.extend(check_scope("PR title", input.title, rules, &ctx));
+    for subject in input.subjects {
+        found.extend(check_scope(
+            &format!("commit title `{subject}`"),
+            subject,
+            rules,
+            &ctx,
+        ));
+    }
+    if found.blocks.is_empty() {
+        Ok(found.warns)
+    } else {
+        Err(found.blocks)
+    }
+}
+
+/// The scope rule alone, for a commit title checked before the commit.
+pub fn enforce_commit(input: &Input<'_>, rules: &Rules) -> Result<(), Vec<String>> {
+    let ctx = Context {
+        ticket: detect_ticket(input.ticket_arg, input.branch, &[], &rules.patterns),
+        issue: None,
+        stacked: input.stacked,
+    };
+    let found = check_scope("commit title", input.title, rules, &ctx);
+    if found.blocks.is_empty() {
+        Ok(())
+    } else {
+        Err(found.blocks)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

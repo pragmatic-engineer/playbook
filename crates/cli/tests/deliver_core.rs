@@ -644,3 +644,56 @@ fn an_earlier_commit_with_ai_attribution_is_refused_before_the_push() {
     assert!(!rig.gh_log().contains("pr create"));
     assert!(rig.git(&["ls-remote", "origin", "feat/x"]).is_empty());
 }
+
+fn with_rules(mut opts: Options) -> Options {
+    opts.rules = Some(playbook::pr::body_rules::Rules::default());
+    opts
+}
+
+#[test]
+fn a_body_that_breaks_the_template_is_refused_with_the_rules_on() {
+    let rig = Rig::new();
+    let mut opts = with_rules(dirty(&rig));
+    opts.body = Some("## Test plan\n\n- run it\n".into());
+
+    let err = deliver::run(&opts).expect_err("refused");
+
+    assert!(
+        err.details.iter().any(|d| d.contains("## Summary")),
+        "got {:?}",
+        err.details
+    );
+}
+
+#[test]
+fn the_composed_body_passes_the_rules_and_leads_with_the_ticket() {
+    let rig = Rig::new();
+    rig.git(&["checkout", "-q", "-b", "feat/PROJ-9-b"]);
+    let mut opts = with_rules(dirty(&rig));
+    opts.message = Some("feat(PROJ-9): add b".into());
+
+    let report = deliver::run(&opts).expect("delivered");
+
+    assert_eq!(report.pr_number, Some(7));
+}
+
+#[test]
+fn a_commit_title_without_the_key_is_refused_before_committing_on_a_stacked_branch() {
+    let rig = Rig::new();
+    rig.git(&["checkout", "-q", "-b", "feat/PROJ-9-b"]);
+    let mut opts = with_rules(dirty(&rig));
+    opts.base = Some("feat/parent".into());
+    opts.message = Some("feat(x): add b".into());
+
+    let err = deliver::run(&opts).expect_err("refused");
+
+    assert!(
+        err.details.iter().any(|d| d.contains("PROJ-9")),
+        "got {:?}",
+        err.details
+    );
+    assert!(
+        rig.git(&["status", "--porcelain"]).contains("b.txt"),
+        "nothing is committed"
+    );
+}

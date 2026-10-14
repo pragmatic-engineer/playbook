@@ -74,6 +74,12 @@ pub struct Options {
     pub env: Vec<(String, String)>,
     /// Runs before a commit (secret and readiness checks); `Err` refuses.
     pub before_commit: Option<BeforeCommit>,
+    /// The PR body, ticket and scope rules (`pr::body_rules`). `None` skips them.
+    pub rules: Option<crate::pr::body_rules::Rules>,
+    /// An explicit ticket key, or `none` to turn the ticket rules off.
+    pub ticket: Option<String>,
+    /// The GitHub issue number the PR handles.
+    pub issue: Option<String>,
 }
 
 impl Options {
@@ -100,6 +106,9 @@ impl Options {
             gh: "gh".into(),
             env: Vec::new(),
             before_commit: None,
+            rules: None,
+            ticket: None,
+            issue: None,
         }
     }
 }
@@ -274,6 +283,40 @@ fn text_problems(opts: &Options) -> Vec<String> {
     out
 }
 
+/// The shared rule path (`pr::body_rules::enforce`) for a PR about to be
+/// opened or edited. Warnings go to stderr; `Ok` carries the blocks.
+fn rule_blocks(
+    opts: &Options,
+    title: &str,
+    body: &str,
+    branch: &str,
+    subjects: &[String],
+    base: &str,
+    default: &str,
+) -> Result<Vec<String>, Failure> {
+    let Some(rules) = &opts.rules else {
+        return Ok(Vec::new());
+    };
+    let input = crate::pr::body_rules::Input {
+        title,
+        body,
+        branch,
+        subjects,
+        stacked: base != default,
+        ticket_arg: opts.ticket.as_deref(),
+        issue_arg: opts.issue.as_deref(),
+    };
+    match crate::pr::body_rules::enforce(&input, rules) {
+        Ok(warns) => {
+            for warn in warns {
+                eprintln!("deliver: WARN: {warn}");
+            }
+            Ok(Vec::new())
+        }
+        Err(blocks) => Ok(blocks),
+    }
+}
+
 fn refuse_all(problems: Vec<String>, what: &str) -> Failure {
     let mut f = fail(exit::REFUSED, format!("refusing: {what}"));
     f.details = problems;
@@ -348,6 +391,28 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
                 problems,
                 "the commit message breaks a text rule",
             ));
+        }
+    }
+
+    if let (Some(rules), Some(message)) = (&opts.rules, &opts.message) {
+        // Fail before anything is committed, so a missing key in the scope
+        // never leaves a pushed commit that the PR step would then refuse.
+        let title = message.lines().next().unwrap_or("").to_string();
+        let input = crate::pr::body_rules::Input {
+            title: &title,
+            body: "",
+            branch: &branch,
+            subjects: std::slice::from_ref(&title),
+            stacked: opts
+                .base
+                .clone()
+                .or_else(|| parent_branch(&sys, &branch))
+                .is_some_and(|b| b != default),
+            ticket_arg: opts.ticket.as_deref(),
+            issue_arg: opts.issue.as_deref(),
+        };
+        if let Err(blocks) = crate::pr::body_rules::enforce_commit(&input, rules) {
+            return Err(refuse_all(blocks, "the commit title breaks a PR rule"));
         }
     }
 
@@ -661,12 +726,34 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
                     ))
                 }
             };
+            let ticket = opts.rules.as_ref().and_then(|rules| {
+                crate::pr::body_rules::detect_ticket(
+                    opts.ticket.as_deref(),
+                    &branch,
+                    &subjects,
+                    &rules.patterns,
+                )
+            });
             let body = match &opts.body {
                 Some(b) => pr::with_kept(b, &kept),
-                None => pr::compose_body(&subjects, &messages, pr::template(&sys.dir).as_deref()),
+                None => pr::compose_body(
+                    &subjects,
+                    &messages,
+                    // The repo template carries sections the team template
+                    // refuses, so it is left out when the rules are on.
+                    opts.rules
+                        .is_none()
+                        .then(|| pr::template(&sys.dir))
+                        .flatten()
+                        .as_deref(),
+                    ticket.as_deref(),
+                ),
             };
             let mut problems = check::pr_title(&title);
             problems.extend(check::pr_body(&body));
+            problems.extend(rule_blocks(
+                opts, &title, &body, &branch, &subjects, &base, &default,
+            )?);
             if !problems.is_empty() {
                 return Err(refuse_all(
                     problems,
@@ -692,7 +779,17 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
                 if !opts.dry_run {
                     let body = opts.body.as_deref().map(|b| pr::with_kept(b, &kept));
                     if let Some(body) = &body {
-                        let problems = check::pr_body(body);
+                        let mut problems = check::pr_body(body);
+                        let title = new_title.unwrap_or(found.title.as_str());
+                        problems.extend(rule_blocks(
+                            opts,
+                            title,
+                            body,
+                            &branch,
+                            &[],
+                            &found.base,
+                            &default,
+                        )?);
                         if !problems.is_empty() {
                             return Err(refuse_all(problems, "the PR body breaks a text rule"));
                         }
