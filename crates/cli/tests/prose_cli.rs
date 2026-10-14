@@ -6,12 +6,8 @@
 use std::fs;
 use std::process::Command;
 
-fn run(text: &str, strict: bool) -> (i32, String) {
-    let dir = std::env::temp_dir().join(format!(
-        "prose-cli-{}-{}",
-        playbook::testing::run_id(),
-        strict
-    ));
+fn run(tag: &str, text: &str, strict: bool) -> (i32, String) {
+    let dir = std::env::temp_dir().join(format!("prose-cli-{}-{tag}", playbook::testing::run_id()));
     fs::create_dir_all(&dir).expect("scratch dir");
     let file = dir.join("a.md");
     fs::write(&file, text).expect("scratch file");
@@ -29,7 +25,7 @@ fn run(text: &str, strict: bool) -> (i32, String) {
 
 #[test]
 fn a_hard_finding_exits_zero_without_strict() {
-    let (code, out) = run("Let that sink in.\n", false);
+    let (code, out) = run("a", "Let that sink in.\n", false);
 
     assert_eq!(code, 0);
     assert!(out.contains("a.md:1: emphasis crutch"), "{out}");
@@ -38,14 +34,14 @@ fn a_hard_finding_exits_zero_without_strict() {
 
 #[test]
 fn a_hard_finding_exits_one_with_strict() {
-    let (code, _) = run("Let that sink in.\n", true);
+    let (code, _) = run("b", "Let that sink in.\n", true);
 
     assert_eq!(code, 1);
 }
 
 #[test]
 fn a_soft_finding_exits_zero_even_with_strict() {
-    let (code, out) = run("It always fails.\n", true);
+    let (code, out) = run("c", "It always fails.\n", true);
 
     assert_eq!(code, 0);
     assert!(out.contains("absolute word"), "{out}");
