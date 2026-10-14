@@ -100,6 +100,11 @@ fn pick(on: bool, off: bool) -> Option<bool> {
     }
 }
 
+/// True when there is no terminal to ask on and the user did not pass `--yes`.
+pub fn unattended(flags: &Flags, terminal: bool) -> bool {
+    !terminal && !flags.yes
+}
+
 /// Decide every part. `ask(question, default)` is called only for a part with
 /// no flag, and only when `interactive` is true. `security_config` is the
 /// resolved `security.defaults` key: the default for the security part, which
@@ -107,6 +112,25 @@ fn pick(on: bool, off: bool) -> Option<bool> {
 pub fn resolve(
     flags: &Flags,
     interactive: bool,
+    security_config: bool,
+    ask: &mut dyn FnMut(&str, bool) -> bool,
+) -> Choices {
+    resolve_with(
+        flags,
+        interactive,
+        !unattended(flags, interactive),
+        security_config,
+        ask,
+    )
+}
+
+/// Like `resolve`, with the default for the parts that change Claude Code's
+/// settings given by the caller. A dry run in a terminal does not ask but
+/// still previews the answers a real run would give.
+pub fn resolve_with(
+    flags: &Flags,
+    interactive: bool,
+    settings_default: bool,
     security_config: bool,
     ask: &mut dyn FnMut(&str, bool) -> bool,
 ) -> Choices {
@@ -119,18 +143,20 @@ pub fn resolve(
             }
         })
     };
+    // Hooks and the status line are entries in Claude Code's settings. With
+    // nobody to ask and no --yes, they stay off unless a flag turns them on.
     Choices {
         hooks: decide(
             flags.hooks,
             flags.no_hooks,
             catalog::question("hooks"),
-            true,
+            settings_default,
         ),
         statusline: decide(
             flags.statusline,
             flags.no_statusline,
             catalog::question("statusline"),
-            true,
+            settings_default,
         ),
         security: pick(flags.security, flags.no_security).unwrap_or(security_config),
         path: decide(flags.path, flags.no_path, catalog::question("path"), true),
@@ -187,8 +213,9 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
     .iter()
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
-        "init: output is not a terminal, so no questions were asked and the defaults apply; \
-         pass --yes to accept them or the --x/--no-x flags (see --explain) to choose",
+        "init: output is not a terminal, so no questions were asked; the hooks and status line \
+         stay off and the other defaults apply; pass --yes to accept all defaults or the \
+         --x/--no-x flags (see --explain) to choose",
     )
 }
 
@@ -251,13 +278,33 @@ mod tests {
     }
 
     #[test]
+    fn with_yes_and_no_terminal_the_settings_parts_are_on() {
+        let yes = Flags {
+            yes: true,
+            ..Flags::default()
+        };
+        let c = resolve(&yes, false, false, &mut never);
+        assert!(c.hooks && c.statusline);
+    }
+
+    #[test]
+    fn an_explicit_hooks_flag_is_consent_without_a_terminal() {
+        let flags = Flags {
+            hooks: true,
+            ..Flags::default()
+        };
+        let c = resolve(&flags, false, false, &mut never);
+        assert!(c.hooks && !c.statusline);
+    }
+
+    #[test]
     fn without_a_terminal_every_part_uses_its_default() {
         let c = resolve(&Flags::default(), false, false, &mut never);
         assert_eq!(
             c,
             Choices {
-                hooks: true,
-                statusline: true,
+                hooks: false,
+                statusline: false,
                 security: false,
                 path: true,
                 aliases: false,

@@ -14,7 +14,7 @@ The quickest route is one command. This page covers every route, requirements, h
 
 The skills are a Claude Code plugin and work on their own. The binary is optional. Installing one never installs the other, and playbook never installs or removes a plugin for you.
 
-When the binary is installed, `playbook init` adds its hook entries to `~/.claude/settings.json`. In a terminal it asks first. With no terminal and no `--no-hooks`, it applies the defaults, which include the hooks. It merges with the entries you already have. An entry counts as playbook's when its command is exactly one of the `playbook hook <name>` commands `init` writes, and `playbook uninstall` removes only those. The old `playbook-hooks` plugin is retired. If it is still installed, remove it with `claude plugin uninstall playbook-hooks@pragmatic-engineer`, because its hooks would run next to the ones in `settings.json`.
+When the binary is installed, `playbook init` adds its hook entries to `~/.claude/settings.json`. In a terminal it asks first. With no terminal and no `--yes`, it leaves your Claude Code settings alone and prints the command to run. `--hooks` or `--yes` is the explicit yes. It merges with the entries you already have. An entry counts as playbook's when its command is exactly one of the `playbook hook <name>` commands `init` writes, and `playbook uninstall` removes only those. The old `playbook-hooks` plugin is retired. If it is still installed, remove it with `claude plugin uninstall playbook-hooks@pragmatic-engineer`, because its hooks would run next to the ones in `settings.json`.
 
 Which one? Choose skills only if you want to read the skills and nothing else runs on your machine. Choose both for everything else. The binary is a hard dependency of the hooks, guards, status line and usage. Only the skill text works without it. See [Skills without the binary](#skills-without-the-binary).
 
@@ -122,7 +122,7 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
    playbook init
    ```
 
-   In a terminal, `init` asks about hooks, settings, the status line, `PATH`, the launcher and the system prompt. The status line question reads "Use the playbook status line?" and has `--statusline` and `--no-statusline`. Answering no leaves `statusLine` in `settings.json` as it is, and an existing playbook status line stays until `playbook uninstall`. Each part has `--x` and `--no-x` flags. With `--yes`, or without a terminal, hooks, settings, the status line and `PATH` are on and the launcher and system prompt are off. Every step is safe to repeat.
+   In a terminal, `init` asks about hooks, settings, the status line, `PATH`, the launcher and the system prompt. The status line question reads "Use the playbook status line?" and has `--statusline` and `--no-statusline`. Answering no leaves `statusLine` in `settings.json` as it is, and an existing playbook status line stays until `playbook uninstall`. Each part has `--x` and `--no-x` flags. With `--yes`, hooks, settings, the status line and `PATH` are on and the launcher and system prompt are off. Without a terminal and without `--yes`, the hooks and the status line stay off unless you pass `--hooks` or `--statusline`. Every step is safe to repeat.
 
 5. For the skills, run the two plugin commands from [Pick an install mode](#pick-an-install-mode). Then run `/playbook:doctor`, or `playbook doctor check` without the skills.
 
@@ -163,7 +163,7 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 ## Init flags
 
-`playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override` and `--short-name`, each with a `--no-` form. Hooks, status line and `PATH` are on by default, the permissions rules (`--security`), launcher and system prompt are off.
+`playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override` and `--short-name`, each with a `--no-` form. With `--yes` or in a terminal, hooks, status line and `PATH` are on by default. Without a terminal and without `--yes`, hooks and the status line stay off unless their flag is passed. The permissions rules (`--security`), launcher and system prompt are off.
 
 ## Skills without the binary
 

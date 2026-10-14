@@ -972,7 +972,7 @@ fn binary_malformed_settings_json_exits_non_zero() {
 
     // Act
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .arg("init")
+        .args(["init", "--yes"])
         .env("HOME", &home)
         .env("CLAUDE_PLUGIN_ROOT", self_root())
         .env("SHELL", "/bin/bash")
@@ -1002,7 +1002,7 @@ fn binary_clean_init_exits_zero_and_is_idempotent() {
     let home = scratch_home("binary-clean");
     let run_init = || {
         Command::new(env!("CARGO_BIN_EXE_playbook"))
-            .arg("init")
+            .args(["init", "--yes"])
             .env("HOME", &home)
             .env("CLAUDE_PLUGIN_ROOT", self_root())
             .env("SHELL", "/bin/bash")

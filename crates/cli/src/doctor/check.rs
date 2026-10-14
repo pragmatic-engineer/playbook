@@ -652,7 +652,7 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
                 Level::Warn,
                 "playbook hooks are not in settings.json, so the guards and worktree hooks do not run",
             )
-            .hint("run: playbook init"),
+            .hint("run: playbook init --yes"),
         );
     } else if !found.missing.is_empty() {
         rows.push(
@@ -665,7 +665,7 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
                     found.missing.join(", ")
                 ),
             )
-            .hint("run: playbook init"),
+            .hint("run: playbook init --yes"),
         );
     } else {
         rows.push(Row::new(

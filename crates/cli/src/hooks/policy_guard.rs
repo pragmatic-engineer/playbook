@@ -113,7 +113,7 @@ owner or repo in the text.";
 
 const RM_GUARD_CONFIG_REASON: &str = "The rm guard's allowed roots, the prose lint mode and the pull request rules are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Until then, work within the current setting and say so.";
 
-const HOOK_ENTRIES_REASON: &str = "The hook entries in settings.json are the user's to change, not the model's. They are the guards that keep this session safe. Ask the user to run `playbook init` (to add them) or `playbook uninstall` (to remove them) themselves in the prompt with `!`, or to edit settings.json by hand. Until then, leave the hook entries as they are and say so; in an unattended run, report this and stop. A settings change that keeps every hook entry is fine with the Edit tool.";
+const HOOK_ENTRIES_REASON: &str = "The hook entries in settings.json are the user's to change, not the model's. They are the guards that keep this session safe. Ask the user to run `playbook init --yes` (to add them) or `playbook uninstall` (to remove them) themselves in the prompt with `!`, or to edit settings.json by hand. Until then, leave the hook entries as they are and say so; in an unattended run, report this and stop. A settings change that keeps every hook entry is fine with the Edit tool.";
 
 /// What marks an entry `playbook init` owns.
 const HOOK_MARK: &str = crate::init::wire::HOOK_COMMAND_PREFIX;

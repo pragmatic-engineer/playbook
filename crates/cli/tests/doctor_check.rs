@@ -598,7 +598,7 @@ fn nothing_wired_is_a_warning_with_the_one_command_to_fix_it() {
         rows[0].starts_with("WARN playbook hooks are not in settings.json"),
         "{rows:?}"
     );
-    assert!(rows[0].ends_with("run: playbook init"), "{rows:?}");
+    assert!(rows[0].ends_with("run: playbook init --yes"), "{rows:?}");
 }
 
 #[test]

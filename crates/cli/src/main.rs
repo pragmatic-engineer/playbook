@@ -464,12 +464,30 @@ fn main() {
                     }
                 }
             }
-            let choices = init::choices::resolve(
+            let terminal = init::choices::stdio_is_interactive();
+            let choices = init::choices::resolve_with(
                 &flags,
                 asking,
+                !init::choices::unattended(&flags, terminal),
                 security_config,
                 &mut |question, default| init::wizard::guided_answer(&guided, question, default),
             );
+            if init::choices::unattended(&flags, terminal) && !flags.dry_run {
+                let mut left_off = Vec::new();
+                if !choices.hooks && !flags.hooks && !flags.no_hooks {
+                    left_off.push("hooks");
+                }
+                if !choices.statusline && !flags.statusline && !flags.no_statusline {
+                    left_off.push("status line");
+                }
+                if !left_off.is_empty() {
+                    eprintln!(
+                        "init: no terminal and no --yes, so these were left out of your Claude Code \
+                         settings: {}. To add them, run: playbook init --yes",
+                        left_off.join(" and ")
+                    );
+                }
+            }
             let (system_prompt, aliases) = (choices.system_prompt, choices.aliases);
             let home = common::home_dir();
             let claude_home = home.join(".claude");

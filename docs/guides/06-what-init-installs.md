@@ -6,7 +6,7 @@
 
 - In a terminal, `playbook init` is a guided wizard. It shows one screen per part ("Step 3 of 8"), with what happens if you accept and what happens if you decline, a mark for the recommended answer, and the keys y, n, b (back), s (use the default) and q (quit). A summary and a confirm come last. Nothing is written before you confirm.
 - `--yes` (or `--defaults`) skips the wizard and takes the defaults. Each part also has a `--x` and `--no-x` flag, and a flag wins over the wizard and shows in the summary as set by a flag.
-- Without a terminal there are no questions: flags and defaults apply.
+- Without a terminal there are no questions. Hooks and the status line change Claude Code's settings, so they stay off unless you pass `--yes` or their own flag. The other defaults apply.
 - `playbook init --dry-run` prints exactly what would change for each part and changes nothing.
 - `playbook init --explain` describes every part. `playbook init --explain <part>` describes one, for example `--explain hooks`.
 - `playbook hooks list` prints every hook with its event, matcher and one line of purpose.
