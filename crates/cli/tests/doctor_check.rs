@@ -530,11 +530,8 @@ fn hook_rows(rows: &[Value]) -> Vec<String> {
             )
         })
         .filter(|t| {
-            (t.contains("playbook hooks")
-                || t.contains("hook the binary")
-                || t.contains("these hooks")
-                || t.contains("hooks are missing")
-                || t.contains("minimal PATH"))
+            !t.contains("data folder")
+                && (t.to_lowercase().contains("hook") || t.contains("minimal PATH"))
         })
         .collect()
 }
@@ -551,6 +548,18 @@ fn stub_with_hooks(b: &Box, listed: &[&str]) -> PathBuf {
     fs::write(&f, body).unwrap();
     fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).unwrap();
     d
+}
+
+/// A host whose system profile already puts a playbook on the minimal PATH
+/// cannot show the blind case.
+fn host_finds_playbook() -> bool {
+    let host = Command::new("/bin/sh")
+        .args(["-lc", "command -v playbook"])
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        .output()
+        .unwrap();
+    !String::from_utf8_lossy(&host.stdout).trim().is_empty()
 }
 
 fn every_hook_name() -> Vec<&'static str> {
@@ -584,7 +593,7 @@ fn a_fully_wired_settings_file_passes() {
     let total = every_hook_name().len();
     assert!(
         rows[0].starts_with(&format!(
-            "PASS playbook hooks in settings.json ({total} of {total})"
+            "PASS playbook hook entries in settings.json ({total} of {total})"
         )),
         "{rows:?}"
     );
@@ -649,6 +658,9 @@ fn a_binary_that_does_not_know_a_wired_hook_is_reported() {
 
 #[test]
 fn a_login_shell_with_a_minimal_path_must_find_the_binary() {
+    if host_finds_playbook() {
+        return;
+    }
     let b = Box::new("hooks-minimal-path");
     wire_all(&b);
     let dir = stub_with_hooks(&b, &every_hook_name());
@@ -731,4 +743,64 @@ fn layer_one_fails_when_the_playbook_plugin_is_disabled() {
     let rows = b.run(&[&dir], "/bin/bash", None);
 
     assert!(text(&layer(&rows, "1")).contains("FAIL plugin installed but disabled"));
+}
+
+#[test]
+fn a_login_shell_that_prints_something_is_not_taken_for_a_hit() {
+    if host_finds_playbook() {
+        return;
+    }
+    let b = Box::new("hooks-noisy-profile");
+    wire_all(&b);
+    let dir = stub_with_hooks(&b, &every_hook_name());
+    fs::write(b.home().join(".profile"), "echo Agent pid 4242\n").unwrap();
+
+    let rows = hook_rows(&b.run(&[&dir], "/bin/sh", None));
+
+    assert!(
+        rows.iter()
+            .any(|r| r.contains("minimal PATH cannot find playbook")),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn the_real_binarys_hook_help_lists_every_wired_hook() {
+    let b = Box::new("hooks-real-binary");
+    wire_all(&b);
+    let bin = std::path::Path::new(env!("CARGO_BIN_EXE_playbook"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+
+    let rows = hook_rows(&b.run(&[&bin], "/bin/sh", None));
+
+    assert!(
+        !rows.iter().any(|r| r.contains("does not know")),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn an_installed_hooks_plugin_is_reported_because_its_hooks_would_run_twice() {
+    let b = Box::new("hooks-plugin-overlap");
+    wire_all(&b);
+    let dir = b.home().join(".claude/plugins");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("installed_plugins.json"),
+        r#"{"version":2,"plugins":{"playbook-hooks@pragmatic-engineer":[{"scope":"user"}]}}"#,
+    )
+    .unwrap();
+
+    let rows = hook_rows(&b.run(&[], "/bin/sh", None));
+
+    let row = rows
+        .iter()
+        .find(|r| r.contains("playbook-hooks plugin is still installed"))
+        .expect("overlap row");
+    assert!(
+        row.ends_with("run: claude plugin uninstall playbook-hooks@pragmatic-engineer"),
+        "{row}"
+    );
 }

@@ -60,7 +60,7 @@ Every hook is a module under `crates/cli/src/hooks/`, run as `playbook hook <nam
 
 `playbook init` writes the hook entries and `statusLine` into your user `settings.json`. Disabling the plugin in Claude Code sets `enabledPlugins["playbook@pragmatic-engineer"]` to `false` and leaves those entries, so playbook checks the key itself. `common::plugin_state::paused()` reads `~/.claude/settings.json` once per call, from the one place every hook (`run_hook` in `crates/cli/src/main.rs`) and `playbook statusline` go through. When the key is explicitly `false`, a hook exits 0 with no output and no side effects, and the status line prints nothing.
 
-Only an explicit `false` pauses. A missing key, `true`, a missing file and a file that cannot be read or parsed all count as enabled, so Homebrew-only users and broken settings keep their guards. The safety guards pause too, which is intended: a disabled plugin means no playbook behaviour. A skipped `WorktreeCreate` hook prints no path, so Claude Code falls back to its own error for that call.
+Only an explicit `false` pauses. A missing key, `true`, a missing file and a file that cannot be read or parsed all count as enabled, so Homebrew-only users and broken settings keep their guards. The safety guards pause too, which is intended: a disabled plugin means no playbook behaviour. The two worktree hooks are the exception and always run: they stand in for Claude Code's own worktree handling, and a skipped `WorktreeCreate` hook would print no path.
 
 Set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` to run hooks and the status line anyway. The check skips the JSON parse unless the settings text mentions the plugin key, and measured about 40 microseconds on a 7 KB `settings.json`.
 

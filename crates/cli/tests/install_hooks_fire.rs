@@ -531,7 +531,16 @@ fn fires(f: &Fire, name: &str) -> bool {
             fs::create_dir_all(&repo).unwrap();
             let git = |args: &[&str]| {
                 Command::new("git")
-                    .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+                    .args([
+                        "-c",
+                        "user.name=t",
+                        "-c",
+                        "user.email=t@example.com",
+                        "-c",
+                        "commit.gpgsign=false",
+                    ])
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_NOSYSTEM", "1")
                     .args(args)
                     .current_dir(&repo)
                     .env("HOME", &home)
@@ -581,10 +590,12 @@ fn every_wired_hook_fires_and_produces_its_observable_effect() {
     )
     .unwrap();
     let names = hook_names(&settings);
-    assert!(
-        names.len() >= 20,
-        "expected 20 distinct hook names, got {}: {names:?}",
-        names.len()
+    let wired: BTreeSet<String> = playbook::init::wire::wired_hooks()
+        .map(|h| h.name.to_string())
+        .collect();
+    assert_eq!(
+        names, wired,
+        "install should wire exactly the hooks init writes"
     );
     let failed: Vec<&String> = names.iter().filter(|n| !fires(&f, n)).collect();
     assert!(failed.is_empty(), "hooks that did not fire: {failed:?}");

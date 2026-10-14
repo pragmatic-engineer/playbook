@@ -100,6 +100,22 @@ fn a_disabled_plugin_makes_the_hook_a_silent_success() {
 }
 
 #[test]
+fn a_disabled_plugin_does_not_pause_the_worktree_hooks() {
+    // The hook stands in for Claude Code's own worktree creation, so it must
+    // still run. With no cwd in the payload it refuses and says so.
+    let home = scratch_home("worktree", Some(DISABLED));
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["hook", "worktree-create"])
+        .env("HOME", &home)
+        .env("HOOK_INPUT", r#"{"name":"x"}"#)
+        .env_remove("PLAYBOOK_IGNORE_PLUGIN_DISABLED")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("payload cwd is missing"));
+}
+
+#[test]
 fn the_escape_variable_runs_the_hook_even_when_the_plugin_is_disabled() {
     let home = scratch_home("escape", Some(DISABLED));
     let out = run_rm_guard(&home, true);
