@@ -1,6 +1,6 @@
 # ADR-0030: Keep the Skills, Commands and Agents in Their Own Repository
 
-- **Status:** Accepted. Decisions 2 and 3, the parts about the `playbook-hooks` plugin, are superseded by [ADR 0031](0031-hooks-in-settings-json.md)
+- **Status:** Accepted. Decisions 2 and 3, the parts about the `playbook-hooks` plugin, are superseded by [ADR 0031](0031-hooks-in-settings-json.md). Decisions 1, 5, 6 and 7, the second repository, the daily comparison, the checks crate and the version line, are superseded by [ADR 0032](0032-plugin-in-the-playbook-repo.md)
 - **Date created:** 2026-10-13
 - **Date modified:** 2026-10-14
 

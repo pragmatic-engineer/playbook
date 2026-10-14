@@ -43,7 +43,7 @@ On a match, the hook emits a prompt context message reminding Claude the session
 
 The reasoning is in [Why the pieces are shaped this way](../concepts/03-why-the-pieces-are-shaped-this-way.md).
 
-Effort is a second dial next to the model tier. Agents, commands and skills accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, the launcher renders tier variants for the session (see [Authoring agents](https://github.com/pragmatic-engineer/skills/blob/main/docs/authoring/02-authoring-agents.md)) and the orchestrator picks by name. To compare settings on real inputs, run `playbook eval bench`.
+Effort is a second dial next to the model tier. Agents, commands and skills accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, the launcher renders tier variants for the session (see [Authoring agents](../authoring/02-authoring-agents.md)) and the orchestrator picks by name. To compare settings on real inputs, run `playbook eval bench`.
 
 **Main session default.** The `playbook cc` and `playbook ccd` launchers add `--effort medium` to the `claude` command line when the session states no effort. Stating one turns it off: pass `--effort high` (or any level), set `effortLevel` in `~/.claude/settings.json`, or export `CLAUDE_CODE_EFFORT_LEVEL`. An effort ceiling still lowers the default. Playbook only shapes its own launcher command line and never writes Claude Code's settings or memory, so a session started without the launcher keeps the model default. See [ADR-0023](../adr/0023-commands-at-medium.md).
 
@@ -77,7 +77,7 @@ Dispatch granularity was benched with tools. `playbook eval bench --cases crates
 
 ### Policy table: every component
 
-The table of every agent, command and skill with the model and effort in its file, and why, now lives with the plugin files in [pragmatic-engineer/skills](https://github.com/pragmatic-engineer/skills/blob/main/docs/policy-table.md). A test there keeps it equal to the frontmatter.
+The table of every agent, command and skill with the model and effort in its file, and why, now lives in [`docs/policy-table.md`](../policy-table.md). A test there keeps it equal to the frontmatter.
 
 ### Effort cap per model
 
@@ -121,11 +121,11 @@ Measured on Claude Code 2.1.293 (2026-10-09): all six ids answer, and the aliase
 
 **Effort and the fallback.** The previous Sonnet and Opus reject `xhigh` and `max` with HTTP 400 `Invalid effort level`. They accept `low`, `medium` and `high`. Haiku 4.5 accepts all four. A 400 also triggers the fallback, so a session at `xhigh` would walk the chain and end at Haiku anyway. When the effort in force is `xhigh` or `max` (from `--effort`, or `effortLevel` in your user settings, lowered to the effective ceiling), `playbook cc` therefore passes only `claude-haiku-4-5`. When no effort is stated, the model default applies and the full chain is passed. Playbook never changes your effort to suit a fallback.
 
-**Overrides.** `playbook config set --global models.sonnet claude-sonnet-5` (also `models.haiku` and `models.opus`) points an alias at another model of the same tier. The value is empty (no override) or `claude-<tier>-<major>[-<minor>]` for its own tier, and anything else is refused. `playbook cc` and `playbook ccd` export `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for each override, so subagents and skills that name the alias follow it. A variable you exported yourself wins. Shipped plugin files still name only aliases, so the pin check in `crates/cli/tests/model_pins.rs` is unchanged.
+**Overrides.** `playbook config set --global models.sonnet claude-sonnet-5` (also `models.haiku` and `models.opus`) points an alias at another model of the same tier. The value is empty (no override) or `claude-<tier>-<major>[-<minor>]` for its own tier, and anything else is refused. `playbook cc` and `playbook ccd` export `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for each override, so subagents and skills that name the alias follow it. A variable you exported yourself wins. Shipped plugin files still name only aliases, so the pin check is unchanged.
 
 `playbook doctor models` (add `--json`) prints the table, any override, the chain `playbook cc` passes, whether your own fallback replaces it, and whether the effort in force trimmed the chain.
 
-`crates/cli/tests/model_pins.rs` fails when an agent, command, skill, prompt, output style, workflow or `settings.shared.json` names a model id outside this table, or when an agent uses anything but a tier alias.
+a test fails when an agent, command, skill, prompt, output style, workflow or `settings.shared.json` names a model id outside this table, or when an agent uses anything but a tier alias.
 
 ## Memory Protocol
 

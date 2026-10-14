@@ -12,8 +12,25 @@ about half an hour. To update sooner, run the `release` workflow by hand in the
 tap repo.
 
 A release attaches the five binaries and `SHA256SUMS`. It builds no plugin
-archive. The skills, commands and agents ship from `pragmatic-engineer/skills`
-and have their own version line there.
+archive. The plugin in `plugins/playbook` has its own version line and its own
+release, described next.
+
+## The plugin release
+
+The marketplace repository `pragmatic-engineer/marketplace` lists the plugin as
+a `git-subdir` source that points at `plugins/playbook` in this repository, with
+no `ref` and no `version`. Claude Code follows the default branch, copies only
+that folder and updates the plugin when the `version` in `plugin.json` changes.
+
+A change under `plugins/playbook` needs a higher version in `plugin.json` and a
+`## playbook <version>` section at the top of `CHANGELOG.md`. The `version-bump`
+check enforces both and the `payload-guard` check keeps the folder to markdown
+and the manifest. When `plugin.json` or `CHANGELOG.md` changes on `main`,
+`plugin-release.yml` creates the tag `playbook-plugin-v<version>` and a release
+with that changelog section. It stops when the tag exists and marks the release
+as not latest. The tag does not match `v*`, so `release.yml` never runs for it.
+See [ADR 0032](../adr/0032-plugin-in-the-playbook-repo.md) for the versioning
+rules.
 
 ## One workflow, one tag prefix per tool
 
