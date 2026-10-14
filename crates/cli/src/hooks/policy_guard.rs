@@ -12,7 +12,8 @@
 //!   (`~/.claude/projects/*/memory/`) or the retired `~/.claude/memory/`.
 //!
 //! - changing the `rm` guard's own allowance: `playbook config set` on a
-//!   `hooks.rmGuard.*` key, `config import`, `config unset` or `config edit`,
+//!   `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars` or
+//!   `pr.ticketPatterns` key, `config import`, `config unset` or `config edit`,
 //!   anything naming the config database, a write to a config file, or an
 //!   inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=` assignment. A model
 //!   that could widen the roots could delete anything it likes, so this holds
@@ -110,7 +111,7 @@ describes: a directory (`src/auth/`), a file (`src/auth/login.py`) or a symbol \
 `<owner>/` for one owner's repos, the root for everything. Inside a scoped folder do not repeat the \
 owner or repo in the text.";
 
-const RM_GUARD_CONFIG_REASON: &str = "The rm guard's allowed roots are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Until then, clean up inside the repo, or leave the path and say so.";
+const RM_GUARD_CONFIG_REASON: &str = "The rm guard's allowed roots, the prose lint mode and the pull request rules are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Until then, work within the current setting and say so.";
 
 const HOOK_ENTRIES_REASON: &str = "The hook entries in settings.json are the user's to change, not the model's. They are the guards that keep this session safe. Ask the user to run `playbook init` (to add them) or `playbook uninstall` (to remove them) themselves in the prompt with `!`, or to edit settings.json by hand. Until then, leave the hook entries as they are and say so; in an unattended run, report this and stop. A settings change that keeps every hook entry is fine with the Edit tool.";
 
@@ -183,6 +184,21 @@ const DB_WRITER_PROGRAMS: [&str; 8] = [
     "sqlite3", "python", "python3", "node", "ruby", "perl", "sed", "jq",
 ];
 
+/// The config keys the model may not change: the `rm` guard's roots, the
+/// prose lint mode and the pull request rules. Matched on lowercase prefixes.
+const PROTECTED_KEY_PREFIXES: [&str; 5] = [
+    "hooks.rmguard",
+    "hooks.proselint",
+    "pr.rules.",
+    "pr.bodymaxchars",
+    "pr.ticketpatterns",
+];
+
+fn is_protected_config_key(word: &str) -> bool {
+    let key = word.to_lowercase();
+    PROTECTED_KEY_PREFIXES.iter().any(|p| key.starts_with(p))
+}
+
 /// Whether this simple command can widen the `rm` guard's allowance.
 fn changes_rm_guard_config(words: &[String], program_at: usize, home: &str) -> bool {
     changes_rm_guard_config_at(words, program_at, home, 0)
@@ -230,7 +246,7 @@ fn changes_rm_guard_config_at(
         if RUNNER_PROGRAMS.contains(&program.as_str()) {
             return rest
                 .iter()
-                .position(|w| program_name(w) == "playbook")
+                .position(|w| matches!(program_name(w).as_str(), "playbook" | "pb"))
                 .is_some_and(|i| {
                     let inner = &rest[i..];
                     changes_rm_guard_config_at(inner, 0, home, depth + 1)
@@ -239,7 +255,7 @@ fn changes_rm_guard_config_at(
     }
     let mut args = rest;
     match program.as_str() {
-        "playbook" => {}
+        "playbook" | "pb" => {}
         "cargo" => match super::auto_cost::cargo_run_args(args) {
             Some(after) => args = after,
             None => return false,
@@ -264,7 +280,7 @@ fn changes_rm_guard_config_at(
         Some("set") => args[at + 2..]
             .iter()
             .filter(|w| !w.starts_with('-'))
-            .any(|w| w.to_lowercase().starts_with("hooks.rmguard")),
+            .any(|w| is_protected_config_key(w)),
         _ => false,
     }
 }
@@ -601,6 +617,7 @@ fn mentions_a_guarded_program(command: &str) -> bool {
         ".claude",
         "~",
         "playbook",
+        "config",
         "uninstall",
         "cargo",
         "worktree_base_dir",
@@ -793,11 +810,18 @@ mod tests {
     const HOME: &str = "/Users/me";
 
     #[test]
-    fn changes_to_the_rm_guard_allowance_are_denied() {
+    fn changes_to_protected_config_are_denied() {
         for command in [
             "playbook config set --global hooks.rmGuard.allowedRoots '[\"/opt/a/b\"]'",
             "playbook config set hooks.rmGuard.allowedRoots ~/x/y",
             "playbook config set --org hooks.rmguard.allowedroots x",
+            "playbook config set hooks.proseLint.mode off",
+            "pb config set hooks.proseLint.mode off",
+            "nohup pb config set pr.rules.template off",
+            "playbook config set --global pr.rules.prose off",
+            "playbook config set pr.bodyMaxChars 100000",
+            "playbook config set --org acme pr.ticketPatterns '[\"X-1\"]'",
+            "playbook config unset pr.rules.length",
             "/usr/local/bin/playbook config import cfg.json",
             "playbook config unset hooks.rmGuard.allowedRoots",
             "playbook config edit",
@@ -831,6 +855,11 @@ mod tests {
     fn ordinary_config_use_and_prose_are_left_alone() {
         for command in [
             "playbook config get hooks.rmGuard.allowedRoots",
+            "playbook config get hooks.proseLint.mode",
+            "playbook config set --global pr.draft false",
+            "playbook config set pr.rulesX true",
+            "playbook config get pr.rules.prose",
+            "echo \"playbook config set hooks.proseLint.mode off\"",
             "playbook config list",
             "playbook config export",
             "playbook config set --global commit.signOff true",
