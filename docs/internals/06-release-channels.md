@@ -11,10 +11,9 @@ through the GitHub API, so GitHub signs it. The tap follows a release within
 about half an hour. To update sooner, run the `release` workflow by hand in the
 tap repo.
 
-The binary carries its own hooks. `playbook init` writes them into
-`~/.claude/settings.json`, so a release has no plugin archive and no hooks
-plugin to publish. The skills, commands and agents ship from
-`pragmatic-engineer/skills` and have their own version line there.
+A release attaches the five binaries and `SHA256SUMS`. It builds no plugin
+archive. The skills, commands and agents ship from `pragmatic-engineer/skills`
+and have their own version line there.
 
 ## One workflow, one tag prefix per tool
 
@@ -30,9 +29,7 @@ creates the GitHub release when it is missing, with `--latest=false` for every
 prefix except `v`, so the repository's latest release stays on the playbook
 line. `build` compiles the five targets, ad hoc signs the macOS binaries and
 uploads one asset per target. `checksums` writes `SHA256SUMS` and attests the
-assets. The workflow only publishes. The tap's own
-`release` workflow checks every 30 minutes and picks the new release up, so a
-formula follows within about half an hour.
+assets. The workflow only publishes.
 
 To rehearse, run the `release` workflow by hand with a `tag` input. A manual run
 is always a dry run: it resolves, verifies and builds, and skips release

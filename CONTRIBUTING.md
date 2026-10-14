@@ -13,7 +13,7 @@ See the [justfile](justfile) for build and test commands (`just --list`).
 
 ### Repository layout
 
-This is a Cargo workspace. The hooks plugin files (`hooks/`, `prompts/`, `bin/`, `install.sh`, `.claude-plugin/`) stay at the repository root, which is the plugin root. The skills, commands and agents live in [pragmatic-engineer/skills](https://github.com/pragmatic-engineer/skills). The Rust code lives under `crates/`:
+This is a Cargo workspace. The hooks plugin files (`hooks/`, `prompts/`, `bin/`, `install.sh`) stay at the repository root, which is the plugin root. The skills, commands and agents live in [pragmatic-engineer/skills](https://github.com/pragmatic-engineer/skills). The Rust code lives under `crates/`:
 
 | Folder | Package | What it holds |
 | --- | --- | --- |

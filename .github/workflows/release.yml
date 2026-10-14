@@ -13,11 +13,11 @@
 # then builds, ad hoc codesigns and uploads the artefacts plus SHA256SUMS, and
 # attests their build provenance. Releases for telemetry-v and code-v tags are
 # created with `--latest=false`, so GitHub's "latest release" stays on the
-# playbook `vX.Y.Z` line that install.sh and the marketplace read.
+# playbook `vX.Y.Z` line that install.sh reads.
 #
 # Dry run: `workflow_dispatch` with a `tag` input and `dry_run` left on runs
-# resolve, verify-version, the five builds, and
-# skips release creation, uploads, checksums and attestation.
+# resolve, verify-version and the five builds, and skips release creation,
+# uploads, checksums and attestation.
 # A dispatch can never publish: publishing needs a pushed tag.
 #
 # Five targets, built on the host that matches them:
@@ -152,10 +152,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "tag ${tag} resolves to package ${package}, dry run ${dry_run}"
 
-  # Fail before spending five build legs on a version mismatch. For playbook
-  # the hooks manifest version is user-visible through `claude plugin details`,
-  # so a binary whose version contradicts the manifest must never publish. The
-  # skills plugin has its own version line in pragmatic-engineer/skills.
+  # Fail before spending five build legs on a version mismatch: the tag and
+  # the tool's Cargo.toml must agree before anything publishes.
   verify-version:
     needs: resolve
     runs-on: ubuntu-latest
