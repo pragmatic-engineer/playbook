@@ -240,8 +240,15 @@ fn is_trailer(line: &str) -> bool {
 fn mask(text: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     let mut fenced = false;
+    // An indented block is code only after a blank line. An indented line
+    // that follows text is a wrapped list item and stays prose.
+    let mut prev_blank = true;
+    let mut in_indented = false;
     for raw in text.lines() {
         let t = raw.trim_start();
+        let indented = raw.starts_with("    ") || raw.starts_with('\t');
+        in_indented = indented && (prev_blank || in_indented);
+        prev_blank = raw.trim().is_empty();
         if t.starts_with("```") {
             fenced = !fenced;
             out.push(blank_out(raw));
@@ -249,8 +256,7 @@ fn mask(text: &str) -> String {
             || is_trailer(raw)
             || t.starts_with("> ")
             || t.starts_with("$ ")
-            || raw.starts_with("    ")
-            || raw.starts_with('\t')
+            || in_indented
         {
             out.push(blank_out(raw));
         } else {
@@ -507,9 +513,18 @@ mod tests {
 
     #[test]
     fn fenced_code_inline_code_urls_paths_and_quotes_are_skipped() {
-        let text = "Run `leverage \u{2014} x` now.\n\n```\nHere's the thing \u{2014} x\n```\n\nSee https://a.b/never-here\u{2014}x and src/always/simply.rs.\n\n> Let that sink in.\n$ echo always\n    indented never\n\nSigned-off-by: A \u{2014} B <a@b.c>\n";
+        let text = "Run `leverage \u{2014} x` now.\n\n```\nHere's the thing \u{2014} x\n```\n\nSee https://a.b/never-here\u{2014}x and src/always/simply.rs.\n\n> Let that sink in.\n$ echo always\n\n    indented never\n\nSigned-off-by: A \u{2014} B <a@b.c>\n";
 
         assert!(lint(text).is_empty(), "{:?}", lint(text));
+    }
+
+    #[test]
+    fn a_wrapped_list_line_is_prose_but_an_indented_block_after_a_blank_line_is_code() {
+        let wrapped = "- item text\n    Let that sink in.\n";
+        let block = "Text.\n\n    Let that sink in.\n    more code\n";
+
+        assert_eq!(classes(wrapped), vec![Class::EmphasisCrutch]);
+        assert!(lint(block).is_empty(), "{:?}", lint(block));
     }
 
     #[test]

@@ -299,7 +299,7 @@ inside existing tests instead, noted per row.
 | no session id is a silent no-op (1) | `no_session_id_is_a_silent_noop` | in `mod post_edit_track`, a separate test from the search-counter one of the same name |
 
 Extraction note: these are the two suites an earlier attempt gave up on. The
-technique that works is the one recorded for `session-clean-exit`, grep the
+technique that works is the one recorded for `session-clean-exit`: grep the
 `ok "` and `bad "` CALL SITES with line numbers and read them. Regex-extracting
 the quoted strings fails here because each scenario has an `ok` and a `bad`
 variant with interpolated text, so a naive extract returns roughly double the

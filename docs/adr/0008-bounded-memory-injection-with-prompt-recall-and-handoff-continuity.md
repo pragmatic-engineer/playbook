@@ -133,8 +133,8 @@ of the same repo share a `repo_slug` but never share a `project_slug`.
   remove the SessionStart slice in favor of this per-turn mechanism.
 - Trade-offs: closes the edit-only anchor gap and could in principle be
   leaner per turn than a fixed 29 KB block. But it does not, on its own,
-  solve `/clear` continuity, that still needs a persisted handoff regardless
-  of which retrieval model is chosen, so this alternative does not remove the
+  solve `/clear` continuity (that still needs a persisted handoff regardless
+  of which retrieval model is chosen), so this alternative does not remove the
   need for the mechanism in C. It also removes the always-available baseline
   a fresh session opens with, and no relevance-matching code exists anywhere
   in this repo today (confirmed by an exhaustive grep across `src/`, `shell/`,
