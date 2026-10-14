@@ -25,10 +25,7 @@
 //!   produce (worked out from the file on disk) lacks a `playbook hook`
 //!   command the file has now, sets `disableAllHooks`, or switches the
 //!   playbook plugin off. Bash is denied when it runs `playbook uninstall
-//!   --yes`, replaces or removes a settings file that holds the entries
-//!   (`>`, `cp`, `mv`, `rm`, `tee`), or edits one in place (`sed -i`, a
-//!   `python -c` script) in a command that names hooks or
-//!   `enabledPlugins`. An agent that could drop the guard entries could run without
+//!   --yes`. An agent that could drop the guard entries could run without
 //!   them, so these are the user's to change, in `ask` mode too. Other
 //!   settings changes pass.
 //!
@@ -325,11 +322,17 @@ fn settings_path(path: &str, home: &str) -> Option<PathBuf> {
     if path.is_empty() {
         return None;
     }
-    let direct = PathBuf::from(path);
+    let direct = lexical(Path::new(path));
     if is_claude_settings(&direct) {
         return Some(direct);
     }
-    let real = std::fs::canonicalize(&direct).ok()?;
+    let real = match std::fs::canonicalize(&direct) {
+        Ok(real) => real,
+        // A file that does not exist yet: resolve the folder it goes in.
+        Err(_) => std::fs::canonicalize(direct.parent()?)
+            .ok()?
+            .join(direct.file_name()?),
+    };
     if is_claude_settings(&real) {
         return Some(real);
     }
@@ -343,6 +346,22 @@ fn settings_path(path: &str, home: &str) -> Option<PathBuf> {
                 .is_ok_and(|linked| linked == real)
         })
         .then_some(real)
+}
+
+/// `path` with `.` and `..` resolved by text, as `is_claude_memory_path` does,
+/// so `.claude/agents/../settings.json` is seen for what it is.
+fn lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            part => out.push(part),
+        }
+    }
+    out
 }
 
 /// The text of a settings file, or `None` when it is missing, not a regular
@@ -359,8 +378,9 @@ fn read_settings(path: &Path) -> Option<String> {
 /// What the guard watches in a settings file.
 #[derive(Debug, Default)]
 struct Guarded {
-    /// Event, matcher and command of every `playbook hook` entry.
-    entries: BTreeSet<(String, String, String)>,
+    /// Event, matcher, command, `type` and `if` of every `playbook hook`
+    /// entry. Changing any of them can stop the hook from running.
+    entries: BTreeSet<(String, String, String, String, String)>,
     /// `disableAllHooks` is on.
     all_off: bool,
     /// The playbook plugin is switched off, which pauses the hooks.
@@ -386,10 +406,18 @@ fn guarded_state(text: &str) -> Option<Guarded> {
             for hook in hooks.into_iter().flatten() {
                 let command = hook.get("command").and_then(serde_json::Value::as_str);
                 if let Some(command) = command.filter(|c| c.starts_with(HOOK_MARK)) {
+                    let text = |key: &str| {
+                        hook.get(key)
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_string()
+                    };
                     state.entries.insert((
                         event.clone(),
                         matcher.unwrap_or_default().to_string(),
                         command.to_string(),
+                        text("type"),
+                        text("if"),
                     ));
                 }
             }
@@ -429,20 +457,30 @@ struct SettingsEdit {
 /// `hooks` key, say) is caught, and one that keeps every entry is allowed.
 fn check_settings_edit(path: &Path, edit: &SettingsEdit, new: &str) -> Option<&'static str> {
     let on_disk = read_settings(path);
+    // A file that is there but cannot be read (a device, or too large to be
+    // settings) cannot be judged, so it is not touched.
+    if on_disk.is_none() && std::fs::metadata(path).is_ok() {
+        return Some(HOOK_ENTRIES_REASON);
+    }
     let loses = match on_disk {
         Some(before) if edit.whole_file => loses_guard(&before, new),
         // An Edit always names text; do not guess at the result of an empty one.
         Some(_) if edit.old.is_empty() => false,
-        // The text the Edit names is not in the file (different line endings,
-        // say), so the result cannot be replayed. Judge the text of the edit.
-        Some(before) if !before.contains(&edit.old) => edit_names_the_guard(&edit.old, new),
         Some(before) => {
-            let after = if edit.replace_all {
-                before.replace(&edit.old, new)
+            // JSON does not care about line endings, so replay on LF text.
+            let (before, old) = (before.replace("\r\n", "\n"), edit.old.replace("\r\n", "\n"));
+            if !before.contains(&old) {
+                // The text the Edit names is not in the file, so the result
+                // cannot be replayed. Judge the text of the edit.
+                edit_names_the_guard(&edit.old, new)
             } else {
-                before.replacen(&edit.old, new, 1)
-            };
-            loses_guard(&before, &after)
+                let after = if edit.replace_all {
+                    before.replace(&old, new)
+                } else {
+                    before.replacen(&old, new, 1)
+                };
+                loses_guard(&before, &after)
+            }
         }
         // A new file has nothing to lose, but may still switch hooks off.
         None if edit.whole_file => loses_guard("{}", new),
@@ -475,7 +513,7 @@ fn wrapped_commands(words: &[String], program_at: usize) -> Vec<Vec<String>> {
     if RUNNER_PROGRAMS.contains(&program.as_str()) {
         return rest
             .iter()
-            .position(|w| program_name(w) == "playbook")
+            .position(|w| matches!(program_name(w).as_str(), "playbook" | "pb"))
             .map(|at| vec![rest[at..].to_vec()])
             .unwrap_or_default();
     }
@@ -494,7 +532,7 @@ fn uninstalls_playbook(words: &[String], program_at: usize, depth: usize) -> boo
     }
     let mut args = &words[program_at + 1..];
     match program_name(&words[program_at]).as_str() {
-        "playbook" => {}
+        "playbook" | "pb" => {}
         "cargo" => match super::auto_cost::cargo_run_args(args) {
             Some(after) => args = after,
             None => return false,
@@ -563,6 +601,7 @@ fn mentions_a_guarded_program(command: &str) -> bool {
         ".claude",
         "~",
         "playbook",
+        "uninstall",
         "cargo",
         "worktree_base_dir",
         "safe_roots",
@@ -681,7 +720,7 @@ fn redirects(word: &str) -> bool {
 
 /// The reason to deny a write to `path`, or `None` to allow it.
 fn check_path(path: &str, home: &str, content: &str) -> Option<&'static str> {
-    if writes_guard_env_to_settings(path, content) {
+    if writes_guard_env_to_settings(path, home, content) {
         return Some(RM_GUARD_CONFIG_REASON);
     }
     if !home.is_empty()
@@ -697,8 +736,8 @@ fn check_path(path: &str, home: &str, content: &str) -> Option<&'static str> {
 
 /// A Claude Code settings file that is given an `env` entry able to move the
 /// `rm` guard's roots or switch the guards off. Other edits to settings pass.
-fn writes_guard_env_to_settings(path: &str, content: &str) -> bool {
-    settings_path(path, "").is_some()
+fn writes_guard_env_to_settings(path: &str, home: &str, content: &str) -> bool {
+    settings_path(path, home).is_some()
         && ["PLAYBOOK_SAFE_ROOTS", "WORKTREE_BASE_DIR", "POLICY_GUARD"]
             .iter()
             .any(|key| content.contains(key))
@@ -959,19 +998,50 @@ mod tests {
 
     #[test]
     fn an_edit_that_does_not_match_the_file_is_judged_by_its_text() {
-        // CRLF on disk, LF in the edit: the replay would be a no-op, so the
-        // text of the edit is read instead.
+        // CRLF on disk, LF in the edit: the edit is replayed on LF text, so a
+        // key rename that spans a line break is still caught.
         let path = settings_with("edit-nomatch", &ENTRIES.replace(',', ",\r\n"));
+        assert_eq!(
+            check_settings_edit(&path, &edit("\"opus\",\n\"hooks\""), "\"opus\",\n\"off\""),
+            Some(HOOK_ENTRIES_REASON)
+        );
 
         assert_eq!(
             check_settings_edit(
                 &path,
-                &edit("\"command\":\"playbook hook policy-guard\"\n"),
+                &edit("\"type\":\"command\",\n\"command\":\"playbook hook policy-guard\""),
                 ""
             ),
             Some(HOOK_ENTRIES_REASON)
         );
         assert_eq!(check_settings_edit(&path, &edit("no such text"), "x"), None);
+    }
+
+    #[test]
+    fn a_settings_file_that_cannot_be_read_is_left_alone() {
+        let dir = crate::common::test_support::scratch_dir("settings-big");
+        std::fs::create_dir_all(dir.join(".claude")).unwrap();
+        let big = dir.join(".claude/settings.json");
+        std::fs::write(&big, vec![b' '; (1 << 20) + 1]).unwrap();
+
+        assert_eq!(
+            check_settings_edit(&big, &write(), r#"{"model":"opus"}"#),
+            Some(HOOK_ENTRIES_REASON)
+        );
+        assert_eq!(
+            check_settings_edit(&big, &edit(" "), "x"),
+            Some(HOOK_ENTRIES_REASON)
+        );
+    }
+
+    #[test]
+    fn a_path_with_dots_or_a_missing_file_still_reaches_the_settings_check() {
+        let dir = crate::common::test_support::scratch_dir("settings-dots");
+        std::fs::create_dir_all(dir.join(".claude/agents")).unwrap();
+        let sneaky = format!("{}/.claude/agents/../settings.local.json", dir.display());
+
+        assert!(settings_path(&sneaky, "").is_some());
+        assert_eq!(lexical(Path::new("/a/b/../c/./d")), PathBuf::from("/a/c/d"));
     }
 
     #[test]
@@ -1063,6 +1133,8 @@ mod tests {
             "bash -c 'playbook uninstall --yes'",
             "cargo run -q -- uninstall --yes",
             "/usr/local/bin/playbook uninstall --yes",
+            "pb uninstall --yes",
+            "nohup pb uninstall --yes",
         ] {
             assert_eq!(deny(command), Some(HOOK_ENTRIES_REASON), "{command}");
         }
