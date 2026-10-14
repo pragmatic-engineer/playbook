@@ -54,7 +54,6 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `sessions.recentDays` | `7` | a number, see the config keys guide for the range |
 | `hygiene.enabled` | `true` | `true`, `false` |
 | `hygiene.thresholdTokens` | `250000` | a number, see the config keys guide for the range |
-| `hints.pluginRemoved` | `true` | `true`, `false` |
 | `docs.convert` | `auto` | `auto`, `off` |
 | `docs.maxBytes` | `26214400` | a number, see the config keys guide for the range |
 | `docs.timeoutSeconds` | `30` | a number, see the config keys guide for the range |

@@ -543,3 +543,13 @@ fn init_telemetry_then_uninstall_removes_exactly_the_variables_init_wrote() {
     assert!(!after.contains("CLAUDE_CODE_ENABLE_TELEMETRY"), "{after}");
     assert!(after.contains("MY_OWN"), "{after}");
 }
+
+#[test]
+fn uninstall_removes_a_plugin_seen_marker_an_earlier_release_left() {
+    let sb = Sandbox::new("plugin-seen");
+    sb.write(".config/playbook/plugin-seen", "1\n");
+
+    sb.run(&["uninstall", "--yes"]);
+
+    assert!(!sb.path(".config/playbook/plugin-seen").exists());
+}

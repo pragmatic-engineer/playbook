@@ -11,7 +11,7 @@ The quickest route is one command. This page covers every route, requirements, h
 | Skills only (plugin) | `claude plugin marketplace add pragmatic-engineer/skills`, then `claude plugin install playbook@pragmatic-engineer`. Or the install script with `--skills-only`, which does the same and nothing else | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
 | Skills plus binary (recommended) | Pick one. Install script: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash` (installs both plugins). Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook init`. Plugins: `claude plugin install playbook@pragmatic-engineer` and `claude plugin install playbook-hooks@pragmatic-engineer`, then `/playbook:setup` | Everything: slash commands, guards, hooks, status line, memory, usage | Nothing |
 
-There are two plugins. `playbook` holds the skills, commands and agents and has no hooks. `playbook-hooks` holds the worktree hooks and the installer shim, and needs the binary. If you installed `playbook` before the split, add the second one with `claude plugin install playbook-hooks@pragmatic-engineer`. `playbook init` and `/playbook:doctor` tell you when it is missing, and playbook never installs a plugin for you.
+There are two plugins. `playbook` holds the skills, commands and agents and has no hooks. `playbook-hooks` holds the worktree hooks and the installer shim, and needs the binary. If you installed `playbook` before the split, add the second one with `claude plugin install playbook-hooks@pragmatic-engineer`. playbook never installs a plugin for you.
 
 Which one? Choose skills only if you want to read the skills and nothing else runs on your machine. Choose skills plus binary for everything else. The binary is a hard dependency of the commands, hooks, guards, status line and usage. Only the skill text works without it.
 
@@ -198,10 +198,6 @@ If a run is interrupted between writing `settings.json` and the baseline, delete
 ## Disabling the plugin
 
 Disabling `playbook@pragmatic-engineer` in Claude Code pauses playbook. Every hook, including the safety guards, exits as a silent success and the status line prints nothing, while the entries `playbook init` wrote stay in `settings.json`. Enable the plugin again to resume. Only an explicit `false` pauses: with no entry (Homebrew only), `true`, or a `settings.json` that cannot be read, playbook runs as usual. To run hooks anyway, set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` in the environment Claude Code starts in. See [Launcher and hooks](../internals/01-launcher-and-hooks.md#pausing-when-the-plugin-is-disabled).
-
-## When the plugin was removed
-
-`playbook init` notes in `~/.config/playbook/plugin-seen` that it saw the plugin installed. If the plugin later leaves Claude Code's `installed_plugins.json` (removed, which differs from disabled), the status line shows `playbook plugin was removed, run \`playbook uninstall --yes\` to clean up` and the SessionStart hook adds the same line once per session start. Nothing is deleted for you. Homebrew-only users never had the plugin and never see the line. Set `hints.pluginRemoved` to `false` to hide it (see [config keys](04-config-keys.md)).
 
 ## Uninstall
 

@@ -475,7 +475,6 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         }
     }
 
-    let removed_hint = crate::common::plugin_state::removed_hint(Path::new(&home));
     let opts = Opts {
         show_model: env.flag("STATUSLINE_SHOW_MODEL"),
         show_context: env.flag("STATUSLINE_SHOW_CONTEXT"),
@@ -499,9 +498,6 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         if !stopped {
             out.push(b'\n');
         }
-    }
-    if let Some(hint) = removed_hint {
-        out.extend(format!("{DIM}{hint}{RESET}\n").bytes());
     }
     out
 }

@@ -561,102 +561,38 @@ fn an_old_ccc_alias_and_ccd_script_are_reported_with_their_replacements_and_left
     assert!(ccd.exists());
 }
 
-// The two plugins
-
-fn installed_plugins(b: &Box, body: &str) {
-    let dir = b.home().join(".claude/plugins");
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("installed_plugins.json"), body).unwrap();
-}
-
-fn split_rows(rows: &[Value]) -> Vec<String> {
-    layer(rows, "-")
-        .iter()
-        .map(|r| {
-            format!(
-                "{} {} -- {}",
-                r["level"].as_str().unwrap(),
-                r["message"].as_str().unwrap(),
-                r["hint"].as_str().unwrap_or("")
-            )
-        })
-        .filter(|t| t.contains("playbook-hooks") || t.contains("playbook plugin"))
-        .collect()
-}
-
-#[test]
-fn a_missing_hooks_plugin_is_a_warning_with_the_one_command_to_add_it() {
-    let b = Box::new("hooks-missing");
-    installed_plugins(
-        &b,
-        r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"version":"0.25.0"}]}}"#,
-    );
-
-    let rows = split_rows(&b.run(&[], "/bin/bash", None));
-
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert!(rows[0].starts_with("WARN playbook-hooks plugin not installed"));
-    assert!(rows[0].ends_with("claude plugin install playbook-hooks@pragmatic-engineer"));
-}
-
-#[test]
-fn both_plugins_at_one_version_say_nothing() {
-    let b = Box::new("both-plugins");
-    installed_plugins(
-        &b,
-        r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"version":"0.25.0"}],"playbook-hooks@pragmatic-engineer":[{"version":"0.25.0"}]}}"#,
-    );
-
-    assert!(split_rows(&b.run(&[], "/bin/bash", None)).is_empty());
-}
-
-#[test]
-fn plugins_at_different_versions_are_not_a_problem() {
-    // The two plugins are versioned apart, so equal versions are not required.
-    let b = Box::new("plugin-versions");
-    installed_plugins(
-        &b,
-        r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{"version":"0.25.0"}],"playbook-hooks@pragmatic-engineer":[{"version":"0.26.0"}]}}"#,
-    );
-
-    assert!(split_rows(&b.run(&[], "/bin/bash", None)).is_empty());
-}
-
-#[test]
-fn a_hooks_plugin_without_the_skills_plugin_is_info_not_a_failure() {
-    let b = Box::new("hooks-only");
-    installed_plugins(
-        &b,
-        r#"{"version":2,"plugins":{"playbook-hooks@pragmatic-engineer":[{"version":"0.25.0"}]}}"#,
-    );
-
-    let rows = split_rows(&b.run(&[], "/bin/bash", None));
-
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert!(rows[0].starts_with("INFO playbook plugin not installed"));
-}
-
-#[test]
-fn a_machine_with_no_plugin_list_gets_no_plugin_rows() {
-    let b = Box::new("no-plugin-list");
-
-    assert!(split_rows(&b.run(&[], "/bin/bash", None)).is_empty());
-}
-
-#[test]
-fn layer_one_finds_the_playbook_plugin_even_when_the_hooks_plugin_is_listed_first() {
-    let b = Box::new("layer1-exact");
+/// A fake `claude` whose `plugin list` prints `body`, returned as the dir to put on PATH.
+fn fake_claude(b: &Box, body: &str) -> PathBuf {
     let dir = b.root.join("claude-bin");
     fs::create_dir_all(&dir).unwrap();
     let claude = dir.join("claude");
-    fs::write(
-        &claude,
-        "#!/bin/sh\nprintf '  playbook-hooks@pragmatic-engineer\\n    Status: disabled\\n\\n  playbook@pragmatic-engineer\\n    Status: enabled\\n'\n",
-    )
-    .unwrap();
+    fs::write(&claude, format!("#!/bin/sh\nprintf '{body}'\n")).unwrap();
     fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
+    dir
+}
+
+#[test]
+fn layer_one_reads_the_playbook_block_even_when_a_longer_named_plugin_is_listed_first() {
+    let b = Box::new("layer1-exact");
+    let dir = fake_claude(
+        &b,
+        "  playbook-hooks@pragmatic-engineer\\n    Status: disabled\\n\\n  playbook@pragmatic-engineer\\n    Status: enabled\\n",
+    );
 
     let rows = b.run(&[&dir], "/bin/bash", None);
 
     assert!(text(&layer(&rows, "1")).contains("PASS plugin enabled"));
+}
+
+#[test]
+fn layer_one_fails_when_the_playbook_plugin_is_disabled() {
+    let b = Box::new("layer1-disabled");
+    let dir = fake_claude(
+        &b,
+        "  playbook@pragmatic-engineer\\n    Status: disabled\\n",
+    );
+
+    let rows = b.run(&[&dir], "/bin/bash", None);
+
+    assert!(text(&layer(&rows, "1")).contains("FAIL plugin installed but disabled"));
 }

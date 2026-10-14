@@ -50,7 +50,6 @@ pub const KNOWN_KEYS: &[&str] = &[
     "sessions.recentDays",
     "hygiene.enabled",
     "hygiene.thresholdTokens",
-    "hints.pluginRemoved",
     "docs.convert",
     "docs.maxBytes",
     "docs.timeoutSeconds",
@@ -127,7 +126,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "usage.budget.monthlyUsd" | "usage.budget.weeklyUsd" => Some(Value::Number(0.into())),
         "sessions.staleAfterDays" => Some(Value::Number(3.into())),
         "sessions.recentDays" => Some(Value::Number(7.into())),
-        "hygiene.enabled" | "hints.pluginRemoved" => Some(Value::Bool(true)),
+        "hygiene.enabled" => Some(Value::Bool(true)),
         "hygiene.thresholdTokens" => Some(Value::Number(250_000.into())),
         "docs.convert" => Some(Value::String("auto".to_string())),
         "docs.maxBytes" => Some(Value::Number(26_214_400.into())),
@@ -233,16 +232,6 @@ mod tests {
             Some(&["off", "suggest", "on"][..])
         );
         assert!(!is_effort_component_key("effort.auto"));
-    }
-
-    #[test]
-    fn the_plugin_removed_hint_key_is_a_boolean_that_defaults_to_on() {
-        assert!(KNOWN_KEYS.contains(&"hints.pluginRemoved"));
-        assert_eq!(
-            default_value("hints.pluginRemoved"),
-            Some(Value::Bool(true))
-        );
-        assert_eq!(allowed_enum_values("hints.pluginRemoved"), None);
     }
 
     #[test]
