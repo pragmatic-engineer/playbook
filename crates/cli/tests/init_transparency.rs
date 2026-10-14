@@ -96,7 +96,7 @@ fn a_dry_run_changes_nothing_and_exits_zero() {
 fn a_dry_run_names_the_files_and_the_changes_for_each_part() {
     let sb = Sandbox::new("dry-text");
 
-    let text = stdout(&sb.run(&["init", "--dry-run", "--aliases", "--system-prompt"]));
+    let text = stdout(&sb.run(&["init", "--dry-run", "--yes", "--aliases", "--system-prompt"]));
 
     let hooks = format!("add {} hook entries", wired_hooks().count());
     for needle in [
@@ -124,7 +124,7 @@ fn a_dry_run_reports_a_part_you_turned_off_as_skipped() {
 #[test]
 fn a_dry_run_describes_what_a_real_run_then_does() {
     let sb = Sandbox::new("dry-vs-real");
-    let plan = stdout(&sb.run(&["init", "--dry-run", "--aliases"]));
+    let plan = stdout(&sb.run(&["init", "--dry-run", "--yes", "--aliases"]));
 
     let real = sb.run(&["init", "--yes", "--aliases"]);
 
@@ -134,7 +134,7 @@ fn a_dry_run_describes_what_a_real_run_then_does() {
     assert!(fs::read_to_string(sb.home.join(".zshrc"))
         .unwrap()
         .contains("playbook shell-init"));
-    let again = stdout(&sb.run(&["init", "--dry-run", "--aliases"]));
+    let again = stdout(&sb.run(&["init", "--dry-run", "--yes", "--aliases"]));
     assert!(!again.contains("add statusLine"), "{again}");
     assert!(
         again.contains("no change") || again.contains("already"),

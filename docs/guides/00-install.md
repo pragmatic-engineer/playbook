@@ -163,7 +163,7 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 ## Init flags
 
-`playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override` and `--short-name`, each with a `--no-` form. Hooks, status line and `PATH` are on by default, the permissions rules (`--security`), launcher and system prompt are off.
+`playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override` and `--short-name`, each with a `--no-` form. With `--yes` or in a terminal, hooks, status line and `PATH` are on by default. Without a terminal and without `--yes`, hooks and the status line stay off unless their flag is passed. The permissions rules (`--security`), launcher and system prompt are off.
 
 ## Skills without the binary
 

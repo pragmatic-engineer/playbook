@@ -263,9 +263,10 @@ pub enum Command {
     /// Safe to run again: it only touches what is missing or out of date.
     /// In a terminal it asks about each optional part (hooks, status line,
     /// PATH, the `playbook cc` launcher, the system prompt) unless you answer with a flag.
-    /// Each part has `--x` and `--no-x`. Without a terminal, or with `--yes`,
+    /// Each part has `--x` and `--no-x`. With `--yes`,
     /// unanswered parts use their defaults: hooks, the status line and PATH on, the
-    /// launcher and system prompt off.
+    /// launcher and system prompt off. Without a terminal and without `--yes`,
+    /// hooks and the status line stay off unless you pass `--hooks` or `--statusline`.
     ///
     /// The security defaults (permissions rules)
     /// are never asked about and stay off unless you pass `--security` or set

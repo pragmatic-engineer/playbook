@@ -315,7 +315,7 @@ fn no_hooks_keeps_the_hooks_a_user_already_has() {
 }
 
 #[test]
-fn hooks_are_wired_by_default_and_a_rerun_with_no_hooks_is_stable() {
+fn a_yes_run_wires_hooks_and_a_rerun_with_no_hooks_is_stable() {
     let h = Sandbox::new("hooks-default");
     h.init("/bin/zsh", &[]);
     assert!(h.read(".claude/settings.json").contains("playbook hook"));
@@ -329,7 +329,7 @@ fn hooks_are_wired_by_default_and_a_rerun_with_no_hooks_is_stable() {
 }
 
 #[test]
-fn a_run_without_a_terminal_uses_defaults_and_never_blocks() {
+fn a_yes_run_without_a_terminal_uses_defaults_and_never_blocks() {
     let h = Sandbox::new("defaults");
     let out = h.init("/bin/zsh", &[]);
     let t = text(&out);
@@ -487,6 +487,7 @@ fn a_run_with_no_terminal_and_no_yes_leaves_the_claude_settings_alone() {
 
     let t = text(&out);
     assert!(t.contains("playbook init --yes"), "{t}");
+    assert!(t.contains("hooks and status line"), "{t}");
     let settings = fs::read_to_string(h.path(".claude/settings.json")).unwrap_or_default();
     assert!(!settings.contains("playbook hook"), "{settings}");
     assert!(!settings.contains("statusLine"), "{settings}");
@@ -496,7 +497,9 @@ fn a_run_with_no_terminal_and_no_yes_leaves_the_claude_settings_alone() {
 fn an_explicit_hooks_flag_with_no_terminal_adds_only_the_hooks() {
     let h = Sandbox::new("unattended-hooks");
 
-    h.init_raw("/bin/zsh", &["--hooks"]);
+    let out = h.init_raw("/bin/zsh", &["--hooks"]);
+    let t = text(&out);
+    assert!(t.contains("settings: status line."), "{t}");
 
     let settings = fs::read_to_string(h.path(".claude/settings.json")).unwrap_or_default();
     assert!(settings.contains("playbook hook"), "{settings}");
