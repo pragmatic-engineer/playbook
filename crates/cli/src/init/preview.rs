@@ -190,6 +190,8 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         statusline: paths.statusline,
         security: paths.security,
         telemetry: paths.telemetry,
+        telemetry_replace_off: paths.telemetry_replace_off,
+        only: paths.only,
         claude_override: paths.claude_override,
         short_name: paths.short_name,
         path_setup: paths.path_setup.as_ref().map(|s| path::Setup {
@@ -238,6 +240,9 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("short-name", choices.short_name),
     ];
     for (id, enabled) in flags {
+        if paths.only && !enabled {
+            continue;
+        }
         let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{id} ({})\n", on(enabled)));
         if !enabled {
             out.push_str("  skipped, you chose off\n\n");
@@ -291,9 +296,11 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         }
         out.push('\n');
     }
-    out.push_str("Runs every time\n");
-    for line in always_lines(paths) {
-        let _ = std::fmt::Write::write_fmt(&mut out, format_args!("  {line}\n"));
+    if !paths.only {
+        out.push_str("Runs every time\n");
+        for line in always_lines(paths) {
+            let _ = std::fmt::Write::write_fmt(&mut out, format_args!("  {line}\n"));
+        }
     }
     out.push_str(
         "\nA backup of settings.json is saved before any change. One-time migrations are not simulated.\n",

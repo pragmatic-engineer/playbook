@@ -49,6 +49,9 @@ fn write_with_backup(path: &Path, root: Map<String, Value>, epoch: u64) -> Resul
                 .map_err(|e| format!("could not back up {}: {e}", path.display()))?;
         }
     }
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    }
     crate::common::atomic::write_atomic(path, format!("{:#}\n", Value::Object(root)))
         .map_err(|e| format!("could not write {}: {e}", path.display()))
 }
@@ -199,13 +202,87 @@ fn only_an_off_switch(settings_path: &Path) -> bool {
         == 1
 }
 
+/// Whether the process environment names a telemetry variable that the user's
+/// own settings.json does not also name with the same value. Claude Code puts
+/// the `env` block of its settings into the environment of the commands it
+/// runs, so `playbook init` run from inside a session sees a copy of the
+/// settings it is about to read, and that copy is not a second setup.
+pub fn process_configured_beyond_settings(claude_home: &Path) -> bool {
+    let user_env = load(&claude_home.join("settings.json"))
+        .ok()
+        .and_then(|root| root.get("env").and_then(Value::as_object).cloned())
+        .unwrap_or_default();
+    std::env::vars_os()
+        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+        .filter(|(k, _)| crate::usage::telemetry_detect::is_telemetry_var(k))
+        .any(|(k, v)| {
+            let mirrored = user_env.get(&k).is_some_and(|s| match s {
+                Value::String(s) => *s == v,
+                other => {
+                    let text = other.to_string();
+                    text == v
+                }
+            });
+            !mirrored
+        })
+}
+
+/// The lines the wizard shows for the telemetry part: the exact keys that
+/// change, and what each switch that is left alone does. `claude_home` is the
+/// folder that holds the user's settings.json.
+pub fn plan_lines(claude_home: &Path) -> Vec<String> {
+    let env = load(&claude_home.join("settings.json"))
+        .ok()
+        .and_then(|root| root.get("env").and_then(Value::as_object).cloned())
+        .unwrap_or_default();
+    let text = |v: &Value| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    let mut lines = Vec::new();
+    match env.get("CLAUDE_CODE_ENABLE_TELEMETRY") {
+        Some(old) if text(old).trim() == "1" => {
+            lines.push("Stays: CLAUDE_CODE_ENABLE_TELEMETRY is already 1".to_string());
+        }
+        Some(old) => lines.push(format!(
+            "Changes: CLAUDE_CODE_ENABLE_TELEMETRY {} -> 1 (CLAUDE_CODE_ENABLE_TELEMETRY is the switch that lets Claude Code export OpenTelemetry data to your own collector)",
+            text(old)
+        )),
+        None => lines.push(
+            "Adds: CLAUDE_CODE_ENABLE_TELEMETRY=1 (the switch that lets Claude Code export OpenTelemetry data to your own collector)"
+                .to_string(),
+        ),
+    }
+    lines.push(format!(
+        "Also adds: {} (where to send it and how to log in to the local collector)",
+        crate::cc::telemetry::env_for(&crate::usage::collector::State::default())
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .filter(|k| *k != "CLAUDE_CODE_ENABLE_TELEMETRY")
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    for name in ["DISABLE_TELEMETRY", "DO_NOT_TRACK"] {
+        if let Some(v) = env.get(name) {
+            lines.push(format!(
+                "Stays as it is: {name}={}. It turns off Anthropic's own analytics and error reporting. Claude Code documents it as separate from OpenTelemetry export, so it does not block this.",
+                text(v)
+            ));
+        }
+    }
+    lines
+}
+
 /// The init step. `cwd` is where project settings are looked up.
+/// `replace_off_ok` is whether a lone off switch the user set may be replaced
+/// (an answer to the question or an explicit `--telemetry`, not `--yes`).
 pub fn apply(
     home: &Path,
     claude_home: &Path,
     cwd: &Path,
     epoch: u64,
     process_configured: bool,
+    replace_off_ok: bool,
 ) -> StepReport {
     let off = matches!(
         crate::config::resolve_valid("usage.telemetry", home, None),
@@ -214,33 +291,52 @@ pub fn apply(
     if off {
         return StepReport::skipped("telemetry", "usage.telemetry is off, so nothing is written");
     }
-    if already_written(home, &claude_home.join("settings.json")) {
-        return StepReport::already_correct(
-            "telemetry",
-            "the variables init wrote are still in place",
-        );
+    let settings_path = claude_home.join("settings.json");
+    let paths = crate::usage::run::Paths::from_home(home);
+    let written_before = load(&marker_path(home)).unwrap_or_default();
+    let ours = !written_before.is_empty() && already_written(home, &settings_path);
+    if ours {
+        let current = match crate::usage::collector::ensure_state(&paths) {
+            Ok(s) => s,
+            Err(e) => return StepReport::failed("telemetry", e),
+        };
+        if holds_all(&settings_path, &crate::cc::telemetry::env_for(&current)) {
+            return StepReport::already_correct(
+                "telemetry",
+                "the variables init wrote are still in place",
+            );
+        }
     }
     // A yes to "turn it on" may replace an off switch that lives alone in the
     // user's own settings.json. Any other existing setup is left as it is.
     let switch_off_here = can_replace_off_switch(home, claude_home, cwd, process_configured);
-    if !switch_off_here && (process_configured || crate::cc::telemetry::files_configured(home, cwd))
+    if switch_off_here && !replace_off_ok && !ours {
+        return StepReport::skipped(
+            "telemetry",
+            "CLAUDE_CODE_ENABLE_TELEMETRY is 0 in your settings and --yes does not change a value you set; to turn it on, run: playbook init --only telemetry",
+        );
+    }
+    if !ours
+        && !switch_off_here
+        && (process_configured || crate::cc::telemetry::files_configured(home, cwd))
     {
         return StepReport::skipped(
             "telemetry",
             "you already have telemetry configured, left as it is (`playbook usage status` shows how it is read)",
         );
     }
-    let paths = crate::usage::run::Paths::from_home(home);
     let state = match crate::usage::collector::ensure_state(&paths) {
         Ok(s) => s,
         Err(e) => return StepReport::failed("telemetry", e),
     };
-    let settings_path = claude_home.join("settings.json");
     let mut root = match load(&settings_path) {
         Ok(r) => r,
         Err(e) => return StepReport::failed("telemetry", e),
     };
     let vars = crate::cc::telemetry::env_for(&state);
+    // The settings merge writes its keys sorted. A file that is sorted stays
+    // sorted, so the next merge finds nothing to reorder.
+    let was_sorted = root.keys().is_sorted();
     let env = root
         .entry("env")
         .or_insert_with(|| Value::Object(Map::new()));
@@ -251,15 +347,28 @@ pub fn apply(
         );
     };
     let mut written = Map::new();
-    let mut replaced = Map::new();
+    // A refresh keeps what the first run replaced, so uninstall still restores it.
+    let mut replaced = written_before
+        .get(REPLACED)
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
     for (k, v) in vars {
-        if let Some(old) = env.insert(k.clone(), Value::String(v.clone())) {
+        let new = Value::String(v);
+        if ours && env.get(&k) == written_before.get(&k) {
+            env.insert(k.clone(), new.clone());
+        } else if let Some(old) = env.insert(k.clone(), new.clone()) {
             replaced.insert(k.clone(), old);
         }
-        written.insert(k, Value::String(v));
+        written.insert(k, new);
     }
     if !replaced.is_empty() {
         written.insert(REPLACED.to_string(), Value::Object(replaced));
+    }
+    if was_sorted {
+        let mut entries: Vec<(String, Value)> = std::mem::take(&mut root).into_iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        root.extend(entries);
     }
     if let Err(e) = write_with_backup(&settings_path, root, epoch) {
         return StepReport::failed("telemetry", e);
@@ -277,10 +386,21 @@ pub fn apply(
     StepReport::wired(
         "telemetry",
         format!(
-            "wrote the OpenTelemetry variables for the local collector (127.0.0.1:{}); no prompt text or tool content is sent",
+            "wrote the OpenTelemetry variables for the local collector (127.0.0.1:{}); no prompt text or tool content is sent. Restart Claude Code for the new settings to apply",
             state.port
         ),
     )
+}
+
+/// Whether settings.json's env holds every `(key, value)` in `wanted`.
+fn holds_all(settings_path: &Path, wanted: &[(String, String)]) -> bool {
+    let Ok(root) = load(settings_path) else {
+        return false;
+    };
+    let env = root.get("env").and_then(Value::as_object);
+    wanted
+        .iter()
+        .all(|(k, v)| env.is_some_and(|e| e.get(k).and_then(Value::as_str) == Some(v)))
 }
 
 /// What `remove` did.
@@ -371,7 +491,7 @@ mod tests {
     #[test]
     fn with_no_telemetry_configured_the_env_keys_are_written_and_recorded() {
         let (home, claude, cwd) = setup("init-tel-write", r#"{"model":"opus","env":{"FOO":"1"}}"#);
-        let step = apply(&home, &claude, &cwd, 100, false);
+        let step = apply(&home, &claude, &cwd, 100, false, true);
         let env = env_of(&claude);
         assert_eq!(step.status, crate::init::run::StepStatus::Wired);
         assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
@@ -414,7 +534,7 @@ mod tests {
             let settings = format!(r#"{{"env":{{"CLAUDE_CODE_ENABLE_TELEMETRY":{spelling}}}}}"#);
             let (home, claude, cwd) = setup(&format!("init-tel-spelling-{i}"), &settings);
 
-            let step = apply(&home, &claude, &cwd, 5, false);
+            let step = apply(&home, &claude, &cwd, 5, false, true);
 
             assert_eq!(
                 step.status,
@@ -436,7 +556,7 @@ mod tests {
         )
         .unwrap();
 
-        let step = apply(&home, &claude, &cwd, 5, false);
+        let step = apply(&home, &claude, &cwd, 5, false, true);
 
         assert_eq!(step.status, crate::init::run::StepStatus::Skipped);
         assert_eq!(
@@ -455,7 +575,7 @@ mod tests {
         )
         .unwrap();
 
-        let step = apply(&home, &claude, &cwd, 5, false);
+        let step = apply(&home, &claude, &cwd, 5, false, true);
 
         assert_eq!(step.status, crate::init::run::StepStatus::Skipped);
         assert!(env_of(&claude).is_empty());
@@ -468,7 +588,7 @@ mod tests {
             r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#,
         );
 
-        let step = apply(&home, &claude, &cwd, 5, true);
+        let step = apply(&home, &claude, &cwd, 5, true, true);
 
         assert_eq!(step.status, crate::init::run::StepStatus::Skipped);
         assert_eq!(env_of(&claude)["CLAUDE_CODE_ENABLE_TELEMETRY"], "0");
@@ -480,7 +600,7 @@ mod tests {
             "init-tel-restore",
             r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0","FOO":"1"}}"#,
         );
-        apply(&home, &claude, &cwd, 5, false);
+        apply(&home, &claude, &cwd, 5, false, true);
 
         let removed = remove(&home, &claude.join("settings.json"), 6, false).unwrap();
 
@@ -497,9 +617,9 @@ mod tests {
             "init-tel-replaced-twice",
             r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#,
         );
-        apply(&home, &claude, &cwd, 5, false);
+        apply(&home, &claude, &cwd, 5, false, true);
 
-        let again = apply(&home, &claude, &cwd, 6, false);
+        let again = apply(&home, &claude, &cwd, 6, false, true);
 
         assert_eq!(again.status, crate::init::run::StepStatus::AlreadyCorrect);
     }
@@ -545,7 +665,7 @@ mod tests {
             "init-tel-flip",
             r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0","FOO":"1"}}"#,
         );
-        let step = apply(&home, &claude, &cwd, 5, false);
+        let step = apply(&home, &claude, &cwd, 5, false, true);
         let env = env_of(&claude);
         assert_eq!(step.status, crate::init::run::StepStatus::Wired);
         assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
@@ -555,8 +675,8 @@ mod tests {
     #[test]
     fn a_second_run_reports_no_change_instead_of_calling_it_your_setup() {
         let (home, claude, cwd) = setup("init-tel-twice", "{}");
-        apply(&home, &claude, &cwd, 1, false);
-        let again = apply(&home, &claude, &cwd, 2, false);
+        apply(&home, &claude, &cwd, 1, false, true);
+        let again = apply(&home, &claude, &cwd, 2, false, true);
         assert_eq!(again.status, crate::init::run::StepStatus::AlreadyCorrect);
     }
 
@@ -566,7 +686,7 @@ mod tests {
         let cfg = home.join(".config/playbook");
         fs::create_dir_all(&cfg).unwrap();
         fs::write(cfg.join("config.json"), r#"{"usage":{"telemetry":"off"}}"#).unwrap();
-        let step = apply(&home, &claude, &cwd, 1, false);
+        let step = apply(&home, &claude, &cwd, 1, false, true);
         assert_eq!(step.status, crate::init::run::StepStatus::Skipped);
         assert!(env_of(&claude).is_empty());
     }
@@ -574,7 +694,7 @@ mod tests {
     #[test]
     fn content_logging_variables_are_never_written() {
         let (home, claude, cwd) = setup("init-tel-privacy", "{}");
-        apply(&home, &claude, &cwd, 1, false);
+        apply(&home, &claude, &cwd, 1, false, true);
         let env = env_of(&claude);
         for name in [
             "OTEL_LOG_USER_PROMPTS",
@@ -590,7 +710,7 @@ mod tests {
     fn an_existing_telemetry_setting_is_never_overridden() {
         let original = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0","OTEL_EXPORTER_OTLP_ENDPOINT":"https://x"}}"#;
         let (home, claude, cwd) = setup("init-tel-keep", original);
-        let step = apply(&home, &claude, &cwd, 1, false);
+        let step = apply(&home, &claude, &cwd, 1, false, true);
         assert_eq!(step.status, crate::init::run::StepStatus::Skipped);
         assert_eq!(
             fs::read_to_string(claude.join("settings.json")).unwrap(),
@@ -602,7 +722,7 @@ mod tests {
     #[test]
     fn a_telemetry_variable_in_the_environment_counts_as_configured() {
         let (home, claude, cwd) = setup("init-tel-envvar", "{}");
-        let step = apply(&home, &claude, &cwd, 1, true);
+        let step = apply(&home, &claude, &cwd, 1, true, true);
         assert_eq!(step.status, crate::init::run::StepStatus::Skipped);
         assert!(env_of(&claude).is_empty());
     }
@@ -616,7 +736,7 @@ mod tests {
             r#"{"env":{"OTEL_LOGS_EXPORTER":"console"}}"#,
         )
         .unwrap();
-        let step = apply(&home, &claude, &cwd, 1, false);
+        let step = apply(&home, &claude, &cwd, 1, false, true);
         assert_eq!(step.status, crate::init::run::StepStatus::Skipped);
         assert!(env_of(&claude).is_empty());
     }
@@ -624,7 +744,7 @@ mod tests {
     #[test]
     fn remove_takes_out_exactly_what_was_written_and_keeps_the_rest() {
         let (home, claude, cwd) = setup("init-tel-remove", r#"{"env":{"FOO":"1"}}"#);
-        apply(&home, &claude, &cwd, 1, false);
+        apply(&home, &claude, &cwd, 1, false, true);
         let out = remove(&home, &claude.join("settings.json"), 2, false).unwrap();
         assert_eq!(out.keys, 8);
         assert_eq!(
@@ -637,7 +757,7 @@ mod tests {
     #[test]
     fn remove_keeps_a_key_the_user_changed_since() {
         let (home, claude, cwd) = setup("init-tel-changed", "{}");
-        apply(&home, &claude, &cwd, 1, false);
+        apply(&home, &claude, &cwd, 1, false, true);
         let path = claude.join("settings.json");
         let mut doc: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         doc["env"]["OTEL_LOGS_EXPORTER"] = json!("console");
@@ -662,7 +782,7 @@ mod tests {
     #[test]
     fn a_dry_run_remove_counts_and_writes_nothing() {
         let (home, claude, cwd) = setup("init-tel-dry", "{}");
-        apply(&home, &claude, &cwd, 1, false);
+        apply(&home, &claude, &cwd, 1, false, true);
         let before = fs::read_to_string(claude.join("settings.json")).unwrap();
         let out = remove(&home, &claude.join("settings.json"), 2, true).unwrap();
         assert_eq!(out.keys, 8);
@@ -671,5 +791,107 @@ mod tests {
             before
         );
         assert!(marker_path(&home).exists());
+    }
+
+    #[test]
+    fn the_plan_lists_the_changed_switch_and_the_two_that_stay() {
+        let (_home, claude, _cwd) = setup(
+            "init-tel-plan",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0","DISABLE_TELEMETRY":"1","DO_NOT_TRACK":"1"}}"#,
+        );
+
+        let lines = plan_lines(&claude).join("\n");
+
+        assert!(
+            lines.contains("CLAUDE_CODE_ENABLE_TELEMETRY 0 -> 1"),
+            "{lines}"
+        );
+        assert!(
+            lines.contains("Stays as it is: DISABLE_TELEMETRY=1"),
+            "{lines}"
+        );
+        assert!(lines.contains("Stays as it is: DO_NOT_TRACK=1"), "{lines}");
+        assert!(lines.contains("OTEL_EXPORTER_OTLP_ENDPOINT"), "{lines}");
+    }
+
+    #[test]
+    fn the_plan_for_a_clean_file_adds_the_switch() {
+        let (_home, claude, _cwd) = setup("init-tel-plan-clean", "{}");
+
+        let lines = plan_lines(&claude).join("\n");
+
+        assert!(
+            lines.contains("Adds: CLAUDE_CODE_ENABLE_TELEMETRY=1"),
+            "{lines}"
+        );
+        assert!(!lines.contains("Stays as it is"), "{lines}");
+    }
+
+    #[test]
+    fn the_three_off_values_keep_two_and_flip_one_and_uninstall_restores_all() {
+        let original = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0","DISABLE_TELEMETRY":"1","DO_NOT_TRACK":"1"}}"#;
+        let (home, claude, cwd) = setup("init-tel-trio", original);
+
+        let step = apply(&home, &claude, &cwd, 3, false, true);
+        let during = env_of(&claude);
+        remove(&home, &claude.join("settings.json"), 4, false).unwrap();
+        let after = env_of(&claude);
+
+        assert_eq!(step.status, crate::init::run::StepStatus::Wired);
+        assert_eq!(during["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+        assert_eq!(during["DISABLE_TELEMETRY"], "1");
+        assert_eq!(during["DO_NOT_TRACK"], "1");
+        assert_eq!(after.len(), 3);
+        assert_eq!(after["CLAUDE_CODE_ENABLE_TELEMETRY"], "0");
+    }
+
+    #[test]
+    fn without_consent_to_replace_a_lone_off_switch_nothing_is_written() {
+        let original = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#;
+        let (home, claude, cwd) = setup("init-tel-no-replace", original);
+
+        let step = apply(&home, &claude, &cwd, 3, false, false);
+
+        assert_eq!(step.status, crate::init::run::StepStatus::Skipped);
+        assert!(step.detail.contains("playbook init --only telemetry"));
+        assert_eq!(
+            fs::read_to_string(claude.join("settings.json")).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn a_changed_collector_port_is_rewritten_and_uninstall_still_restores_the_original() {
+        let (home, claude, cwd) = setup(
+            "init-tel-port-move",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#,
+        );
+        apply(&home, &claude, &cwd, 1, false, true);
+        let paths = crate::usage::run::Paths::from_home(&home);
+        let state_file = crate::usage::collector::state_path(&paths);
+        let mut state = crate::usage::collector::read_state(&state_file).unwrap();
+        state.port = 51234;
+        fs::write(&state_file, serde_json::to_vec(&state).unwrap()).unwrap();
+
+        let again = apply(&home, &claude, &cwd, 2, false, false);
+        let moved = env_of(&claude)["OTEL_EXPORTER_OTLP_ENDPOINT"].clone();
+        remove(&home, &claude.join("settings.json"), 3, false).unwrap();
+
+        assert_eq!(again.status, crate::init::run::StepStatus::Wired);
+        assert_eq!(moved, "http://127.0.0.1:51234");
+        assert_eq!(env_of(&claude)["CLAUDE_CODE_ENABLE_TELEMETRY"], "0");
+        assert!(!env_of(&claude).contains_key("OTEL_EXPORTER_OTLP_ENDPOINT"));
+    }
+
+    #[test]
+    fn a_machine_with_no_claude_folder_gets_the_file_created() {
+        crate::usage_host::install();
+        let home = crate::common::test_support::scratch_dir("init-tel-nodir");
+        let claude = home.join(".claude");
+
+        let step = apply(&home, &claude, &home, 1, false, true);
+
+        assert_eq!(step.status, crate::init::run::StepStatus::Wired);
+        assert_eq!(env_of(&claude)["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
     }
 }

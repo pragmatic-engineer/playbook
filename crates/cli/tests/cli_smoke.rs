@@ -485,6 +485,9 @@ fn table() -> Vec<Case> {
         case("init", &["init", "--dry-run"]).out("nothing is changed"),
         case("init", &["init", "--yes"]).out("Applying").writes(),
         case("init", &["init", "--explain"]).plain(),
+        case("init", &["init", "--only", "telemetry"])
+            .out("changes only the parts you named")
+            .writes(),
         case("hooks list", &["hooks", "list"]).out("Safety guards").plain(),
         case("uninstall", &["uninstall"]).code(1).err("nothing was changed"),
         case("uninstall", &["uninstall", "--dry-run"]).pre(&["init", "--yes"]),

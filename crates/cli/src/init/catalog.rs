@@ -97,10 +97,10 @@ pub const PARTS: &[Part] = &[
     Part {
         id: "telemetry",
         asked: true,
-        default_on: false,
+        default_on: true,
         flags: "--telemetry, --no-telemetry",
-        question: "Claude Code telemetry is not on. Turn it on by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting init will not change)",
-        does: "Points Claude Code at a collector on 127.0.0.1 (`playbook usage collect`). Prompt text, tool content, emails and tokens are never sent. Asked only when a yes can act: telemetry not set, or switched off by a lone off switch in ~/.claude/settings.json. Otherwise init says why in one line and asks nothing. Written only on a yes, and only when you have no telemetry variable in your environment or any Claude Code settings file, except a lone off switch in ~/.claude/settings.json, which a yes replaces (uninstall puts the old value back). Without it, `cc` still does this for its own sessions and `playbook usage` reads transcripts.",
+        question: "Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting init will not change)",
+        does: "Points Claude Code at a collector on 127.0.0.1 (`playbook usage collect`). Prompt text, tool content, emails and tokens are never sent. Asked only when a yes can act: telemetry not set, or switched off by a lone off switch in ~/.claude/settings.json. Otherwise init says why in one line and asks nothing. On by default: Y is the default answer, and `--yes` counts as a yes, except that `--yes` alone never replaces an off switch you set (answer the question or run `playbook init --only telemetry` for that). Without a terminal and without `--yes` nothing is written and init prints the command to run. Written only on a yes, and only when you have no telemetry variable in your environment or any Claude Code settings file, except a lone off switch in ~/.claude/settings.json, which a yes replaces (uninstall puts the old value back). Without it, `cc` still does this for its own sessions and `playbook usage` reads transcripts.",
         changes: "~/.claude/settings.json (the env block) and ~/.config/playbook/telemetry-env.json (a record of what was written)",
         undo: "`playbook uninstall` removes exactly the keys init wrote, unless you changed them.",
     },

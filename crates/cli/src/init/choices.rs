@@ -47,7 +47,7 @@ pub struct Flags {
     /// Do not install the system prompt
     #[arg(long, overrides_with = "system_prompt")]
     pub no_system_prompt: bool,
-    /// Write the OpenTelemetry variables for the local usage collector into settings.json (asked only when telemetry is off or not set)
+    /// Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
     #[arg(long, overrides_with = "no_telemetry")]
     pub telemetry: bool,
     /// Do not write telemetry variables into settings.json
@@ -65,6 +65,9 @@ pub struct Flags {
     /// Do not add the `pb` short name
     #[arg(long, overrides_with = "short_name")]
     pub no_short_name: bool,
+    /// Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name), ask nothing and leave everything else untouched. `playbook init --only telemetry` turns telemetry on
+    #[arg(long, value_name = "PART", value_delimiter = ',', num_args = 1..)]
+    pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
     #[arg(long, short = 'y', visible_alias = "defaults")]
     pub yes: bool,
@@ -98,6 +101,77 @@ fn pick(on: bool, off: bool) -> Option<bool> {
     } else {
         None
     }
+}
+
+fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
+    Some(match id {
+        "hooks" => (flags.hooks, flags.no_hooks),
+        "statusline" => (flags.statusline, flags.no_statusline),
+        "security" => (flags.security, flags.no_security),
+        "path" => (flags.path, flags.no_path),
+        "aliases" => (flags.aliases, flags.no_aliases),
+        "system-prompt" => (flags.system_prompt, flags.no_system_prompt),
+        "telemetry" => (flags.telemetry, flags.no_telemetry),
+        "claude-override" => (flags.claude_override, flags.no_claude_override),
+        "short-name" => (flags.short_name, flags.no_short_name),
+        _ => return None,
+    })
+}
+
+/// The parts `--only` selects. A bare `--telemetry` (no other part flag and
+/// no `--yes`) means `--only telemetry`, so it never runs unrelated parts.
+pub fn only_parts(flags: &Flags) -> Vec<String> {
+    if !flags.only.is_empty() {
+        return flags.only.clone();
+    }
+    let others = catalog::ids()
+        .iter()
+        .any(|id| *id != "telemetry" && part_pair(flags, id).is_some_and(|(on, off)| on || off));
+    if flags.telemetry && !flags.no_telemetry && !others && !flags.yes {
+        return vec!["telemetry".to_string()];
+    }
+    Vec::new()
+}
+
+/// The choices for an `--only` run: the named parts on, every other part off.
+/// `Ok(None)` when `--only` is not in play.
+pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
+    let named = only_parts(flags);
+    if named.is_empty() {
+        return Ok(None);
+    }
+    let valid = catalog::ids();
+    if let Some(bad) = named.iter().find(|n| !valid.contains(&n.as_str())) {
+        return Err(format!(
+            "unknown part `{bad}`. Choose one of: {}",
+            valid.join(", ")
+        ));
+    }
+    for id in &valid {
+        let chosen = named.iter().any(|n| n == id);
+        let (on, off) = part_pair(flags, id).unwrap_or((false, false));
+        if chosen && off {
+            return Err(format!("--only {id} conflicts with --no-{id}"));
+        }
+        if !chosen && on && !flags.only.is_empty() {
+            return Err(format!(
+                "--{id} is not in --only {}; add it to --only or drop the flag",
+                named.join(",")
+            ));
+        }
+    }
+    let has = |id: &str| named.iter().any(|n| n == id);
+    Ok(Some(Choices {
+        hooks: has("hooks"),
+        statusline: has("statusline"),
+        security: has("security"),
+        path: has("path"),
+        aliases: has("aliases"),
+        system_prompt: has("system-prompt"),
+        telemetry: has("telemetry"),
+        claude_override: has("claude-override"),
+        short_name: has("short-name"),
+    }))
 }
 
 /// True when there is no terminal to ask on and the user did not pass `--yes`.
@@ -176,7 +250,7 @@ pub fn resolve_with(
             flags.telemetry,
             flags.no_telemetry,
             catalog::question("telemetry"),
-            false,
+            settings_default,
         ),
         claude_override: decide(
             flags.claude_override,
@@ -417,5 +491,89 @@ mod tests {
         assert!(!parse_answer("no\n", true));
         assert!(parse_answer("\n", true));
         assert!(!parse_answer("maybe", false));
+    }
+
+    #[test]
+    fn yes_turns_telemetry_on_and_no_terminal_without_yes_leaves_it_off() {
+        let yes = Flags {
+            yes: true,
+            ..Flags::default()
+        };
+
+        let with_yes = resolve(&yes, false, false, &mut never);
+        let without = resolve(&Flags::default(), false, false, &mut never);
+
+        assert!(with_yes.telemetry);
+        assert!(!without.telemetry);
+    }
+
+    #[test]
+    fn only_runs_the_named_parts_and_nothing_else() {
+        let flags = Flags {
+            only: vec!["telemetry".into(), "hooks".into()],
+            ..Flags::default()
+        };
+
+        let c = only_choices(&flags).unwrap().unwrap();
+
+        assert!(c.telemetry && c.hooks);
+        assert!(!c.path && !c.statusline && !c.aliases && !c.system_prompt && !c.security);
+    }
+
+    #[test]
+    fn an_unknown_only_part_lists_the_valid_names() {
+        let flags = Flags {
+            only: vec!["nope".into()],
+            ..Flags::default()
+        };
+
+        let err = only_choices(&flags).unwrap_err();
+
+        assert!(
+            err.contains("unknown part `nope`") && err.contains("telemetry"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn only_conflicts_with_the_no_flag_of_a_named_part_and_with_a_flag_for_an_unnamed_one() {
+        let named = Flags {
+            only: vec!["telemetry".into()],
+            no_telemetry: true,
+            ..Flags::default()
+        };
+        let unnamed = Flags {
+            only: vec!["telemetry".into()],
+            hooks: true,
+            ..Flags::default()
+        };
+
+        let a = only_choices(&named).unwrap_err();
+        let b = only_choices(&unnamed).unwrap_err();
+
+        assert!(a.contains("conflicts with --no-telemetry"), "{a}");
+        assert!(b.contains("--hooks is not in --only"), "{b}");
+    }
+
+    #[test]
+    fn a_bare_telemetry_flag_means_only_telemetry_but_not_beside_other_flags() {
+        let bare = Flags {
+            telemetry: true,
+            ..Flags::default()
+        };
+        let beside = Flags {
+            telemetry: true,
+            hooks: true,
+            ..Flags::default()
+        };
+        let with_yes = Flags {
+            telemetry: true,
+            yes: true,
+            ..Flags::default()
+        };
+
+        assert_eq!(only_parts(&bare), vec!["telemetry".to_string()]);
+        assert!(only_parts(&beside).is_empty());
+        assert!(only_parts(&with_yes).is_empty());
     }
 }

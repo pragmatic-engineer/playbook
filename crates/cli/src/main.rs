@@ -392,11 +392,21 @@ fn main() {
         Command::Version => print!("{}", Cli::command().render_version()),
         Command::Init { flags } if flags.explain.is_some() => {
             let which = flags.explain.as_ref().and_then(|w| w.as_deref());
-            match init::catalog::explain(which) {
-                Ok(text) => print!("{text}"),
-                Err(err) => {
-                    eprintln!("init: {err}");
-                    std::process::exit(2);
+            let named = init::choices::only_parts(&flags);
+            let texts: Vec<Result<String, String>> = match (which, named.is_empty()) {
+                (None, false) => named
+                    .iter()
+                    .map(|n| init::catalog::explain(Some(n)))
+                    .collect(),
+                _ => vec![init::catalog::explain(which)],
+            };
+            for text in texts {
+                match text {
+                    Ok(text) => print!("{text}"),
+                    Err(err) => {
+                        eprintln!("init: {err}");
+                        std::process::exit(2);
+                    }
                 }
             }
         }
@@ -404,7 +414,17 @@ fn main() {
             let security_config = config::resolve("security.defaults", &common::home_dir(), None)
                 .map(|(value, _)| value.as_bool().unwrap_or(false))
                 .unwrap_or(false);
-            let asking = init::choices::stdio_is_interactive() && !flags.yes && !flags.dry_run;
+            let only = match init::choices::only_choices(&flags) {
+                Ok(only) => only,
+                Err(err) => {
+                    eprintln!("init: {err}");
+                    std::process::exit(2);
+                }
+            };
+            let asking = init::choices::stdio_is_interactive()
+                && !flags.yes
+                && !flags.dry_run
+                && only.is_none();
             // Telemetry already on, set up by you, or off for a reason init will
             // not override: say so in one line and do not ask. An explicit
             // --telemetry or --no-telemetry flag is still honoured.
@@ -416,17 +436,21 @@ fn main() {
                     &home_dir,
                     &home_dir.join(".claude"),
                     &std::env::current_dir().unwrap_or_else(|_| home_dir.clone()),
-                    crate::cc::telemetry::process_configured(),
+                    init::telemetry::process_configured_beyond_settings(&home_dir.join(".claude")),
                 )
             };
-            if let Some(line) = skip_telemetry_question {
-                println!("{line}");
+            if only.is_none() {
+                if let Some(line) = skip_telemetry_question {
+                    println!("{line}");
+                }
             }
             if let Some(notice) = init::choices::defaults_notice(
                 std::io::stdin().is_terminal(),
                 std::io::stdout().is_terminal(),
                 &flags,
-            ) {
+            )
+            .filter(|_| only.is_none())
+            {
                 eprintln!("{notice}");
             }
             let caps = playbook::ui::Caps::detect();
@@ -465,20 +489,36 @@ fn main() {
                 }
             }
             let terminal = init::choices::stdio_is_interactive();
-            let choices = init::choices::resolve_with(
-                &flags,
-                asking,
-                !init::choices::unattended(&flags, terminal),
-                security_config,
-                &mut |question, default| init::wizard::guided_answer(&guided, question, default),
-            );
-            if init::choices::unattended(&flags, terminal) && !flags.dry_run {
+            let choices = only.unwrap_or_else(|| {
+                init::choices::resolve_with(
+                    &flags,
+                    asking,
+                    !init::choices::unattended(&flags, terminal),
+                    security_config,
+                    &mut |question, default| {
+                        init::wizard::guided_answer(&guided, question, default)
+                    },
+                )
+            });
+            let only_run = only.is_some();
+            if only_run && choices.telemetry {
+                println!("playbook init --only: this run changes only the parts you named.");
+                for line in init::telemetry::plan_lines(&common::home_dir().join(".claude")) {
+                    println!("  telemetry: {line}");
+                }
+            }
+            if !only_run && init::choices::unattended(&flags, terminal) && !flags.dry_run {
                 let mut left_off = Vec::new();
                 if !choices.hooks && !flags.hooks && !flags.no_hooks {
                     left_off.push("hooks");
                 }
                 if !choices.statusline && !flags.statusline && !flags.no_statusline {
                     left_off.push("status line");
+                }
+                if !choices.telemetry && !flags.telemetry && !flags.no_telemetry {
+                    eprintln!(
+                        "init: no terminal and no --yes, so telemetry was not turned on. To turn it on, run: playbook init --only telemetry"
+                    );
                 }
                 if !left_off.is_empty() {
                     eprintln!(
@@ -531,6 +571,9 @@ fn main() {
                 statusline: choices.statusline,
                 security: choices.security,
                 telemetry: choices.telemetry,
+                telemetry_replace_off: choices.telemetry
+                    && (flags.telemetry || only_run || !flags.yes),
+                only: only_run,
                 claude_override: choices.claude_override,
                 short_name: choices.short_name,
             };
@@ -558,7 +601,18 @@ fn main() {
             .filter(|(_, on)| *on)
             .map(|(id, _)| *id)
             .collect();
-            print!("{}", init::catalog::summary(&changed, &on_parts));
+            if !only_run {
+                print!("{}", init::catalog::summary(&changed, &on_parts));
+            }
+            if outcome
+                .steps
+                .iter()
+                .any(|s| s.name == "telemetry" && s.status == StepStatus::Wired)
+            {
+                println!(
+                    "Telemetry is set up. Restart Claude Code (close it and open it again) so the new settings apply; sessions that are already open keep the old settings."
+                );
+            }
             if !outcome.ok() {
                 let failed = outcome
                     .steps

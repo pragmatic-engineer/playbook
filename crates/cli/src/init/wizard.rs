@@ -62,6 +62,9 @@ fn extra_lines(id: &str) -> Vec<String> {
                 .to_string(),
         ],
         "aliases" => vec![format!("Adds this line to your rc file: {SOURCE_LINE}")],
+        "telemetry" => {
+            crate::init::telemetry::plan_lines(&crate::common::home_dir().join(".claude"))
+        }
         "claude-override" => {
             vec![
                 "Runs the equivalent of `playbook config set launcher.claudeOverride true`."
@@ -321,7 +324,11 @@ mod tests {
             guided_answer(&guided, q, d)
         });
         assert!(!c.hooks && !c.statusline && !c.path);
-        assert!(c.aliases && c.system_prompt && c.telemetry && c.claude_override && c.short_name);
+        assert!(c.aliases && c.system_prompt && c.claude_override && c.short_name);
+        assert!(
+            !c.telemetry,
+            "telemetry is on by default, so a no flips it off"
+        );
     }
 
     #[test]
