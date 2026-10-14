@@ -99,6 +99,27 @@ fn write_legacy_json(home: &Path) {
     fs::write(legacy_json_path(home), OLD_JSON).unwrap();
 }
 
+/// Moves the old graph file's mtime `secs` ahead of (or, negative, behind)
+/// now. The binary compares it with the time the database recorded, which
+/// comes from a precise clock, while a file time comes from the kernel's
+/// coarse clock and can lag by milliseconds. Writing the file just before or
+/// after a rebuild therefore proves nothing about which is newer, so tests
+/// that depend on the order pin it.
+fn shift_legacy_json_mtime(home: &Path, secs: i64) {
+    let now = std::time::SystemTime::now();
+    let when = if secs >= 0 {
+        now + std::time::Duration::from_secs(secs as u64)
+    } else {
+        now - std::time::Duration::from_secs(secs.unsigned_abs())
+    };
+    fs::File::options()
+        .write(true)
+        .open(legacy_json_path(home))
+        .unwrap()
+        .set_modified(when)
+        .unwrap();
+}
+
 fn migrated_leftovers(home: &Path) -> Vec<String> {
     fs::read_dir(legacy_json_path(home).parent().unwrap())
         .unwrap()
@@ -160,6 +181,7 @@ fn a_graph_file_that_an_older_binary_wrote_beside_a_database_is_folded_in_again(
         PINNED_FACT.replace("a-fact", "b-fact").as_str(),
     );
     write_legacy_json(&home); // what the older binary's hook would have written
+    shift_legacy_json_mtime(&home, 3600);
 
     let out = export(&home);
 
@@ -195,7 +217,7 @@ fn a_graph_file_older_than_the_database_is_set_aside_without_a_rebuild() {
     let home = scratch_home("memdb-json-older");
     write_fact(&home, "global/a-fact.md", PINNED_FACT);
     write_legacy_json(&home);
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    shift_legacy_json_mtime(&home, -3600);
     run_rebuild_for(&home, "global/a-fact.md");
     write_fact(
         &home,

@@ -362,18 +362,12 @@ fn a_collector_is_seen_by_status_and_idles_out_even_while_status_polls_it() {
         .spawn()
         .unwrap();
 
-    let started = std::time::Instant::now();
+    // Keep probing until the collector stops: probes must not keep it alive.
+    // The loop follows the collector's own life instead of a fixed window, so
+    // a slow start under load cannot make the probes miss it, and the limit
+    // only guards against a collector that probing keeps alive.
     let mut seen = false;
-    // Keep probing for a while: probes must not keep the collector alive.
-    while started.elapsed() < std::time::Duration::from_millis(1500) {
-        let json = home.run(&["usage", "status", "--json"]);
-        let doc: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
-        seen |= doc["running"] == true && doc["idle_seconds"] == 2;
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    assert!(seen, "status never saw the running collector");
-
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let status = loop {
         if let Some(s) = child.try_wait().unwrap() {
             break s;
@@ -382,8 +376,12 @@ fn a_collector_is_seen_by_status_and_idles_out_even_while_status_polls_it() {
             let _ = child.kill();
             panic!("the collector did not stop by itself while status polled it");
         }
+        let json = home.run(&["usage", "status", "--json"]);
+        let doc: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
+        seen |= doc["running"] == true && doc["idle_seconds"] == 2;
         std::thread::sleep(std::time::Duration::from_millis(100));
     };
+    assert!(seen, "status never saw the running collector");
     assert!(status.success());
     let after = stdout(&home.run(&["usage", "status"]));
     assert!(after.contains("not running"), "{after}");

@@ -289,7 +289,18 @@ fn arm_capture_due(w: &World) -> PathBuf {
         .join("runtime")
         .join(STOP_SID);
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("capture-due"), "").unwrap();
+    let marker = dir.join("capture-due");
+    fs::write(&marker, "").unwrap();
+    // Well ahead of the graph fixture: the hook compares the graph's recorded
+    // write time (precise clock) with this file time (coarse kernel clock,
+    // which can lag by milliseconds on Linux), and an older-looking marker is
+    // read as "memory was written" and released silently.
+    fs::File::options()
+        .write(true)
+        .open(&marker)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(3600))
+        .unwrap();
     dir
 }
 
