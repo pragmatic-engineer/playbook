@@ -292,3 +292,99 @@ fn skills_only_is_refused_with_the_plugin_commands() {
         "{log}"
     );
 }
+
+/// Runs `cmd` with no controlling terminal, as `curl | bash` does under cron
+/// or in CI, so a prompt has nobody to ask.
+fn without_terminal(cmd: &mut Command) -> &mut Command {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: setsid(2) in the forked child before exec touches no memory.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        })
+    }
+}
+
+fn installer(work: &Work, stub: &Path, flags: &[&str], tag: &str) -> Command {
+    let home = work.dir(&format!("home-{tag}"));
+    let mut cmd = Command::new("bash");
+    cmd.arg(repo_root().join("install.sh"))
+        .args(flags)
+        .env("PLAYBOOK_SKIP_DOWNLOAD", "1")
+        .env("HOME", &home)
+        .env("PLAYBOOK_BIN_DIR", stub)
+        .env("SHELL", "/bin/bash");
+    cmd
+}
+
+#[test]
+fn with_no_yes_and_no_terminal_init_is_not_run_and_its_command_is_printed() {
+    let work = Work::new("bp-noconsent");
+    let (stub, argv) = recording_stub(&work);
+
+    let mut cmd = installer(&work, &stub, &[], "nc");
+    let out = without_terminal(&mut cmd).output().unwrap();
+
+    let text = both(&out);
+    assert!(out.status.success(), "{text}");
+    assert!(!argv.exists(), "init ran without a yes: {text}");
+    assert!(text.contains("Run: playbook init "), "{text}");
+}
+
+#[test]
+fn requested_wrapper_flags_are_kept_in_the_printed_init_command() {
+    let work = Work::new("bp-noconsent-flags");
+    let (stub, argv) = recording_stub(&work);
+
+    let mut cmd = installer(&work, &stub, &["--system-prompt"], "ncf");
+    let out = without_terminal(&mut cmd).output().unwrap();
+
+    let text = both(&out);
+    assert!(out.status.success(), "{text}");
+    assert!(!argv.exists(), "init ran without a yes: {text}");
+    assert!(
+        text.contains("Run: playbook init --aliases --system-prompt"),
+        "{text}"
+    );
+}
+
+#[test]
+fn no_init_skips_init_even_with_yes() {
+    let work = Work::new("bp-noinit");
+    let (stub, argv) = recording_stub(&work);
+
+    let out = installer(&work, &stub, &["--yes", "--no-init"], "ni")
+        .output()
+        .unwrap();
+
+    let text = both(&out);
+    assert!(out.status.success(), "{text}");
+    assert!(!argv.exists(), "init ran: {text}");
+    assert!(text.contains("Run: playbook init "), "{text}");
+}
+
+#[test]
+fn the_installer_never_touches_the_claude_plugins() {
+    let work = Work::new("bp-noplugin");
+    let (stub, _) = recording_stub(&work);
+    let calls = work.path("claude-calls.txt");
+    write_exec(
+        &stub.join("claude"),
+        &format!("printf '%s\\n' \"$*\" >> \"{}\"\n", calls.display()),
+    );
+    let path = format!(
+        "{}:{}",
+        stub.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let out = installer(&work, &stub, &["--yes"], "np")
+        .env("PATH", path)
+        .output()
+        .unwrap();
+
+    let text = both(&out);
+    assert!(out.status.success(), "{text}");
+    assert!(!calls.exists(), "claude was called: {text}");
+}

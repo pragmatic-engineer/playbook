@@ -2,9 +2,18 @@
 
 An opinionated toolkit for Claude Code. It gives you slash commands, skills and subagents for planning, building, reviewing and remembering, plus a small Rust binary that runs the safety guards, hooks, launcher and status line.
 
-It ships as a Claude Code plugin. The local layer (guards, settings, launcher, system prompt) is optional.
+The skills ship as a Claude Code plugin and work on their own. The binary, which adds the guards, hooks, status line and launcher, is optional.
 
 ## Quick start
+
+Skills, the part you can use alone:
+
+```bash
+claude plugin marketplace add pragmatic-engineer/skills
+claude plugin install playbook@pragmatic-engineer
+```
+
+The binary, optional. The install script installs it and then asks whether to run `playbook init`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
@@ -17,9 +26,9 @@ brew install pragmatic-engineer/tap/playbook
 playbook init
 ```
 
-Then open a Claude Code session and run `/playbook:doctor`. It checks every layer and tells you how to fix a miss.
+`playbook init` adds the hook entries to `~/.claude/settings.json`. It asks first, keeps your own entries, and marks the ones it owns so `playbook uninstall` removes only those. Then open a Claude Code session and run `/playbook:doctor`. It checks every layer and tells you how to fix a miss.
 
-The installer adds the plugin, installs the `playbook` binary (checksum verified), wires the guards and hooks, and sets the status line in `settings.json`. It asks before adding the launcher and system prompt. Pass `--yes` to accept every default.
+The installer only installs the `playbook` binary (checksum verified) and puts it on `PATH`. It never installs or removes a plugin. `playbook init` also sets the status line and asks before adding the launcher and system prompt. Pass `--yes` to the installer to say yes to every question.
 
 To see what `playbook init` changes before you agree, read [What init installs](docs/guides/06-what-init-installs.md) and the [hook reference](docs/reference/hooks.md).
 
@@ -29,10 +38,11 @@ Pin a version with `PLAYBOOK_REF=v0.25.0`. Update later with `playbook update`. 
 
 | Mode | What you get | Commands |
 |---|---|---|
-| Skills only (plugin) | Skill text. No guards, hooks, status line or working commands. | `claude plugin marketplace add pragmatic-engineer/skills` then `claude plugin install playbook@pragmatic-engineer` |
-| Skills plus binary (recommended) | Everything | The install script above, or Homebrew then `playbook init`, or the plugin then `/playbook:setup` |
+| Skills only | Skills, commands and subagents. No guards, hooks or status line. | The two `claude plugin` commands above |
+| Binary only | The `playbook` command, hooks, guards, status line and usage | The install script, or Homebrew then `playbook init` |
+| Both (recommended) | Everything | Both of the above |
 
-The `playbook` binary is a hard dependency of every command, hook, guard, the status line and usage. Only the skill text works without it. The plugin needs Claude Code 2.1.224 or later. See [Pick an install mode](docs/guides/00-install.md#pick-an-install-mode).
+The hooks, guards, status line and usage need the binary. Only the skill text works without it. See [Pick an install mode](docs/guides/00-install.md#pick-an-install-mode).
 
 ## A first session
 
