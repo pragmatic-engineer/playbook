@@ -17,7 +17,7 @@
 //!   `running_wire_twice_writes_nothing_the_second_time`
 //! - Every written command for a ported hook resolves to a real `HookName`,
 //!   and is a bare name rather than a path (the "bare-name assumption"),
-//!   and all 20 ported hooks (the 14 functional hooks plus the 6 safety
+//!   and all 24 ported hooks (the 18 functional hooks plus the 6 safety
 //!   guards) are exactly the ones wired that way:
 //!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
@@ -105,9 +105,7 @@ fn all_hook_commands(settings: &Value) -> Vec<String> {
 /// A `settings.json` shaped like the one `settings.shared.json` ships and a
 /// real, unwired `~/.claude/settings.json` has today: the four safety guards
 /// wired directly with legacy `~/.claude/hooks/*.sh` paths, and none of the
-/// 11 functional hooks `hooks/hooks.json` used to register, since those
-/// only ever lived in the retired plugin registry, never in `settings.json`
-/// itself.
+/// functional hooks, which `wire` adds.
 fn unwired_fixture() -> Value {
     json!({
         "$schema": "https://json.schemastore.org/claude-code-settings.json",
@@ -252,6 +250,8 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "context-hygiene",
         "doc-read-hint",
         "usage-warm",
+        "worktree-create",
+        "worktree-remove",
         "rm-workspace-guard",
         "bg-await-guard",
         "no-slop-guard",
@@ -265,7 +265,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         resolved_names.iter().map(String::as_str).collect();
     assert_eq!(
         resolved_names, expected,
-        "wiring should register exactly all 20 ported HookName variants in binary form"
+        "wiring should register exactly all 24 ported HookName variants in binary form"
     );
 }
 
@@ -679,4 +679,72 @@ fn auto_guard_and_auto_cost_carry_the_ten_second_timeout_of_the_other_guards() {
         }
     }
     assert_eq!(checked, 3, "auto-guard on two events and auto-cost on one");
+}
+
+#[test]
+fn audit_of_a_missing_or_malformed_file_reports_every_hook_missing() {
+    let total = playbook::init::wire::wired_hooks().count();
+    let missing = scratch_settings_path("audit-missing");
+    let bad = scratch_settings_path("audit-bad");
+    fs::write(&bad, "not json {").unwrap();
+
+    for path in [&missing, &bad] {
+        let found = playbook::init::wire::audit(path);
+        assert_eq!(found.present, 0);
+        assert!(!found.missing.is_empty() && found.missing.len() <= total);
+        assert!(found.stale.is_empty());
+    }
+}
+
+#[test]
+fn audit_of_a_fully_wired_file_finds_nothing_missing_or_stale() {
+    let path = scratch_settings_path("audit-wired");
+    wire(&path).unwrap();
+
+    let found = playbook::init::wire::audit(&path);
+
+    assert!(found.missing.is_empty() && found.stale.is_empty());
+    assert_eq!(found.present, playbook::init::wire::wired_hooks().count());
+}
+
+#[test]
+fn audit_counts_a_hook_under_the_wrong_matcher_as_missing_and_names_it_once() {
+    let path = scratch_settings_path("audit-matcher");
+    wire(&path).unwrap();
+    let mut settings = read_json(&path);
+    let groups = settings["hooks"]["PreToolUse"].as_array_mut().unwrap();
+    for group in groups.iter_mut() {
+        if group["matcher"] == "Read" {
+            group["matcher"] = json!("Other");
+        }
+    }
+    write_json(&path, &settings);
+
+    let found = playbook::init::wire::audit(&path);
+
+    assert!(found.missing.contains(&"preread-edit-check"), "{found:?}");
+    assert_eq!(
+        found
+            .missing
+            .iter()
+            .filter(|n| **n == "preread-edit-check")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn audit_dedupes_a_stale_entry_that_appears_twice() {
+    let path = scratch_settings_path("audit-stale");
+    wire(&path).unwrap();
+    let mut settings = read_json(&path);
+    let stale = json!({"hooks":[{"type":"command","command":"playbook hook retired-hook"}]});
+    let stop = settings["hooks"]["Stop"].as_array_mut().unwrap();
+    stop.push(stale.clone());
+    stop.push(stale);
+    write_json(&path, &settings);
+
+    let found = playbook::init::wire::audit(&path);
+
+    assert_eq!(found.stale, vec!["playbook hook retired-hook".to_string()]);
 }

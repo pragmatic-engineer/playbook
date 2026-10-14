@@ -107,7 +107,7 @@ const PROBES: [Probe; 14] = [
     worktree_rows,
     migration_rows,
     data_rows,
-    plugin_only_rows,
+    hooks_rows,
     atlassian_rows,
     old_launcher_rows,
 ];
@@ -624,19 +624,156 @@ fn migration_rows(env: &Env) -> Vec<Row> {
         .collect()
 }
 
-/// A `settings.json` with no playbook hooks means a plugin-only install: the
-/// binary runs this check but nothing is wired. One row names it and gives the
-/// single fix. (With no binary at all, commands/doctor.md prints the message.)
-fn plugin_only_rows(env: &Env) -> Vec<Row> {
-    if crate::hooks::migration_check::is_wired(&env.settings()) {
-        return Vec::new();
+/// Longest the login shell probe may run. A slow profile reads as an answer we
+/// could not get, not as a missing binary.
+const LOGIN_SHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The hooks `playbook init` writes into `settings.json`: present, current,
+/// known to the binary that runs them, and reachable from a shell that starts
+/// with a minimal PATH. Hook commands are the bare `playbook hook <name>`, so
+/// the last probe starts a login shell with only the system directories on
+/// PATH, the way a launcher or an IDE starts Claude Code, and asks it where
+/// `playbook` is. The result is a hint, not proof: `init/path.rs` documents
+/// how hook commands get their PATH. None of these rows fails: the binary and
+/// its hooks are optional.
+fn hooks_rows(env: &Env) -> Vec<Row> {
+    use crate::common::plugin_state::{listed_in, HOOKS_PLUGIN_KEY};
+    use crate::init::wire::{audit, wired_hooks};
+    let total = wired_hooks().count();
+    let found = audit(&env.settings());
+    let mut rows = Vec::new();
+    if found.present == 0 {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                "playbook hooks are not in settings.json, so the guards and worktree hooks do not run",
+            )
+            .hint("run: playbook init"),
+        );
+    } else if !found.missing.is_empty() {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                format!(
+                    "{} of {total} playbook hook entries are missing from settings.json: {}",
+                    total - found.present,
+                    found.missing.join(", ")
+                ),
+            )
+            .hint("run: playbook init"),
+        );
+    } else {
+        rows.push(Row::new(
+            "-",
+            Level::Pass,
+            format!("playbook hook entries in settings.json ({total} of {total})"),
+        ));
     }
-    vec![Row::new(
-        "-",
-        Level::Warn,
-        "plugin only: playbook hooks and guards are not wired in settings.json, so they do not run",
-    )
-    .hint("run /playbook:setup")]
+    for cmd in &found.stale {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                format!("settings.json has a hook the binary no longer writes: {cmd}"),
+            )
+            .hint("delete the entry from ~/.claude/settings.json by hand"),
+        );
+    }
+    if listed_in(&env.home, HOOKS_PLUGIN_KEY) == Some(true) {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                "the playbook-hooks plugin is still installed, so its hooks run next to the ones in settings.json",
+            )
+            .hint("run: claude plugin uninstall playbook-hooks@pragmatic-engineer"),
+        );
+    }
+    if found.present > 0 {
+        rows.extend(hook_binary_rows(env));
+    }
+    rows
+}
+
+/// What a login shell with a minimal PATH finds for `playbook`: its absolute
+/// path, `Some(None)` when it found nothing, and `None` when the shell did not
+/// answer (no shell set, it failed to start, or it took too long).
+fn login_shell_playbook(env: &Env) -> Option<Option<PathBuf>> {
+    if env.shell.is_empty() {
+        return None;
+    }
+    let mut cmd = Command::new(&env.shell);
+    cmd.args(["-lc", "printf 'PBPATH:%s\\n' \"$(command -v playbook)\""])
+        .env_clear()
+        .env("HOME", &env.home)
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+    let out = crate::common::proc::run_with_timeout(&mut cmd, LOGIN_SHELL_TIMEOUT)?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let found = text
+        .lines()
+        .rev()
+        .find_map(|l| l.strip_prefix("PBPATH:"))
+        .map(str::trim)?;
+    Some(Path::new(found).is_absolute().then(|| PathBuf::from(found)))
+}
+
+/// The two ways a present hook entry can fail to run: the `playbook` a hook
+/// reaches does not know the hook name, or a minimal-PATH login shell cannot
+/// find `playbook` at all. The name check runs against the binary the login
+/// shell found, and falls back to the first one on doctor's own PATH.
+fn hook_binary_rows(env: &Env) -> Vec<Row> {
+    use crate::init::wire::wired_hooks;
+    let mut rows = Vec::new();
+    let login = login_shell_playbook(env);
+    match &login {
+        Some(None) => rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                "a login shell with a minimal PATH cannot find playbook, so hooks fail when Claude Code starts from a launcher or an IDE",
+            )
+            .hint("run: playbook init, which puts the binary's directory on PATH for every shell start"),
+        ),
+        None if !env.shell.is_empty() => rows.push(Row::new(
+            "-",
+            Level::Info,
+            "the login shell probe did not answer in time, so the minimal PATH check was skipped",
+        )),
+        _ => {}
+    }
+    let binary = match login {
+        Some(Some(path)) => Some(path),
+        _ => pathcheck::scan(&env.path_var).into_iter().next(),
+    };
+    if let Some(binary) = binary {
+        let mut cmd = Command::new(&binary);
+        cmd.args(["hook", "--help"]);
+        if let Some(help) = output_of(cmd) {
+            let mut unknown: Vec<&str> = wired_hooks()
+                .map(|s| s.name)
+                .filter(|n| !help.contains(n))
+                .collect();
+            unknown.sort_unstable();
+            unknown.dedup();
+            if !unknown.is_empty() {
+                rows.push(
+                    Row::new(
+                        "-",
+                        Level::Warn,
+                        format!(
+                            "{} does not know these hooks, so they fail every time: {}",
+                            binary.display(),
+                            unknown.join(", ")
+                        ),
+                    )
+                    .hint("run: playbook update"),
+                );
+            }
+        }
+    }
+    rows
 }
 
 /// The lines under the table: what to run for each failed layer, or that all

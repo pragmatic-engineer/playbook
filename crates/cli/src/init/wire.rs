@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wires the 20 hooks Claude Code can invoke into `settings.json` as a bare
-//! `playbook hook <name>` command: 14 functional hooks plus 6 guards.
+//! Wires the 24 hooks Claude Code can invoke into `settings.json` as a bare
+//! `playbook hook <name>` command: 18 functional hooks plus 6 guards.
 //!
 //! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS` because the
-//! two mirror different sources: `PORTED_HOOK_SPECS` is the 14 functional
+//! two mirror different sources: `PORTED_HOOK_SPECS` is the 18 functional
 //! hooks, while `GUARD_SPECS` is the guards
 //! `settings.json` wires directly, carrying their own `if` and `timeout`
 //! fields hooks.json never had. `wire` treats both lists identically: every
@@ -27,8 +27,13 @@
 //! The bare-name form (`playbook hook session-init`, not an absolute path)
 //! is deliberate: Claude Code already accepts a bare command resolved on
 //! PATH for a hand-written hook entry, so `playbook`, installed the same
-//! way, resolves the same way. `tests/init_wire.rs` asserts this rather than
-//! trusting it.
+//! way, resolves the same way. An absolute path would go stale when Homebrew
+//! replaces the binary or the user moves it. The known cost is a Claude Code
+//! started from a launcher or an IDE with a minimal PATH: `playbook init` puts
+//! the binary's directory on PATH for every shell start (`init/path.rs`), and
+//! `playbook doctor` probes a minimal-PATH login shell to catch the case.
+//! `tests/init_wire.rs` asserts only that the command is the bare form and
+//! names a real hook.
 
 use serde_json::{Map, Value};
 use std::fs;
@@ -94,8 +99,8 @@ pub fn wired_hooks() -> impl Iterator<Item = &'static HookSpec> {
     PORTED_HOOK_SPECS.iter().chain(GUARD_SPECS)
 }
 
-/// The hooks the plugin registers in its own `hooks/hooks.json`. `wire` never
-/// writes these, so a test keeps this list equal to that file.
+/// The hook the plugin registers in its own `hooks/hooks.json`. `wire` never
+/// writes it, so a test keeps this list equal to that file.
 pub const PLUGIN_HOOKS: &[HookSpec] = &[
     HookSpec {
         event: "SessionStart",
@@ -107,38 +112,17 @@ pub const PLUGIN_HOOKS: &[HookSpec] = &[
         timeout: None,
         also_replaces: None,
     },
-    HookSpec {
-        event: "WorktreeCreate",
-        matcher: None,
-        name: "worktree-create",
-        group: Group::Worktree,
-        purpose: "Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude` and keeps `origin/HEAD` at most a day old.",
-        if_cond: None,
-        timeout: Some(180),
-        also_replaces: None,
-    },
-    HookSpec {
-        event: "WorktreeRemove",
-        matcher: None,
-        name: "worktree-remove",
-        group: Group::Worktree,
-        purpose: "Removes a worktree only when nothing would be lost. Dirty trees and unpublished commits keep it; squash-merged branches count as published.",
-        if_cond: None,
-        timeout: Some(120),
-        also_replaces: None,
-    },
 ];
 
 /// The functional hooks, already ported to Rust, rewired here to the bare
 /// `playbook hook <name>` form. Eleven were ported from the old
-/// `hooks/hooks.json` (it now holds only the session-start migration check and
-/// the two worktree hooks), line for line (`session-clean-exit` fires on both
+/// `hooks/hooks.json` (it now holds only the session-start migration check),
+/// line for line (`session-clean-exit` fires on both
 /// `Stop` and `SessionEnd`), while `auto-guard` and `auto-cost` never had a
 /// `hooks/hooks.json` entry. Together with `GUARD_SPECS` below these are exactly
-/// the 20 settings-wired `HookName` variants. The two worktree hooks ship through
-/// `hooks/hooks.json` instead, so they are not wired here.
+/// the 24 settings-wired `HookName` variants.
 ///
-/// Divergence from `hooks/hooks.json`'s literal shape: that file ships
+/// Divergence from `hooks/hooks.json`'s literal shape: that file shipped
 /// `Stop`'s two hooks (`session-clean-exit`, `memory-capture`) as two
 /// separate single-hook groups rather than one two-hook group. `wire` groups
 /// purely by (event, matcher), so it merges them into one `Stop` group here.
@@ -347,6 +331,26 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         purpose: "Starts the same background read when a session ends, so the finished session is already stored.",
         if_cond: None,
         timeout: Some(5),
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "WorktreeCreate",
+        matcher: None,
+        name: "worktree-create",
+        group: Group::Worktree,
+        purpose: "Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude` and keeps `origin/HEAD` at most a day old.",
+        if_cond: None,
+        timeout: Some(180),
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "WorktreeRemove",
+        matcher: None,
+        name: "worktree-remove",
+        group: Group::Worktree,
+        purpose: "Removes a worktree only when nothing would be lost. Dirty trees and unpublished commits keep it; squash-merged branches count as published.",
+        if_cond: None,
+        timeout: Some(120),
         also_replaces: None,
     },
 ];
@@ -614,7 +618,7 @@ pub fn unwire_at(
 
     let mut drop_hooks_key = false;
     if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
-        let managed: Vec<String> = wired_hooks().map(|spec| bare_command(spec.name)).collect();
+        let managed = managed_commands();
         let mut touched_events = Vec::new();
         for (event, groups) in hooks.iter_mut() {
             let Some(groups) = groups.as_array_mut() else {
@@ -689,6 +693,73 @@ pub fn unwire_at(
     outcome.backup_path = Some(backup);
     atomic_write(settings_path, &rendered)?;
     Ok(outcome)
+}
+
+/// What a read-only look at `settings.json` found about the hooks `wire` owns.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HookAudit {
+    /// Names of hooks `wire` writes that lack an entry under one of their
+    /// events, each name once.
+    pub missing: Vec<&'static str>,
+    /// `playbook hook <name>` entries whose name `wire` no longer writes.
+    pub stale: Vec<String>,
+    /// How many of the entries `wire` owns are present. A hook wired under two
+    /// events has two entries.
+    pub present: usize,
+}
+
+/// Compare `settings_path` with what `wire` would write, without changing it.
+/// A missing, unreadable or malformed file reports every hook as missing.
+pub fn audit(settings_path: &Path) -> HookAudit {
+    let root = fs::read_to_string(settings_path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let hooks = root.as_ref().and_then(|r| r.get("hooks"));
+    let mut out = HookAudit::default();
+    for spec in wired_hooks() {
+        let want = bare_command(spec.name);
+        let found = hooks
+            .and_then(|h| h.get(spec.event))
+            .and_then(Value::as_array)
+            .is_some_and(|groups| {
+                groups.iter().any(|g| {
+                    group_matcher(g) == spec.matcher
+                        && g.get("hooks").and_then(Value::as_array).is_some_and(|es| {
+                            es.iter().any(|e| {
+                                e.get("command").and_then(Value::as_str) == Some(want.as_str())
+                            })
+                        })
+                })
+            });
+        if found {
+            out.present += 1;
+        } else if !out.missing.contains(&spec.name) {
+            out.missing.push(spec.name);
+        }
+    }
+    let known = managed_commands();
+    if let Some(events) = hooks.and_then(Value::as_object) {
+        for groups in events.values().filter_map(Value::as_array) {
+            for entry in groups
+                .iter()
+                .filter_map(|g| g.get("hooks").and_then(Value::as_array))
+                .flatten()
+            {
+                let cmd = entry.get("command").and_then(Value::as_str).unwrap_or("");
+                if cmd.starts_with("playbook hook ") && !is_managed_entry(entry, &known) {
+                    out.stale.push(cmd.to_string());
+                }
+            }
+        }
+    }
+    out.stale.sort();
+    out.stale.dedup();
+    out
+}
+
+/// The command of every entry `wire` writes, which marks an entry as ours.
+fn managed_commands() -> Vec<String> {
+    wired_hooks().map(|spec| bare_command(spec.name)).collect()
 }
 
 /// Whether `entry` is a command hook running exactly one of `managed`.

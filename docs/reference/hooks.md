@@ -1,6 +1,6 @@
 # Hook reference
 
-Every hook that `playbook init` wires into `~/.claude/settings.json`, and the three the plugin registers itself (marked in the last column). Each command is `playbook hook <name>`. A test fails when init wires a hook that is missing from the tables below, so this page cannot drift.
+Every hook that `playbook init` wires into `~/.claude/settings.json`, and the one the plugin registers itself, `migration-check` (marked in the last column). Each command is `playbook hook <name>`. A test fails when init wires a hook that is missing from the tables below, so this page cannot drift.
 
 Paths below use `~/.config/playbook/` as the playbook home. The session directory is `~/.config/playbook/runtime/<session id>/`, owner-only (mode 0700). No hook reads a secret value, and no hook sends anything over the network.
 
@@ -9,7 +9,7 @@ Paths below use `~/.config/playbook/` as the playbook home. The session director
 Five ways, from narrowest to widest.
 
 - A per-hook switch, where the last column names one. Environment switches (`POLICY_GUARD=0`) go in the `env` block of `settings.json` or your shell.
-- Disable the plugin in Claude Code. That sets `enabledPlugins["playbook@pragmatic-engineer"]` to `false`. Every hook then exits with no output and no side effects, and the status line prints nothing, while the entries stay in `settings.json`. Enable the plugin again to resume.
+- Disable the plugin in Claude Code. That sets `enabledPlugins["playbook@pragmatic-engineer"]` to `false`. Every hook then exits with no output and no side effects, and the status line prints nothing, while the entries stay in `settings.json`. The two worktree hooks keep running, because they replace Claude Code's own worktree creation. Enable the plugin again to resume.
 - Delete the hook's entry from `~/.claude/settings.json`. Init puts it back on the next run unless you pass `--no-hooks`.
 - `playbook init --no-hooks` never adds playbook hook entries. It does not remove ones that are already there.
 - `playbook uninstall` removes every entry init wired. Add `--dry-run` to see the list first.
@@ -75,9 +75,9 @@ The usage store is filled by `playbook usage` itself, by the `usage-warm` hook i
 
 ## Worktree
 
-These two come from the plugin's `hooks/hooks.json`, not from `settings.json`. They exist only while the plugin is installed. `playbook init` does not wire them. The `migration-check` hook in Session lifecycle comes from the plugin too.
+`playbook init` writes these two into `settings.json` like every other hook.
 
 | Event | Matcher | Command | What it does | Can block or change | Reads and writes | Turn off |
 | :- | :- | :- | :- | :- | :- | :- |
-| `WorktreeCreate` | none | `playbook hook worktree-create` | Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude` and keeps `origin/HEAD` at most a day old. | Replaces Claude Code's default worktree creation. | Runs git in your repo. Writes the new worktree and a refresh stamp inside the git directory. | Disable or remove the plugin. |
-| `WorktreeRemove` | none | `playbook hook worktree-remove` | Removes a worktree only when nothing would be lost. Dirty trees and unpublished commits keep it; squash-merged branches count as published. | Never forces a removal. | Runs git in your repo. | Disable or remove the plugin. |
+| `WorktreeCreate` | none | `playbook hook worktree-create` | Creates worktrees under `<repo-parent>/.worktrees/<repo>/<name>`, copies files named in `.worktreeinclude` and keeps `origin/HEAD` at most a day old. | Replaces Claude Code's default worktree creation. | Runs git in your repo. Writes the new worktree and a refresh stamp inside the git directory. | Entry only. |
+| `WorktreeRemove` | none | `playbook hook worktree-remove` | Removes a worktree only when nothing would be lost. Dirty trees and unpublished commits keep it; squash-merged branches count as published. | Never forces a removal. | Runs git in your repo. | Entry only. |

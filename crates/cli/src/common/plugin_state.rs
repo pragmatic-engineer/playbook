@@ -47,8 +47,8 @@ pub fn is_disabled_in(home: &Path) -> bool {
         == Some(serde_json::Value::Bool(false))
 }
 
-/// The key of the `playbook-hooks` plugin. Only `playbook uninstall` reads it,
-/// to list the step that removes the plugin from a machine that installed it.
+/// The key of the `playbook-hooks` plugin. `playbook uninstall` and the doctor
+/// hooks row read it, to tell a machine that installed the plugin how to remove it.
 pub const HOOKS_PLUGIN_KEY: &str = "playbook-hooks@pragmatic-engineer";
 
 /// The marketplace the plugin comes from.

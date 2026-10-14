@@ -23,8 +23,8 @@
 //! statusline outage, and the 2026-08-11 hook-rename incident that produced
 //! roughly 110 silent errors over 28 hours).
 //!
-//! `hooks/hooks.json` now carries only the migration check and the two
-//! worktree hooks, and `settings.shared.json` is already in binary-invoked
+//! `hooks/hooks.json` now carries only the migration check, and
+//! `settings.shared.json` is already in binary-invoked
 //! form. `wire` changes what a user's own `settings.json` looks like after
 //! they choose to run `playbook init`.
 

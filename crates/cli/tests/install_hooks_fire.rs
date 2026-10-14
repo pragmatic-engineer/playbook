@@ -525,6 +525,59 @@ fn fires(f: &Fire, name: &str) -> bool {
                 && out2.contains("\"permissionDecision\":\"deny\"")
                 && out2.contains("cost unreadable")
         }
+        "worktree-create" | "worktree-remove" => {
+            let home = scratch(f, &format!("h-{name}"));
+            let repo = home.join("repo");
+            fs::create_dir_all(&repo).unwrap();
+            let git = |args: &[&str]| {
+                Command::new("git")
+                    .args([
+                        "-c",
+                        "user.name=t",
+                        "-c",
+                        "user.email=t@example.com",
+                        "-c",
+                        "commit.gpgsign=false",
+                    ])
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_NOSYSTEM", "1")
+                    .args(args)
+                    .current_dir(&repo)
+                    .env("HOME", &home)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            };
+            assert!(git(&["init", "-q", "-b", "main"]));
+            assert!(git(&["commit", "-q", "--allow-empty", "-m", "init"]));
+            let repo = fs::canonicalize(&repo).unwrap();
+            let create = format!(
+                r#"{{"cwd":{},"name":"fire-wt"}}"#,
+                json_str(&repo.to_string_lossy())
+            );
+            let (ok, out) = run_hook(
+                &f.playbook,
+                "worktree-create",
+                &create,
+                &home,
+                &repo,
+                &[],
+                &[],
+            );
+            let path = PathBuf::from(out.trim());
+            let created = ok && path.is_absolute() && path.is_dir();
+            if name == "worktree-create" {
+                return created;
+            }
+            let remove = format!(
+                r#"{{"cwd":{},"worktree_path":{}}}"#,
+                json_str(&repo.to_string_lossy()),
+                json_str(&path.to_string_lossy())
+            );
+            let (ok, _) = run_hook(&f.playbook, name, &remove, &home, &repo, &[], &[]);
+            created && ok && !path.exists()
+        }
         other => panic!("no fire-matrix case registered for hook: {other}"),
     }
 }
@@ -537,10 +590,12 @@ fn every_wired_hook_fires_and_produces_its_observable_effect() {
     )
     .unwrap();
     let names = hook_names(&settings);
-    assert!(
-        names.len() >= 18,
-        "expected 18 distinct hook names, got {}: {names:?}",
-        names.len()
+    let wired: BTreeSet<String> = playbook::init::wire::wired_hooks()
+        .map(|h| h.name.to_string())
+        .collect();
+    assert_eq!(
+        names, wired,
+        "install should wire exactly the hooks init writes"
     );
     let failed: Vec<&String> = names.iter().filter(|n| !fires(&f, n)).collect();
     assert!(failed.is_empty(), "hooks that did not fire: {failed:?}");

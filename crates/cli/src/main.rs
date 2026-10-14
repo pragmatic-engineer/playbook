@@ -35,7 +35,13 @@ fn restore_sigpipe() {}
 fn run_hook(name: playbook::HookName) {
     let raw = read_hook_input();
     // Plugin disabled in Claude Code: succeed silently, with no side effects.
-    if common::plugin_state::paused() {
+    // The worktree hooks stand in for Claude Code's own worktree handling, so a
+    // pause cannot skip them without leaving the call with no worktree path.
+    let is_worktree = matches!(
+        name,
+        playbook::HookName::WorktreeCreate | playbook::HookName::WorktreeRemove
+    );
+    if !is_worktree && common::plugin_state::paused() {
         return;
     }
     let payload = Payload::parse(&raw);

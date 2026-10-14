@@ -218,7 +218,7 @@ fn every_playbook_command_in_hooks_json_goes_through_the_shim() {
             }
         }
     }
-    assert_eq!(seen, 3);
+    assert_eq!(seen, 1);
 }
 
 #[test]

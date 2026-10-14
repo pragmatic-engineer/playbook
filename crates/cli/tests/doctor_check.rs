@@ -510,28 +510,176 @@ fn the_probes_run_side_by_side_but_the_table_keeps_its_order() {
     }
 }
 
-// Plugin-only row
+// The hooks `playbook init` writes into settings.json
 
-#[test]
-fn plugin_only_is_named_with_the_single_fix_when_nothing_is_wired() {
-    let b = Box::new("plugin-only");
-    b.settings(r#"{"hooks":{}}"#);
-    let rows = b.run(&[], "/bin/bash", None);
-    let info = layer(&rows, "-");
-    let row = info
+fn wire_all(b: &Box) -> PathBuf {
+    let path = b.home().join(".claude/settings.json");
+    playbook::init::wire::wire(&path).unwrap();
+    path
+}
+
+fn hook_rows(rows: &[Value]) -> Vec<String> {
+    layer(rows, "-")
         .iter()
-        .find(|r| r["message"].as_str().unwrap().starts_with("plugin only"))
-        .expect("plugin only row");
-    assert_eq!(row["level"], "WARN");
-    assert_eq!(row["hint"], "run /playbook:setup");
+        .map(|r| {
+            format!(
+                "{} {} -- {}",
+                r["level"].as_str().unwrap(),
+                r["message"].as_str().unwrap(),
+                r["hint"].as_str().unwrap_or("")
+            )
+        })
+        .filter(|t| {
+            !t.contains("data folder")
+                && (t.to_lowercase().contains("hook") || t.contains("minimal PATH"))
+        })
+        .collect()
+}
+
+/// A fake `playbook` whose `hook --help` lists every hook `init` writes.
+fn stub_with_hooks(b: &Box, listed: &[&str]) -> PathBuf {
+    let d = b.root.join("hookbin");
+    fs::create_dir_all(&d).unwrap();
+    let names = listed.join(" ");
+    let body = format!(
+        "#!/bin/sh\ncase \"$1\" in --version) echo 'playbook 0.1.0';; hook) echo '{names}';; esac\n"
+    );
+    let f = d.join("playbook");
+    fs::write(&f, body).unwrap();
+    fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).unwrap();
+    d
+}
+
+/// A host whose system profile already puts a playbook on the minimal PATH
+/// cannot show the blind case.
+fn host_finds_playbook() -> bool {
+    let host = Command::new("/bin/sh")
+        .args(["-lc", "command -v playbook"])
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        .output()
+        .unwrap();
+    !String::from_utf8_lossy(&host.stdout).trim().is_empty()
+}
+
+fn every_hook_name() -> Vec<&'static str> {
+    playbook::init::wire::wired_hooks()
+        .map(|h| h.name)
+        .collect()
 }
 
 #[test]
-fn plugin_only_row_is_silent_once_hooks_are_wired() {
-    let b = Box::new("plugin-wired");
-    b.settings(&hook("playbook hook session-init"));
-    let rows = b.run(&[], "/bin/bash", None);
-    assert!(!text(&layer(&rows, "-")).contains("plugin only"));
+fn nothing_wired_is_a_warning_with_the_one_command_to_fix_it() {
+    let b = Box::new("hooks-absent");
+    b.settings(r#"{"hooks":{}}"#);
+
+    let rows = hook_rows(&b.run(&[], "/bin/sh", None));
+
+    assert!(
+        rows[0].starts_with("WARN playbook hooks are not in settings.json"),
+        "{rows:?}"
+    );
+    assert!(rows[0].ends_with("run: playbook init"), "{rows:?}");
+}
+
+#[test]
+fn a_fully_wired_settings_file_passes() {
+    let b = Box::new("hooks-present");
+    wire_all(&b);
+    let dir = stub_with_hooks(&b, &every_hook_name());
+
+    let rows = hook_rows(&b.run(&[&dir], "/bin/sh", None));
+
+    let total = every_hook_name().len();
+    assert!(
+        rows[0].starts_with(&format!(
+            "PASS playbook hook entries in settings.json ({total} of {total})"
+        )),
+        "{rows:?}"
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.starts_with("WARN") && r.contains("does not know")),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn a_removed_entry_is_named_as_missing() {
+    let b = Box::new("hooks-missing-one");
+    let path = wire_all(&b);
+    let mut v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    v["hooks"].as_object_mut().unwrap().remove("WorktreeRemove");
+    fs::write(&path, v.to_string()).unwrap();
+
+    let rows = hook_rows(&b.run(&[], "/bin/sh", None));
+
+    assert!(rows[0].starts_with("WARN 1 of "), "{rows:?}");
+    assert!(rows[0].contains("worktree-remove"), "{rows:?}");
+}
+
+#[test]
+fn an_entry_for_a_hook_the_binary_no_longer_writes_is_stale() {
+    let b = Box::new("hooks-stale");
+    let path = wire_all(&b);
+    let mut v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    v["hooks"]["SessionStart"].as_array_mut().unwrap().push(
+        serde_json::json!({"hooks":[{"type":"command","command":"playbook hook migration-check"}]}),
+    );
+    fs::write(&path, v.to_string()).unwrap();
+
+    let rows = hook_rows(&b.run(&[], "/bin/sh", None));
+
+    assert!(
+        rows.iter().any(|r| r.starts_with("WARN settings.json has a hook the binary no longer writes: playbook hook migration-check")),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn a_binary_that_does_not_know_a_wired_hook_is_reported() {
+    let b = Box::new("hooks-old-binary");
+    wire_all(&b);
+    let dir = stub_with_hooks(&b, &["session-init"]);
+
+    let rows = hook_rows(&b.run(&[&dir], "/bin/sh", None));
+
+    let row = rows
+        .iter()
+        .find(|r| r.contains("does not know these hooks"))
+        .expect("row");
+    assert!(
+        row.starts_with("WARN") && row.contains("worktree-create"),
+        "{row}"
+    );
+    assert!(row.ends_with("run: playbook update"), "{row}");
+}
+
+#[test]
+fn a_login_shell_with_a_minimal_path_must_find_the_binary() {
+    if host_finds_playbook() {
+        return;
+    }
+    let b = Box::new("hooks-minimal-path");
+    wire_all(&b);
+    let dir = stub_with_hooks(&b, &every_hook_name());
+    let blind = hook_rows(&b.run(&[&dir], "/bin/sh", None));
+    assert!(
+        blind
+            .iter()
+            .any(|r| r.contains("minimal PATH cannot find playbook")),
+        "{blind:?}"
+    );
+
+    fs::write(
+        b.home().join(".profile"),
+        format!("export PATH=\"{}:$PATH\"\n", dir.display()),
+    )
+    .unwrap();
+    let seen = hook_rows(&b.run(&[&dir], "/bin/sh", None));
+
+    assert!(!seen.iter().any(|r| r.contains("minimal PATH")), "{seen:?}");
 }
 
 #[test]
@@ -595,4 +743,64 @@ fn layer_one_fails_when_the_playbook_plugin_is_disabled() {
     let rows = b.run(&[&dir], "/bin/bash", None);
 
     assert!(text(&layer(&rows, "1")).contains("FAIL plugin installed but disabled"));
+}
+
+#[test]
+fn a_login_shell_that_prints_something_is_not_taken_for_a_hit() {
+    if host_finds_playbook() {
+        return;
+    }
+    let b = Box::new("hooks-noisy-profile");
+    wire_all(&b);
+    let dir = stub_with_hooks(&b, &every_hook_name());
+    fs::write(b.home().join(".profile"), "echo Agent pid 4242\n").unwrap();
+
+    let rows = hook_rows(&b.run(&[&dir], "/bin/sh", None));
+
+    assert!(
+        rows.iter()
+            .any(|r| r.contains("minimal PATH cannot find playbook")),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn the_real_binarys_hook_help_lists_every_wired_hook() {
+    let b = Box::new("hooks-real-binary");
+    wire_all(&b);
+    let bin = std::path::Path::new(env!("CARGO_BIN_EXE_playbook"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+
+    let rows = hook_rows(&b.run(&[&bin], "/bin/sh", None));
+
+    assert!(
+        !rows.iter().any(|r| r.contains("does not know")),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn an_installed_hooks_plugin_is_reported_because_its_hooks_would_run_twice() {
+    let b = Box::new("hooks-plugin-overlap");
+    wire_all(&b);
+    let dir = b.home().join(".claude/plugins");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("installed_plugins.json"),
+        r#"{"version":2,"plugins":{"playbook-hooks@pragmatic-engineer":[{"scope":"user"}]}}"#,
+    )
+    .unwrap();
+
+    let rows = hook_rows(&b.run(&[], "/bin/sh", None));
+
+    let row = rows
+        .iter()
+        .find(|r| r.contains("playbook-hooks plugin is still installed"))
+        .expect("overlap row");
+    assert!(
+        row.ends_with("run: claude plugin uninstall playbook-hooks@pragmatic-engineer"),
+        "{row}"
+    );
 }
