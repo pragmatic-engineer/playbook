@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 14] = [
+const PROBES: [Probe; 15] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -104,6 +104,7 @@ const PROBES: [Probe; 14] = [
     layer6,
     layer7,
     config_rows,
+    effort_rows,
     worktree_rows,
     migration_rows,
     data_rows,
@@ -492,6 +493,24 @@ fn layer7(env: &Env) -> Vec<Row> {
                 .hint("this hook does nothing every time it fires; `playbook init` will not remove it, so delete the entry from ~/.claude/settings.json by hand")
         })
         .collect()
+}
+
+fn effort_rows(env: &Env) -> Vec<Row> {
+    let cwd = env.repo_root.clone().unwrap_or_else(|| env.home.clone());
+    let c = crate::effort::ceiling(&env.home, &env.claude_home, &cwd);
+    vec![
+        Row::new(
+            "-",
+            Level::Info,
+            format!(
+                "effort ceiling: playbook {}, Claude Code {} (read only, never written), effective {}",
+                c.playbook,
+                c.claude.as_deref().unwrap_or("none"),
+                c.effective.as_deref().unwrap_or("none"),
+            ),
+        ),
+        Row::new("-", Level::Info, format!("effort ceiling limit: {}", crate::effort::LIMIT)),
+    ]
 }
 
 fn config_rows(env: &Env) -> Vec<Row> {
