@@ -16,6 +16,9 @@
 !/install.sh
 !/justfile
 !/prompts/
+!/plugins/
+!/intents.json
+!/CHANGELOG.md
 # settings.json is intentionally NOT tracked: it is the owner's live, personal
 # config. The shipped install seed is the generated settings.shared.json below.
 # Warning: `git clean -x` inside ~/.claude will delete the untracked settings.json.
