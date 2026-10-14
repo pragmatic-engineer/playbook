@@ -244,6 +244,7 @@ fn the_binary_stays_unless_asked_for() {
     sb.write("bin/playbook", "#!/bin/sh\n");
     sb.write("bin/playbook.0.1.0.bak", "old\n");
     sb.write("bin/other", "keep\n");
+    std::os::unix::fs::symlink("playbook", sb.path("bin/pb")).unwrap();
 
     let out = sb.run(&["uninstall", "--yes"]);
     assert!(out.status.success(), "{}", text(&out));
@@ -254,6 +255,7 @@ fn the_binary_stays_unless_asked_for() {
     assert!(out.status.success(), "{}", text(&out));
     assert!(!sb.path("bin/playbook").exists());
     assert!(!sb.path("bin/playbook.0.1.0.bak").exists());
+    assert!(sb.path("bin/pb").symlink_metadata().is_err());
     assert!(sb.path("bin/other").is_file());
     assert_eq!(
         sb.read(".bashrc"),
@@ -552,4 +554,29 @@ fn uninstall_removes_a_plugin_seen_marker_an_earlier_release_left() {
     sb.run(&["uninstall", "--yes"]);
 
     assert!(!sb.path(".config/playbook/plugin-seen").exists());
+}
+
+#[test]
+fn a_pb_of_the_users_own_is_kept() {
+    let sb = Sandbox::new("own-pb");
+    sb.write("bin/playbook", "#!/bin/sh\n");
+    sb.write("bin/other", "#!/bin/sh\n");
+    std::os::unix::fs::symlink("other", sb.path("bin/pb")).unwrap();
+
+    let out = sb.run(&["uninstall", "--yes", "--remove-binary"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!sb.path("bin/playbook").exists());
+    assert!(sb.path("bin/pb").symlink_metadata().is_ok());
+}
+
+#[test]
+fn a_dry_run_keeps_the_pb_link() {
+    let sb = Sandbox::new("dry-pb");
+    sb.write("bin/playbook", "#!/bin/sh\n");
+    std::os::unix::fs::symlink("playbook", sb.path("bin/pb")).unwrap();
+
+    sb.run(&["uninstall", "--yes", "--dry-run", "--remove-binary"]);
+
+    assert!(sb.path("bin/pb").symlink_metadata().is_ok());
 }

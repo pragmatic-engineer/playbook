@@ -256,6 +256,7 @@ fn binary_step(opts: &Options, verb: &str, report: &mut Report) {
     if binary.is_file() {
         remove_file(&binary, verb, opts.dry_run, report);
     }
+    remove_pb_link(&opts.bin_dir, &binary, verb, opts.dry_run, report);
     let Ok(entries) = fs::read_dir(&opts.bin_dir) else {
         return;
     };
@@ -271,6 +272,19 @@ fn binary_step(opts: &Options, verb: &str, report: &mut Report) {
     backups.sort();
     for backup in backups {
         remove_file(&backup, verb, opts.dry_run, report);
+    }
+}
+
+/// The `pb` short name the installer links next to the binary. It goes only
+/// when it is a symlink to `playbook` (relative or absolute), so a `pb` of the
+/// user's own stays.
+fn remove_pb_link(bin_dir: &Path, binary: &Path, verb: &str, dry_run: bool, report: &mut Report) {
+    let link = bin_dir.join("pb");
+    let Ok(target) = fs::read_link(&link) else {
+        return;
+    };
+    if target == Path::new("playbook") || target == binary {
+        remove_file(&link, verb, dry_run, report);
     }
 }
 
