@@ -1941,7 +1941,6 @@ pub enum HookName {
     AutoCost,
     WorktreeCreate,
     WorktreeRemove,
-    MigrationCheck,
     ContextHygiene,
     DocReadHint,
     UsageWarm,

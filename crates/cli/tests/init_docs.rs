@@ -6,7 +6,7 @@
 //! code and checks each entry against the page, so a new hook cannot ship
 //! without a row.
 
-use playbook::init::wire::{self, wired_hooks, PLUGIN_HOOKS};
+use playbook::init::wire::{self, wired_hooks};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
@@ -24,7 +24,7 @@ fn read(rel: &str) -> String {
     fs::read_to_string(root().join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
 }
 
-/// Every (event, matcher, hook name) entry in a settings or hooks.json value.
+/// Every (event, matcher, hook name) entry in a settings value.
 fn entries(settings: &Value) -> Vec<(String, String, String)> {
     let mut out = Vec::new();
     let hooks = settings["hooks"].as_object().expect("hooks object");
@@ -106,25 +106,9 @@ fn every_hook_in_the_shipped_template_is_one_init_wires() {
 }
 
 #[test]
-fn every_plugin_hook_has_a_row_in_the_hook_reference() {
-    let page = read(REFERENCE);
-    let plugin: Value = serde_json::from_str(&read("hooks/hooks.json")).unwrap();
-
-    for entry in entries(&plugin) {
-        let prefix = row_prefix(&entry);
-        assert!(
-            page.lines().any(|l| l.starts_with(&prefix)),
-            "{REFERENCE} has no table row starting with: {prefix}"
-        );
-    }
-}
-
-#[test]
 fn the_reference_has_no_row_for_a_hook_nothing_ships() {
     let page = read(REFERENCE);
-    let plugin: Value = serde_json::from_str(&read("hooks/hooks.json")).unwrap();
-    let mut known: BTreeSet<String> = wired_entries().iter().map(row_prefix).collect();
-    known.extend(entries(&plugin).iter().map(row_prefix));
+    let known: BTreeSet<String> = wired_entries().iter().map(row_prefix).collect();
 
     for line in page
         .lines()
@@ -188,18 +172,10 @@ fn the_hook_table_in_code_is_exactly_what_init_wires() {
 }
 
 #[test]
-fn the_plugin_hook_table_in_code_is_exactly_the_plugin_hooks_file() {
-    let plugin: Value = serde_json::from_str(&read("hooks/hooks.json")).unwrap();
-    let from_file: BTreeSet<_> = entries(&plugin).into_iter().collect();
-
-    assert_eq!(table_entries(PLUGIN_HOOKS.iter()), from_file);
-}
-
-#[test]
 fn the_reference_says_what_each_hook_does_in_the_words_the_table_uses() {
     let page = read(REFERENCE);
 
-    for h in wired_hooks().chain(PLUGIN_HOOKS) {
+    for h in wired_hooks() {
         let matcher = h.matcher.unwrap_or("none").to_string();
         let prefix = row_prefix(&(h.event.to_string(), matcher, h.name.to_string()));
         let row = page
@@ -229,10 +205,7 @@ fn every_hook_sits_under_the_heading_of_its_group() {
             .find("\n## ")
             .map_or(page.len(), |n| start + heading.len() + n);
         let section = &page[start..end];
-        for h in wired_hooks()
-            .chain(PLUGIN_HOOKS)
-            .filter(|h| h.group == group)
-        {
+        for h in wired_hooks().filter(|h| h.group == group) {
             assert!(
                 section.contains(&format!("`playbook hook {}`", h.name)),
                 "{} is not under {}",

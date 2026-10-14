@@ -390,10 +390,6 @@ fn main() {
         }
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
-        // Retiring `hooks/hooks.json` and regenerating the seed into
-        // binary-invoked form are the other two thirds of WU-11's atomic
-        // switchover and stay untouched here; see `src/init/mod.rs`'s doc
-        // comment for why running this wiring alone is still safe.
         Command::Init { flags } if flags.explain.is_some() => {
             let which = flags.explain.as_ref().and_then(|w| w.as_deref());
             match init::catalog::explain(which) {

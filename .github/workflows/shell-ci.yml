@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # CI gate for the repo's own shell code. What is left is the installer
-# (install.sh, run through curl | bash) and the plugin shim (bin/playbook),
-# which must work before any binary exists. Their behavior is tested in Rust
-# (tests/install_*.rs, tests/plugin_bin_shim.rs). Runs on ubuntu-latest and
+# (install.sh, run through curl | bash), which must work before any binary
+# exists. Its behavior is tested in Rust (tests/install_*.rs). Runs on ubuntu-latest and
 # macos-latest so the BSD code paths execute too. Validates:
 #   - ShellCheck static analysis on every shell script (Linux only, lint once)
 #   - Bash syntax (bash -n) on every shell script
@@ -119,12 +118,12 @@ jobs:
         # which survives even `shellcheck -x`. Tightening would mean adding
         # disable directives, not fixing bugs.
         if: runner.os == 'Linux' && needs.changes.outputs.docs_only != 'true'
-        run: (git ls-files '*.sh'; echo bin/playbook) | xargs shellcheck --severity=warning
+        run: git ls-files '*.sh' | xargs shellcheck --severity=warning
 
       - name: Bash syntax check
         if: needs.changes.outputs.docs_only != 'true'
         run: |
-          for f in $(git ls-files '*.sh') bin/playbook; do bash -n "$f"; done
+          for f in $(git ls-files '*.sh'); do bash -n "$f"; done
 
       # Always runs, docs-only or not: it greps docs/ and README.md too.
       - name: Personal-identifier grep

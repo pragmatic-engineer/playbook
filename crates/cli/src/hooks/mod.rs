@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! One module per hook name, matching hooks.json's `HookName` set exactly.
+//! One module per hook name, matching the `HookName` set exactly.
 //! Each module owns its hook's behaviour, and `dispatch` below is exhaustive
 //! over `HookName`.
 
@@ -18,7 +18,6 @@ pub mod doc_read_hint;
 pub mod memory_anchors;
 pub mod memory_capture;
 pub mod memory_signals;
-pub mod migration_check;
 pub mod no_slop_guard;
 pub mod policy_guard;
 pub mod post_edit_track;
@@ -64,7 +63,6 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::AutoCost => auto_cost::run(payload),
         HookName::WorktreeCreate => worktree_create::run(payload),
         HookName::WorktreeRemove => worktree_remove::run(payload),
-        HookName::MigrationCheck => migration_check::run(payload),
         HookName::ContextHygiene => context_hygiene::run(payload),
         HookName::DocReadHint => doc_read_hint::run(payload),
         HookName::UsageWarm => usage_warm::run(payload),
