@@ -31,7 +31,7 @@ Commands could do everything inline. Agents exist for three reasons.
 2. **Cost control.** Mechanical work (run git steps, gather history, apply an approved diff) goes to Haiku at low effort. The expensive model is kept for work where a mistake is costly.
 3. **Context control.** An agent's long output stays out of the main conversation. Only its result comes back.
 
-The full list of agents, their tools and how a command binds to one is in [Authoring agents](https://github.com/pragmatic-engineer/skills/blob/main/docs/authoring/02-authoring-agents.md).
+The full list of agents, their tools and how a command binds to one is in [Authoring agents](../authoring/02-authoring-agents.md).
 
 ## Why each model is where it is
 

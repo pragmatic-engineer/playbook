@@ -126,9 +126,9 @@ Off by default. Set it with `playbook config set --global effort.auto suggest` (
 
 ## See also
 
-- [Review and PR flow](https://github.com/pragmatic-engineer/skills/blob/main/docs/guides/02-review-and-pr-flow.md#pr-and-commit-settings): how the PR keys behave in detail.
+- [Review and PR flow](02-review-and-pr-flow.md#pr-and-commit-settings): how the PR keys behave in detail.
 - [Auto mode](05-auto-mode.md): what `mode`, `auto.budgetUsd`, `auto.agentBudgetUsd`, `auto.sessionCeilingUsd` and `auto.warnPct` turn on.
-- [Plan and implement](https://github.com/pragmatic-engineer/skills/blob/main/docs/guides/01-plan-and-implement.md): the `/playbook:fix` limits.
+- [Plan and implement](01-plan-and-implement.md): the `/playbook:fix` limits.
 - [Worktree engine](../internals/03-worktree.md): the sweep that the `worktreeCleanup.*` keys control.
 
 The model cannot change `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars` or `pr.ticketPatterns`. The policy guard refuses a model-run `config set`, `import`, `unset` or `edit` on them. Run the change yourself in the prompt with `!`.

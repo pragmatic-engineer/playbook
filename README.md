@@ -53,7 +53,7 @@ The hooks, guards, status line and usage need the binary. Only the skill text wo
 /playbook:quick-review  or /playbook:deep-review for a bigger change
 ```
 
-For a small bug, `/playbook:fix` goes from a failing test to one pull request. For a big choice, `/playbook:adr` records the decision. The [guides](https://github.com/pragmatic-engineer/skills/blob/main/docs/guides/01-plan-and-implement.md) walk through each flow.
+For a small bug, `/playbook:fix` goes from a failing test to one pull request. For a big choice, `/playbook:adr` records the decision. The [guides](docs/guides/01-plan-and-implement.md) walk through each flow.
 
 ## The launcher
 
@@ -93,7 +93,7 @@ The work happens in the binary, so bash and zsh behave the same. `playbook shell
 
 Reviews are stack aware. When a PR sits in a stack, `/playbook:quick-review` and `/playbook:deep-review` always ask whether to review the whole stack or one PR (`playbook pr stack` finds it, see [ADR-0019](docs/adr/0019-pr-stack-review.md)).
 
-Skills load on demand from the `playbook` plugin in [pragmatic-engineer/skills](https://github.com/pragmatic-engineer/skills): review and research discipline, engineering standards, writing style, subagent delegation and debugging. To add your own, see [Commands, skills and hooks](https://github.com/pragmatic-engineer/skills/blob/main/docs/authoring/01-commands-skills-hooks.md).
+Skills load on demand from the `playbook` plugin in `plugins/playbook`: review and research discipline, engineering standards, writing style, subagent delegation and debugging. To add your own, see [Commands, skills and hooks](docs/authoring/01-commands-skills-hooks.md).
 
 ## Settings
 
@@ -174,14 +174,14 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 Start at the [docs index](docs/index.md).
 
-- **Guides:** [install](docs/guides/00-install.md), [plan and implement](https://github.com/pragmatic-engineer/skills/blob/main/docs/guides/01-plan-and-implement.md), [review and PR flow](https://github.com/pragmatic-engineer/skills/blob/main/docs/guides/02-review-and-pr-flow.md), [decisions and memory](docs/guides/03-decisions-and-memory.md), [config keys](docs/guides/04-config-keys.md), [auto mode](docs/guides/05-auto-mode.md).
+- **Guides:** [install](docs/guides/00-install.md), [plan and implement](docs/guides/01-plan-and-implement.md), [review and PR flow](docs/guides/02-review-and-pr-flow.md), [decisions and memory](docs/guides/03-decisions-and-memory.md), [config keys](docs/guides/04-config-keys.md), [auto mode](docs/guides/05-auto-mode.md).
 - **Concepts:** [system prompt](docs/concepts/01-system-prompt.md), [memory](docs/concepts/02-memory-system.md), [design rationale](docs/concepts/03-why-the-pieces-are-shaped-this-way.md).
-- **Authoring:** [commands, skills and hooks](https://github.com/pragmatic-engineer/skills/blob/main/docs/authoring/01-commands-skills-hooks.md), [agents](https://github.com/pragmatic-engineer/skills/blob/main/docs/authoring/02-authoring-agents.md).
+- **Authoring:** [commands, skills and hooks](docs/authoring/01-commands-skills-hooks.md), [agents](docs/authoring/02-authoring-agents.md).
 - **Internals:** [launcher and hooks](docs/internals/01-launcher-and-hooks.md), [model routing](docs/internals/02-model-routing-and-memory.md), [worktrees](docs/internals/03-worktree.md), [usage dashboard](docs/internals/04-usage-dashboard.md), [headless mode](docs/internals/05-headless-mode.md), [release channels](docs/internals/06-release-channels.md), [migrations](docs/internals/07-migrations.md), [state store](docs/internals/08-state-store.md), [sessions](docs/internals/09-sessions.md), [document conversion benchmark](docs/internals/10-document-conversion-benchmark.md).
 
 ## Repository layout
 
-This repository holds the `playbook` binary and `install.sh`. The skills, commands and agents live in [pragmatic-engineer/skills](https://github.com/pragmatic-engineer/skills). The Rust code is a Cargo workspace under `crates/`: `cli` (the `playbook` binary), `common`, `code`, `telemetry` (`playbook-telemetry` and `pbtop`) and `data`. See [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout).
+This repository holds the `playbook` binary and `install.sh`. The skills, commands and agents live in `plugins/playbook`. The Rust code is a Cargo workspace under `crates/`: `cli` (the `playbook` binary), `common`, `code`, `telemetry` (`playbook-telemetry` and `pbtop`) and `data`. See [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout).
 
 ## License
 

@@ -156,6 +156,6 @@ It rewrites the message file in place and always exits 0. With `--check` it repo
 
 ## See also
 
-- [Authoring commands, skills and hooks](https://github.com/pragmatic-engineer/skills/blob/main/docs/authoring/01-commands-skills-hooks.md): how to write your own hook.
+- [Authoring commands, skills and hooks](../authoring/01-commands-skills-hooks.md): how to write your own hook.
 - [Model routing and memory](02-model-routing-and-memory.md): model tiers, effort and the memory graph.
 - [Docs index](../index.md)

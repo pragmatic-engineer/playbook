@@ -17,8 +17,8 @@ Why the foundations work the way they do.
 Task-oriented workflows.
 
 - [Install](guides/00-install.md): requirements, every install route, upgrade and uninstall.
-- [Plan and implement](https://github.com/pragmatic-engineer/skills/blob/main/docs/guides/01-plan-and-implement.md): design with `/playbook:plan`, build with `/playbook:implement`, fix a small bug with `/playbook:fix`.
-- [Review and PR flow](https://github.com/pragmatic-engineer/skills/blob/main/docs/guides/02-review-and-pr-flow.md): commit, review, and work through feedback.
+- [Plan and implement](guides/01-plan-and-implement.md): design with `/playbook:plan`, build with `/playbook:implement`, fix a small bug with `/playbook:fix`.
+- [Review and PR flow](guides/02-review-and-pr-flow.md): commit, review, and work through feedback.
 - [Decisions and memory](guides/03-decisions-and-memory.md): record choices with `/playbook:adr`, build project knowledge with `/playbook:learn-project`.
 - [Config keys](guides/04-config-keys.md): every `playbook config` key with its default, allowed values and what it does.
 - [Auto mode](guides/05-auto-mode.md): run commands without questions, with a spend cap.
@@ -31,8 +31,8 @@ Task-oriented workflows.
 
 Extend the config.
 
-- [Commands, skills, and hooks](https://github.com/pragmatic-engineer/skills/blob/main/docs/authoring/01-commands-skills-hooks.md): templates for each extension point.
-- [Authoring agents](https://github.com/pragmatic-engineer/skills/blob/main/docs/authoring/02-authoring-agents.md): the frontmatter schema, both binding mechanisms, and the parametrize or split rule.
+- [Commands, skills, and hooks](authoring/01-commands-skills-hooks.md): templates for each extension point.
+- [Authoring agents](authoring/02-authoring-agents.md): the frontmatter schema, both binding mechanisms, and the parametrize or split rule.
 
 ## Internals
 
@@ -83,5 +83,6 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0027](adr/0027-anydoc-as-optional-local-tool.md) | Use anydoc as an optional local tool found on PATH, never vendored | Accepted | 2026-10-12 |
 | [0028](adr/0028-per-agent-auto-budget.md) | Budget auto mode per agent, with the closing steps allowed at a cap | Accepted | 2026-10-12 |
 | [0029](adr/0029-cargo-workspace-monorepo.md) | Keep the Rust crates in one Cargo workspace | Accepted | 2026-10-13 |
-| [0030](adr/0030-skills-and-commands-in-their-own-repo.md) | Keep the skills, commands and agents in their own repository | Accepted, hooks plugin parts superseded by 0031 | 2026-10-13 |
+| [0030](adr/0030-skills-and-commands-in-their-own-repo.md) | Keep the skills, commands and agents in their own repository | Accepted, partly superseded by 0031 and 0032 | 2026-10-13 |
 | [0031](adr/0031-hooks-in-settings-json.md) | Put the hooks in settings.json | Accepted | 2026-10-14 |
+| [0032](adr/0032-plugin-in-the-playbook-repo.md) | Keep the plugin in the playbook repository | Accepted | 2026-10-14 |
