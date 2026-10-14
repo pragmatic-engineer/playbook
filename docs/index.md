@@ -57,7 +57,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | ADR | Title | Status | Date |
 |---|---|---|---|
 | [0001](adr/0001-package-toolkit-as-plugin.md) | Package the toolkit as an opt-in Claude Code plugin | Accepted, amended by 0002, 0006, 0007 | 2026-07-23 |
-| [0002](adr/0002-plugin-based-install-safety-hooks.md) | Plugin based install with always-on safety hooks | Accepted, amended by 0006, 0007 | 2026-07-30 |
+| [0002](adr/0002-plugin-based-install-safety-hooks.md) | Plugin based install with always-on safety hooks | Accepted, amended by 0006, 0007, 0031 | 2026-07-30 |
 | [0003](adr/0003-purpose-built-subagents.md) | Purpose-built subagents over generic fallbacks | Accepted | 2026-08-07 |
 | [0004](adr/0004-graph-first-memory.md) | Graph-first memory retrieval and triggered capture | Accepted | 2026-08-10 |
 | [0005](adr/0005-python-hooks-and-config-scripts.md) | Migrate the hooks and the config scripts from shell to Python | Superseded by 0007 | 2026-08-11 |
@@ -83,3 +83,5 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0027](adr/0027-anydoc-as-optional-local-tool.md) | Use anydoc as an optional local tool found on PATH, never vendored | Accepted | 2026-10-12 |
 | [0028](adr/0028-per-agent-auto-budget.md) | Budget auto mode per agent, with the closing steps allowed at a cap | Accepted | 2026-10-12 |
 | [0029](adr/0029-cargo-workspace-monorepo.md) | Keep the Rust crates in one Cargo workspace | Accepted | 2026-10-13 |
+| [0030](adr/0030-skills-and-commands-in-their-own-repo.md) | Keep the skills, commands and agents in their own repository | Accepted, hooks plugin parts superseded by 0031 | 2026-10-13 |
+| [0031](adr/0031-hooks-in-settings-json.md) | Put the hooks in settings.json | Accepted | 2026-10-14 |

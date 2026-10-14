@@ -1,6 +1,6 @@
 # ADR 0002: Plugin based install with always-on safety hooks
 
-- **Status:** Accepted, amended by ADR 0006 and ADR 0007 (hook delivery now goes through `playbook init`; hooks.json carries only the worktree hooks and the migration check)
+- **Status:** Accepted, amended by ADR 0006 and ADR 0007 (hook delivery now goes through `playbook init`; hooks.json carries only the worktree hooks and the migration check), and by ADR 0031 (hooks.json is gone; every hook is in settings.json)
 - **Date created:** 2026-07-30
 - **Date modified:** 2026-07-30
 - **Amends:** ADR 0001 (package the toolkit as an opt-in plugin)

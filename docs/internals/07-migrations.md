@@ -4,7 +4,7 @@
 
 ## When it runs
 
-Only `playbook init` runs migrations. Hooks never do, so a session does not pay for them. After an update, run `playbook init`. The installer and `brew` caveat both say so, and `install.sh` runs it for you.
+Only `playbook init` runs migrations. Hooks never do, so a session does not pay for them. After an update, run `playbook init`. The installer and `brew` caveat both say so, and `install.sh` offers to run it, and runs it on a yes or with `--yes`.
 
 ## The three kinds
 
