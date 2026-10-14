@@ -31,6 +31,11 @@ line. `build` compiles the five targets, ad hoc signs the macOS binaries and
 uploads one asset per target. `checksums` writes `SHA256SUMS` and attests the
 assets. The workflow only publishes.
 
+The release notes for a `v*` release start with the upgrade note in
+`.github/release-notes-upgrade.md`. Paste it above the generated notes while
+the move from the `playbook-hooks` plugin is still recent, and drop it when
+most users have upgraded.
+
 To rehearse, run the `release` workflow by hand with a `tag` input. A manual run
 is always a dry run: it resolves, verifies and builds, and skips release
 creation, uploads and attestation. The tag's version must match

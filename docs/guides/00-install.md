@@ -140,6 +140,17 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 mv -f ~/.local/bin/playbook.0.19.0.bak ~/.local/bin/playbook
 ```
 
+### Coming from the playbook-hooks plugin
+
+Older releases delivered the hooks in a second plugin, `playbook-hooks`. The hooks now live in `~/.claude/settings.json`. After you upgrade the binary, run these two commands once:
+
+```bash
+claude plugin uninstall playbook-hooks@pragmatic-engineer
+playbook init --yes
+```
+
+`playbook init` adds the hook entries and asks first when you run it in a terminal. Leaving the old plugin installed makes every hook run twice, and `playbook doctor check` points it out.
+
 See [release channels](../internals/06-release-channels.md) for how a release reaches each channel.
 
 ## How the binary gets on PATH
