@@ -66,6 +66,8 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::ContextHygiene => context_hygiene::run(payload),
         HookName::DocReadHint => doc_read_hint::run(payload),
         HookName::UsageWarm => usage_warm::run(payload),
+        // Retired. Old plugin caches still call it; succeed without output.
+        HookName::MigrationCheck => {}
     }
 }
 

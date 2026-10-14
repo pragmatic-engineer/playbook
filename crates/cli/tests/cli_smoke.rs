@@ -402,7 +402,7 @@ const SESSION_PAYLOAD: &str = r#"{"session_id":"smoke","hook_event_name":"Sessio
 /// Every hook name, with the JSON Claude Code would send it.
 #[rustfmt::skip]
 fn hook_cases() -> Vec<Case> {
-    let hooks: [(&str, &str); 24] = [
+    let hooks: [(&str, &str); 25] = [
         ("session-init", SESSION_PAYLOAD),
         ("preread-edit-check", EDIT_PAYLOAD),
         ("preread-size-check", EDIT_PAYLOAD),
@@ -427,6 +427,8 @@ fn hook_cases() -> Vec<Case> {
         ("context-hygiene", SESSION_PAYLOAD),
         ("doc-read-hint", EDIT_PAYLOAD),
         ("usage-warm", SESSION_PAYLOAD),
+        // Retired, kept so an old plugin cache stays quiet: no output, no files.
+        ("migration-check", SESSION_PAYLOAD),
     ];
     hooks.iter().map(|(name, payload)| {
             let c = case(&format!("hook {name}"), &["hook", name]).stdin(payload);
@@ -434,6 +436,7 @@ fn hook_cases() -> Vec<Case> {
                 // A worktree hook with no worktree name refuses and says so.
                 "worktree-create" => c.code(1).err("unsafe worktree name"),
                 "worktree-remove" => c.err("worktree_path is missing"),
+                "migration-check" => c,
                 // These keep a log or a counter, so a second run adds to it.
                 "session-init" | "session-clean-exit" | "search-counter" | "precompact-warn"
                 | "usage-warm" => c.grows(),

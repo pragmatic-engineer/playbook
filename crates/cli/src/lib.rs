@@ -1944,6 +1944,11 @@ pub enum HookName {
     ContextHygiene,
     DocReadHint,
     UsageWarm,
+    /// Kept so a playbook-hooks plugin cached on disk from an older release
+    /// still exits 0 on SessionStart. Does nothing. Remove it once those
+    /// caches have aged out.
+    #[value(hide = true)]
+    MigrationCheck,
 }
 
 /// `playbook hooks` subcommands.
@@ -1951,8 +1956,8 @@ pub enum HookName {
 pub enum HooksCommand {
     /// Print every hook with its event, matcher and what it does
     ///
-    /// Lists the hooks init adds to settings.json, grouped by purpose, and the
-    /// ones the plugin registers itself. Changes nothing.
+    /// Lists the hooks init adds to settings.json, grouped by purpose.
+    /// Changes nothing.
     List,
 }
 

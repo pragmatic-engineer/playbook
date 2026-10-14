@@ -171,7 +171,7 @@ Start at the [docs index](docs/index.md).
 
 ## Repository layout
 
-This repository holds the `playbook` binary and the `playbook-hooks` plugin (hooks, the `bin/playbook` shim and `install.sh`). The skills, commands and agents live in [pragmatic-engineer/skills](https://github.com/pragmatic-engineer/skills). The Rust code is a Cargo workspace under `crates/`: `cli` (the `playbook` binary), `common`, `code`, `telemetry` (`playbook-telemetry` and `pbtop`) and `data`. See [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout).
+This repository holds the `playbook` binary and `install.sh`. The skills, commands and agents live in [pragmatic-engineer/skills](https://github.com/pragmatic-engineer/skills). The Rust code is a Cargo workspace under `crates/`: `cli` (the `playbook` binary), `common`, `code`, `telemetry` (`playbook-telemetry` and `pbtop`) and `data`. See [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout).
 
 ## License
 

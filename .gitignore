@@ -21,8 +21,6 @@
 # Warning: `git clean -x` inside ~/.claude will delete the untracked settings.json.
 !/settings.shared.json
 !/permissions.shared.json
-!/hooks/
-!/bin/
 !/shell/
 !/docs/
 !/.github/

@@ -101,8 +101,7 @@ pub fn wired_hooks() -> impl Iterator<Item = &'static HookSpec> {
 
 /// The functional hooks, already ported to Rust, rewired here to the bare
 /// `playbook hook <name>` form. Eleven were ported from the old
-/// `hooks/hooks.json` (it now holds only the session-start migration check),
-/// line for line (`session-clean-exit` fires on both
+/// `hooks/hooks.json` (since removed), line for line (`session-clean-exit` fires on both
 /// `Stop` and `SessionEnd`), while `auto-guard` and `auto-cost` never had a
 /// `hooks/hooks.json` entry. Together with `GUARD_SPECS` below these are exactly
 /// the 24 settings-wired `HookName` variants.

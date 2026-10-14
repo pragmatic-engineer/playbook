@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Helpers for tests that run the repo's real shell scripts (`install.sh`,
-//! `bin/playbook`) against stubbed `curl`, `gh`, `uname` and `claude`.
+//! Helpers for tests that run the repo's real shell script (`install.sh`)
+//! against stubbed `curl`, `gh`, `uname` and `claude`.
 
 #![allow(dead_code)]
 
