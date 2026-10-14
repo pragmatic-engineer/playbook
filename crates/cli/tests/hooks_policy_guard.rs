@@ -255,7 +255,8 @@ fn the_rm_guard_allowance_cannot_be_changed_by_the_model() {
 
 #[test]
 fn the_hook_entries_in_settings_cannot_be_dropped_by_the_model() {
-    let dir = std::env::temp_dir().join(format!("pb-guard-entries-{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("pb-guard-entries-{}", playbook::testing::run_id()));
     std::fs::create_dir_all(dir.join(".claude")).expect("scratch dir");
     let file = dir.join(".claude/settings.json");
     let kept = r#"{"model":"opus","hooks":{"Stop":[{"hooks":[{"command":"playbook hook session-clean-exit"}]}]}}"#;

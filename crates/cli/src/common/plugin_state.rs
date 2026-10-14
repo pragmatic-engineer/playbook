@@ -40,11 +40,16 @@ pub fn is_disabled_in(home: &Path) -> bool {
     }
     serde_json::from_str::<serde_json::Value>(&text)
         .ok()
-        .and_then(|v| {
-            v.pointer("/enabledPlugins")
-                .and_then(|e| e.get(PLUGIN_KEY).cloned())
-        })
-        == Some(serde_json::Value::Bool(false))
+        .is_some_and(|v| disables_plugin(&v))
+}
+
+/// Whether a parsed settings value sets the plugin to `false`, which pauses
+/// every hook.
+pub fn disables_plugin(settings: &serde_json::Value) -> bool {
+    settings
+        .pointer("/enabledPlugins")
+        .and_then(|e| e.get(PLUGIN_KEY))
+        == Some(&serde_json::Value::Bool(false))
 }
 
 /// The key of the `playbook-hooks` plugin. `playbook uninstall` and the doctor

@@ -730,7 +730,7 @@ pub fn audit(settings_path: &Path) -> HookAudit {
                 .flatten()
             {
                 let cmd = entry.get("command").and_then(Value::as_str).unwrap_or("");
-                if cmd.starts_with("playbook hook ") && !is_managed_entry(entry, &known) {
+                if cmd.starts_with(HOOK_COMMAND_PREFIX) && !is_managed_entry(entry, &known) {
                     out.stale.push(cmd.to_string());
                 }
             }
@@ -882,10 +882,14 @@ fn is_legacy_command(cmd: &str, name: &str) -> bool {
     file_name == format!("{name}.py") || file_name == format!("{name}.sh")
 }
 
+/// What every command `wire` writes starts with. The policy guard reads it to
+/// tell the entries `init` owns from the user's own.
+pub const HOOK_COMMAND_PREFIX: &str = "playbook hook ";
+
 /// The bare command `wire` writes for the hook named `name`: no path,
 /// resolved on `PATH` the same way a hand-written `rtk hook claude` entry is.
 fn bare_command(name: &str) -> String {
-    format!("playbook hook {name}")
+    format!("{HOOK_COMMAND_PREFIX}{name}")
 }
 
 /// The exact JSON object `wire` writes for one `HookSpec`: `type` and
