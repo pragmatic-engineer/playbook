@@ -227,6 +227,10 @@ jobs:
         if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: ./target/debug/playbook manifest check .
 
+      - name: Validate the plugin agents
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        run: ./target/debug/playbook agents check plugins/playbook/agents
+
       # Warn-only for now: the findings show as annotations and never fail the
       # job. `--strict` would fail it on a hard finding.
       - name: Check the docs prose
