@@ -780,6 +780,12 @@ pub enum Command {
         /// Allow a change over 1500 lines
         #[arg(long)]
         allow_large: bool,
+        /// Ticket key for the branch (`none` turns the ticket rules off)
+        #[arg(long)]
+        ticket: Option<String>,
+        /// GitHub issue number the PR handles
+        #[arg(long)]
+        issue: Option<String>,
         /// Print JSON instead of text
         #[arg(long)]
         json: bool,

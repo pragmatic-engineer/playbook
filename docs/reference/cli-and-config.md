@@ -426,6 +426,8 @@ Example: `playbook deliver --dir ../wt -A --message "fix(x): y" --title "fix(x):
 - `--timeout <TIMEOUT>`: Seconds to wait with `--wait`
 - `--dry-run`: Print the plan and change nothing
 - `--allow-large`: Allow a change over 1500 lines
+- `--ticket <TICKET>`: Ticket key for the branch (`none` turns the ticket rules off)
+- `--issue <ISSUE>`: GitHub issue number the PR handles
 - `--json`: Print JSON instead of text
 
 ### `playbook deps`

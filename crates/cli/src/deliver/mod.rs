@@ -74,6 +74,12 @@ pub struct Options {
     pub env: Vec<(String, String)>,
     /// Runs before a commit (secret and readiness checks); `Err` refuses.
     pub before_commit: Option<BeforeCommit>,
+    /// The PR body, ticket and scope rules (`pr::body_rules`). `None` skips them.
+    pub rules: Option<crate::pr::body_rules::Rules>,
+    /// An explicit ticket key, or `none` to turn the ticket rules off.
+    pub ticket: Option<String>,
+    /// The GitHub issue number the PR handles.
+    pub issue: Option<String>,
 }
 
 impl Options {
@@ -100,6 +106,9 @@ impl Options {
             gh: "gh".into(),
             env: Vec::new(),
             before_commit: None,
+            rules: None,
+            ticket: None,
+            issue: None,
         }
     }
 }
@@ -274,6 +283,163 @@ fn text_problems(opts: &Options) -> Vec<String> {
     out
 }
 
+/// The shared rule path (`pr::body_rules::enforce`) for a PR about to be
+/// opened or edited. Warnings go to stderr; `Ok` carries the blocks.
+fn rule_blocks(
+    opts: &Options,
+    title: Option<&str>,
+    body: Option<&str>,
+    branch: &str,
+    subjects: &[String],
+    base: &str,
+    default: &str,
+) -> Vec<String> {
+    let Some(rules) = &opts.rules else {
+        return Vec::new();
+    };
+    let input = crate::pr::body_rules::Input {
+        title,
+        body,
+        branch,
+        subjects,
+        stacked: base != default,
+        ticket_arg: opts.ticket.as_deref(),
+        issue_arg: opts.issue.as_deref(),
+    };
+    match crate::pr::body_rules::enforce(&input, rules) {
+        Ok(warns) => {
+            for warn in warns {
+                eprintln!("deliver: WARN: {warn}");
+            }
+            Vec::new()
+        }
+        Err(blocks) => blocks,
+    }
+}
+
+/// The text a delivery will publish, checked before anything is committed.
+#[derive(Default)]
+struct Planned {
+    /// Title and body of a PR to open.
+    create: Option<(String, String)>,
+    /// A changed title for an open PR.
+    new_title: Option<String>,
+    /// A new body for an open PR.
+    body: Option<String>,
+}
+
+fn plan_text(
+    opts: &Options,
+    sys: &Sys,
+    branch: &str,
+    base: &str,
+    default: &str,
+    existing: Option<&Pr>,
+    messages: &[String],
+) -> Result<Planned, Failure> {
+    let subjects: Vec<String> = messages
+        .iter()
+        .map(|m| m.lines().next().unwrap_or("").to_string())
+        .collect();
+    if subjects.is_empty() {
+        // Nothing to publish yet; the later steps report that.
+        return Ok(Planned::default());
+    }
+    let kept = pr::kept_lines(messages.iter().map(String::as_str));
+    let text_rules_off = opts
+        .rules
+        .as_ref()
+        .is_none_or(|r| r.template == crate::pr::body_rules::Level::Off);
+    let (planned, problems) = match existing {
+        None => {
+            let title = match (&opts.title, subjects.as_slice()) {
+                (Some(t), _) => t.clone(),
+                (None, [only]) => only.clone(),
+                _ => {
+                    return Err(fail(
+                        exit::REFUSED,
+                        "several commits and no --title; pass a PR title",
+                    ))
+                }
+            };
+            let ticket = opts.rules.as_ref().and_then(|rules| {
+                crate::pr::body_rules::detect_ticket(
+                    opts.ticket.as_deref(),
+                    branch,
+                    &subjects,
+                    &rules.patterns,
+                )
+            });
+            let issue = opts
+                .rules
+                .as_ref()
+                .and_then(|_| crate::pr::body_rules::detect_issue(opts.issue.as_deref(), branch));
+            let body = match &opts.body {
+                Some(b) => pr::with_kept(b, &kept),
+                None => pr::compose_body(
+                    &subjects,
+                    messages,
+                    // The repo template carries sections the team template
+                    // refuses, so it is left out while that rule is on.
+                    text_rules_off
+                        .then(|| pr::template(&sys.dir))
+                        .flatten()
+                        .as_deref(),
+                    ticket.as_deref(),
+                    issue,
+                ),
+            };
+            let mut problems = check::pr_title(&title);
+            problems.extend(check::pr_body(&body));
+            problems.extend(rule_blocks(
+                opts,
+                Some(&title),
+                Some(&body),
+                branch,
+                &subjects,
+                base,
+                default,
+            ));
+            (
+                Planned {
+                    create: Some((title, body)),
+                    ..Planned::default()
+                },
+                problems,
+            )
+        }
+        Some(found) => {
+            let new_title = opts.title.clone().filter(|t| *t != found.title);
+            let body = opts.body.as_deref().map(|b| pr::with_kept(b, &kept));
+            let mut problems = body.as_deref().map(check::pr_body).unwrap_or_default();
+            problems.extend(rule_blocks(
+                opts,
+                new_title.as_deref(),
+                body.as_deref(),
+                branch,
+                &subjects,
+                base,
+                default,
+            ));
+            (
+                Planned {
+                    create: None,
+                    new_title,
+                    body,
+                },
+                problems,
+            )
+        }
+    };
+    if problems.is_empty() {
+        return Ok(planned);
+    }
+    Err(refuse_all(
+        problems,
+        "the PR title or body breaks a text rule",
+    ))
+}
+
 fn refuse_all(problems: Vec<String>, what: &str) -> Failure {
     let mut f = fail(exit::REFUSED, format!("refusing: {what}"));
     f.details = problems;
@@ -441,6 +607,27 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
             ),
         ));
     }
+
+    // Text gate: the title, the body and every commit title are checked
+    // before anything is committed or pushed.
+    let mut messages: Vec<String> = sys
+        .git_out(&["rev-list", "--reverse", &format!("{base_ref}..HEAD")])
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|c| sys.git_out(&["log", "-1", "--format=%B", c]))
+        .collect();
+    if has_staged {
+        messages.extend(opts.message.clone());
+    }
+    let planned = plan_text(
+        opts,
+        &sys,
+        &branch,
+        &base,
+        &default,
+        existing.as_ref(),
+        &messages,
+    )?;
 
     // 4. Commit.
     let signed = signing_flag(&sys);
@@ -634,45 +821,12 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         Some(ready) => !ready,
         None => opts.default_draft,
     };
-    let mut messages: Vec<String> = commits
-        .iter()
-        .filter_map(|c| sys.git_out(&["log", "-1", "--format=%B", c]))
-        .collect();
-    if would_commit {
-        messages.extend(opts.message.clone());
-    }
-    let kept = pr::kept_lines(messages.iter().map(String::as_str));
     let mut pr_now: Option<Pr> = existing.clone();
     let body_file = body_path(&sys)?;
 
     match &existing {
         None => {
-            let subjects: Vec<String> = messages
-                .iter()
-                .map(|m| m.lines().next().unwrap_or("").to_string())
-                .collect();
-            let title = match (&opts.title, subjects.as_slice()) {
-                (Some(t), _) => t.clone(),
-                (None, [only]) => only.clone(),
-                _ => {
-                    return Err(fail(
-                        exit::REFUSED,
-                        "several commits and no --title; pass a PR title",
-                    ))
-                }
-            };
-            let body = match &opts.body {
-                Some(b) => pr::with_kept(b, &kept),
-                None => pr::compose_body(&subjects, &messages, pr::template(&sys.dir).as_deref()),
-            };
-            let mut problems = check::pr_title(&title);
-            problems.extend(check::pr_body(&body));
-            if !problems.is_empty() {
-                return Err(refuse_all(
-                    problems,
-                    "the PR title or body breaks a text rule",
-                ));
-            }
+            let (title, body) = planned.create.clone().unwrap_or_default();
             report.actions.push(format!(
                 "open a {} PR",
                 if draft_wanted { "draft" } else { "ready" }
@@ -686,16 +840,11 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         }
         Some(found) => {
             let new_base = opts.base.as_deref().filter(|b| *b != found.base);
-            let new_title = opts.title.as_deref().filter(|t| *t != found.title);
-            if new_title.is_some() || opts.body.is_some() || new_base.is_some() {
+            let new_title = planned.new_title.as_deref();
+            if new_title.is_some() || planned.body.is_some() || new_base.is_some() {
                 report.actions.push("update the PR".into());
                 if !opts.dry_run {
-                    let body = opts.body.as_deref().map(|b| pr::with_kept(b, &kept));
-                    if let Some(body) = &body {
-                        let problems = check::pr_body(body);
-                        if !problems.is_empty() {
-                            return Err(refuse_all(problems, "the PR body breaks a text rule"));
-                        }
+                    if let Some(body) = &planned.body {
                         std::fs::write(&body_file, body)
                             .map_err(|e| fail(exit::FAILED, e.to_string()))?;
                     }
@@ -703,7 +852,7 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
                         &sys,
                         found.number,
                         new_title,
-                        body.as_ref().map(|_| body_file.as_path()),
+                        planned.body.as_ref().map(|_| body_file.as_path()),
                         new_base,
                     );
                     let _ = std::fs::remove_file(&body_file);
