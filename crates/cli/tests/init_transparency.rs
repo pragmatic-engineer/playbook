@@ -4,7 +4,7 @@
 //! `playbook init --dry-run`, `--explain`, `playbook hooks list` and the
 //! summary after a run, all against a scratch `$HOME`.
 
-use playbook::init::wire::{wired_hooks, PLUGIN_HOOKS};
+use playbook::init::wire::wired_hooks;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -223,7 +223,7 @@ fn hooks_list_prints_every_hook_with_event_matcher_and_purpose() {
 
     assert!(out.status.success());
     let text = stdout(&out);
-    for h in wired_hooks().chain(PLUGIN_HOOKS) {
+    for h in wired_hooks() {
         let matcher = h.matcher.unwrap_or("any");
         let line = format!("{} [{}] {}", h.event, matcher, h.name);
         assert!(

@@ -110,7 +110,7 @@ fn seed_skeleton(dir: &Path) {
     add_file(dir, "settings.shared.json");
     add_file(dir, "permissions.shared.json");
     add_file(dir, "shell/worktree.zsh");
-    add_file(dir, "hooks/session-init.sh");
+    add_file(dir, "prompts/system.md");
     add_file(dir, "docs/index.md");
     add_file(dir, ".github/workflows/ci.yml");
 }

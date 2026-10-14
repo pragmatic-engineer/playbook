@@ -99,25 +99,9 @@ pub fn wired_hooks() -> impl Iterator<Item = &'static HookSpec> {
     PORTED_HOOK_SPECS.iter().chain(GUARD_SPECS)
 }
 
-/// The hook the plugin registers in its own `hooks/hooks.json`. `wire` never
-/// writes it, so a test keeps this list equal to that file.
-pub const PLUGIN_HOOKS: &[HookSpec] = &[
-    HookSpec {
-        event: "SessionStart",
-        matcher: None,
-        name: "migration-check",
-        group: Group::Session,
-        purpose: "Tells you to re-run `playbook init` when a plugin update arrived without it. Silent once settings are wired.",
-        if_cond: None,
-        timeout: None,
-        also_replaces: None,
-    },
-];
-
 /// The functional hooks, already ported to Rust, rewired here to the bare
 /// `playbook hook <name>` form. Eleven were ported from the old
-/// `hooks/hooks.json` (it now holds only the session-start migration check),
-/// line for line (`session-clean-exit` fires on both
+/// `hooks/hooks.json` (since removed), line for line (`session-clean-exit` fires on both
 /// `Stop` and `SessionEnd`), while `auto-guard` and `auto-cost` never had a
 /// `hooks/hooks.json` entry. Together with `GUARD_SPECS` below these are exactly
 /// the 24 settings-wired `HookName` variants.

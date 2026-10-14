@@ -6,7 +6,7 @@
 //! the summary after a run all draw from it, so a description is written once.
 //! The hooks live in one table too, in `init::wire`.
 
-use crate::init::wire::{wired_hooks, Group, HookSpec, PLUGIN_HOOKS};
+use crate::init::wire::{wired_hooks, Group, HookSpec};
 use std::fmt::Write as _;
 
 /// One part of `init`.
@@ -277,20 +277,14 @@ fn matcher_label(spec: &HookSpec) -> &'static str {
 }
 
 /// Every hook, grouped by purpose: event, matcher, name and one line of purpose.
-/// Hooks the plugin registers are marked.
 pub fn hooks_list() -> String {
     let mut out = String::new();
     for group in Group::ALL {
         let _ = writeln!(out, "{}", group.label());
-        let wired = wired_hooks().filter(|h| h.group == group).map(|h| (h, ""));
-        let plugin = PLUGIN_HOOKS
-            .iter()
-            .filter(|h| h.group == group)
-            .map(|h| (h, " (plugin)"));
-        for (h, mark) in wired.chain(plugin) {
+        for h in wired_hooks().filter(|h| h.group == group) {
             let _ = writeln!(
                 out,
-                "  {} [{}] {}{mark}: {}",
+                "  {} [{}] {}: {}",
                 h.event,
                 matcher_label(h),
                 h.name,
@@ -354,9 +348,9 @@ mod tests {
     }
 
     #[test]
-    fn the_hooks_list_names_every_wired_and_plugin_hook() {
+    fn the_hooks_list_names_every_wired_hook() {
         let text = hooks_list();
-        for h in wired_hooks().chain(PLUGIN_HOOKS) {
+        for h in wired_hooks() {
             assert!(
                 text.contains(h.name) && text.contains(h.purpose),
                 "{}",

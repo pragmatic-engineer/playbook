@@ -9,13 +9,13 @@ The quickest route is one command. This page covers every route, requirements, h
 | Mode | Commands, in order | You get | You lack |
 |---|---|---|---|
 | Skills only (plugin) | `claude plugin marketplace add pragmatic-engineer/skills`, then `claude plugin install playbook@pragmatic-engineer`. Or the install script with `--skills-only`, which does the same and nothing else | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
-| Skills plus binary (recommended) | Pick one. Install script: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash` (installs both plugins). Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook init`. Plugins: `claude plugin install playbook@pragmatic-engineer` and `claude plugin install playbook-hooks@pragmatic-engineer`, then `/playbook:setup` | Everything: slash commands, guards, hooks, status line, memory, usage | Nothing |
+| Skills plus binary (recommended) | Pick one. Install script: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash` (installs both plugins). Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook init`. Plugins: `claude plugin install playbook@pragmatic-engineer`, then `/playbook:setup` | Everything: slash commands, guards, hooks, status line, memory, usage | Nothing |
 
-There are two plugins. `playbook` holds the skills, commands and agents and has no hooks. `playbook-hooks` holds the worktree hooks and the installer shim, and needs the binary. If you installed `playbook` before the split, add the second one with `claude plugin install playbook-hooks@pragmatic-engineer`. playbook never installs a plugin for you.
+The `playbook` plugin holds the skills, commands and agents and has no hooks. The old `playbook-hooks` plugin is retired: the binary now wires every hook into `settings.json` with `playbook init`. If `playbook-hooks` is still installed, remove it with `claude plugin uninstall playbook-hooks@pragmatic-engineer`, because its hooks would run next to the ones in `settings.json`. playbook never installs a plugin for you.
 
 Which one? Choose skills only if you want to read the skills and nothing else runs on your machine. Choose skills plus binary for everything else. The binary is a hard dependency of the commands, hooks, guards, status line and usage. Only the skill text works without it.
 
-Some commands call the `playbook` binary. With only the `playbook` plugin they fall back to plain git, gh and file steps where they can. With `playbook-hooks` installed, the first `playbook` call installs the binary once and prints a notice first. See [Plugin only](#plugin-only-and-the-binary).
+Some commands call the `playbook` binary. With only the `playbook` plugin they fall back to plain git, gh and file steps where they can. See [Plugin only](#plugin-only-and-the-binary).
 
 ## Requirements
 
@@ -92,12 +92,11 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 ```bash
 claude plugin marketplace add pragmatic-engineer/skills
 claude plugin install playbook@pragmatic-engineer
-claude plugin install playbook-hooks@pragmatic-engineer
 ```
 
 Then run `/playbook:setup` in a Claude Code session. It installs the release binary (checksum verified) when none is on `PATH`, wires the guards and settings, and offers the launchers and system prompt.
 
-The `playbook` plugin alone gives you skills, commands and subagents, and nothing else. Without the binary every hook is dead, so `/playbook:doctor` reports the binary, guards and status line as missing. The `playbook-hooks` plugin ships a `bin/playbook` shim, and the first `playbook` call installs the binary once (binary and `PATH` only).
+The `playbook` plugin alone gives you skills, commands and subagents, and nothing else. Without the binary every hook is dead, so `/playbook:doctor` reports the binary, guards and status line as missing.
 
 **Fully manual.**
 
@@ -180,8 +179,6 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 `playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override` and `--short-name`, each with a `--no-` form. Hooks, status line and `PATH` are on by default, the permissions rules (`--security`), launcher and system prompt are off.
 
 With the plugins alone, the guards and status line are not wired, and `/playbook:doctor` reports them as missing. Run `/playbook:setup` to finish. The first session after a plugin-only install also prints one line: "playbook is installed as a plugin only. Run /playbook:setup to install the binary and guards." It goes away once the hooks are wired, and Homebrew and install script users never see it after `playbook init`.
-
-When no binary exists and `playbook-hooks` is installed, the first bare `playbook` call from a command runs that plugin's installer once. It prints what it does first: it downloads the release, checks its SHA256, adds the install directory to your shell `PATH` and wires hooks in `settings.json`. To stop that, set `PLAYBOOK_NO_AUTO_INSTALL=1`, or create the file `~/.config/playbook/no-auto-install`. The shim then exits with the manual install command and installs nothing.
 
 ## Settings merge
 

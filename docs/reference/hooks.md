@@ -1,6 +1,6 @@
 # Hook reference
 
-Every hook that `playbook init` wires into `~/.claude/settings.json`, and the one the plugin registers itself, `migration-check` (marked in the last column). Each command is `playbook hook <name>`. A test fails when init wires a hook that is missing from the tables below, so this page cannot drift.
+Every hook that `playbook init` wires into `~/.claude/settings.json`. Each command is `playbook hook <name>`. A test fails when init wires a hook that is missing from the tables below, so this page cannot drift.
 
 Paths below use `~/.config/playbook/` as the playbook home. The session directory is `~/.config/playbook/runtime/<session id>/`, owner-only (mode 0700). No hook reads a secret value, and no hook sends anything over the network.
 
@@ -38,7 +38,6 @@ A hook that fails or cannot read its input allows the call. Only the hooks marke
 | `Stop` | none | `playbook hook session-clean-exit` | Records that the session ended cleanly after each turn, so the next start can spot a crash. | Never blocks. | Writes `last-clean-ts` in the session directory and may queue an auto-learn entry under `runtime/to-learn/`. | `AUTO_LEARN_NUDGE=0` stops the queue entry. |
 | `SessionEnd` | none | `playbook hook session-clean-exit` | Writes the clean-exit marker when the session truly ends. | Never blocks. | Writes `clean-exit` in the session directory. Reads `edit-count`. | `AUTO_LEARN_NUDGE=0` stops the queue entry. |
 | `PreCompact` | none | `playbook hook precompact-warn` | Warns you that the context is about to be compacted and logs the event. | Warns only. Never blocks. | Appends a timestamp line to `~/.config/playbook/runtime/compactions.log`. | Entry only. |
-| `SessionStart` | none | `playbook hook migration-check` | Tells you to re-run `playbook init` when a plugin update arrived without it. Silent once settings are wired. | Shows a warning. Never blocks. | Reads `~/.claude/settings.json`. Writes nothing. | Disable or remove the plugin. |
 
 ## Usage tracking and auto mode
 

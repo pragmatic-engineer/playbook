@@ -780,7 +780,7 @@ Subcommands: `list`
 
 Print every hook with its event, matcher and what it does
 
-Lists the hooks init adds to settings.json, grouped by purpose, and the ones the plugin registers itself. Changes nothing.
+Lists the hooks init adds to settings.json, grouped by purpose. Changes nothing.
 
 ### `playbook init`
 

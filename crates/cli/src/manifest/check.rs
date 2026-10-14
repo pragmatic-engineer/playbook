@@ -36,13 +36,11 @@ const ALLOW_FILES: [&str; 15] = [
 ];
 
 /// Top-level directories any tracked file may live under.
-const ALLOW_DIRS: [&str; 13] = [
-    "bin",
+const ALLOW_DIRS: [&str; 11] = [
     "prompts",
     "skills",
     "commands",
     "agents",
-    "hooks",
     "shell",
     "docs",
     "output-styles",
@@ -149,9 +147,9 @@ mod tests {
     }
 
     #[test]
-    fn the_plugin_bin_directory_is_allowlisted() {
+    fn the_retired_bin_directory_is_an_offender() {
         let tracked = vec!["bin/playbook".to_string()];
-        assert!(violations(&tracked).is_empty());
+        assert_eq!(violations(&tracked).len(), 1);
     }
 
     #[test]
@@ -195,7 +193,7 @@ mod tests {
             "settings.shared.json".to_string(),
             "permissions.shared.json".to_string(),
             "shell/worktree.zsh".to_string(),
-            "hooks/session-init.sh".to_string(),
+            "prompts/system.md".to_string(),
             "docs/index.md".to_string(),
             ".github/workflows/ci.yml".to_string(),
         ];
