@@ -866,6 +866,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "playbook-plugin-checks"
+version = "0.0.0"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "playbook-telemetry"
 version = "0.2.0"
 dependencies = [
