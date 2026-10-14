@@ -283,7 +283,12 @@ fn planning_reference_scan_flags_references_and_leaves_plain_comments() {
 fn comments_in_this_test_and_the_commands_carry_no_planning_references() {
     // Arrange
     let mut offenders = Vec::new();
-    let own_source = include_str!("commands_fix.rs");
+    let own_source = [
+        include_str!("commands_auto_parity.rs"),
+        include_str!("commands_fix.rs"),
+        include_str!("support/auto_parity.rs"),
+    ]
+    .join("\n");
     assert!(
         COMMANDS
             .iter()
@@ -295,7 +300,7 @@ fn comments_in_this_test_and_the_commands_carry_no_planning_references() {
     for (i, line) in own_source.lines().enumerate() {
         if line.trim_start().starts_with("//") && references_planning(line) {
             offenders.push(format!(
-                "tests/commands_auto_parity.rs:{}: {}",
+                "the plugin check sources, line {}: {}",
                 i + 1,
                 line.trim()
             ));
