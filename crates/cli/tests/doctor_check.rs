@@ -277,6 +277,33 @@ fn l4_warns_when_the_system_prompt_is_unreadable() {
     );
 }
 
+#[test]
+fn doctor_shows_the_effort_ceiling_read_only_and_its_limit() {
+    let b = Box::new("effort-rows");
+    b.settings(r#"{"maxEffortLevel":"medium"}"#);
+    let before = fs::read_to_string(b.home().join(".claude/settings.json")).unwrap();
+
+    let rows = b.run(&[], "/bin/zsh", None);
+
+    let t: Vec<String> = layer(&rows, "-")
+        .iter()
+        .map(|r| r["message"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        t.iter().any(|m| m.contains("effort ceiling: playbook auto, Claude Code medium (read only, never written), effective medium")),
+        "{t:?}"
+    );
+    assert!(
+        t.iter()
+            .any(|m| m.contains("does not cap a command, skill or base agent")),
+        "{t:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(b.home().join(".claude/settings.json")).unwrap(),
+        before
+    );
+}
+
 // Layer 5
 
 fn statusline(b: &Box, cmd: &str) {

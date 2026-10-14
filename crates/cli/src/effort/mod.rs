@@ -9,11 +9,13 @@
 //! none either, since nothing is above it. Playbook only ever reads Claude
 //! Code's key and never writes to its settings files.
 //!
-//! The effective ceiling is the lower of the two. When playbook's is lower,
-//! the launcher (`playbook cc`, `playbook ccd`) passes it to that one session with `--settings`,
-//! which Claude Code applies to command, skill and agent effort alike. When
-//! Claude Code's is as low or lower, or playbook is `auto` or `max`, the launcher adds
-//! nothing. A session started without the launcher gets no playbook ceiling.
+//! The effective ceiling is the lower of the two. Claude Code enforces its own
+//! `maxEffortLevel` on everything. Playbook's ceiling is applied by the binary
+//! itself: to the agent variants the launcher renders per session, to the
+//! launcher's default `--effort`, and to what `playbook effort` reports. The
+//! launcher passes no `--settings`, and playbook never writes a Claude Code
+//! settings file, so the ceiling does not cap a command or skill that ships
+//! its own `effort` (`LIMIT`).
 
 pub mod auto;
 pub mod component;
@@ -26,6 +28,9 @@ use crate::config::{self, write};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// What the playbook ceiling does not cap. Shown by `playbook effort` and `playbook doctor`.
+pub const LIMIT: &str = "playbook's ceiling caps agent variants, the launcher's default effort and what the binary reports. It does not cap a command, skill or base agent that ships its own effort, or a level you state for the session (--effort, effortLevel, CLAUDE_CODE_EFFORT_LEVEL, /effort), because only Claude Code's maxEffortLevel setting can, and playbook never writes it";
 
 /// The config key.
 pub const KEY: &str = "maxEffortLevel";
@@ -139,17 +144,6 @@ pub fn ceiling(home: &Path, claude_home: &Path, cwd: &Path) -> Ceiling {
     Ceiling::new(&configured(home), claude_cap(claude_home, cwd).as_deref())
 }
 
-/// The inline `--settings` value the launcher passes, or `None` when it has
-/// nothing to add: playbook is `auto` or `max`, or Claude Code's ceiling is as low or
-/// lower.
-pub fn launcher_settings(home: &Path, claude_home: &Path, cwd: &Path) -> Option<String> {
-    let c = ceiling(home, claude_home, cwd);
-    if c.winner != Winner::Playbook {
-        return None;
-    }
-    Some(serde_json::json!({ "maxEffortLevel": c.playbook }).to_string())
-}
-
 /// `playbook effort <level>`: store playbook's level. Nothing else is written.
 pub fn run_set(home: &Path, level: &str) -> Result<String, String> {
     if !LEVELS.contains(&level) {
@@ -170,8 +164,8 @@ pub fn run_set(home: &Path, level: &str) -> Result<String, String> {
         format!("maxEffortLevel set to {level}, playbook sets no ceiling and Claude Code's applies")
     } else {
         format!(
-            "playbook maxEffortLevel set to {level}. Sessions started with playbook cc or playbook ccd stay at or below it, \
-             and never above your Claude Code maxEffortLevel. Claude Code's settings are not changed."
+            "playbook maxEffortLevel set to {level}. Agent variants and the launcher's default effort stay at or below it, \
+             and never above your Claude Code maxEffortLevel. Claude Code's settings are not changed. {LIMIT}."
         )
     })
 }
@@ -190,6 +184,7 @@ pub fn run_status(home: &Path, claude_home: &Path, cwd: &Path, json: bool) -> St
             "claudeCode": c.claude,
             "effective": c.effective,
             "winner": winner,
+            "limit": LIMIT,
         })
         .to_string();
     }
@@ -200,7 +195,7 @@ pub fn run_status(home: &Path, claude_home: &Path, cwd: &Path, json: bool) -> St
         c.effective
             .as_deref()
             .unwrap_or("none, shipped defaults apply"),
-    )
+    ) + &format!("\nlimit: {LIMIT}")
 }
 
 #[cfg(test)]
@@ -263,38 +258,6 @@ mod tests {
         assert_eq!(Ceiling::new("max", Some("low")).winner, Winner::ClaudeCode);
         assert_eq!(Ceiling::new("max", None).winner, Winner::Neither);
         assert_eq!(Ceiling::new("max", None).effective, None);
-    }
-
-    #[test]
-    fn the_launcher_adds_settings_only_when_playbook_is_lower() {
-        let (home, claude) = setup("effort-launcher");
-        let cwd = home.join("proj");
-        fs::create_dir_all(&cwd).unwrap();
-        run_set(&home, "xhigh").unwrap();
-
-        // No Claude Code cap: playbook's applies.
-        assert_eq!(
-            launcher_settings(&home, &claude, &cwd).as_deref(),
-            Some(r#"{"maxEffortLevel":"xhigh"}"#)
-        );
-        // Claude Code at max: still playbook's.
-        fs::write(claude.join("settings.json"), r#"{"maxEffortLevel":"max"}"#).unwrap();
-        assert!(launcher_settings(&home, &claude, &cwd).is_some());
-        // Claude Code at medium: nothing to add.
-        fs::write(
-            claude.join("settings.json"),
-            r#"{"maxEffortLevel":"medium"}"#,
-        )
-        .unwrap();
-        assert_eq!(launcher_settings(&home, &claude, &cwd), None);
-    }
-
-    #[test]
-    fn playbook_auto_and_max_add_nothing() {
-        let (home, claude) = setup("effort-max");
-        assert_eq!(launcher_settings(&home, &claude, &home), None);
-        run_set(&home, "max").unwrap();
-        assert_eq!(launcher_settings(&home, &claude, &home), None);
     }
 
     #[test]
