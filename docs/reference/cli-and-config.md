@@ -57,6 +57,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `usage.autoIngestMinutes` | `10` | a number, see the config keys guide for the range |
 | `usage.budget.monthlyUsd` | `0` | a number, see the config keys guide for the range |
 | `usage.budget.weeklyUsd` | `0` | a number, see the config keys guide for the range |
+| `usage.ui.layout` | empty | see the config keys guide |
+| `usage.ui.state` | empty | see the config keys guide |
 | `sessions.staleAfterDays` | `3` | a number, see the config keys guide for the range |
 | `sessions.recentDays` | `7` | a number, see the config keys guide for the range |
 | `hygiene.enabled` | `true` | `true`, `false` |

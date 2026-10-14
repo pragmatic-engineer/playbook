@@ -29,6 +29,8 @@ pub const KEYS: &[&str] = &[
     "usage.autoIngestMinutes",
     "usage.budget.monthlyUsd",
     "usage.budget.weeklyUsd",
+    "usage.ui.layout",
+    "usage.ui.state",
 ];
 
 /// The built-in default of `key`, `None` for a key that is not a usage key.
@@ -44,6 +46,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "usage.telemetryRetentionDays" => Value::from(90),
         "usage.telemetryMaxRows" => Value::from(500_000),
         "usage.budget.monthlyUsd" | "usage.budget.weeklyUsd" => Value::from(0),
+        "usage.ui.layout" | "usage.ui.state" => Value::from(""),
         _ => return None,
     })
 }
@@ -59,6 +62,9 @@ pub fn allowed_values(key: &str) -> Option<&'static [&'static str]> {
     }
 }
 
+/// The longest `usage.ui.state` value.
+pub const MAX_STATE_BYTES: usize = 4096;
+
 /// `value` when it is valid for `key`, else the reason it is not.
 pub fn validate(key: &str, value: &Value) -> Result<(), String> {
     if let Some(allowed) = allowed_values(key) {
@@ -68,6 +74,15 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         };
     }
     match key {
+        "usage.ui.layout" => match value.as_str() {
+            Some("") => Ok(()),
+            Some(text) => crate::tui::layout::Layout::parse(text).map(|_| ()),
+            None => Err("expected text like Charts=spend,tokens;Numbers=models".into()),
+        },
+        "usage.ui.state" => match value.as_str() {
+            Some(text) if text.len() <= MAX_STATE_BYTES => Ok(()),
+            _ => Err(format!("expected text of at most {MAX_STATE_BYTES} bytes")),
+        },
         "usage.autoIngest" if !value.is_boolean() => Err("expected true or false".into()),
         "usage.autoIngest" => Ok(()),
         _ => match value.as_f64() {
@@ -190,6 +205,12 @@ fn old_file_notice(home: &Path) {
     }
 }
 
+/// The stored value of `key` without validating it, so a caller can say why
+/// an invalid value is ignored. `None` when nothing is stored.
+pub fn stored_raw(home: &Path, key: &str) -> Option<Value> {
+    stored(home, key)
+}
+
 /// The value of a usage key for the user at `home`: the stored value when it
 /// is valid, else the default. `None` for a key that is not a usage key.
 pub fn resolve(home: &Path, key: &str) -> Option<Value> {
@@ -208,6 +229,24 @@ pub fn resolve(home: &Path, key: &str) -> Option<Value> {
             Some(default)
         }
     }
+}
+
+/// Stores `value` for `key` in this tool's own `app` tier of the config store.
+/// Returns `false` when the store does not exist yet; it is never created
+/// here, because a new `config.db` would hide an older store that playbook
+/// has not moved. A failed write is an error the caller may ignore.
+pub fn save_app(home: &Path, key: &str, value: &Value) -> Result<bool, String> {
+    default_value(key).ok_or_else(|| format!("{key} is not a usage key"))?;
+    validate(key, value)?;
+    let db = playbook_data::config::db_in(&root(home).join("data"));
+    playbook_data::config::set_app_in(
+        &db,
+        key,
+        playbook_data::config::APP_TELEMETRY,
+        &value.to_string(),
+        crate::util::time::now_secs(),
+    )
+    .map_err(|e| format!("cannot write {}: {e}", db.display()))
 }
 
 #[cfg(test)]
@@ -324,5 +363,29 @@ mod tests {
             let d = default_value(key).unwrap();
             assert!(validate(key, &d).is_ok(), "{key}");
         }
+    }
+
+    #[test]
+    fn the_ui_keys_accept_good_text_and_refuse_bad_values() {
+        let long = "x".repeat(MAX_STATE_BYTES + 1);
+        let fits = "x".repeat(MAX_STATE_BYTES);
+
+        assert!(validate("usage.ui.layout", &Value::from("Money=budget,models")).is_ok());
+        assert!(validate("usage.ui.layout", &Value::from("A=bogus")).is_err());
+        assert!(validate("usage.ui.layout", &Value::from(5)).is_err());
+        assert!(validate("usage.ui.state", &Value::from(fits)).is_ok());
+        assert!(validate("usage.ui.state", &Value::from(long)).is_err());
+        assert!(validate("usage.ui.state", &Value::from(5)).is_err());
+    }
+
+    #[test]
+    fn save_app_refuses_a_key_that_is_not_a_usage_key_or_a_bad_value() {
+        let h = home("cfg-save-guard");
+
+        let other = save_app(&h, "models.default", &Value::from("opus"));
+        let bad = save_app(&h, "usage.ui.layout", &Value::from("A=bogus"));
+
+        assert!(other.is_err());
+        assert!(bad.is_err());
     }
 }

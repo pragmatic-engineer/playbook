@@ -468,3 +468,10 @@ fn a_bool_for_the_pr_and_commit_settings_is_written() {
         assert_written(key, &json!(false));
     }
 }
+
+#[test]
+fn a_ui_layout_takes_tabs_of_known_panels_and_nothing_else() {
+    assert_rejected("usage.ui.layout", &json!("A=bogus"), "tabs like");
+    assert_written("usage.ui.layout", &json!(""));
+    assert_written("usage.ui.layout", &json!("Money=budget,models"));
+}

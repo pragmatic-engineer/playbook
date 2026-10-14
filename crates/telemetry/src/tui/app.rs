@@ -153,6 +153,10 @@ pub struct App {
     pub telemetry: Option<crate::telemetry_status::Mode>,
     /// How often the snapshot is refreshed, shown in the footer.
     pub refresh_every: Duration,
+    /// The tabs and the panels on each.
+    pub layout: super::layout::Layout,
+    /// The selected tab, an index into `layout.tabs`.
+    pub tab: usize,
 }
 
 /// What the loop must do after a key.
@@ -192,6 +196,45 @@ impl App {
             sources: String::new(),
             telemetry: None,
             refresh_every: Duration::from_secs(DEFAULT_REFRESH_SECONDS),
+            layout: super::layout::Layout::default(),
+            tab: 0,
+        }
+    }
+
+    /// The screen setup to remember.
+    pub fn ui_state(&self) -> super::ui_state::UiState {
+        super::ui_state::UiState {
+            tab: self.layout.tabs.get(self.tab).map(|t| t.name.clone()),
+            range: Some(self.range.key().to_string()),
+            spend_view: Some(self.spend_view),
+            projects_view: Some(self.projects_view),
+            sorts: self.sorts.iter().map(|s| Some(*s)).collect(),
+            filter: Some(self.filter.clone()),
+        }
+    }
+
+    /// Applies a remembered screen setup. The range is not part of it: the
+    /// caller picks the range, since a command line flag outranks the stored
+    /// one. A tab that no longer exists leaves the first tab selected.
+    pub fn apply_ui_state(&mut self, state: &super::ui_state::UiState) {
+        if let Some(name) = &state.tab {
+            if let Some(i) = self.layout.tabs.iter().position(|t| &t.name == name) {
+                self.tab = i;
+            }
+        }
+        if let Some(v) = state.spend_view {
+            self.spend_view = v;
+        }
+        if let Some(v) = state.projects_view {
+            self.projects_view = v;
+        }
+        for panel in PANELS {
+            if let Some(sort) = state.sort_for(panel, true) {
+                self.sorts[panel.index()] = sort;
+            }
+        }
+        if let Some(filter) = &state.filter {
+            self.filter = filter.clone();
         }
     }
 
@@ -1247,5 +1290,54 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_screen_setup_saved_from_one_app_is_restored_into_a_fresh_one() {
+        let mut first = App::new(Range::All);
+        first.layout = super::super::layout::Layout::default();
+        first.tab = 1;
+        first.spend_view = SpendView::Daily;
+        first.projects_view = ProjectsView::Agents;
+        first.sorts[Panel::Models.index()] = Sort::new(5, false);
+        first.filter = "alpha".into();
+        let text = first.ui_state().to_text();
+
+        let mut second = App::new(Range::All);
+        second.apply_ui_state(&super::super::ui_state::UiState::parse(&text));
+
+        assert_eq!(second.tab, 1);
+        assert_eq!(second.spend_view, SpendView::Daily);
+        assert_eq!(second.projects_view, ProjectsView::Agents);
+        assert_eq!(second.sorts[Panel::Models.index()], Sort::new(5, false));
+        assert_eq!(second.filter, "alpha");
+    }
+
+    #[test]
+    fn a_saved_tab_that_no_longer_exists_leaves_the_first_tab_selected() {
+        let mut app = App::new(Range::All);
+        let state = super::super::ui_state::UiState {
+            tab: Some("Gone".into()),
+            ..Default::default()
+        };
+
+        app.apply_ui_state(&state);
+
+        assert_eq!(app.tab, 0);
+    }
+
+    #[test]
+    fn a_saved_sort_on_a_column_the_panel_lacks_keeps_the_default_sort() {
+        let mut app = App::new(Range::All);
+        let mut sorts = vec![None; 6];
+        sorts[Panel::Live.index()] = Some(Sort::new(0, true));
+        let state = super::super::ui_state::UiState {
+            sorts,
+            ..Default::default()
+        };
+
+        app.apply_ui_state(&state);
+
+        assert_eq!(app.sort(Panel::Live), Panel::Live.default_sort());
     }
 }

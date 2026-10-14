@@ -96,6 +96,24 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
             });
         }
     }
+    if let ("usage.ui.layout", Value::String(text)) = (key, value) {
+        if !text.is_empty() && playbook_telemetry::tui::layout::Layout::parse(text).is_err() {
+            return Err(ConfigError::OutOfRange {
+                key: key.to_string(),
+                value: value.to_string(),
+                constraint: "tabs like Charts=spend,tokens;Numbers=models (1 to 9 tabs; panels: spend, tokens, models, breakdown, live, sessions, budget; a name is 1 to 16 characters)",
+            });
+        }
+    }
+    if let ("usage.ui.state", Value::String(text)) = (key, value) {
+        if text.len() > playbook_telemetry::config::MAX_STATE_BYTES {
+            return Err(ConfigError::OutOfRange {
+                key: key.to_string(),
+                value: "(too long)".to_string(),
+                constraint: "text of at most 4096 bytes, written by pbtop",
+            });
+        }
+    }
     if key == "hooks.rmGuard.allowedRoots" {
         validate_root_list(key, value)?;
     }
