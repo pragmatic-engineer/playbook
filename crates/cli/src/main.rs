@@ -503,8 +503,12 @@ fn main() {
             let only_run = only.is_some();
             if only_run && choices.telemetry {
                 println!("playbook init --only: this run changes only the parts you named.");
-                for line in init::telemetry::plan_lines(&common::home_dir().join(".claude")) {
-                    println!("  telemetry: {line}");
+                if let Some(line) = skip_telemetry_question {
+                    println!("  {line}");
+                } else {
+                    for line in init::telemetry::plan_lines(&common::home_dir().join(".claude")) {
+                        println!("  telemetry: {line}");
+                    }
                 }
             }
             if !only_run && init::choices::unattended(&flags, terminal) && !flags.dry_run {
@@ -515,7 +519,11 @@ fn main() {
                 if !choices.statusline && !flags.statusline && !flags.no_statusline {
                     left_off.push("status line");
                 }
-                if !choices.telemetry && !flags.telemetry && !flags.no_telemetry {
+                if !choices.telemetry
+                    && !flags.telemetry
+                    && !flags.no_telemetry
+                    && skip_telemetry_question.is_none()
+                {
                     eprintln!(
                         "init: no terminal and no --yes, so telemetry was not turned on. To turn it on, run: playbook init --only telemetry"
                     );
@@ -571,8 +579,11 @@ fn main() {
                 statusline: choices.statusline,
                 security: choices.security,
                 telemetry: choices.telemetry,
-                telemetry_replace_off: choices.telemetry
-                    && (flags.telemetry || only_run || !flags.yes),
+                telemetry_replace_off: init::choices::replace_off_ok(
+                    &flags,
+                    choices.telemetry,
+                    only_run,
+                ),
                 only: only_run,
                 claude_override: choices.claude_override,
                 short_name: choices.short_name,

@@ -52,8 +52,15 @@ fn write_with_backup(path: &Path, root: Map<String, Value>, epoch: u64) -> Resul
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     }
-    crate::common::atomic::write_atomic(path, format!("{:#}\n", Value::Object(root)))
-        .map_err(|e| format!("could not write {}: {e}", path.display()))
+    let text = format!("{:#}\n", Value::Object(root));
+    // A new file holds a bearer token, so it starts owner-only; an existing
+    // file keeps the mode it has.
+    let written = if path.is_file() {
+        crate::common::atomic::write_atomic(path, text)
+    } else {
+        crate::common::atomic::write_atomic_private(path, text)
+    };
+    written.map_err(|e| format!("could not write {}: {e}", path.display()))
 }
 
 /// Whether the record exists and settings.json still holds every value in it.
@@ -213,15 +220,19 @@ pub fn process_configured_beyond_settings(claude_home: &Path) -> bool {
         .and_then(|root| root.get("env").and_then(Value::as_object).cloned())
         .unwrap_or_default();
     std::env::vars_os()
-        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+        .filter_map(|(k, v)| Some((k.into_string().ok()?, v)))
         .filter(|(k, _)| crate::usage::telemetry_detect::is_telemetry_var(k))
         .any(|(k, v)| {
-            let mirrored = user_env.get(&k).is_some_and(|s| match s {
-                Value::String(s) => *s == v,
-                other => {
-                    let text = other.to_string();
-                    text == v
-                }
+            // A value that is not valid text cannot match, so it counts as the
+            // user's own.
+            let mirrored = v.to_str().is_some_and(|v| {
+                user_env.get(&k).is_some_and(|s| match s {
+                    Value::String(s) => s == v,
+                    other => {
+                        let text = other.to_string();
+                        text == v
+                    }
+                })
             });
             !mirrored
         })
@@ -351,6 +362,7 @@ pub fn apply(
     let mut replaced = written_before
         .get(REPLACED)
         .and_then(Value::as_object)
+        .filter(|_| ours)
         .cloned()
         .unwrap_or_default();
     for (k, v) in vars {
@@ -386,7 +398,7 @@ pub fn apply(
     StepReport::wired(
         "telemetry",
         format!(
-            "wrote the OpenTelemetry variables for the local collector (127.0.0.1:{}); no prompt text or tool content is sent. Restart Claude Code for the new settings to apply",
+            "wrote the OpenTelemetry variables for the local collector (127.0.0.1:{}); no prompt text or tool content is sent",
             state.port
         ),
     )
@@ -893,5 +905,21 @@ mod tests {
 
         assert_eq!(step.status, crate::init::run::StepStatus::Wired);
         assert_eq!(env_of(&claude)["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+    }
+
+    #[test]
+    fn a_stale_record_of_a_replaced_value_is_not_carried_into_a_fresh_write() {
+        let (home, claude, cwd) = setup(
+            "init-tel-stale-record",
+            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#,
+        );
+        apply(&home, &claude, &cwd, 1, false, true);
+        let settings = claude.join("settings.json");
+        fs::write(&settings, "{}").unwrap();
+
+        apply(&home, &claude, &cwd, 2, false, true);
+        remove(&home, &settings, 3, false).unwrap();
+
+        assert!(!env_of(&claude).contains_key("CLAUDE_CODE_ENABLE_TELEMETRY"));
     }
 }

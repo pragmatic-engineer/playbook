@@ -223,11 +223,11 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     let mut steps = Vec::new();
     if paths.system_prompt {
-        steps.push(place_system_prompt_step(
-            paths.self_root.as_deref(),
-            &paths.home,
-            true,
-        ));
+        let step = place_system_prompt_step(paths.self_root.as_deref(), &paths.home, true);
+        if step_confirmed(&step) {
+            migrate::record_system_prompt(&paths.home);
+        }
+        steps.push(step);
     }
     if paths.hooks || paths.statusline || paths.security {
         let (settings_step, hooks_step) = settings_and_hooks_steps(paths, epoch);

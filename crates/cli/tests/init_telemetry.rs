@@ -38,13 +38,17 @@ impl Sandbox {
     }
 
     fn run_with(&self, args: &[&str], extra_env: &[(&str, &str)]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_playbook"))
-            .args(args)
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+        // Nothing from the machine running the tests may look like a setup.
+        for (name, _) in std::env::vars() {
+            if name == "CLAUDE_CODE_ENABLE_TELEMETRY" || name.starts_with("OTEL_") {
+                cmd.env_remove(name);
+            }
+        }
+        cmd.args(args)
             .env("HOME", &self.home)
             .env("SHELL", "/bin/zsh")
             .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
-            .env_remove("CLAUDE_CODE_ENABLE_TELEMETRY")
-            .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
             .envs(extra_env.iter().copied())
             .current_dir(&self.home)
             .output()
@@ -331,4 +335,66 @@ fn an_endpoint_in_the_process_environment_that_settings_do_not_name_is_left_alon
 
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(sb.env()["CLAUDE_CODE_ENABLE_TELEMETRY"], "0");
+}
+
+#[test]
+fn yes_with_an_explicit_telemetry_flag_replaces_the_off_switch() {
+    let sb = Sandbox::new("yes-flag", Some(OFF_TRIO));
+
+    let out = sb.run(&[
+        "init",
+        "--yes",
+        "--telemetry",
+        "--no-hooks",
+        "--no-statusline",
+    ]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(sb.env()["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+}
+
+#[test]
+fn a_dry_run_over_an_off_switch_changes_no_file() {
+    let sb = Sandbox::new("dry-off", Some(OFF_TRIO));
+    let before = fs::read_to_string(sb.home.join(".claude/settings.json")).unwrap();
+
+    let out = sb.run(&["init", "--only", "telemetry", "--dry-run"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!text(&out).contains("Runs every time"), "{}", text(&out));
+    let after = fs::read_to_string(sb.home.join(".claude/settings.json")).unwrap();
+    assert_eq!(after, before);
+    assert!(!sb.home.join(".config/playbook/telemetry-env.json").exists());
+}
+
+#[test]
+fn a_part_that_is_not_a_choice_is_refused_by_only() {
+    let sb = Sandbox::new("only-trust", None);
+
+    let out = sb.run(&["init", "--only", "trust"]);
+
+    assert!(!out.status.success());
+    assert!(
+        text(&out).contains("unknown part `trust`"),
+        "{}",
+        text(&out)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_settings_file_created_by_init_is_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let sb = Sandbox::new("mode", None);
+    fs::remove_dir_all(sb.home.join(".claude")).unwrap();
+
+    let out = sb.run(&["init", "--only", "telemetry"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    let mode = fs::metadata(sb.home.join(".claude/settings.json"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
 }

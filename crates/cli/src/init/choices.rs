@@ -103,7 +103,7 @@ fn pick(on: bool, off: bool) -> Option<bool> {
     }
 }
 
-fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
+pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
     Some(match id {
         "hooks" => (flags.hooks, flags.no_hooks),
         "statusline" => (flags.statusline, flags.no_statusline),
@@ -140,7 +140,10 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
     if named.is_empty() {
         return Ok(None);
     }
-    let valid = catalog::ids();
+    let valid: Vec<&'static str> = catalog::ids()
+        .into_iter()
+        .filter(|id| part_pair(flags, id).is_some())
+        .collect();
     if let Some(bad) = named.iter().find(|n| !valid.contains(&n.as_str())) {
         return Err(format!(
             "unknown part `{bad}`. Choose one of: {}",
@@ -172,6 +175,13 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         claude_override: has("claude-override"),
         short_name: has("short-name"),
     }))
+}
+
+/// Whether a lone off switch the user set may be replaced: an answer to the
+/// question (a run with no `--yes`), `--only`, or an explicit `--telemetry`.
+/// `--yes` alone never replaces it.
+pub fn replace_off_ok(flags: &Flags, telemetry: bool, only_run: bool) -> bool {
+    telemetry && (flags.telemetry || only_run || !flags.yes)
 }
 
 /// True when there is no terminal to ask on and the user did not pass `--yes`.
@@ -287,8 +297,8 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
     .iter()
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
-        "init: output is not a terminal, so no questions were asked; the hooks and status line \
-         stay off and the other defaults apply; pass --yes to accept all defaults or the \
+        "init: output is not a terminal, so no questions were asked; the hooks, status line and \
+         telemetry stay off and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
 }
@@ -516,8 +526,20 @@ mod tests {
 
         let c = only_choices(&flags).unwrap().unwrap();
 
-        assert!(c.telemetry && c.hooks);
-        assert!(!c.path && !c.statusline && !c.aliases && !c.system_prompt && !c.security);
+        assert_eq!(
+            c,
+            Choices {
+                hooks: true,
+                statusline: false,
+                security: false,
+                path: false,
+                aliases: false,
+                system_prompt: false,
+                telemetry: true,
+                claude_override: false,
+                short_name: false
+            }
+        );
     }
 
     #[test]
@@ -575,5 +597,25 @@ mod tests {
         assert_eq!(only_parts(&bare), vec!["telemetry".to_string()]);
         assert!(only_parts(&beside).is_empty());
         assert!(only_parts(&with_yes).is_empty());
+    }
+
+    #[test]
+    fn replacing_an_off_switch_needs_an_answer_an_explicit_flag_or_only_but_not_yes_alone() {
+        let plain = Flags::default();
+        let yes = Flags {
+            yes: true,
+            ..Flags::default()
+        };
+        let yes_flag = Flags {
+            yes: true,
+            telemetry: true,
+            ..Flags::default()
+        };
+
+        assert!(replace_off_ok(&plain, true, false));
+        assert!(!replace_off_ok(&yes, true, false));
+        assert!(replace_off_ok(&yes_flag, true, false));
+        assert!(replace_off_ok(&yes, true, true));
+        assert!(!replace_off_ok(&plain, false, false));
     }
 }

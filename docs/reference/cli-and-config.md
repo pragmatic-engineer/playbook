@@ -797,7 +797,7 @@ Lists the hooks init adds to settings.json, grouped by purpose. Changes nothing.
 
 Install or repair your local Claude Code setup
 
-Safe to run again: it only touches what is missing or out of date. In a terminal it asks about each optional part (hooks, status line, PATH, the `playbook cc` launcher, the system prompt) unless you answer with a flag. Each part has `--x` and `--no-x`. With `--yes`, unanswered parts use their defaults: hooks, the status line and PATH on, the launcher and system prompt off. Without a terminal and without `--yes`, hooks and the status line stay off unless you pass `--hooks` or `--statusline`.
+Safe to run again: it only touches what is missing or out of date. In a terminal it asks about each optional part (hooks, status line, PATH, the `playbook cc` launcher, the system prompt) unless you answer with a flag. Each part has `--x` and `--no-x`. With `--yes`, unanswered parts use their defaults: hooks, the status line and PATH on, the launcher and system prompt off. Telemetry is on by default too: the question defaults to yes and `--yes` is a yes, but `--yes` alone never replaces an off switch you set. Without a terminal and without `--yes`, hooks, the status line and telemetry stay off unless you pass their flag. `--only telemetry` (or a bare `--telemetry`) runs just that part; `--only` takes any parts and leaves everything else alone.
 
 The security defaults (permissions rules) are never asked about and stay off unless you pass `--security` or set `security.defaults` to true. Without them, `init` leaves any permissions you already have untouched.
 

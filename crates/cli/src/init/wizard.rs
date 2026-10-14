@@ -17,17 +17,7 @@ use crate::ui::Caps;
 
 /// What a flag already decided for a part, by catalog id.
 pub fn flag_for(flags: &Flags, id: &str) -> Option<bool> {
-    let pair = match id {
-        "hooks" => (flags.hooks, flags.no_hooks),
-        "statusline" => (flags.statusline, flags.no_statusline),
-        "path" => (flags.path, flags.no_path),
-        "aliases" => (flags.aliases, flags.no_aliases),
-        "system-prompt" => (flags.system_prompt, flags.no_system_prompt),
-        "telemetry" => (flags.telemetry, flags.no_telemetry),
-        "claude-override" => (flags.claude_override, flags.no_claude_override),
-        "short-name" => (flags.short_name, flags.no_short_name),
-        _ => return None,
-    };
+    let pair = crate::init::choices::part_pair(flags, id)?;
     match pair {
         (true, _) => Some(true),
         (_, true) => Some(false),
