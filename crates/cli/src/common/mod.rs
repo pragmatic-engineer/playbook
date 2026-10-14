@@ -18,6 +18,7 @@ pub use playbook_common::{atomic, git, gitfacts, payload, proc, repo, session, s
 pub use playbook_data as data;
 pub mod plugin_state;
 pub mod prose;
+pub mod prose_lint;
 pub mod re;
 pub mod shell;
 pub mod stdin;

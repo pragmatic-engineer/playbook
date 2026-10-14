@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+
+//! `playbook prose check` as the real binary runs it.
+
+use std::fs;
+use std::process::Command;
+
+fn run(tag: &str, text: &str, strict: bool) -> (i32, String) {
+    let dir = std::env::temp_dir().join(format!("prose-cli-{}-{tag}", playbook::testing::run_id()));
+    fs::create_dir_all(&dir).expect("scratch dir");
+    let file = dir.join("a.md");
+    fs::write(&file, text).expect("scratch file");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+    cmd.args(["prose", "check"]).env_remove("GITHUB_ACTIONS");
+    if strict {
+        cmd.arg("--strict");
+    }
+    let out = cmd.arg(&file).output().expect("playbook runs");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    )
+}
+
+#[test]
+fn a_hard_finding_exits_zero_without_strict() {
+    let (code, out) = run("a", "Let that sink in.\n", false);
+
+    assert_eq!(code, 0);
+    assert!(out.contains("a.md:1: emphasis crutch"), "{out}");
+    assert!(out.contains("1 hard"), "{out}");
+}
+
+#[test]
+fn a_hard_finding_exits_one_with_strict() {
+    let (code, _) = run("b", "Let that sink in.\n", true);
+
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn a_soft_finding_exits_zero_even_with_strict() {
+    let (code, out) = run("c", "It always fails.\n", true);
+
+    assert_eq!(code, 0);
+    assert!(out.contains("absolute word"), "{out}");
+}
