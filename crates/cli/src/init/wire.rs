@@ -9,12 +9,11 @@
 //! hooks, while `GUARD_SPECS` is the guards
 //! `settings.json` wires directly, carrying their own `if` and `timeout`
 //! fields hooks.json never had. `wire` treats both lists identically: every
-//! entry in either is upserted unconditionally through `upsert_hook`. A
-//! pre-existing legacy command for an entry, if a user still has one, is
-//! replaced in place rather than left to coexist with the new bare command
-//! (`entry_targets` recognises both forms as targeting the same hook, so
-//! `upsert_hook` rewrites the same array slot rather than appending a second
-//! entry).
+//! entry in either is upserted unconditionally through `upsert_hook`. Only an
+//! entry whose command is the bare `playbook hook <name>` form is ours
+//! (`entry_targets`), so `upsert_hook` rewrites that slot. A command of the
+//! user's own, even one whose script is called `<name>.sh` or `<name>.py`, is
+//! never rewritten: the bare command is added next to it.
 //!
 //! `wire` is mostly an upsert into whatever `settings.json` already has,
 //! never a wholesale replace: a hand-added hook entry a user placed
@@ -341,9 +340,8 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
 
 /// The always-on safety guards, wired identically to `PORTED_HOOK_SPECS`:
 /// every entry here is upserted
-/// unconditionally in bare `playbook hook <name>` form. A pre-existing
-/// legacy `~/.claude/hooks/<name>.sh` command is replaced, not left to
-/// coexist. Kept as a list separate from `PORTED_HOOK_SPECS`, rather than
+/// unconditionally in bare `playbook hook <name>` form. A command of the
+/// user's own is never replaced. Kept as a list separate from `PORTED_HOOK_SPECS`, rather than
 /// merged into it, because the two mirror different sources (see the module
 /// doc comment): these guards came from `settings.json`'s own pre-existing
 /// guard entries, not from `hooks/hooks.json`.
@@ -501,10 +499,10 @@ pub struct WireOutcome {
 /// Writes every hook in `PORTED_HOOK_SPECS` and every guard in `GUARD_SPECS`
 /// to its bare `playbook hook <name>` command, creating `.hooks` and any
 /// event or matcher group it needs from scratch. Every entry in both lists
-/// is upserted unconditionally. A guard's pre-existing legacy
-/// `~/.claude/hooks/<name>.sh` command, if a user still has one, is replaced
-/// in place rather than left to coexist alongside the new bare command
-/// (`entry_targets` recognises both forms as targeting the same hook).
+/// is upserted unconditionally. Only an entry carrying the `playbook hook
+/// <name>` marker is ours and rewritten in place. A user's own command, even
+/// one named `<name>.sh` or `<name>.py`, is left as it is and the bare command
+/// is added next to it.
 /// Every other key in the file, and every hook entry not managed here, is
 /// left untouched. Idempotent: calling this twice in a row writes nothing
 /// the second time, since the second call's freshly rendered content is
@@ -853,33 +851,17 @@ fn group_matcher(group: &Value) -> Option<&str> {
     group.as_object()?.get("matcher")?.as_str()
 }
 
-/// Whether `entry`'s `command` already targets hook `name`, in either its
-/// legacy form (a python script under `hooks/`, or a shell guard under
-/// `~/.claude/hooks/`) or the bare `playbook hook <name>` form `wire`
-/// writes. Used both to find the entry to rewrite and, on a second `wire`
-/// call, to recognise that it is already in its target form.
+/// Whether `entry`'s `command` is the bare `playbook hook <name>` command
+/// `wire` writes. That marker is what makes an entry ours. A user's own
+/// command is never ours, whatever its script is called. Used both to find
+/// the entry to rewrite and, on a second `wire` call, to recognise that it is
+/// already in its target form.
 fn entry_targets(entry: &Value, name: &str) -> bool {
-    match entry
+    entry
         .as_object()
         .and_then(|e| e.get("command"))
         .and_then(Value::as_str)
-    {
-        Some(cmd) => is_legacy_command(cmd, name) || cmd == bare_command(name),
-        None => false,
-    }
-}
-
-/// Whether `cmd` is the pre-wiring command for hook `name`: a python script
-/// `hooks/hooks.json` pointed at (`.../hooks/<name>.py`, generally wrapped
-/// in literal quote characters for the shell) or a shell guard `settings.json`
-/// pointed at directly (`~/.claude/hooks/<name>.sh`). The hook's kebab-case
-/// `HookName` and its script's file stem are identical by construction, so
-/// comparing the trailing path segment against `<name>.py` / `<name>.sh` is
-/// sufficient without needing to know which of the two legacy forms it is.
-fn is_legacy_command(cmd: &str, name: &str) -> bool {
-    let trimmed = cmd.trim_matches('"');
-    let file_name = trimmed.rsplit('/').next().unwrap_or(trimmed);
-    file_name == format!("{name}.py") || file_name == format!("{name}.sh")
+        .is_some_and(|cmd| cmd == bare_command(name))
 }
 
 /// What every command `wire` writes starts with. The policy guard reads it to
