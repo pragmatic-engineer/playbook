@@ -58,7 +58,6 @@ pub const KNOWN_KEYS: &[&str] = &[
     "docs.anydocPath",
     "launcher.claudeOverride",
     "launcher.shortName",
-    "launcher.systemPromptMode",
     "hooks.rmGuard.allowedRoots",
 ];
 
@@ -135,7 +134,6 @@ pub fn default_value(key: &str) -> Option<Value> {
         "docs.maxMemoryMb" => Some(Value::Number(1024.into())),
         "docs.anydocPath" => Some(Value::String(String::new())),
         "launcher.claudeOverride" | "launcher.shortName" => Some(Value::Bool(false)),
-        "launcher.systemPromptMode" => Some(Value::String("append".to_string())),
         "hooks.rmGuard.allowedRoots" => Some(Value::Array(Vec::new())),
         _ => None,
     }
@@ -159,7 +157,6 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
         "usage.telemetry" => Some(&["auto", "off"]),
         "docs.convert" => Some(&["auto", "off"]),
-        "launcher.systemPromptMode" => Some(&["append", "replace"]),
         _ => None,
     }
 }

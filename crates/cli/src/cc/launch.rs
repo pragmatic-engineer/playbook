@@ -68,31 +68,66 @@ fn playbook_memory_only(home: &Path) -> bool {
     )
 }
 
-/// Flags that set the system prompt text. Any of them in the user's arguments
-/// means the playbook prompt is not added.
-const SYSTEM_PROMPT_FLAGS: [&str; 4] = [
-    "--system-prompt",
-    "--system-prompt-file",
-    "--append-system-prompt",
-    "--append-system-prompt-file",
-];
+/// Flags that replace Claude Code's system prompt.
+const REPLACE_FLAGS: [&str; 2] = ["--system-prompt", "--system-prompt-file"];
 
-fn has_system_prompt_flag(args: &[String]) -> bool {
-    args.iter().any(|a| {
-        SYSTEM_PROMPT_FLAGS
+/// Flags that append to it. The launcher's contract is replace, so these are refused.
+const APPEND_FLAGS: [&str; 2] = ["--append-system-prompt", "--append-system-prompt-file"];
+
+/// Whether a flag is present before any `--`, where Claude Code's own option parsing stops.
+fn has_flag(args: &[String], flags: &[&str]) -> bool {
+    args.iter().take_while(|a| a.as_str() != "--").any(|a| {
+        flags
             .iter()
             .any(|f| a == f || a.strip_prefix(f).is_some_and(|r| r.starts_with('=')))
     })
 }
 
-/// The flag that loads the playbook prompt: `launcher.systemPromptMode`
-/// `append` (default) keeps Claude Code's own prompt, `replace` swaps it out.
-fn prompt_flag(home: &Path) -> &'static str {
-    match crate::config::resolve("launcher.systemPromptMode", home, None) {
-        Ok((serde_json::Value::String(v), _)) if v == "replace" => "--system-prompt-file",
-        _ => "--append-system-prompt-file",
+/// The system prompt arguments to add, or the exit code when the launch is refused.
+///
+/// Rule: playbook always replaces Claude Code's prompt with its own file and
+/// never appends. A replace flag from the user wins and playbook adds none
+/// (one stderr line, interactive runs only). An append flag from the user is
+/// refused with exit code 2.
+fn prompt_args(
+    args: &[String],
+    prompt: &Path,
+    interactive: bool,
+) -> Result<(Vec<String>, Option<String>), i32> {
+    if has_flag(args, &APPEND_FLAGS) {
+        eprintln!(
+            "playbook: --append-system-prompt and --append-system-prompt-file are not allowed here. \
+             This launcher replaces Claude Code's system prompt and never appends to it. \
+             Use --system-prompt-file to supply your own, or run plain claude."
+        );
+        return Err(2);
     }
+    if has_flag(args, &REPLACE_FLAGS) {
+        let note = interactive.then(|| {
+            "playbook: using your system prompt flag, the playbook prompt is not loaded".to_string()
+        });
+        return Ok((Vec::new(), note));
+    }
+    if !prompt.is_file() {
+        let note = interactive.then(|| {
+            format!(
+                "playbook: system prompt not found at {}, starting with Claude Code's own (run /playbook:setup)",
+                prompt.display()
+            )
+        });
+        return Ok((Vec::new(), note));
+    }
+    Ok((
+        vec![
+            "--system-prompt-file".into(),
+            prompt.to_string_lossy().into_owned(),
+        ],
+        None,
+    ))
 }
+
+/// The one-line prompt notice, held until the screen is cleared so it stays visible.
+static PROMPT_NOTICE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 /// Runs the launcher and returns the exit code of the session (or the failure).
 pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
@@ -101,10 +136,18 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         all.push("--dangerously-skip-permissions".into());
     }
     let prompt = crate::common::paths::playbook_root().join(SYSTEM_PROMPT_REL);
-    // The user's own system prompt flags win: playbook adds nothing then.
-    if prompt.is_file() && !has_system_prompt_flag(args) {
-        all.push(prompt_flag(&crate::common::home_dir()).into());
-        all.push(prompt.to_string_lossy().into_owned());
+    {
+        use std::io::IsTerminal;
+        let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+        match prompt_args(args, &prompt, interactive) {
+            Ok((extra, note)) => {
+                all.extend(extra);
+                if let Ok(mut slot) = PROMPT_NOTICE.lock() {
+                    *slot = note;
+                }
+            }
+            Err(code) => return code,
+        }
     }
     let cwd_now = PathBuf::from(super::logical_cwd());
     let has_settings = args
@@ -206,6 +249,9 @@ fn with_sigint_held<T>(f: impl FnOnce() -> T) -> T {
 fn dispatch(cwd: &mut PathBuf, args: &[String]) -> i32 {
     bust_cache::bust();
     clear_screen();
+    if let Some(note) = PROMPT_NOTICE.lock().ok().and_then(|mut slot| slot.take()) {
+        eprintln!("{note}");
+    }
     let (flags, rest) = split_flags(args);
     let sub = rest.first().map(String::as_str).unwrap_or("");
     let cwd_str = cwd.to_string_lossy().into_owned();
@@ -454,11 +500,39 @@ fn short(sid: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::prompt_args;
+    use std::path::Path;
 
     fn v(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
     }
+
+    #[test]
+    fn the_notice_is_only_for_interactive_runs() {
+        let missing = Path::new("/nonexistent/SYSTEM_PROMPT.md");
+        let (_, quiet) = prompt_args(&[], missing, false).unwrap_or_default();
+        assert!(quiet.is_none());
+        let (_, loud) = prompt_args(&[], missing, true).unwrap_or_default();
+        assert!(loud.is_some_and(|n| n.contains("not found")));
+        let (args, note) =
+            prompt_args(&v(&["--system-prompt=x"]), missing, true).unwrap_or_default();
+        assert!(args.is_empty());
+        assert!(note.is_some_and(|n| n.contains("your system prompt flag")));
+        let (_, none) = prompt_args(&v(&["--system-prompt=x"]), missing, false).unwrap_or_default();
+        assert!(none.is_none());
+    }
+
+    #[test]
+    fn append_flags_after_a_double_dash_are_prompt_text() {
+        let missing = Path::new("/nonexistent/SYSTEM_PROMPT.md");
+        assert_eq!(
+            prompt_args(&v(&["--append-system-prompt=x"]), missing, false),
+            Err(2)
+        );
+        assert!(prompt_args(&v(&["--", "--append-system-prompt"]), missing, false).is_ok());
+    }
+
+    use super::*;
 
     #[test]
     fn value_taking_flag_does_not_leak_its_value_as_the_subcommand() {

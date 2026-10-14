@@ -237,7 +237,10 @@ fn layer4(env: &Env) -> Row {
     let file = crate::common::paths::playbook_root_from(&env.home)
         .join("prompts")
         .join("SYSTEM_PROMPT.md");
-    if file.is_file() {
+    if file.is_file() && std::fs::File::open(&file).is_err() {
+        Row::new("4", Level::Warn, "system prompt file is not readable")
+            .hint("fix the file permissions on ~/.config/playbook/prompts/SYSTEM_PROMPT.md")
+    } else if file.is_file() {
         Row::new("4", Level::Pass, "system prompt installed")
     } else {
         Row::new(

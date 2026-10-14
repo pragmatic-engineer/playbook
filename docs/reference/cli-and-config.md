@@ -62,7 +62,6 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `docs.anydocPath` | empty | see the config keys guide |
 | `launcher.claudeOverride` | `false` | `true`, `false` |
 | `launcher.shortName` | `false` | `true`, `false` |
-| `launcher.systemPromptMode` | `append` | `append`, `replace` |
 | `hooks.rmGuard.allowedRoots` | `[]` | see the config keys guide |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
