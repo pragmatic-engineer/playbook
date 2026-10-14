@@ -246,7 +246,7 @@ fn changes_rm_guard_config_at(
         if RUNNER_PROGRAMS.contains(&program.as_str()) {
             return rest
                 .iter()
-                .position(|w| program_name(w) == "playbook")
+                .position(|w| matches!(program_name(w).as_str(), "playbook" | "pb"))
                 .is_some_and(|i| {
                     let inner = &rest[i..];
                     changes_rm_guard_config_at(inner, 0, home, depth + 1)
@@ -255,7 +255,7 @@ fn changes_rm_guard_config_at(
     }
     let mut args = rest;
     match program.as_str() {
-        "playbook" => {}
+        "playbook" | "pb" => {}
         "cargo" => match super::auto_cost::cargo_run_args(args) {
             Some(after) => args = after,
             None => return false,
@@ -617,6 +617,7 @@ fn mentions_a_guarded_program(command: &str) -> bool {
         ".claude",
         "~",
         "playbook",
+        "config",
         "uninstall",
         "cargo",
         "worktree_base_dir",
@@ -809,12 +810,14 @@ mod tests {
     const HOME: &str = "/Users/me";
 
     #[test]
-    fn changes_to_the_rm_guard_allowance_are_denied() {
+    fn changes_to_protected_config_are_denied() {
         for command in [
             "playbook config set --global hooks.rmGuard.allowedRoots '[\"/opt/a/b\"]'",
             "playbook config set hooks.rmGuard.allowedRoots ~/x/y",
             "playbook config set --org hooks.rmguard.allowedroots x",
             "playbook config set hooks.proseLint.mode off",
+            "pb config set hooks.proseLint.mode off",
+            "nohup pb config set pr.rules.template off",
             "playbook config set --global pr.rules.prose off",
             "playbook config set pr.bodyMaxChars 100000",
             "playbook config set --org acme pr.ticketPatterns '[\"X-1\"]'",
@@ -853,6 +856,8 @@ mod tests {
         for command in [
             "playbook config get hooks.rmGuard.allowedRoots",
             "playbook config get hooks.proseLint.mode",
+            "playbook config set --global pr.draft false",
+            "playbook config set pr.rulesX true",
             "playbook config get pr.rules.prose",
             "echo \"playbook config set hooks.proseLint.mode off\"",
             "playbook config list",
