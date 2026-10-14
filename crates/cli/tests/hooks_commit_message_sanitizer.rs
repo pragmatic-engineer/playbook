@@ -1473,3 +1473,78 @@ fn a_reused_message_with_reset_author_is_left_alone_and_reported() {
     let kept = lab.hook("git commit --allow-empty -C HEAD");
     assert!(kept.contains("PLAYBOOK_MESSAGE_END"), "{kept}");
 }
+
+#[test]
+fn a_commit_message_with_a_banned_phrase_gets_a_warning_and_still_runs() {
+    let lab = Lab::new("prose-lint-warn");
+    let command = "git commit --allow-empty -m 'feat: x' -m 'Let that sink in.'";
+
+    let out = lab.hook(command);
+
+    let note = context_of(&out);
+    assert!(note.contains("prose-lint"), "{out}");
+    assert!(
+        note.contains("the commit message line 3: emphasis crutch"),
+        "{note}"
+    );
+    assert!(!out.contains("deny"), "{out}");
+}
+
+#[test]
+fn a_clean_commit_message_gets_no_prose_lint_note() {
+    let lab = Lab::new("prose-lint-clean");
+    let command = "git commit --allow-empty -m 'feat: x' -m 'The cache is cold.'";
+
+    let out = lab.hook(command);
+
+    assert!(!out.contains("prose-lint"), "{out}");
+}
+
+#[test]
+fn pr_and_issue_comments_are_linted_but_never_rewritten() {
+    let lab = Lab::new("prose-lint-comments");
+    for command in [
+        "gh pr comment 3 --body 'Plot twist: it passed.'",
+        "gh issue comment 3 -b 'Plot twist: it passed.'",
+        "gh pr review 3 --comment --body 'Plot twist: it passed.'",
+        "gh issue create --title t --body 'Plot twist: it passed.'",
+    ] {
+        let out = lab.hook(command);
+
+        assert!(
+            context_of(&out).contains("meta commentary"),
+            "{command}: {out}"
+        );
+        assert!(!out.contains("updatedInput"), "{command}: {out}");
+    }
+}
+
+#[test]
+fn block_mode_denies_a_hard_finding_and_off_mode_stays_silent() {
+    let lab = Lab::new("prose-lint-block");
+    let command = "gh pr comment 3 --body 'Let that sink in.'";
+
+    lab.write_global_config(r#"{"hooks":{"proseLint":{"mode":"block"}}}"#);
+    let blocked = lab.hook(command);
+    let off = Lab::new("prose-lint-off");
+    off.write_global_config(r#"{"hooks":{"proseLint":{"mode":"off"}}}"#);
+    let silent = off.hook(command);
+
+    assert!(
+        blocked.contains("\"permissionDecision\":\"deny\""),
+        "{blocked}"
+    );
+    assert!(blocked.contains("prose-lint blocked"), "{blocked}");
+    assert!(silent.trim().is_empty(), "{silent}");
+}
+
+#[test]
+fn block_mode_only_warns_on_a_soft_finding() {
+    let lab = Lab::new("prose-lint-soft");
+    lab.write_global_config(r#"{"hooks":{"proseLint":{"mode":"block"}}}"#);
+
+    let out = lab.hook("gh pr comment 3 --body 'It always fails.'");
+
+    assert!(!out.contains("deny"), "{out}");
+    assert!(context_of(&out).contains("absolute word"), "{out}");
+}

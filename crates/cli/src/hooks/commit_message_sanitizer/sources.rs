@@ -74,6 +74,8 @@ pub enum Rule {
     Commit,
     /// A PR title or body, which has no trailer block.
     Prose,
+    /// Text posted as a comment or a review: linted, never rewritten.
+    Lint,
 }
 
 fn is_stdin_path(path: &str) -> bool {
@@ -654,7 +656,15 @@ pub fn apply(
         let removed = match rule {
             Rule::Commit => problems(&text),
             Rule::Prose => prose_problems(&text),
+            Rule::Lint => Vec::new(),
         };
+        let label = group.first().map(|&i| sources[i].label.as_str());
+        let lint = crate::common::prose_lint::lint(&text);
+        findings.lint_hard |= crate::common::prose_lint::has_hard(&lint);
+        findings.lint.extend(
+            lint.iter()
+                .map(|f| format!("{} {}", label.unwrap_or("the text"), f.render())),
+        );
         let mut first_line = 1;
         for &i in &group {
             let lines = trimmed[i].split('\n').count();

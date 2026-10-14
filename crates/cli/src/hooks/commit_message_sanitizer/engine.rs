@@ -37,6 +37,11 @@ pub struct Findings {
     pub unread: Vec<String>,
     /// A `-s` was added to a commit that had no sign-off.
     pub signed_off: bool,
+    /// Prose lint findings, each `<label> line N: ...`. They never carry a
+    /// rewrite: the lint only reports.
+    pub lint: Vec<String>,
+    /// Whether any lint finding is a hard one, which `block` mode denies.
+    pub lint_hard: bool,
 }
 
 /// Where text a handler writes into a script ends up.

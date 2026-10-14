@@ -393,7 +393,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Bash"),
         name: "commit-message-sanitizer",
         group: Group::Safety,
-        purpose: "Removes AI attribution from commit, tag, merge and PR messages, and adds `-s` to a commit that has no sign-off.",
+        purpose: "Removes AI attribution from commit, tag, merge and PR messages, and adds `-s` to a commit that has no sign-off. It also lints the prose of commit messages, PR text and comments against the writing-style phrase table: a warning by default, a denial when `hooks.proseLint.mode` is `block`.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,

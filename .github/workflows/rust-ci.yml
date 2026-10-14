@@ -227,6 +227,13 @@ jobs:
         if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
         run: ./target/debug/playbook manifest check .
 
+      # Warn-only for now: the findings show as annotations and never fail the
+      # job. `--strict` would fail it on a hard finding.
+      - name: Check the docs prose
+        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        continue-on-error: true
+        run: ./target/debug/playbook prose check docs/adr/*.md
+
       # cargo-audit's own `cargo install --locked` compiles it from source
       # every run, ~2 minutes on ubuntu-latest, the single most expensive
       # step in this job by far (measured: musl-tools + rustup target add

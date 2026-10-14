@@ -8,13 +8,13 @@ use playbook::init::shim::ShellKind;
 use playbook::{
     adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor,
     effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
-    plan_cleanup, planning, pr, review, sanitize, settings, statusline, storage, tools_map, trust,
-    update, usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli, Command,
-    CommitCommand, ConfigCommand, DepsCommand, DocCommand, DoctorCommand, EvalCommand, GateCommand,
-    GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand, MemoryCommand,
-    ModeArg, ModeCommand, PlanCommand, PrCommand, ReviewCommand, ReviewWorktreeCommand,
-    SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand, SettingsCommand,
-    ToolsCommand, WorktreeCommand,
+    plan_cleanup, planning, pr, prose, review, sanitize, settings, statusline, storage, tools_map,
+    trust, update, usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli,
+    Command, CommitCommand, ConfigCommand, DepsCommand, DocCommand, DoctorCommand, EvalCommand,
+    GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand,
+    MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ProseCommand, ReviewCommand,
+    ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand,
+    SettingsCommand, ToolsCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -1446,6 +1446,31 @@ fn main() {
             let today = today.split(' ').next().unwrap_or("");
             match adr::next_line(&root, today) {
                 Ok(line) => println!("{line}"),
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Command::Prose {
+            sub: ProseCommand::Check { files, strict },
+        } => {
+            let github = std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true");
+            match prose::check(&files, github) {
+                Ok(report) => {
+                    for line in &report.lines {
+                        println!("{line}");
+                    }
+                    println!(
+                        "{} findings, {} hard, {} files checked",
+                        report.total,
+                        report.hard,
+                        files.len()
+                    );
+                    if strict && report.hard > 0 {
+                        std::process::exit(1);
+                    }
+                }
                 Err(err) => {
                     eprintln!("error: {err}");
                     std::process::exit(1);

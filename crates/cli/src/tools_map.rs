@@ -232,6 +232,13 @@ pub const TOOLS: &[Tool] = &[
     t("memory-rebuild", "memory", "rebuild", "", "memory rebuild"),
     t("next-adr-number", "adr", "next", "", "adr next"),
     t(
+        "prose-check",
+        "prose",
+        "check",
+        "FILES",
+        "prose check docs/adr/0001-x.md",
+    ),
+    t(
         "add-glossary-term",
         "glossary",
         "add",

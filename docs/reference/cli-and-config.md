@@ -63,6 +63,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `launcher.claudeOverride` | `false` | `true`, `false` |
 | `launcher.shortName` | `false` | `true`, `false` |
 | `hooks.rmGuard.allowedRoots` | `[]` | see the config keys guide |
+| `hooks.proseLint.mode` | `warn` | `warn`, `block`, `off` |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
@@ -73,7 +74,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -1089,6 +1090,21 @@ Find the pull requests stacked with a PR
 Reads the GitHub stack API, then falls back to the branch chain. Takes the arguments as one string (`#12 --json --max-prs 6 --max-lines 3000`). Prints a summary, or JSON with `--json`. `--context` writes one shared review context under `/tmp/pr-stack-<pr>`. `map --stack <file> --findings <file>` gives each finding to the PR whose diff holds the line.
 
 - `<ARGS>`: The command's arguments, as one string
+
+### `playbook prose`
+
+Check prose against the writing-style rules
+
+Subcommands: `check`
+
+### `playbook prose check`
+
+Lint files for banned phrases, structures and em or en dashes
+
+Prints `path:line: finding` for each problem. Fenced code, inline code, URLs, file paths and quoted lines are skipped. Exits 0 unless `--strict` is given and a hard finding exists, or a file cannot be read. With `GITHUB_ACTIONS=true` it prints annotations.
+
+- `<FILES>`: Files to check
+- `--strict`: Exit 1 when a hard finding exists
 
 ### `playbook review`
 

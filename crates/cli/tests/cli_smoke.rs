@@ -604,6 +604,7 @@ fn table() -> Vec<Case> {
         case( "plan brief", &[ "plan", "brief", "--out", "{ROOT}/brief.md", "{ROOT}/plan.md", "WU1", ], ).file("plan.md", "# Plan\n").code(1).err("no section for WU1"),
         case("glossary add", &["glossary", "add", "term: a definition"]).grows(),
         case("adr next", &["adr", "next"]).out("Next number: 0001").writes(),
+        case("prose check", &["prose", "check", "{ROOT}/a.md"]).file("a.md", "Let that sink in.\n").out("1 hard"),
         case("tools map", &["tools", "map"]).out("playbook tools:"),
         case("atlassian check", &["atlassian", "check"]).code(1).out("acli: missing"),
         case("learn preflight", &["learn", "preflight"]).plain().code(1).err("not in a git repo"),

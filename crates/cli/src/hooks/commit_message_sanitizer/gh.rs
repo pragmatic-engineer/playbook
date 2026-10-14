@@ -3,7 +3,9 @@
 
 //! The `gh pr` calls that write text on GitHub: `create` (also spelled `new`),
 //! `edit` and `merge`. A PR title and body are free text, while the subject
-//! and body of a merge become a commit message.
+//! and body of a merge become a commit message. The text of `gh pr comment`,
+//! `gh pr review` and `gh issue create|comment|edit` is only linted, never
+//! rewritten.
 
 use super::engine::{Call, Findings, Plan};
 use super::sources::{apply, from_path, from_word, value_span, Named, Rule, Source};
@@ -27,6 +29,37 @@ const PR_WRITE: Spec = Spec {
         "template",
     ],
     long_flags: &["fill", "fill-first", "fill-verbose", "draft", "web"],
+    other_long: &[],
+    abbreviate: false,
+};
+const COMMENT_WRITE: Spec = Spec {
+    short_values: "tbFaBHlmprRT",
+    short_attached: "",
+    long_values: &[
+        "title",
+        "body",
+        "body-file",
+        "assignee",
+        "base",
+        "head",
+        "label",
+        "milestone",
+        "project",
+        "reviewer",
+        "repo",
+        "template",
+    ],
+    long_flags: &[
+        "approve",
+        "comment",
+        "request-changes",
+        "edit-last",
+        "delete-last",
+        "create-if-none",
+        "yes",
+        "editor",
+        "web",
+    ],
     other_long: &[],
     abbreviate: false,
 };
@@ -58,10 +91,19 @@ pub fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
     let (Some(group), Some(verb)) = (words.get(call.at + 1), words.get(call.at + 2)) else {
         return;
     };
+    let rest = call.at + 3;
+    if group == "issue" || (group == "pr" && matches!(verb.as_str(), "comment" | "review")) {
+        if matches!(
+            verb.as_str(),
+            "create" | "new" | "edit" | "comment" | "review"
+        ) {
+            lint_text(call, rest, plan, findings);
+        }
+        return;
+    }
     if group != "pr" {
         return;
     }
-    let rest = call.at + 3;
     match verb.as_str() {
         "create" | "new" | "edit" => {
             let opts = PR_WRITE.scan(&words[rest..]);
@@ -92,6 +134,23 @@ pub fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
         }
         _ => {}
     }
+}
+
+/// Lints the title and body of an issue or a comment. Nothing is rewritten.
+fn lint_text(call: &Call, rest: usize, plan: &mut Plan, findings: &mut Findings) {
+    let words = &call.cmd().words;
+    let opts = COMMENT_WRITE.scan(&words[rest..]);
+    let title = text_sources(call, rest, &opts, &["t", "title"], "the title", findings);
+    let body = text_sources(
+        call,
+        rest,
+        &opts,
+        &["b", "body", "F", "body-file"],
+        "the comment text",
+        findings,
+    );
+    apply(&title, Rule::Lint, false, plan, findings);
+    apply(&body, Rule::Lint, false, plan, findings);
 }
 
 /// The text of each option called one of `names`, as a body file when the

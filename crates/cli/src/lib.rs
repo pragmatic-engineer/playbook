@@ -62,6 +62,7 @@ pub mod plan_cleanup;
 pub mod planning;
 pub mod plans;
 pub mod pr;
+pub mod prose;
 pub mod review;
 pub mod routing;
 pub mod sanitize;
@@ -693,6 +694,11 @@ pub enum Command {
     Adr {
         #[command(subcommand)]
         sub: AdrCommand,
+    },
+    /// Check prose against the writing-style rules
+    Prose {
+        #[command(subcommand)]
+        sub: ProseCommand,
     },
     /// Checks for the `playbook:atlassian` skill
     Atlassian {
@@ -1370,6 +1376,25 @@ pub enum GlossaryCommand {
         /// The entry text
         #[arg(allow_hyphen_values = true)]
         entry: String,
+    },
+}
+
+/// `playbook prose` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ProseCommand {
+    /// Lint files for banned phrases, structures and em or en dashes
+    ///
+    /// Prints `path:line: finding` for each problem. Fenced code, inline
+    /// code, URLs, file paths and quoted lines are skipped. Exits 0 unless
+    /// `--strict` is given and a hard finding exists, or a file cannot be
+    /// read. With `GITHUB_ACTIONS=true` it prints annotations.
+    Check {
+        /// Files to check
+        #[arg(required = true)]
+        files: Vec<std::path::PathBuf>,
+        /// Exit 1 when a hard finding exists
+        #[arg(long)]
+        strict: bool,
     },
 }
 

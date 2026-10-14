@@ -19,6 +19,12 @@
 //! itself, by `--signoff` or by `git interpret-trailers --trailer` for it. A
 //! hook that only checks for the line does not count.
 //!
+//! The same pass lints the prose of those messages, and of `gh pr comment`,
+//! `gh pr review` and `gh issue` text, against the writing-style phrase and
+//! structure table (`common::prose_lint`). In the default `warn` mode the
+//! findings go to the model as context. With `hooks.proseLint.mode` set to
+//! `block` a hard finding denies the call, and `off` turns the lint off.
+//!
 //! Best effort against an agent drifting, not a security boundary: it does
 //! not expand variables in a message, an alias or a script that builds one.
 
@@ -31,7 +37,7 @@ mod sources;
 mod state;
 
 use crate::common::payload::Payload;
-use crate::common::{emit_pre_context, emit_pre_updated_input};
+use crate::common::{emit_pre_context, emit_pre_deny, emit_pre_updated_input};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -52,7 +58,16 @@ fn pre(payload: &Payload, command: &str, dir: &Path) {
     for repo in &git::git_use(command, dir).commit_dirs {
         state::record_head(payload, repo);
     }
-    let rewritten = engine::rewrite(command, dir);
+    let mut rewritten = engine::rewrite(command, dir);
+    let mode = lint_mode();
+    if mode == "off" {
+        rewritten.findings.lint.clear();
+        rewritten.findings.lint_hard = false;
+    }
+    if mode == "block" && rewritten.findings.lint_hard {
+        emit_pre_deny(&lint_denial(&rewritten.findings.lint));
+        return;
+    }
     let note = context(&rewritten.findings);
     if rewritten.command != command {
         if let Some(mut input) = payload.value(".tool_input").cloned() {
@@ -87,6 +102,24 @@ fn start_dir(payload: &Payload) -> PathBuf {
     }
 }
 
+/// The `hooks.proseLint.mode` setting: `warn` (the default), `block` or `off`.
+fn lint_mode() -> String {
+    let home = crate::common::home_dir();
+    let slug = crate::common::repo_slug();
+    let slug = (!slug.is_empty()).then_some(slug);
+    crate::config::resolve_valid("hooks.proseLint.mode", &home, slug.as_deref())
+        .ok()
+        .and_then(|(v, _, _)| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "warn".to_string())
+}
+
+fn lint_denial(lint: &[String]) -> String {
+    format!(
+        "prose-lint blocked this call, since hooks.proseLint.mode is block. Fix the text and run it again: {}",
+        lint.join(" ")
+    )
+}
+
 /// One line for the agent: what was removed, by line and shape, and what
 /// could not be read. Never the text of a removed line.
 fn context(findings: &engine::Findings) -> Option<String> {
@@ -108,6 +141,12 @@ fn context(findings: &engine::Findings) -> Option<String> {
             "commit-message-sanitizer added -s so the commit carries a Signed-off-by line."
                 .to_string(),
         );
+    }
+    if !findings.lint.is_empty() {
+        parts.push(format!(
+            "prose-lint found writing-style problems, so fix them in the text you write next time or amend it: {}",
+            findings.lint.join(" ")
+        ));
     }
     (!parts.is_empty()).then(|| parts.join(" "))
 }
