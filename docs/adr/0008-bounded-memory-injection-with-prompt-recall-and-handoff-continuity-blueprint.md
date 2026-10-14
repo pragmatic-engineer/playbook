@@ -4,40 +4,40 @@
 
 ## System Snapshot
 
-- `src/hooks/memory_anchors.rs` — `PreToolUse` on `Edit|Write` only today
+- `src/hooks/memory_anchors.rs`: `PreToolUse` on `Edit|Write` only today
   (`src/init/wire.rs:126-133`). Builds a per-session anchor index once, cached
   as a TSV under `session_dir(payload)` (`memory_anchors.rs:158-201`,
   `build_index`/`compute_index_rows`), matches exact path then containing
   directory (`:105-129`), emits fact **names** via `emit_pre_context`, never
   blocks. Test file: `tests/hooks_graph_reader.rs`.
-- `src/hooks/session_init.rs` — `SessionStart`, runs unconditionally on every
+- `src/hooks/session_init.rs`: `SessionStart`, runs unconditionally on every
   `source` (`:83-86`). `append_memory_slice` (`:172-222`) shells to
   `shell/memory-context.sh --repo <slug>`, no size cap; legacy fallback
   `read_legacy_memory` (`:242-247`) is capped at `.chars().take(16000)`. Test
   file: `tests/hooks_session.rs`.
-- `src/init/wire.rs` — `HookSpec` table (`PORTED_HOOK_SPECS`, `:93-190`).
+- `src/init/wire.rs`: `HookSpec` table (`PORTED_HOOK_SPECS`, `:93-190`).
   Precedent for one hook name on two events already exists: `session-clean-exit`
   is registered on both `Stop` and `SessionEnd` (`:167-181`), branching
   internally on which payload fields are present. `memory-anchors` will follow
   the same pattern for `PreToolUse` and `UserPromptSubmit`.
-- `src/common/emit.rs:73-77` — `emit_prompt_context(msg)` already exists,
+- `src/common/emit.rs:73-77`: `emit_prompt_context(msg)` already exists,
   wraps `emit_pre_context("UserPromptSubmit", msg)`, unused for memory today.
-- `src/common/payload.rs:13,32-45` — `Payload` wraps raw JSON; any dotted path
+- `src/common/payload.rs:13,32-45`: `Payload` wraps raw JSON; any dotted path
   is legal to query, missing resolves to `""`. `auto_model_detect.rs:89`
   proves `.prompt` is readable on `UserPromptSubmit` in this codebase.
-- `src/hooks/post_edit_track.rs` — writes `edits.jsonl` under
+- `src/hooks/post_edit_track.rs`: writes `edits.jsonl` under
   `session_dir(payload)` on every `Edit`/`Write`; `memory_capture.rs:43,72-89`
   already reads it for "recently touched paths". WU-0 reuses this file rather
   than tracking touched paths a second way.
-- `src/cc/mod.rs:24` — `pub fn project_slug(path: &str) -> String`, slugifies
+- `src/cc/mod.rs:24`: `pub fn project_slug(path: &str) -> String`, slugifies
   every non-alphanumeric character to `-`. `src/cc/config_drift.rs:21-23`
   already keys per-worktree state this way (`cc-state/<project-slug>`).
   `logical_cwd()` (`src/cc/mod.rs:35-45`) prefers `$PWD` over
   `current_dir()`, required because macOS symlinks `/tmp` and `/var` into
   `/private`.
-- `src/hooks/session_clean_exit.rs:92` / `session_init.rs:262` — the
+- `src/hooks/session_clean_exit.rs:92` / `session_init.rs:262`: the
   `to-learn/<repo-slug>.json` read-once-then-delete pattern WU-3 mirrors.
-- `skills/session-handoff/SKILL.md:62-66` — prints only by default; "Never
+- `skills/session-handoff/SKILL.md:62-66`: prints only by default; "Never
   write to a path that was not explicitly provided" governs the **user-facing**
   path argument, not the new fixed internal runtime path WU-2 adds.
 - No *behavioral* skill-validation tooling exists in this repo. One light

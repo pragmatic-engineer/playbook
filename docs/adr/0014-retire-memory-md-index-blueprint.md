@@ -4,23 +4,23 @@
 
 ## System Snapshot
 
-- `src/hooks/session_init.rs:315-367` — `append_memory_slice`, the SessionStart injector. Its else-branch (`:348-360`) currently reads a legacy `MEMORY.md` file; this is the only Rust code path that changes.
-- `src/hooks/session_init.rs:236-299` — `append_promoted_facts`, an existing sibling function that already reads `memory.graph.json` directly via `serde_json::Value`, filters with `in_promotion_scope`, and extracts `name`/`description`. This is the exact pattern the new native fallback mirrors.
-- `src/hooks/session_init.rs:302-313` — `in_promotion_scope(node: &serde_json::Value, repo: &str) -> bool`, already scope-matching (global/org/project), reused as-is.
-- `src/hooks/session_init.rs:461-469` — `read_legacy_memory`, the function being removed.
-- `src/hooks/session_init.rs:475-477` — `cap_memory_body`, the existing 16000-char cap, reused as-is by the new function.
-- `src/hooks/rebuild_memory_graph.rs:786-811` — the file walk that builds the graph; its `name != "MEMORY.md"` exclusion (`:807`) stays unchanged, per the ADR's explicit decision (defensive, not load-bearing).
-- `src/hooks/rebuild_memory_graph.rs:469-484` — the `Node` struct/JSON shape: `id`, `file`, `scope`, `type` (serialized as `"type"`), optional `name`/`description`/`project`/`pinned`. Code-anchor nodes have `name: None`, confirmed at `:699`.
-- `shell/memory-context.sh` — unchanged by this blueprint. Already renders `name: description` (`:74`) plus edges and anchors from `memory.graph.json`, already the primary SessionStart path. It `exit 0`s with empty output whenever `jq` is missing (`:53,99`), silently, with no error. The five command WUs below repoint their reads at this script instead of at `MEMORY.md`, and each also gets its own native, jq-free fallback for when the script produces nothing, since `MEMORY.md` (readable via the plain `Read` tool, no jq) is no longer there to fall back to.
-- `commands/doctor.md:1-293` — frontmatter `:2` and the intro at `:11` both say "seven" (layers / checks); the seven numbered layers run `:14` (Layer 1) through Layer 7's own section at `:204-260` (its heading through its Report bullets); `:262-293` is a separate, unnumbered `## Output format` section, not part of Layer 7, containing the file's remediation-branch logic (`:282-292`) which enumerates "Layers 1 to 5", "Layer 6", "Layer 7" by name with no catch-all. `:194-202` warns layer numbers are referenced elsewhere and must never shift, so a new check is always appended, never inserted. `jq` is already a hard, unchecked dependency of Layers 2, 5, 6, and 7's own bash blocks (confirmed via grep: `:37,102,164,238`), a pre-existing gap this blueprint's WU-8 closes.
-- `tests/hooks_session.rs:242-278` — `session_init_falls_back_to_the_legacy_memory_index`, the test being replaced.
-- `tests/hooks_session.rs:191-239` — `session_init_caps_the_graph_backed_slice_like_the_legacy_fallback`, the existing cap test for the jq/live path; a sibling test is added for the native fallback path.
-- `tests/hooks_session.rs:74-109` — `run_hook`, the test harness. Confirmed at `:88` it unconditionally does `.env_remove("CLAUDE_PLUGIN_ROOT")` before applying `extra_env`, so passing `&[]` reliably forces `plugin_root` empty in the child process, which is how the new tests reach the fallback branch deterministically.
+- `src/hooks/session_init.rs:315-367`: `append_memory_slice`, the SessionStart injector. Its else-branch (`:348-360`) currently reads a legacy `MEMORY.md` file; this is the only Rust code path that changes.
+- `src/hooks/session_init.rs:236-299`: `append_promoted_facts`, an existing sibling function that already reads `memory.graph.json` directly via `serde_json::Value`, filters with `in_promotion_scope`, and extracts `name`/`description`. This is the exact pattern the new native fallback mirrors.
+- `src/hooks/session_init.rs:302-313`: `in_promotion_scope(node: &serde_json::Value, repo: &str) -> bool`, already scope-matching (global/org/project), reused as-is.
+- `src/hooks/session_init.rs:461-469`: `read_legacy_memory`, the function being removed.
+- `src/hooks/session_init.rs:475-477`: `cap_memory_body`, the existing 16000-char cap, reused as-is by the new function.
+- `src/hooks/rebuild_memory_graph.rs:786-811`: the file walk that builds the graph; its `name != "MEMORY.md"` exclusion (`:807`) stays unchanged, per the ADR's explicit decision (defensive, not load-bearing).
+- `src/hooks/rebuild_memory_graph.rs:469-484`: the `Node` struct/JSON shape: `id`, `file`, `scope`, `type` (serialized as `"type"`), optional `name`/`description`/`project`/`pinned`. Code-anchor nodes have `name: None`, confirmed at `:699`.
+- `shell/memory-context.sh`: unchanged by this blueprint. Already renders `name: description` (`:74`) plus edges and anchors from `memory.graph.json`, already the primary SessionStart path. It `exit 0`s with empty output whenever `jq` is missing (`:53,99`), silently, with no error. The five command WUs below repoint their reads at this script instead of at `MEMORY.md`, and each also gets its own native, jq-free fallback for when the script produces nothing, since `MEMORY.md` (readable via the plain `Read` tool, no jq) is no longer there to fall back to.
+- `commands/doctor.md:1-293`: frontmatter `:2` and the intro at `:11` both say "seven" (layers / checks); the seven numbered layers run `:14` (Layer 1) through Layer 7's own section at `:204-260` (its heading through its Report bullets); `:262-293` is a separate, unnumbered `## Output format` section, not part of Layer 7, containing the file's remediation-branch logic (`:282-292`) which enumerates "Layers 1 to 5", "Layer 6", "Layer 7" by name with no catch-all. `:194-202` warns layer numbers are referenced elsewhere and must never shift, so a new check is always appended, never inserted. `jq` is already a hard, unchecked dependency of Layers 2, 5, 6, and 7's own bash blocks (confirmed via grep: `:37,102,164,238`), a pre-existing gap this blueprint's WU-8 closes.
+- `tests/hooks_session.rs:242-278`: `session_init_falls_back_to_the_legacy_memory_index`, the test being replaced.
+- `tests/hooks_session.rs:191-239`: `session_init_caps_the_graph_backed_slice_like_the_legacy_fallback`, the existing cap test for the jq/live path; a sibling test is added for the native fallback path.
+- `tests/hooks_session.rs:74-109`: `run_hook`, the test harness. Confirmed at `:88` it unconditionally does `.env_remove("CLAUDE_PLUGIN_ROOT")` before applying `extra_env`, so passing `&[]` reliably forces `plugin_root` empty in the child process, which is how the new tests reach the fallback branch deterministically.
 - Five command files with a read step to repoint: `commands/plan.md:171`, `commands/adr.md:80`, `commands/implement.md:131`, `commands/deep-review.md:198`, `commands/learn-project.md:72,103`.
 - Four command files with a `MEMORY.md` write step to delete: `commands/plan.md:281-291,510`, `commands/adr.md:85-92,155`, `commands/implement.md:138-145`, `commands/learn-project.md:120-130,161,168,178`.
-- `commands/implement.md:267` — a WU-brief drafting instruction that references "any fact whose `MEMORY.md` one-line hook mentions the WU's title keywords", needs rewording to `description` since the data now comes from the graph read, not a MEMORY.md scan.
+- `commands/implement.md:267`: a WU-brief drafting instruction that references "any fact whose `MEMORY.md` one-line hook mentions the WU's title keywords", needs rewording to `description` since the data now comes from the graph read, not a MEMORY.md scan.
 - `skills/playbook-usage/SKILL.md:88` and three doc files (`docs/concepts/02-memory-system.md`, `docs/guides/03-decisions-and-memory.md`, `docs/internals/02-model-routing-and-memory.md`) describe the mechanism for contributors/users.
-- `prompts/SYSTEM_PROMPT.md:53,61,63` — the system prompt loaded into every session's persistent instructions, independently instructing the same `MEMORY.md` write convention. Distinct from the five commands above: this isn't read by one specific `/playbook:*` invocation, it's the standing instruction set every session already has, regardless of which command (if any) is running.
+- `prompts/SYSTEM_PROMPT.md:53,61,63`: the system prompt loaded into every session's persistent instructions, independently instructing the same `MEMORY.md` write convention. Distinct from the five commands above: this isn't read by one specific `/playbook:*` invocation, it's the standing instruction set every session already has, regardless of which command (if any) is running.
 
 ## Work Units
 
@@ -55,7 +55,7 @@
   - [ ] A malformed-`memory.graph.json` test and a code-anchor-only-graph test both pass.
   - [ ] `cargo build && cargo clippy --all-targets -- -D warnings` is clean.
 
-### WU-1: commands/plan.md — repoint reads, drop MEMORY.md writes
+### WU-1: commands/plan.md: repoint reads, drop MEMORY.md writes
 
 - Requires: nothing
 - Goal: `/playbook:plan` reads memory via `shell/memory-context.sh` instead of `MEMORY.md`, and writes exactly one file per captured fact.
@@ -73,7 +73,7 @@
   - [ ] The instruction to note which source (script output, direct graph read, or nothing found) produced the result survives into the final wording, not just the fallback mechanism itself.
   - [ ] Neither the checkpoint nor glossary locked-write analogy references `MEMORY.md` anymore.
 
-### WU-2: commands/adr.md — repoint reads, drop MEMORY.md writes
+### WU-2: commands/adr.md: repoint reads, drop MEMORY.md writes
 
 - Requires: nothing
 - Goal: same treatment as WU-1, applied to `/playbook:adr`.
@@ -87,7 +87,7 @@
   - [ ] `grep -c "MEMORY.md" commands/adr.md` is 0.
   - [ ] Stage 1's memory read step names `memory-context.sh` and `--repo`, and specifies the native fallback, including which source produced the result.
 
-### WU-3: commands/implement.md — repoint reads, drop MEMORY.md writes, fix the brief-drafting reference
+### WU-3: commands/implement.md: repoint reads, drop MEMORY.md writes, fix the brief-drafting reference
 
 - Requires: nothing
 - Goal: same treatment as WU-1/WU-2, applied to `/playbook:implement`, plus its one additional reference to `MEMORY.md`'s one-line hook in the WU-brief drafting step.
@@ -102,7 +102,7 @@
   - [ ] Step 3's memory-load step names `memory-context.sh` and `--repo`, and specifies the native fallback, including which source produced the result.
   - [ ] The WU-brief drafting instruction at the old `:267` says `description`, not `MEMORY.md` one-line hook.
 
-### WU-4: commands/deep-review.md — repoint the read step
+### WU-4: commands/deep-review.md: repoint the read step
 
 - Requires: nothing
 - Goal: `/playbook:deep-review`'s Step 2c reads memory via the graph, not `MEMORY.md`. No write-side change: this command never captured facts.
@@ -113,7 +113,7 @@
   - [ ] `grep -c "MEMORY.md" commands/deep-review.md` is 0.
   - [ ] Step 2c's memory-load step names `memory-context.sh` and `--repo`, and specifies the native fallback, including which source produced the result.
 
-### WU-5: commands/learn-project.md — repoint reads, drop MEMORY.md writes (heaviest command file)
+### WU-5: commands/learn-project.md: repoint reads, drop MEMORY.md writes (heaviest command file)
 
 - Requires: nothing
 - Goal: `/playbook:learn-project`'s priming, dedupe, and reporting steps all read the graph instead of `MEMORY.md`; Phase 4 writes exactly one file per fact.
@@ -134,7 +134,7 @@
   - [ ] `--stage` and `--from-staged` no longer reference `MEMORY.md`.
   - [ ] A live `/playbook:learn-project --refresh` run against a repo with existing facts, performed once after this WU lands, confirms dedupe still skips known facts and priming still yields a usable signal to collectors. This is the manual-verification item the Confidence section below names; it is a completion condition for this WU, not an optional follow-up.
 
-### WU-6: skills/playbook-usage/SKILL.md — description update
+### WU-6: skills/playbook-usage/SKILL.md: description update
 
 - Requires: nothing
 - Goal: the skill's description of the memory store no longer names `MEMORY.md` as a load-bearing part of it.
@@ -158,7 +158,7 @@
   - [ ] For each of the three files, `grep -c "MEMORY.md" <file>` is 0, OR its only remaining match is a short note explaining that existing installs may have an inert, unread `MEMORY.md` left over and it's safe to ignore (per the parent ADR's explicit no-active-cleanup decision, `docs/adr/0014-retire-memory-md-index.md:189-194`, restated in Consequences at `:218-220`). A bare zero-count bar would fail a correct edit that chooses to document that leftover state for users.
   - [ ] Each file still accurately describes how retrieval actually works after WU-0's change (native fallback, not a legacy index).
 
-### WU-8: commands/doctor.md — Layer 8, jq installed
+### WU-8: commands/doctor.md: Layer 8, jq installed
 
 - Requires: nothing
 - Goal: `/playbook:doctor` gets a real, appended PASS/FAIL check for `jq`'s presence, closing a pre-existing gap (Layers 2, 5, 6, and 7 already shell out to `jq` today with nothing checking it's installed) that this ADR makes more consequential: the five commands' new native-graph-read fallbacks (WU-1 through WU-5) are the thing standing between a missing `jq` and no memory context at all, so surfacing a missing `jq` clearly is worth doing now.
@@ -174,10 +174,10 @@
   - [ ] The frontmatter description and intro line both say "eight", not "seven".
   - [ ] The remediation-line logic has a Layer 8 branch, not just Layers 1-7.
 
-### WU-9: prompts/SYSTEM_PROMPT.md — stop instructing the MEMORY.md write
+### WU-9: prompts/SYSTEM_PROMPT.md: stop instructing the MEMORY.md write
 
 - Requires: nothing
-- Goal: the system prompt every session loads no longer instructs writing or reading `MEMORY.md`; it describes `memory.graph.json` as the sole index instead. This is not a command file a specific `/playbook:*` invocation reads; it is the standing instruction set every session already has loaded, so it is a distinct write path from the five commands in WU-1 through WU-5, not covered by any of them.
+- Goal: the system prompt every session loads no longer instructs writing or reading `MEMORY.md`; it describes `memory.graph.json` as the sole index instead. No specific `/playbook:*` invocation reads it. It is the standing instruction set every session already has loaded, a distinct write path from the five commands in WU-1 through WU-5, not covered by any of them.
 - Files: `prompts/SYSTEM_PROMPT.md`
 - Changes:
   - `:53` ("Global facts live flat alongside `MEMORY.md`... Each project subfolder has its own `MEMORY.md` as its local index. Both use: index `MEMORY.md` (format: `- [Title](file.md): one-line hook`)..."): remove the `MEMORY.md`-as-index description entirely; the sentence still needs to describe where facts live (global flat, project under `<owner>/<repo>/`) and the frontmatter/body shape, just without naming an index file.

@@ -211,6 +211,6 @@ flowchart TD
   - `critic` premise-versus-convergent stance separation: verify in `/playbook:implement` review that the focus param keeps them distinct.
   - `fact-checker` and `test-reviewer` are consistency bets over the already-read-only `Explore`. Capture the before baseline (fact-check catch rate) so the gain is provable.
   - Cost baseline: measure `/playbook:learn-project` and the `/playbook:implement` refinement swarm token cost before WU-5 and WU-10 land.
-  - `_TEMPLATE.md` must not be picked up as a live agent; confirm the discovery rule ignores the leading underscore, else move the template under `docs/`.
+  - `_TEMPLATE.md` must not be picked up as a live agent; confirm the discovery rule ignores a leading `_` in the file name, else move the template under `docs/`.
   - Inline-versus-system-prompt duplication: the re-point WUs (WU-8, WU-9, WU-10) swap the agent name but leave the command's inline task instructions in place, which now overlap the agent's baked-in system prompt. Decide the source of truth in `/playbook:implement`: thin the inline prompt, or keep it authoritative and thin the agent body. The lint does not catch this cross-file overlap.
   - Lint coverage: add an `effort` out-of-range boundary case and a positive new-agent fixture to `shell/check-agents.test.sh`.

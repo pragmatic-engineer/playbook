@@ -143,7 +143,7 @@ of the same repo share a `repo_slug` but never share a `project_slug`.
   turning up only scope filtering and exact-path anchor matching), so this
   is new code with no precedent to build on.
 
-### C. Keep SessionStart, cap the slice, add prompt-time recall and worktree-safe persisted handoff (effort: M) — CHOSEN
+### C. Keep SessionStart, cap the slice, add prompt-time recall and worktree-safe persisted handoff (effort: M): CHOSEN
 
 - Four changes to the existing, already-unconditional `append_*` chain in
   `session_init.rs:83-86`:

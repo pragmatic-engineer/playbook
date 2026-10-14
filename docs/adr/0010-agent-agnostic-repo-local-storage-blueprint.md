@@ -51,7 +51,7 @@ bootstraps.
 - Files:
   - `src/gate/record.rs` (path construction, currently lines 92-94; doc
     comments lines 6, 82) — production
-  - `src/gate/check.rs` (path construction, currently lines 75-77) —
+  - `src/gate/check.rs` (path construction, currently lines 75-77): 
     production
   - `src/gate/db.rs` (`open_db` doc comment line 48; module doc lines
     4-5, 8-17; `ensure_state_db_gitignored` shape-check and its doc
@@ -60,7 +60,7 @@ bootstraps.
     becomes `playbook_dir_name != ".playbook"`; unit test
     `open_db_gitignores_claude_state_db_path`, currently lines 379-397)
     — production + test
-  - `src/gate/mod.rs` (module doc, currently line 5) — production
+  - `src/gate/mod.rs` (module doc, currently line 5): production
   - `src/lib.rs` (`GateCommand::Record` doc comment, currently line 156)
     — production
 - Verification: `cargo test --lib gate::` && `cargo clippy --all-targets -- -D warnings` && `cargo fmt --check`
@@ -91,7 +91,7 @@ bootstraps.
   previously asserted this, and `record.rs`/`check.rs`'s own path
   construction isn't exercised by WU-0's unit test).
 - Files:
-  - `tests/gate_check.rs` (`db_path` fn, currently lines 43-44) — test
+  - `tests/gate_check.rs` (`db_path` fn, currently lines 43-44): test
   - `tests/gate_record.rs` (`db_path` fn, currently lines 64-65; fixture
     doc comment, currently lines 22-24) — test
 - Verification: `cargo test --test gate_check --test gate_record`
@@ -188,7 +188,7 @@ bootstraps.
     (currently) line 114, inside Step 2, which the Adversarial Review
     confirmed already runs unconditionally regardless of idea-mode vs
     ticket-mode — production markdown
-  - `shell/repo-local-storage-migration.test.sh` (new file) — test
+  - `shell/repo-local-storage-migration.test.sh` (new file): test
 - New test file, following the `ok`/`bad` PASS/FAIL accumulator pattern
   already established in `hooks/migration-check.test.sh` (own `mktemp -d`
   scratch git repo per case, not shared across cases), parameterized over
@@ -277,8 +277,8 @@ bootstraps.
   the new `.playbook/` paths, not the old `.claude/` ones. Historical ADRs
   are explicitly excluded (System Snapshot, above).
 - Files:
-  - `README.md` (line 166: `/playbook:scope` row) — docs
-  - `docs/guides/01-plan-and-implement.md` (lines 66, 101, 136) — docs
+  - `README.md` (line 166: `/playbook:scope` row): docs
+  - `docs/guides/01-plan-and-implement.md` (lines 66, 101, 136): docs
 - Verification:
   `grep -rn '\.claude/plans\|\.claude/designs\|\.claude/implement\|\.claude/worktrees' README.md docs/guides/`
   returns nothing.
