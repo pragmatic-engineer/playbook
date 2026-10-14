@@ -121,7 +121,6 @@ const HOOK_ENTRIES_REASON: &str = "The hook entries in settings.json are the use
 
 const SETTINGS_EDIT_REASON: &str = "Claude Code settings files (settings.json and settings.local.json, user or project) are changed through playbook, not with the Edit or Write tool. Use `playbook init --yes` to add the hooks, `playbook uninstall` to remove them, `playbook config set <key> <value>` for a playbook setting, or `playbook doctor` to check and fix the setup. For any other settings change, ask the user to make it themselves in the prompt with `!`. Reading the file is fine.";
 
-
 const MEMORY_REASON: &str = "Claude Code's own memory is off limits here. Save the fact in playbook's store instead: ~/.config/playbook/memory/ for a global fact, <owner>/<repo>/ under it for a project fact.";
 
 pub fn run(payload: &Payload) {

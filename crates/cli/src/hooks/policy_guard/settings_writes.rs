@@ -103,9 +103,9 @@ fn writes_at(words: &[String], program_at: usize, home: &str, depth: usize) -> b
     let operands = || args.iter().filter(|w| !w.starts_with('-'));
     match program.as_str() {
         "tee" => operands().any(|w| names_settings(w, home)),
-        "cp" | "install" | "rsync" | "ln" | "mv" => {
-            operands().last().is_some_and(|w| names_settings(w, home))
-        }
+        "cp" | "install" | "rsync" | "ln" | "mv" => operands()
+            .next_back()
+            .is_some_and(|w| names_settings(w, home)),
         "dd" => args
             .iter()
             .filter_map(|w| w.strip_prefix("of="))
