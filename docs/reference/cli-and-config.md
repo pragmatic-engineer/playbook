@@ -1420,7 +1420,7 @@ Example: `playbook usage --range today`
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
 - `--range <RANGE>`: Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
 
-Subcommands: `collect`, `prune`, `status`
+Subcommands: `collect`, `doctor`, `prune`, `status`
 
 ### `playbook usage collect`
 
@@ -1432,6 +1432,16 @@ Example: `playbook usage collect --idle-seconds 1800`
 
 - `--port <PORT>`: Port to listen on (an error when busy). Default: the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook init --only telemetry` afterwards
 - `--idle-seconds <IDLE_SECONDS>`: Stop after this many seconds with no request; 0 means never
+
+### `playbook usage doctor`
+
+Show where pbtop can read your usage limits on this machine
+
+Lists which sources exist: the plan fields and the cached usage numbers in the Claude Code config file (`~/.claude.json`), the statusline reading and the manual `usage.budget.*` keys. It prints field names and ages, never an email, name, id, organization or token. Run it on a machine where the limits look wrong and share the output. Add `--raw` to also print the values of the plan fields (billing type, organization type, seat tier and rate limit tiers). It reads files only and writes nothing.
+
+Example: `playbook usage doctor --raw`
+
+- `--raw`: Also print the values of the plan fields
 
 ### `playbook usage prune`
 

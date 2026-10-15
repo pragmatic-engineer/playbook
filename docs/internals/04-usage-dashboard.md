@@ -13,6 +13,7 @@
 | `playbook usage collect` | Runs the local OpenTelemetry receiver in the foreground. `cc` or the `session-init` hook starts it for you when needed. See [The telemetry receiver](#the-telemetry-receiver). |
 | `playbook usage status [--json]` | Shows whether the receiver runs, the telemetry row counts and the retention limits. Starts nothing. |
 | `playbook usage prune [--dry-run]` | Deletes telemetry rows past the retention limits. See [Checking and running the collector](#checking-and-running-the-collector). |
+| `playbook usage doctor [--raw]` | Lists where `pbtop` can read your limits on this machine: the plan fields and cached usage numbers in the Claude Code config file, the statusline reading and the manual budgets. It prints field names and ages, never an email, name, id, organization or token. `--raw` adds the values of the plan fields only. Run it on another machine and share the output when the limits look wrong. |
 
 Every command that shows data reads new history first, so you never need to ingest by hand.
 

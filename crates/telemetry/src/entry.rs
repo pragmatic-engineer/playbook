@@ -90,6 +90,20 @@ pub fn run(
                 Ok(status.text(crate::util::time::now_secs()))
             }
         }
+        Some(UsageCommand::Doctor { raw }) => {
+            let usage_dir = paths
+                .db
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            let budgets = super::limits_source::manual_budgets(&super::host::home_dir());
+            Ok(super::plan::report(
+                &paths.claude_json,
+                usage_dir,
+                &budgets,
+                crate::util::time::now_secs(),
+                raw,
+            ))
+        }
         None if opts.summary => {
             let range = opts.range.as_deref().map(parse_range).transpose()?;
             run_summary(paths, range, crate::util::time::now_secs())
