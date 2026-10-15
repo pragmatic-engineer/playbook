@@ -7,7 +7,7 @@
 
 ## Context
 
-A user upgraded the binary from 0.25 to 0.26 and a skill failed with "could not find the plugin root folder". The binary and the plugin now have their own version lines (binary 0.26, plugin 0.27 to 0.30), and an upgrade leaves old state behind. Five problems on the binary side made this worse:
+A user's skill failed with "could not find the plugin root folder". The binary printed "skill reference not found at skills/writing-style/SKILL.md", a message only binaries up to 0.25 have. The plugin had updated itself to 0.30, and the old binary looked for a cache directory named after its own version, which no longer existed. The binary and the plugin now have their own version lines (binary 0.26, plugin 0.27 to 0.30), and an upgrade leaves old state behind. Five problems on the binary side made this worse:
 
 - Five call sites find the plugin files in their own way. `init` first looks for a cache directory named after the binary version, then falls back to the newest one. No plugin version is 0.26, so the first lookup misses on every run.
 - The fallback picks the highest version directory under `~/.claude/plugins/cache/pragmatic-engineer/playbook`. Claude Code keeps old version directories there and marks them with `.orphaned_at`. The active one is the `installPath` in `~/.claude/plugins/installed_plugins.json`, which no code reads. An orphaned directory with a higher number wins.
@@ -53,7 +53,8 @@ A user upgraded the binary from 0.25 to 0.26 and a skill failed with "could not 
    - An installed `playbook-hooks` plugin, or a `playbook` plugin from another marketplace, is reported with its `claude plugin uninstall` command (`Manual`). The doctor row uses the same check.
    - A plugin older than the minimum this binary supports, or with a major version above the one it knows, is reported with `claude plugin update playbook@pragmatic-engineer` (`Manual`). The minimum is a constant in the binary, raised when the binary needs something new from the plugin.
    - Orphaned cache directories are reported and ignored by the resolver (`Manual`). Playbook does not delete them.
-10. **Doctor compares with the supported range.** The doctor row passes when the plugin version is inside the range from decision 9. It reports the gap only when the plugin is outside it.
+10. **The plugin names the oldest binary it works with.** `plugin.json` holds `metadata.minBinaryVersion`. Claude Code accepts the `metadata` object without a warning. The `session-init` hook and the doctor read it from the resolved plugin. When the running binary is older, the hook adds one line to the session message: `playbook binary X is older than this plugin needs (Y). Run: brew upgrade playbook` on a Homebrew install, else `playbook update`.
+11. **Doctor compares with the supported range.** The doctor row passes when the plugin version is inside the range from decision 9. It reports the gap only when the plugin is outside it.
 
 ## Alternatives considered
 
@@ -67,6 +68,7 @@ A user upgraded the binary from 0.25 to 0.26 and a skill failed with "could not 
 ## Consequences
 
 - A binary upgrade through `playbook update`, Homebrew or a copied file heals the playbook files on the next session start, without a run of `init`.
+- A binary released before this change cannot heal itself or read `minBinaryVersion`. For those, the only fix is an upgrade, and the plugin's own text has to tell the user, because the old binary runs the hooks.
 - Settings problems still need the user. The hook repeats the command each session until the item is fixed.
 - A dev checkout no longer wins over an installed plugin through `CLAUDE_PLUGIN_ROOT`. It needs `PLAYBOOK_PLUGIN_DIR`.
 - The embedded rule files follow the binary's release, so they can lag the plugin. `pr rules` uses them only when the plugin files are missing, and says so. This replaces the error ADR 0030 describes.
