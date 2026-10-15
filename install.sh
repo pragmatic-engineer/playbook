@@ -16,6 +16,9 @@
 # on this machine. It asks first, and with no terminal and no --yes it only prints
 # the command, so nothing is wired without a yes.
 #
+# When it replaces an older binary, it prints the breaking changes the new
+# binary lists since the old version (ADR 0035).
+#
 #   curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 #
 # The binary comes from the latest GitHub release, or from the release named by
@@ -128,6 +131,8 @@ Usage:
 What it does:
   - downloads the release binary, checks its SHA256 (and its build attestation
     when gh can), runs a smoke test, installs it and puts its folder on PATH;
+  - when it replaces an older binary, prints the breaking changes since that
+    version;
   - then asks whether to run `playbook init`, which adds playbook's hook entries to
     ~/.claude/settings.json (your own entries stay), the status line and the shell
     integration. With no terminal and no --yes it only prints the command.
@@ -279,12 +284,9 @@ backup_previous_binary() {
         return 0
     fi
 
-    local old_version
-    old_version="$("$current" --version 2>/dev/null </dev/null | tail -n 1 | awk '{print $NF}')" || old_version=""
-    # The version becomes part of a file name, so accept only a plain token.
-    case "$old_version" in
-        ""|*[!A-Za-z0-9._+-]*) old_version="unknown-$(date -u +%Y%m%dT%H%M%SZ)" ;;
-    esac
+    # PREVIOUS_VERSION is read just before this runs, and is a plain token or
+    # nothing, so it is safe in a file name.
+    local old_version="${PREVIOUS_VERSION:-unknown-$(date -u +%Y%m%dT%H%M%SZ)}"
 
     local bak="$PLAYBOOK_BIN_DIR/playbook.$old_version.bak"
     if [ -e "$bak" ]; then
@@ -307,6 +309,36 @@ backup_previous_binary() {
             [ -n "$_old" ] && rm -f "$_old" && log "Removed old backup $_old"
         done \
         || true
+}
+
+# The version of the playbook binary already in PLAYBOOK_BIN_DIR, or nothing
+# when there is none or it does not answer with a plain token. The backup file
+# name uses it too.
+installed_version() {
+    local current="$PLAYBOOK_BIN_DIR/playbook" v
+    [ -x "$current" ] || return 0
+    v="$("$current" --version 2>/dev/null </dev/null | tail -n 1 | awk '{print $NF}')" || return 0
+    case "$v" in
+        ""|*[!A-Za-z0-9._+-]*) return 0 ;;
+    esac
+    printf '%s' "$v"
+}
+
+# show_breaking_changes OLD: prints, to stderr, the breaking changes the new
+# binary lists since OLD (ADR 0035). A binary without `playbook breaking`, or
+# any other answer than the block, prints nothing. After it prints, it sets
+# PLAYBOOK_BREAKING_SHOWN=1 for the `migrate` and `init` this script runs
+# next, so they record the notice without printing it again.
+show_breaking_changes() {
+    local old="$1" text
+    [ -n "$old" ] || return 0
+    text="$("$PLAYBOOK_BIN_DIR/playbook" breaking --since "$old" 2>/dev/null </dev/null)" || return 0
+    case "$text" in
+        "Breaking changes in this upgrade:"*)
+            printf '%s\n' "$text" >&2
+            export PLAYBOOK_BREAKING_SHOWN=1
+            ;;
+    esac
 }
 
 # Checks the GitHub build attestation for a downloaded asset. Needs a gh that
@@ -384,6 +416,8 @@ install_release_binary() {
         *) die "version mismatch: the downloaded binary reports '$bin_version', expected $version" ;;
     esac
 
+    PREVIOUS_VERSION="$(installed_version)"
+
     # ---- first durable write: everything above here leaves no trace on failure.
     mkdir -p "$PLAYBOOK_BIN_DIR"
     # A safety net, not a gate: a failed backup must never stop the install.
@@ -395,6 +429,9 @@ install_release_binary() {
     chmod 0755 "$bin_tmp"
     mv -f "$bin_tmp" "$PLAYBOOK_BIN_DIR/playbook"
     log "Installed playbook $version to $PLAYBOOK_BIN_DIR/playbook"
+    if [ "$PREVIOUS_VERSION" != "$version" ]; then
+        show_breaking_changes "$PREVIOUS_VERSION"
+    fi
     install_pb_alias
 
     rm -rf "$STAGE"
@@ -488,6 +525,7 @@ ensure_bin_dir_on_path() {
 # interrupted `curl | bash`: a trap on EXIT alone would leak the directory on
 # ctrl-c during the network path.
 STAGE=""
+PREVIOUS_VERSION=""
 _cleanup_staging() {
     [ -n "$STAGE" ] && rm -rf "$STAGE"
     return 0
