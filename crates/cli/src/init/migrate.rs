@@ -1241,8 +1241,12 @@ mod tests {
         assert!(!report.failed);
     }
 
+    /// How long `sleepy` runs, past the deadline the test gives it. The
+    /// margin keeps a loaded machine from reaching the first check late.
+    const DEADLINE: Duration = Duration::from_secs(2);
+
     fn sleepy(_: &Ctx) -> Outcome {
-        std::thread::sleep(Duration::from_millis(60));
+        std::thread::sleep(DEADLINE + Duration::from_millis(100));
         done("sleepy")
     }
 
@@ -1252,7 +1256,7 @@ mod tests {
         let h = home("deadline");
         let ms = [auto("s", sleepy), auto("n", never)];
         let mut report = Report::default();
-        let deadline = Instant::now() + Duration::from_millis(20);
+        let deadline = Instant::now() + DEADLINE;
 
         // Act
         let locked = with_lock_retry(&h, 0, || {

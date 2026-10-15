@@ -146,7 +146,13 @@ pub fn heal_after_swap(
         name = "doctor --fix";
         out = run_heal(exe, &["doctor", "--fix"]).ok_or_else(|| late(name))?;
     }
-    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    // The new binary prints the breaking changes block (ADR 0035) on stderr
+    // and records it as shown, so it is passed on with the report.
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
     if !out.status.success() {
         let detail: Vec<&str> = text
             .lines()
@@ -630,7 +636,11 @@ mod tests {
     fn the_heal_after_a_swap_runs_the_new_binary_and_reports_its_failure() {
         // Arrange
         let env = env_in("heal-run");
-        std::fs::write(&env.exe, "#!/bin/sh\necho \"ran: $*\"\n").unwrap();
+        std::fs::write(
+            &env.exe,
+            "#!/bin/sh\necho 'Breaking changes in this upgrade:' >&2\necho \"ran: $*\"\n",
+        )
+        .unwrap();
         swap::make_executable(&env.exe).unwrap();
         let mut done = Outcome {
             installed: Some("0.27.0-rc.1".into()),
@@ -661,7 +671,13 @@ mod tests {
         let older_failed = heal_after_swap(&env.exe, "0.27.0").unwrap_err();
 
         // Assert
-        assert_eq!(done.out, vec!["migrate: ran: migrate"]);
+        assert_eq!(
+            done.out,
+            vec![
+                "migrate: Breaking changes in this upgrade:",
+                "migrate: ran: migrate"
+            ]
+        );
         assert_eq!(older, Some(("doctor --fix", "ran: doctor --fix\n".into())));
         assert!(
             older_failed.starts_with("doctor --fix exited with")
