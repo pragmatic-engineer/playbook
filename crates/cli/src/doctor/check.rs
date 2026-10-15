@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 16] = [
+const PROBES: [Probe; 17] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -112,6 +112,7 @@ const PROBES: [Probe; 16] = [
     atlassian_rows,
     old_launcher_rows,
     telemetry_rows,
+    update_rows,
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -916,6 +917,25 @@ fn orphan_rows(env: &Env, data: &Path) -> Vec<Row> {
         ),
     )
     .hint("the code index is a cache and safe to delete; check other clones before deleting gate records")]
+}
+
+/// The release check (`update.mode`): the mode and the last check, and a
+/// warning with the fix when the check found a newer release.
+fn update_rows(env: &Env) -> Vec<Row> {
+    let status = crate::update::check::status_at(&env.home);
+    let mut rows = vec![Row::new("-", Level::Info, status.line)];
+    if let Some(latest) = status.newer {
+        let current = env!("CARGO_PKG_VERSION");
+        rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                format!("playbook {latest} is available (you have {current})"),
+            )
+            .hint(format!("run: {}", status.fix)),
+        );
+    }
+    rows
 }
 
 fn migration_rows(env: &Env) -> Vec<Row> {
