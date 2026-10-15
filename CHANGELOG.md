@@ -2,6 +2,11 @@
 
 Release notes for the playbook plugin in `plugins/playbook`. The binary has its own releases. Each plugin release has a section named `## playbook <version>`, newest first, and the top section always matches the version in `plugins/playbook/.claude-plugin/plugin.json`.
 
+## playbook 0.31.3
+
+- The doctor command text matches the binary again: the upgrade record row hints `run: playbook migrate`, and the next session start or `playbook migrate` brings the record up to date.
+- A short note after layer 6 says what to run after an upgrade: `playbook migrate`, or `playbook doctor --fix`, which runs the same step. It also says where each update channel shows breaking changes.
+
 ## playbook 0.31.2
 
 - The doctor command text now matches the binary: it says a version difference still passes, describes the layer 6 upgrade record row, and names `playbook init --hooks` as the fix for dead hook entries under `~/.claude/hooks`.
