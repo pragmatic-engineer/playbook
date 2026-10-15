@@ -88,3 +88,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0032](adr/0032-plugin-in-the-playbook-repo.md) | Keep the plugin in the playbook repository | Accepted | 2026-10-14 |
 | [0033](adr/0033-telemetry-on-by-default.md) | Turn Claude Code telemetry on by default at install | Accepted | 2026-10-15 |
 | [0034](adr/0034-self-healing-upgrades.md) | One plugin root resolver and migrations between versions | Accepted | 2026-10-15 |
+| [0035](adr/0035-breaking-change-notices.md) | Breaking change notices on every update channel | Accepted | 2026-10-15 |

@@ -1,0 +1,11 @@
+{
+  "entries": [
+    {
+      "version": "0.26.0",
+      "component": "playbook",
+      "summary": "Plugin 0.28 and later need playbook 0.26 or later, because an older binary cannot find the plugin files and skills fail with 'could not find the plugin root folder'.",
+      "action": "brew upgrade playbook or playbook update",
+      "migration": null
+    }
+  ]
+}

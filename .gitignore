@@ -19,6 +19,7 @@
 !/plugins/
 !/scripts/
 !/intents.json
+!/breaking-changes.json
 !/CHANGELOG.md
 # settings.json is intentionally NOT tracked: it is the owner's live, personal
 # config. The shipped install seed is the generated settings.shared.json below.

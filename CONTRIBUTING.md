@@ -30,6 +30,10 @@ Run `just test` for everything, or `cargo nextest run -p playbook-code --config-
 
 `vX.Y.Z` releases `playbook`. `telemetry-vX.Y.Z` releases `playbook-telemetry`. Pushing the signed tag is enough: `release.yml` creates the release if it is missing (with `--latest=false` for every prefix except `v`, so GitHub's latest release stays on the `v` line), builds and uploads the assets, and stops. The Homebrew tap checks for new releases every 30 minutes and updates the matching formula. To rehearse, run the `release` workflow by hand with a `tag` such as `v0.26.0` or `telemetry-v0.2.0`: a manual run is always a dry run that builds without publishing.
 
+### Compatibility policy
+
+Every release is backward compatible, or ships a migration that runs on first use ([ADR-0034](docs/adr/0034-self-healing-upgrades.md)). A release that still changes what a user sees or does is a breaking change. Mark its commit with `!` after the type or a `BREAKING CHANGE:` footer, and add an entry to `breaking-changes.json` at the repository root with the version, the component (`playbook`, `plugin` or `telemetry`), a one line summary, the action the user takes (or `none, migrated automatically`) and the migration id or `null`. The release and pull request checks fail when a marked change has no entry. Every update channel shows the entries to the user ([ADR-0035](docs/adr/0035-breaking-change-notices.md)).
+
 ## Changing the plugin
 
 The skills, commands, agents and output style live in `plugins/playbook` and ship to users through the `pragmatic-engineer/marketplace` listing. See [ADR-0032](docs/adr/0032-plugin-in-the-playbook-repo.md) for how.
