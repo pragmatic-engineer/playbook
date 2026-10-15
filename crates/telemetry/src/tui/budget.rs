@@ -6,13 +6,16 @@
 //! the burn rate of the period on screen against the previous one. The tag on
 //! every line says where the number comes from: `measured` is read from Claude
 //! Code's own statusline input, `manual` is a `usage.budget.*` config value,
-//! `local history` is estimated from the session transcripts.
+//! `cached` is read from the usage numbers Claude Code keeps in its config
+//! file (with how old they are), `local history` is estimated from the session transcripts.
 
 use super::data::{Data, LimitsView};
 use super::fmt::{fit, money};
 use super::theme::{Ink, Palette};
 use crate::aggregate::date_key;
 use crate::limits::{Burn, Limit, LimitPeriod, Origin, State, Unit};
+use crate::limits_source::STALE_SECONDS;
+use crate::period::elapsed_text;
 use crate::query::{clock, day_of};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -122,12 +125,31 @@ fn state_seg(pal: &Palette, l: &Limit, now: i64) -> (Seg, Option<State>) {
     (Seg::text(2, text, fg(pal, ink)), Some(h.state))
 }
 
-fn limit_line(pal: &Palette, l: &Limit, now: i64, stale: bool, width: usize) -> Line<'static> {
-    let tag = match (l.origin, stale) {
-        (Origin::Measured, true) => "measured, stale",
-        (Origin::Measured, _) => "measured",
-        (Origin::Manual, _) => "manual",
-    };
+/// The source label of a limit: where it came from, and how old when that
+/// matters.
+fn tag(origin: Origin, stale: bool, cache_age: Option<i64>) -> String {
+    match (origin, stale) {
+        (Origin::Measured, true) => "measured, stale".to_string(),
+        (Origin::Measured, _) => "measured".to_string(),
+        (Origin::Manual, _) => "manual".to_string(),
+        (Origin::Cached, _) => match cache_age {
+            Some(a) if a > STALE_SECONDS => {
+                format!("cached, stale {} ago", elapsed_text(a))
+            }
+            Some(a) => format!("cached {} ago", elapsed_text(a)),
+            None => "cached".to_string(),
+        },
+    }
+}
+
+fn limit_line(
+    pal: &Palette,
+    l: &Limit,
+    now: i64,
+    (stale, cache_age): (bool, Option<i64>),
+    width: usize,
+) -> Line<'static> {
+    let tag = tag(l.origin, stale, cache_age);
     let mut segs = vec![Seg {
         drop: 0,
         spans: vec![
@@ -281,14 +303,19 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
         ));
         lines.push(Line::styled(
             fit(
-                "or use Claude Code on Pro or Max with the playbook statusline for the 5 hour and weekly limits.",
+                v.windows_note.unwrap_or(
+                    "or use Claude Code on Pro or Max with the playbook statusline for the 5 hour and weekly limits.",
+                ),
                 width,
             ),
             dim,
         ));
     }
     for l in v.limits.iter().take(MAX_LIMITS) {
-        lines.push(limit_line(pal, l, data.now, v.stale, width));
+        lines.push(limit_line(pal, l, data.now, (v.stale, v.cache_age), width));
+    }
+    if let Some(note) = v.windows_note.filter(|_| !v.limits.is_empty()) {
+        lines.push(Line::styled(fit(note, width), fg(pal, pal.inactive)));
     }
     lines.push(burn_line(pal, v, width));
     // The burn rate is always the last line, so two limits never push it out.

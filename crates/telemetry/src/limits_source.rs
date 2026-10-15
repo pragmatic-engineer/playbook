@@ -14,6 +14,7 @@
 
 use super::limits::{Burn, Limit, LimitPeriod, Origin, State, Unit};
 use super::period::Period;
+use super::plan::Account;
 use super::query::WeekStart;
 use super::UsageEvent;
 use crate::util::atomic::write_atomic_private;
@@ -216,20 +217,162 @@ pub fn manual_budgets(home: &Path) -> Vec<(LimitPeriod, f64)> {
     .collect()
 }
 
-/// Every known limit at `now`: measured first, then manual. Empty when nothing
-/// is known, which the views show as the "limit unknown" empty state.
-pub fn all_limits(
-    snapshot: Option<&Snapshot>,
-    budgets: &[(LimitPeriod, f64)],
-    events: &[UsageEvent],
-    now: i64,
-    week: WeekStart,
-) -> Vec<Limit> {
-    let mut out = snapshot.map(|s| s.limits(now)).unwrap_or_default();
-    for (period, usd) in budgets {
+/// Everything limits are built from: the statusline reading, the manual
+/// budgets and what Claude Code keeps in its config file.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Sources {
+    pub snapshot: Option<Snapshot>,
+    pub budgets: Vec<(LimitPeriod, f64)>,
+    pub account: Account,
+}
+
+impl Sources {
+    /// Reads the sources. `usage_dir` is the folder of the usage database.
+    pub fn load(usage_dir: Option<&Path>, claude_json: &Path, home: &Path) -> Sources {
+        Sources {
+            snapshot: usage_dir.and_then(load),
+            budgets: manual_budgets(home),
+            account: super::plan::read(claude_json),
+        }
+    }
+
+    /// The plan limits were read over six hours ago.
+    pub fn stale(&self, now: i64) -> bool {
+        self.snapshot.as_ref().is_some_and(|s| s.is_stale(now))
+    }
+}
+
+/// Where the monthly dollar limit comes from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Monthly {
+    /// The spend limit in the Claude Code cache. `fresh` is false once the
+    /// cache is over six hours old.
+    Cached {
+        limit_usd: f64,
+        used_usd: Option<f64>,
+        age: i64,
+        fresh: bool,
+    },
+    /// `usage.budget.monthlyUsd`.
+    Manual(f64),
+    Unset,
+}
+
+/// The monthly limit to use. A fresh cache wins because it is what Claude
+/// Code itself enforces. Otherwise the manual budget wins over an old cache,
+/// because the manual one is what the user chose on purpose.
+pub fn monthly(s: &Sources, now: i64) -> Monthly {
+    let manual = s
+        .budgets
+        .iter()
+        .find(|(p, _)| *p == LimitPeriod::Monthly)
+        .map(|(_, usd)| *usd);
+    let cached = s
+        .account
+        .cache
+        .as_ref()
+        .filter(|c| !c.is_from_the_future(now))
+        .and_then(|c| c.spend.map(|spend| (c, spend)));
+    match (cached, manual) {
+        (Some((c, spend)), _) if c.is_fresh(now) => Monthly::Cached {
+            limit_usd: spend.limit_usd,
+            used_usd: spend.used_usd,
+            age: c.age(now),
+            fresh: true,
+        },
+        (_, Some(usd)) => Monthly::Manual(usd),
+        (Some((c, spend)), None) => Monthly::Cached {
+            limit_usd: spend.limit_usd,
+            used_usd: spend.used_usd,
+            age: c.age(now),
+            fresh: false,
+        },
+        (None, None) => Monthly::Unset,
+    }
+}
+
+/// Every known limit at `now`: measured first, then cached, then manual.
+/// Empty when nothing is known, which the views show as the "limit unknown"
+/// empty state.
+pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart) -> Vec<Limit> {
+    let mut out = s
+        .snapshot
+        .as_ref()
+        .map(|s| s.limits(now))
+        .unwrap_or_default();
+    // The cached windows fill in a window the statusline has not reported, but
+    // only while the cache is fresh: a percentage changes within minutes.
+    if let Some(c) = s.account.cache.as_ref().filter(|c| c.is_fresh(now)) {
+        for (period, w) in [
+            (LimitPeriod::FiveHour, &c.five_hour),
+            (LimitPeriod::SevenDay, &c.seven_day),
+        ] {
+            let Some(w) = w.as_ref().filter(|w| w.resets_at > now) else {
+                continue;
+            };
+            if out.iter().any(|l| l.period == period) {
+                continue;
+            }
+            let (start, end) = period.ending_at(w.resets_at);
+            out.push(Limit {
+                unit: Unit::Percent,
+                period,
+                origin: Origin::Cached,
+                used: w.used_percentage,
+                limit: 100.0,
+                start,
+                end,
+            });
+        }
+    }
+    let choice = monthly(s, now);
+    let measured_monthly = out.iter().any(|l| l.period == LimitPeriod::Monthly);
+    for (period, usd) in &s.budgets {
+        if *period == LimitPeriod::Monthly && matches!(choice, Monthly::Cached { .. }) {
+            continue;
+        }
         out.push(Limit::manual_budget(*period, *usd, events, now, week));
     }
+    if let (
+        Monthly::Cached {
+            limit_usd,
+            used_usd,
+            fresh,
+            ..
+        },
+        false,
+    ) = (choice, measured_monthly)
+    {
+        let mut l = Limit::manual_budget(LimitPeriod::Monthly, limit_usd, events, now, week);
+        l.origin = Origin::Cached;
+        // Only a fresh cache knows the spend of every machine on the account.
+        if let Some(used) = used_usd.filter(|_| fresh) {
+            l.used = used.max(l.used);
+        }
+        out.push(l);
+    }
     out
+}
+
+/// The line for the 5 hour and weekly windows when none is known: the plan
+/// either has none, or none has been read yet. `None` when one is known.
+pub fn windows_note(s: &Sources, limits: &[Limit]) -> Option<&'static str> {
+    if limits
+        .iter()
+        .any(|l| matches!(l.period, LimitPeriod::FiveHour | LimitPeriod::SevenDay))
+    {
+        return None;
+    }
+    Some(if s.account.plan.has_windows() {
+        "5 hour and weekly windows: no recent reading, they appear after a session with the playbook statusline"
+    } else {
+        "5 hour and weekly windows: not available for this plan"
+    })
+}
+
+/// The plan, for views that name it.
+pub fn plan_label(s: &Sources) -> &'static str {
+    s.account.plan.label()
 }
 
 /// The empty state shown where a limit would be.
@@ -258,14 +401,9 @@ pub fn burn_pair(events: &[UsageEvent], period: Period, now: i64) -> (Burn, Burn
 }
 
 /// The limits and burn rates as JSON, for `--json`.
-pub fn report_json(
-    snapshot: Option<&Snapshot>,
-    budgets: &[(LimitPeriod, f64)],
-    events: &[UsageEvent],
-    now: i64,
-    week: WeekStart,
-) -> Value {
-    let limits = all_limits(snapshot, budgets, events, now, week);
+pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart) -> Value {
+    let snapshot = s.snapshot.as_ref();
+    let limits = all_limits(s, events, now, week);
     let burn: serde_json::Map<String, Value> = [Period::Today, Period::Week(week), Period::Month]
         .into_iter()
         .map(|p| {
@@ -281,6 +419,13 @@ pub fn report_json(
         "hint": limits.is_empty().then_some(UNKNOWN_HINT),
         "snapshot_captured_at": snapshot.map(|s| s.captured_at),
         "snapshot_stale": snapshot.map(|s| s.is_stale(now)),
+        "plan": plan_label(s),
+        "windows_note": windows_note(s, &limits),
+        "cache": s.account.cache.as_ref().map(|c| json!({
+            "fetched_at": c.fetched_at,
+            "age_seconds": c.age(now),
+            "fresh": c.is_fresh(now),
+        })),
         "limits": limits.iter().map(|l| l.to_json(now)).collect::<Vec<_>>(),
         "burn": burn,
     })
@@ -299,6 +444,7 @@ pub fn describe(l: &Limit, now: i64) -> String {
     let source = match l.origin {
         Origin::Measured => "measured from Claude Code",
         Origin::Manual => "manual limit",
+        Origin::Cached => "cached by Claude Code",
     };
     let head = format!(
         "{} {}: {} of {} used ({source})",
@@ -336,14 +482,8 @@ pub fn describe(l: &Limit, now: i64) -> String {
 }
 
 /// The limits section of `--summary`.
-pub fn summary_section(
-    snapshot: Option<&Snapshot>,
-    budgets: &[(LimitPeriod, f64)],
-    events: &[UsageEvent],
-    now: i64,
-    week: WeekStart,
-) -> String {
-    let limits = all_limits(snapshot, budgets, events, now, week);
+pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart) -> String {
+    let limits = all_limits(s, events, now, week);
     let mut out = format!("\nLimits and burn rate ({})\n", crate::tz::label());
     if limits.is_empty() {
         out.push_str(&format!("  {UNKNOWN_HINT}\n"));
@@ -351,8 +491,22 @@ pub fn summary_section(
     for l in &limits {
         out.push_str(&format!("  {}\n", describe(l, now)));
     }
-    if snapshot.is_some_and(|s| s.is_stale(now)) {
+    if s.stale(now) {
         out.push_str("  note: the plan limits were read over 6 hours ago\n");
+    }
+    if let Some(c) = s
+        .account
+        .cache
+        .as_ref()
+        .filter(|_| limits.iter().any(|l| l.origin == Origin::Cached))
+    {
+        out.push_str(&format!(
+            "  note: the cached limits were fetched by Claude Code {} ago\n",
+            super::period::elapsed_text(c.age(now))
+        ));
+    }
+    if let Some(note) = windows_note(s, &limits) {
+        out.push_str(&format!("  {note}\n"));
     }
     for p in [Period::Today, Period::Week(week), Period::Month] {
         let (c, v) = burn_pair(events, p, now);
@@ -502,20 +656,205 @@ mod tests {
 
     #[test]
     fn nothing_known_is_an_empty_list() {
-        let l = all_limits(None, &[], &[], NOW, WeekStart::Monday);
+        let l = all_limits(&Sources::default(), &[], NOW, WeekStart::Monday);
         assert!(l.is_empty());
     }
 
     #[test]
     fn manual_budgets_follow_the_snapshot() {
-        let l = all_limits(
-            None,
-            &[(LimitPeriod::Monthly, 100.0), (LimitPeriod::Weekly, 30.0)],
-            &[],
-            NOW,
-            WeekStart::Monday,
-        );
+        let s = Sources {
+            budgets: vec![(LimitPeriod::Monthly, 100.0), (LimitPeriod::Weekly, 30.0)],
+            ..Sources::default()
+        };
+
+        let l = all_limits(&s, &[], NOW, WeekStart::Monday);
+
         assert_eq!(l.len(), 2);
         assert!(l.iter().all(|x| x.origin == Origin::Manual));
+    }
+
+    fn cache(age: i64, spend: Option<SpendLimit>, five_hour: Option<Window>) -> Account {
+        Account {
+            plan: crate::plan::Plan::EnterpriseOrUnknown,
+            cache: Some(crate::plan::UsageCache {
+                fetched_at: NOW - age,
+                five_hour,
+                seven_day: None,
+                spend,
+            }),
+        }
+    }
+
+    use crate::plan::SpendLimit;
+
+    fn spend(limit_usd: f64, used_usd: Option<f64>) -> Option<SpendLimit> {
+        Some(SpendLimit {
+            limit_usd,
+            used_usd,
+        })
+    }
+
+    #[test]
+    fn a_fresh_cached_spend_limit_wins_over_the_manual_monthly_budget() {
+        let s = Sources {
+            budgets: vec![(LimitPeriod::Monthly, 100.0), (LimitPeriod::Weekly, 30.0)],
+            account: cache(600, spend(500.0, Some(120.0)), None),
+            ..Sources::default()
+        };
+
+        let l = all_limits(&s, &[], NOW, WeekStart::Monday);
+
+        let monthly: Vec<_> = l
+            .iter()
+            .filter(|x| x.period == LimitPeriod::Monthly)
+            .collect();
+        assert_eq!(monthly.len(), 1);
+        assert_eq!(monthly[0].origin, Origin::Cached);
+        assert_eq!(monthly[0].limit, 500.0);
+        assert_eq!(monthly[0].used, 120.0);
+        assert!(l
+            .iter()
+            .any(|x| x.period == LimitPeriod::Weekly && x.origin == Origin::Manual));
+    }
+
+    #[test]
+    fn a_stale_cached_spend_limit_loses_to_the_manual_budget() {
+        let s = Sources {
+            budgets: vec![(LimitPeriod::Monthly, 100.0)],
+            account: cache(48 * 3600, spend(500.0, Some(120.0)), None),
+            ..Sources::default()
+        };
+
+        let l = all_limits(&s, &[], NOW, WeekStart::Monday);
+
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].origin, Origin::Manual);
+        assert_eq!(l[0].limit, 100.0);
+    }
+
+    #[test]
+    fn a_stale_cached_spend_limit_is_used_when_no_budget_is_set_and_its_spend_is_local() {
+        let s = Sources {
+            account: cache(48 * 3600, spend(500.0, Some(120.0)), None),
+            ..Sources::default()
+        };
+
+        let l = all_limits(&s, &[], NOW, WeekStart::Monday);
+
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].origin, Origin::Cached);
+        assert_eq!(l[0].limit, 500.0);
+        assert_eq!(l[0].used, 0.0);
+    }
+
+    #[test]
+    fn a_fresh_cached_window_fills_in_but_never_replaces_a_statusline_window() {
+        let cached = Window {
+            used_percentage: 70.0,
+            resets_at: NOW + 3600,
+        };
+        let mut s = Sources {
+            account: cache(600, None, Some(cached)),
+            ..Sources::default()
+        };
+
+        let filled = all_limits(&s, &[], NOW, WeekStart::Monday);
+        s.snapshot = Some(Snapshot {
+            captured_at: NOW,
+            five_hour: Some(Window {
+                used_percentage: 10.0,
+                resets_at: NOW + 7200,
+            }),
+            ..Snapshot::default()
+        });
+        let kept = all_limits(&s, &[], NOW, WeekStart::Monday);
+
+        assert_eq!(
+            (filled.len(), filled[0].origin, filled[0].used),
+            (1, Origin::Cached, 70.0)
+        );
+        assert_eq!(
+            (kept.len(), kept[0].origin, kept[0].used),
+            (1, Origin::Measured, 10.0)
+        );
+    }
+
+    #[test]
+    fn a_cached_window_is_ignored_once_the_cache_is_stale() {
+        let cached = Window {
+            used_percentage: 70.0,
+            resets_at: NOW + 3600,
+        };
+        let s = Sources {
+            account: cache(7 * 3600, None, Some(cached)),
+            ..Sources::default()
+        };
+
+        let l = all_limits(&s, &[], NOW, WeekStart::Monday);
+
+        assert!(l.is_empty());
+    }
+
+    #[test]
+    fn the_windows_note_says_not_available_for_a_plan_without_windows() {
+        let s = Sources::default();
+
+        let note = windows_note(&s, &[]);
+
+        assert_eq!(
+            note,
+            Some("5 hour and weekly windows: not available for this plan")
+        );
+    }
+
+    #[test]
+    fn the_windows_note_asks_for_a_reading_on_a_max_plan() {
+        let s = Sources {
+            account: Account {
+                plan: crate::plan::Plan::Max5x,
+                cache: None,
+            },
+            ..Sources::default()
+        };
+
+        let note = windows_note(&s, &[]).unwrap();
+
+        assert!(note.contains("no recent reading"), "{note}");
+    }
+
+    #[test]
+    fn there_is_no_windows_note_when_a_window_is_known() {
+        let snap = Snapshot::from_statusline(
+            &input(&format!(
+                r#""five_hour":{{"used_percentage":1.0,"resets_at":{}}}"#,
+                NOW + 3600
+            )),
+            NOW,
+        );
+        let s = Sources {
+            snapshot: snap,
+            ..Sources::default()
+        };
+        let limits = all_limits(&s, &[], NOW, WeekStart::Monday);
+
+        assert_eq!(windows_note(&s, &limits), None);
+    }
+
+    #[test]
+    fn the_json_names_the_plan_and_the_cache_age() {
+        let s = Sources {
+            account: cache(600, spend(500.0, None), None),
+            ..Sources::default()
+        };
+
+        let v = report_json(&s, &[], NOW, WeekStart::Monday);
+
+        assert_eq!(v["plan"], "Enterprise or unknown plan");
+        assert_eq!(v["cache"]["age_seconds"], 600);
+        assert_eq!(v["limits"][0]["origin"], "cached");
+        assert!(v["windows_note"]
+            .as_str()
+            .unwrap()
+            .contains("not available"));
     }
 }

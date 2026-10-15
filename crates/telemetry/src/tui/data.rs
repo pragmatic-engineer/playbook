@@ -9,7 +9,7 @@ use super::theme::SERIES;
 use crate::aggregate::{group_usage, unpriced_models, Dimension, Group};
 use crate::db;
 use crate::limits::{Burn, Limit, Origin, State};
-use crate::limits_source::{self, Snapshot};
+use crate::limits_source::{self, Sources};
 use crate::period::{Comparison, Period};
 use crate::query::{self, LiveView, Range, SessionDay, Totals, WeekStart};
 use crate::run::Paths;
@@ -112,6 +112,10 @@ pub struct LimitsView {
     pub limits: Vec<Limit>,
     /// The plan limits were read more than six hours ago.
     pub stale: bool,
+    /// Seconds since Claude Code cached the numbers a cached limit uses.
+    pub cache_age: Option<i64>,
+    /// Why the 5 hour and weekly windows are missing, when they are.
+    pub windows_note: Option<&'static str>,
     pub period: Period,
     pub burn: Burn,
     pub previous: Burn,
@@ -124,6 +128,8 @@ impl Default for LimitsView {
         LimitsView {
             limits: Vec::new(),
             stale: false,
+            cache_age: None,
+            windows_note: None,
             period: Period::Week(WeekStart::default()),
             burn: Burn::new(0.0, 0),
             previous: Burn::new(0.0, 0),
@@ -145,20 +151,28 @@ impl LimitsView {
     /// `events` must reach back to `limits_source::events_since`. The period
     /// is the one the range is, or this week for the other ranges.
     pub fn build(
-        snapshot: Option<&Snapshot>,
-        budgets: &[(crate::limits::LimitPeriod, f64)],
+        sources: &Sources,
         events: &[UsageEvent],
         now: i64,
         week: WeekStart,
         range: Range,
     ) -> LimitsView {
-        let mut limits = limits_source::all_limits(snapshot, budgets, events, now, week);
+        let mut limits = limits_source::all_limits(sources, events, now, week);
         limits.sort_by_key(|l| (severity(l, now), l.origin == Origin::Manual));
+        let windows_note = limits_source::windows_note(sources, &limits);
+        let cache_age = sources
+            .account
+            .cache
+            .as_ref()
+            .filter(|_| limits.iter().any(|l| l.origin == Origin::Cached))
+            .map(|c| c.age(now));
         let period = Period::of_range(range).unwrap_or(Period::Week(week));
         let (burn, previous) = limits_source::burn_pair(events, period, now);
         LimitsView {
             limits,
-            stale: snapshot.is_some_and(|s| s.is_stale(now)),
+            stale: sources.stale(now),
+            cache_age,
+            windows_note,
             period,
             burn,
             previous,
@@ -389,16 +403,8 @@ pub fn load_limits(
 ) -> Result<LimitsView, String> {
     let week = crate::entry::configured_week_start();
     let events = db::load_usage_events_since(conn, limits_source::events_since(now, week))?;
-    let snapshot = paths.db.parent().and_then(limits_source::load);
-    let budgets = limits_source::manual_budgets(&crate::host::home_dir());
-    Ok(LimitsView::build(
-        snapshot.as_ref(),
-        &budgets,
-        &events,
-        now,
-        week,
-        range,
-    ))
+    let sources = crate::run::limit_sources(paths);
+    Ok(LimitsView::build(&sources, &events, now, week, range))
 }
 
 #[cfg(test)]
@@ -440,7 +446,13 @@ mod tests {
             event(NOW + 1, "opus", "a", 8.0),
         ];
 
-        let view = LimitsView::build(None, &[], &events, NOW, WeekStart::default(), Range::Today);
+        let view = LimitsView::build(
+            &Sources::default(),
+            &events,
+            NOW,
+            WeekStart::default(),
+            Range::Today,
+        );
 
         assert_eq!(view.recent_cost_24h, 6.0);
     }

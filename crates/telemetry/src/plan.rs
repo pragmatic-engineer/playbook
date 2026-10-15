@@ -350,6 +350,55 @@ fn statusline_lines(usage_dir: &Path, now: i64) -> Vec<String> {
     ]
 }
 
+fn money(n: f64) -> String {
+    format!("${n:.2}")
+}
+
+/// What the panels will use, given the sources above.
+fn verdict_lines(s: &limits_source::Sources, now: i64) -> Vec<String> {
+    use crate::limits::Origin;
+    use crate::query::WeekStart;
+    let limits = limits_source::all_limits(s, &[], now, WeekStart::default());
+    let mut out = vec!["What pbtop will show".to_string()];
+    for (period, name) in [
+        (LimitPeriod::FiveHour, "5 hour window"),
+        (LimitPeriod::SevenDay, "weekly window"),
+    ] {
+        let from = match limits.iter().find(|l| l.period == period) {
+            Some(l) if l.origin == Origin::Cached => "from the Claude Code cache".to_string(),
+            Some(_) => "from the statusline reading".to_string(),
+            None if s.account.plan.has_windows() => {
+                "no recent reading yet (use `playbook statusline`)".to_string()
+            }
+            None => "not available for this plan".to_string(),
+        };
+        out.push(format!("  {name}: {from}"));
+    }
+    out.push(match limits_source::monthly(s, now) {
+        limits_source::Monthly::Cached {
+            limit_usd,
+            age,
+            fresh,
+            ..
+        } => format!(
+            "  monthly limit: {} from the Claude Code cache, {} old{}",
+            money(limit_usd),
+            elapsed_text(age),
+            if fresh { "" } else { " (stale)" }
+        ),
+        limits_source::Monthly::Manual(usd) => {
+            format!(
+                "  monthly limit: {} from usage.budget.monthlyUsd",
+                money(usd)
+            )
+        }
+        limits_source::Monthly::Unset => {
+            "  monthly limit: none (set usage.budget.monthlyUsd)".to_string()
+        }
+    });
+    out
+}
+
 /// The text of `playbook usage doctor`: which sources of limits exist on this
 /// machine. It lists field names, ages, the plan label, window percentages and
 /// manual budgets. Values of the plan fields and the cached spend limit appear
@@ -392,6 +441,13 @@ pub fn report(
     for (period, usd) in budgets {
         out.push(format!("    {}: ${usd:.2}", period.key()));
     }
+    let sources = limits_source::Sources {
+        snapshot: limits_source::load(usage_dir),
+        budgets: budgets.to_vec(),
+        account: read(claude_json),
+    };
+    out.push(String::new());
+    out.extend(verdict_lines(&sources, now));
     if !raw {
         out.push(String::new());
         out.push(
@@ -765,6 +821,54 @@ mod tests {
         );
         assert!(text.contains("five_hour: present"), "{text}");
         assert!(text.contains("spend_limit: absent"), "{text}");
+    }
+
+    #[test]
+    fn the_report_ends_with_what_pbtop_will_show() {
+        let spend =
+            r#"{"enabled":true,"limit":{"amount_minor":50000,"currency":"USD","exponent":2}}"#;
+        let home = Home::new("verdict", &cache_body((NOW - 600) * 1000, spend));
+
+        let text = report_of(&home, NOW, false);
+
+        assert!(text.contains("What pbtop will show"), "{text}");
+        assert!(
+            text.contains("5 hour window: from the Claude Code cache"),
+            "{text}"
+        );
+        assert!(
+            text.contains("weekly window: no recent reading yet"),
+            "{text}"
+        );
+        assert!(
+            text.contains("monthly limit: $500.00 from the Claude Code cache, 10m old"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_plan_with_no_windows_says_not_available() {
+        let home = Home::new(
+            "verdict-enterprise",
+            r#"{"oauthAccount":{"organizationType":"x"}}"#,
+        );
+
+        let text = report(
+            &home.json(),
+            &home.0,
+            &[(LimitPeriod::Monthly, 80.0)],
+            NOW,
+            false,
+        );
+
+        assert!(
+            text.contains("5 hour window: not available for this plan"),
+            "{text}"
+        );
+        assert!(
+            text.contains("monthly limit: $80.00 from usage.budget.monthlyUsd"),
+            "{text}"
+        );
     }
 
     #[test]
