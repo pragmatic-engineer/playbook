@@ -61,6 +61,7 @@ pub mod memory_import;
 pub mod migrate_cli;
 pub mod mode;
 pub mod models;
+pub mod notices;
 pub mod plan_cleanup;
 pub mod planning;
 pub mod plans;

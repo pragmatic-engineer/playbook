@@ -168,6 +168,9 @@ pub struct Outcome {
     pub recorded: bool,
     /// Whether the deadline stopped the run before every migration started.
     pub timed_out: bool,
+    /// The breaking changes this binary had not shown yet (ADR 0035). The
+    /// caller shows them; they are already marked as shown.
+    pub breaking: Vec<crate::breaking::Entry>,
     /// Why nothing ran, when nothing did.
     pub skipped: Option<Skip>,
 }
@@ -278,8 +281,25 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
     if order == Ordering::Greater {
         return Outcome::skipped(Skip::Downgrade);
     }
+    // Read before the heal moves `versions/binary`, and marked as shown
+    // whether the heal succeeds or not.
+    let breaking = crate::notices::binary(&root, record.binary.as_deref());
+    Outcome {
+        breaking,
+        ..heal_for(ctx, trigger, now, &root, &record, order)
+    }
+}
+
+fn heal_for(
+    ctx: &Ctx,
+    trigger: Trigger,
+    now: u64,
+    root: &Path,
+    record: &Record,
+    order: Ordering,
+) -> Outcome {
     match trigger {
-        Trigger::Hook if order == Ordering::Equal => recheck_pending(ctx, &root, &record),
+        Trigger::Hook if order == Ordering::Equal => recheck_pending(ctx, root, record),
         Trigger::Start { .. } if order == Ordering::Equal => Outcome::default(),
         Trigger::Hook | Trigger::Start { .. } => {
             let waiting = record
@@ -295,10 +315,10 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
                 Trigger::Start { deadline } => Some(deadline),
                 _ => None,
             };
-            heal_now(ctx, &root, 0, now, deadline)
+            heal_now(ctx, root, 0, now, deadline)
         }
         Trigger::Fix => {
-            let mut out = heal_now(ctx, &root, migrate::LOCK_RETRIES, now, None);
+            let mut out = heal_now(ctx, root, migrate::LOCK_RETRIES, now, None);
             out.warnings.extend(migrate::owned_notes(ctx));
             out
         }
@@ -312,7 +332,7 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
             if failed {
                 out
             } else {
-                record_clean(ctx, &root, out)
+                record_clean(ctx, root, out)
             }
         }
     }
@@ -402,9 +422,36 @@ fn ids(open: &[OpenItem]) -> Vec<String> {
 pub fn session_line(home: &Path) -> Option<String> {
     let ctx = Ctx::for_home(home);
     let now = crate::common::time::now_epoch_secs();
-    std::panic::catch_unwind(|| run(&ctx, Trigger::Hook, now))
-        .ok()?
-        .line()
+    std::panic::catch_unwind(|| {
+        let root = crate::common::paths::playbook_root_from(home);
+        // The plugin updates on its own, so its notice is checked every
+        // session, from the plugin version seen before this heal.
+        let seen = Record::read_only(&root).ok().and_then(|r| r.plugin);
+        let out = run(&ctx, Trigger::Hook, now);
+        let mut entries = out.breaking.clone();
+        let mut line = out.line();
+        match crate::notices::plugin(&root, &ctx.claude_home, seen.as_deref()) {
+            Ok(plugin) => entries.extend(plugin),
+            Err(err) => {
+                let err = format!("playbook: {err}");
+                line = Some(line.map_or(err.clone(), |l| format!("{l}\n{err}")));
+            }
+        }
+        notice(line, &entries)
+    })
+    .ok()?
+}
+
+/// `line` and the breaking changes block, in that order, or `None` when
+/// both are empty.
+fn notice(line: Option<String>, entries: &[crate::breaking::Entry]) -> Option<String> {
+    let block = crate::breaking::render(entries);
+    let parts: Vec<&str> = line
+        .as_deref()
+        .into_iter()
+        .chain((!block.is_empty()).then_some(block.trim_end()))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("\n"))
 }
 
 /// Whether the first-run step runs before `command`. Hot paths never pay for
@@ -470,13 +517,16 @@ fn start(home: &Path, deadline: Instant) -> Option<String> {
     }
     let out = run(&Ctx::for_home(home), Trigger::Start { deadline }, now);
     if out.skipped.is_some() {
-        return None;
+        return notice(None, &out.breaking);
     }
-    let mut lines: Vec<String> = out.line().into_iter().collect();
+    let mut line = out.line();
     if out.timed_out {
-        lines.push(format!("playbook: {TIME_LIMIT_NOTE}"));
+        line = Some(match line {
+            Some(l) => format!("{l}\nplaybook: {TIME_LIMIT_NOTE}"),
+            None => format!("playbook: {TIME_LIMIT_NOTE}"),
+        });
     }
-    (!lines.is_empty()).then(|| lines.join("\n"))
+    notice(line, &out.breaking)
 }
 
 #[cfg(test)]
