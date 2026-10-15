@@ -7,7 +7,7 @@
 //! new binary can print the entries between two versions.
 
 use crate::update::resolve::compare;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 const EMBEDDED: &str = include_str!("../../../breaking-changes.json");
 
 /// What an entry applies to. Each has its own version line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Component {
     Playbook,
@@ -40,7 +40,7 @@ pub const AUTO_ACTION: &str = "none, migrated automatically";
 const FIELDS: [&str; 5] = ["version", "component", "summary", "action", "migration"];
 
 /// One breaking change.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Entry {
     /// The release that brings the change, as MAJOR.MINOR.PATCH.
     pub version: String,
@@ -161,16 +161,25 @@ pub fn all() -> &'static [Entry] {
     ALL.get_or_init(|| parse(EMBEDDED).unwrap_or_default())
 }
 
+/// True for a version `select` accepts: MAJOR.MINOR.PATCH with an optional
+/// leading `v` and an optional pre-release.
+pub fn is_version(v: &str) -> bool {
+    crate::plugin_root::is_plain_version(v.trim_start_matches('v'))
+}
+
+/// The entries as a JSON list, the shape `lenient` reads back. `playbook
+/// breaking --json` prints it, so an older binary can read a newer one.
+pub fn to_json(entries: &[Entry]) -> String {
+    serde_json::to_string(entries).unwrap_or_else(|_| "[]".into())
+}
+
 /// The entries of `component` in `entries` with `from < version <= to`,
 /// oldest first. Nothing when `to` is not above `from`, or when either is
 /// not a version (an optional leading `v` and a pre-release are fine), so
 /// an empty or corrupt record never shows the whole history.
 pub fn select(entries: &[Entry], component: Component, from: &str, to: &str) -> Vec<Entry> {
     let (from, to) = (from.trim_start_matches('v'), to.trim_start_matches('v'));
-    if !crate::plugin_root::is_plain_version(from)
-        || !crate::plugin_root::is_plain_version(to)
-        || compare(to, from) != Ordering::Greater
-    {
+    if !is_version(from) || !is_version(to) || compare(to, from) != Ordering::Greater {
         return Vec::new();
     }
     let mut found: Vec<Entry> = entries
@@ -417,6 +426,19 @@ mod tests {
         .unwrap_err()
         .contains("exactly"));
         assert!(parse(&auto(AUTO_ACTION, "\"0001-memory-store-move\"")).is_ok());
+    }
+
+    #[test]
+    fn to_json_round_trips_through_lenient() {
+        let mut migrated = entry("0.27.0", Component::Plugin);
+        migrated.action = AUTO_ACTION.into();
+        migrated.migration = Some("0001-memory-store-move".into());
+        let entries = vec![entry("0.26.0", Component::Playbook), migrated];
+
+        let values: Vec<serde_json::Value> = serde_json::from_str(&to_json(&entries)).unwrap();
+
+        assert_eq!(lenient(&values), entries);
+        assert_eq!(to_json(&[]), "[]");
     }
 
     #[test]

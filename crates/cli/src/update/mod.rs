@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook update`: fetch a release binary, verify it (SHA256SUMS, then the
-//! build attestation), swap it in with a backup, then check PATH.
+//! build attestation), show the breaking changes it brings, swap it in with a
+//! backup, then check PATH.
 //! Install.sh and this share one policy; see `verify`.
 
 pub mod check;
@@ -40,6 +41,9 @@ pub struct Env {
     pub current_version: String,
     pub api_base: String,
     pub download_base: String,
+    /// Shows text to the user at once, before the swap: the breaking
+    /// changes block.
+    pub announce: fn(&str),
 }
 
 impl Env {
@@ -60,6 +64,7 @@ impl Env {
             current_version: env!("CARGO_PKG_VERSION").to_string(),
             api_base: api_base(),
             download_base: format!("https://github.com/{REPO}/releases/download"),
+            announce: |text| eprint!("{text}"),
         })
     }
 }
@@ -76,11 +81,37 @@ pub struct Outcome {
     pub warnings: Vec<String>,
     /// The version swapped in, when the update replaced the binary.
     pub installed: Option<String>,
+    /// The breaking changes block of the new binary, shown again after the
+    /// swap and the heal. Empty when the upgrade crosses none.
+    pub breaking: String,
 }
 
 /// The first release whose binary has `doctor --fix`. The `-0` sorts below
 /// every 0.27.0 pre-release, so a release candidate counts too.
 pub const FIRST_FIX_VERSION: &str = "0.27.0-0";
+
+/// How long `update` waits for the new binary's breaking change list.
+const BREAKING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Asks the binary at `exe` for the playbook entries newer than `since`
+/// (ADR 0035), as JSON, and renders them with this binary. A binary without
+/// the `breaking` command is older than this one, so any failure or output
+/// that is not the JSON list means there is nothing to show.
+pub fn breaking_notice(exe: &Path, since: &str) -> String {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(["breaking", "--since", since, "--json"])
+        .stdin(std::process::Stdio::null());
+    let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, BREAKING_TIMEOUT) else {
+        return String::new();
+    };
+    if !out.status.success() {
+        return String::new();
+    }
+    let Ok(values) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) else {
+        return String::new();
+    };
+    crate::breaking::render(&crate::breaking::lenient(&values))
+}
 
 /// How long `update` waits for the new binary's `doctor --fix`.
 const HEAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
@@ -286,6 +317,13 @@ pub fn run(
         }
     }
 
+    if order.is_gt() {
+        o.breaking = breaking_notice(&stage, current);
+        if !o.breaking.is_empty() {
+            (env.announce)(&o.breaking);
+        }
+    }
+
     let done = swap::install(&stage, &env.exe, current, &version, smoke)?;
     o.installed = Some(version.clone());
     o.warnings.extend(done.warnings);
@@ -337,7 +375,34 @@ mod tests {
             current_version: "0.16.0".into(),
             api_base: API.into(),
             download_base: DL.into(),
+            announce: announce_to_test,
         }
+    }
+
+    thread_local! {
+        static ANNOUNCED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn announce_to_test(text: &str) {
+        ANNOUNCED.with(|a| a.borrow_mut().push(text.to_string()));
+    }
+
+    fn announced() -> Vec<String> {
+        ANNOUNCED.with(|a| a.borrow_mut().drain(..).collect())
+    }
+
+    /// A 0.17.0 binary whose `breaking --since <v> --json` lists one entry.
+    fn breaking_script() -> Vec<u8> {
+        concat!(
+            "#!/bin/sh\n",
+            "if [ \"$1\" = breaking ]; then\n",
+            "  echo '[{\"version\":\"0.17.0\",\"component\":\"playbook\",",
+            "\"summary\":\"The old flag is gone.\",\"action\":\"playbook init\",",
+            "\"migration\":null}]'\n",
+            "else echo 'playbook 0.17.0'; fi\n"
+        )
+        .as_bytes()
+        .to_vec()
     }
 
     fn fixture(binary: &[u8], sums_hash_of: &[u8]) -> FakeFetcher {
@@ -436,6 +501,75 @@ mod tests {
         assert!(env.exe.with_file_name("playbook.0.16.0.bak").exists());
         assert!(out.out.iter().any(|l| l.contains("0.16.0 -> 0.17.0")));
         assert_eq!(out.installed.as_deref(), Some("0.17.0"));
+    }
+
+    #[test]
+    fn an_update_shows_the_new_binary_s_breaking_changes_before_the_swap() {
+        // Arrange
+        let env = env_in("up-breaking");
+        let bin = breaking_script();
+        announced();
+
+        // Act
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(
+            out.breaking,
+            "Breaking changes in this upgrade:\n  playbook 0.17.0: The old flag is gone.\n    Action: playbook init\n"
+        );
+        assert_eq!(announced(), vec![out.breaking.clone()]);
+        assert_eq!(out.installed.as_deref(), Some("0.17.0"));
+    }
+
+    #[test]
+    fn a_new_binary_without_the_breaking_command_shows_nothing() {
+        let env = env_in("up-no-breaking");
+        let bin = script_bytes("0.17.0");
+        announced();
+
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        assert_eq!(out.breaking, "");
+        assert!(announced().is_empty());
+    }
+
+    #[test]
+    fn a_downgrade_shows_no_breaking_changes() {
+        let mut env = env_in("up-down-breaking");
+        env.current_version = "0.19.0".into();
+        let bin = breaking_script();
+        let opts = Options {
+            version: Some("0.17.0".into()),
+            ..Options::default()
+        };
+        announced();
+
+        let out = run(
+            &opts,
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        assert_eq!(out.breaking, "");
+        assert!(announced().is_empty());
     }
 
     #[test]

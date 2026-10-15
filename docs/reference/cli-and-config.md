@@ -90,7 +90,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `breaking`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -142,6 +142,17 @@ Subcommands: `check`
 Check that `acli` meets the minimum version and whether `twg` is installed
 
 Prints one line for `acli` (`ok`, `too old` with the `brew upgrade atlassian/acli/acli` hint, `version unreadable` or `missing`) and one for `twg`. Exits 0 when `acli` is usable and 1 otherwise, so the skill can fall back to the next route. Whether the Atlassian MCP tools are connected is left to the skill.
+
+### `playbook breaking`
+
+List the breaking changes this binary knows about
+
+Reads the record built into this binary (ADR 0035). With `--since`, it lists the playbook entries newer than that version, up to this one. Without it, it lists every entry. `playbook update` runs it on the new binary to show what an upgrade crosses. Prints nothing when there is nothing to list.
+
+Example: `playbook breaking --since 0.25.0`
+
+- `--since <SINCE>`: List only the playbook entries newer than this version
+- `--json`: Print the entries as a JSON list
 
 ### `playbook cc`
 
