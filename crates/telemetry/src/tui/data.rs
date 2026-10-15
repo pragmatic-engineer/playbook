@@ -432,6 +432,20 @@ mod tests {
     }
 
     #[test]
+    fn the_recent_cost_counts_the_last_24_hours_and_stops_at_now() {
+        let events = vec![
+            event(NOW - 86_400, "opus", "a", 1.0),
+            event(NOW - 86_399, "opus", "a", 2.0),
+            event(NOW, "opus", "a", 4.0),
+            event(NOW + 1, "opus", "a", 8.0),
+        ];
+
+        let view = LimitsView::build(None, &[], &events, NOW, WeekStart::default(), Range::Today);
+
+        assert_eq!(view.recent_cost_24h, 6.0);
+    }
+
+    #[test]
     fn build_groups_the_range_and_applies_the_filter() {
         let events = vec![
             event(NOW - 60, "opus", "a", 2.0),

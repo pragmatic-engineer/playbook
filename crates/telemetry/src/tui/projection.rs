@@ -11,9 +11,7 @@
 use super::data::Data;
 use super::fmt::{fit, money};
 use super::theme::Palette;
-use crate::aggregate::date_key;
-use crate::limits::{Limit, LimitPeriod, Unit};
-use crate::query::{clock, day_of};
+use crate::limits::{Limit, Unit, MIN_PROJECTION_SECONDS};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -45,29 +43,22 @@ fn outcome(remaining: f64, pace_per_day: f64, now: i64, end: i64) -> Outcome {
     if !(pace_per_day.is_finite() && pace_per_day > 0.0) {
         return Outcome::Idle;
     }
-    let at = now + (remaining / pace_per_day * DAY).ceil() as i64;
-    if at < end {
-        Outcome::At(at)
+    // Compare in seconds as a float first, so a tiny pace cannot overflow.
+    let wait = (remaining / pace_per_day * DAY).ceil();
+    if wait < (end - now) as f64 {
+        Outcome::At(now + wait as i64)
     } else {
         Outcome::Safe
     }
 }
 
-/// `MM-DD HH:MM` in the chosen zone. The panel title names the zone.
-fn when(at: i64) -> String {
-    let date = date_key(day_of(at));
-    format!("{} {}", &date[5..], &clock(at)[..5])
-}
-
-fn name(l: &Limit) -> &'static str {
-    match (l.period, l.unit) {
-        (LimitPeriod::FiveHour, _) => "5 hour window",
-        (LimitPeriod::SevenDay, _) => "Weekly window",
-        (LimitPeriod::Daily, _) => "Daily budget",
-        (LimitPeriod::Weekly, Unit::Percent) => "Weekly spend limit",
-        (LimitPeriod::Monthly, Unit::Percent) => "Monthly spend limit",
-        (LimitPeriod::Weekly, _) => "Weekly budget",
-        (LimitPeriod::Monthly, _) => "Monthly budget",
+/// The limit's name with a capital letter, as the line starts with it.
+fn heading(l: &Limit) -> String {
+    let n = super::budget::name(l);
+    let mut chars = n.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().chain(chars).collect(),
+        None => String::new(),
     }
 }
 
@@ -86,24 +77,27 @@ fn clause(label: &str, pace: Option<f64>, unit: Unit, o: Outcome) -> String {
     let pace_text = rate(pace);
     match o {
         Outcome::Reached | Outcome::Idle => format!("{label} {pace_text}: no hit"),
-        Outcome::At(at) => format!("{label} {pace_text}: hit {}", when(at)),
+        Outcome::At(at) => format!("{label} {pace_text}: hit {}", super::budget::stamp(at)),
         Outcome::Safe => format!("{label} {pace_text}: won't hit before it resets"),
     }
 }
 
 /// The plain line for one limit. `recent_cost` is the spend of the last
-/// 24 hours, all projects, used for dollar budgets.
+/// 24 hours, all projects, used for dollar budgets that are older than a day.
 pub fn line(l: &Limit, recent_cost: f64, now: i64) -> String {
     let used = match l.unit {
         Unit::Dollars => format!("{} of {}", money(l.used), money(l.limit)),
         Unit::Percent => format!("{:.0}% used", l.used),
     };
-    let head = format!("{}, {used}.", name(l));
+    let head = format!("{}, {used}.", heading(l));
     let Some(h) = l.headroom(now) else {
         return head;
     };
     let remaining = h.remaining;
-    let avg = h.avg_per_day;
+    // Like the Budget panel, wait for an hour of the period before projecting.
+    let avg = h
+        .avg_per_day
+        .filter(|_| h.elapsed_seconds >= MIN_PROJECTION_SECONDS);
     let avg_label = match l.unit {
         Unit::Dollars => "period average",
         Unit::Percent => "window average",
@@ -112,20 +106,26 @@ pub fn line(l: &Limit, recent_cost: f64, now: i64) -> String {
         avg_label,
         avg,
         l.unit,
-        avg.map_or(Outcome::Idle, |p| outcome(remaining, p, now, l.end)),
+        outcome(remaining, avg.unwrap_or(0.0), now, l.end),
     );
     if l.unit == Unit::Percent {
         return format!("{head} {avg_clause}.");
     }
-    // The recent pace covers the last 24 hours, or less when the period is
-    // younger than that. Under an hour there is too little to say.
-    let span = RECENT_SECONDS.min(now - l.start);
-    let recent = (span >= 3600).then(|| recent_cost / (span as f64 / DAY));
+    // The recent pace covers the last 24 hours. A period younger than that
+    // uses its own spend over its own age, so spend from before the period
+    // began never counts. Under an hour there is too little to say.
+    let age = now - l.start;
+    let (spent, span) = if age < RECENT_SECONDS {
+        (l.used, age)
+    } else {
+        (recent_cost, RECENT_SECONDS)
+    };
+    let recent = (span >= MIN_PROJECTION_SECONDS).then(|| spent / (span as f64 / DAY));
     let recent_clause = clause(
         "last 24h",
         recent,
         l.unit,
-        recent.map_or(Outcome::Idle, |p| outcome(remaining, p, now, l.end)),
+        outcome(remaining, recent.unwrap_or(0.0), now, l.end),
     );
     format!("{head} {recent_clause}. {avg_clause}.")
 }
@@ -183,7 +183,7 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::limits::Origin;
+    use crate::limits::{LimitPeriod, Origin};
 
     const NOW: i64 = 1_788_400_000;
     const DAYS: i64 = 86_400;
@@ -207,7 +207,10 @@ mod tests {
 
         let text = line(&l, 100.0, NOW);
 
-        assert!(text.contains("last 24h $100.00/day: hit "), "{text}");
+        assert!(
+            text.contains("last 24h $100.00/day: hit 09-10 01:46"),
+            "{text}"
+        );
         assert!(
             text.contains("period average $20.00/day: won't hit before it resets"),
             "{text}"
@@ -243,12 +246,39 @@ mod tests {
     }
 
     #[test]
-    fn a_period_younger_than_a_day_measures_the_recent_pace_over_its_own_age() {
-        let l = budget(12.0, 1000.0, NOW - 12 * 3600, NOW + 30 * DAYS);
+    fn a_period_younger_than_a_day_uses_its_own_spend_and_age_for_the_recent_pace() {
+        let l = budget(6.0, 1000.0, NOW - 12 * 3600, NOW + 30 * DAYS);
 
         let text = line(&l, 12.0, NOW);
 
-        assert!(text.contains("last 24h $24.00/day"), "{text}");
+        assert!(text.contains("last 24h $12.00/day"), "{text}");
+    }
+
+    #[test]
+    fn a_period_younger_than_an_hour_has_no_average_pace_yet() {
+        let l = budget(2.0, 300.0, NOW - 600, NOW + 30 * DAYS);
+
+        let text = line(&l, 2.0, NOW);
+
+        assert!(text.contains("period average: no pace yet"), "{text}");
+    }
+
+    #[test]
+    fn a_tiny_pace_does_not_overflow_the_hit_time() {
+        let l = budget(1e-300, 1000.0, NOW - 15 * DAYS, NOW + 15 * DAYS);
+
+        let text = line(&l, 0.0, NOW);
+
+        assert!(text.contains("won't hit before it resets"), "{text}");
+    }
+
+    #[test]
+    fn a_young_period_that_used_up_its_limit_says_so() {
+        let l = budget(1000.0, 1000.0, NOW - 600, NOW + 30 * DAYS);
+
+        let text = line(&l, 1000.0, NOW);
+
+        assert!(text.contains("last 24h: limit reached"), "{text}");
     }
 
     #[test]

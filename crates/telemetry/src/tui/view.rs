@@ -1392,9 +1392,10 @@ mod tests {
             let area = Rect::new(0, 0, w, h);
             let old = layout(area);
 
-            let placed = place(area, &ALL[..7], false);
+            let classic = Layout::classic().tabs[0].panels.clone();
+            let placed = place(area, &classic, false);
 
-            let rect = |id| panel_rect(area, &ALL[..7], false, id).unwrap();
+            let rect = |id| panel_rect(area, &classic, false, id).unwrap();
             assert_eq!(rect(PanelId::Spend), old.spend, "{w}x{h}");
             assert_eq!(rect(PanelId::Tokens), old.tokens, "{w}x{h}");
             assert_eq!(rect(PanelId::Models), old.models, "{w}x{h}");

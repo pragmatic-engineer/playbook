@@ -123,12 +123,17 @@ impl Default for Layout {
 }
 
 impl Layout {
-    /// One tab with every panel: the single screen pbtop had before tabs.
+    /// One tab with the panels of the single screen pbtop had before tabs, which
+    /// is every panel except Projection.
     pub fn classic() -> Layout {
         Layout {
             tabs: vec![Tab {
                 name: "All".to_string(),
-                panels: ALL[..7].to_vec(),
+                panels: ALL
+                    .iter()
+                    .copied()
+                    .filter(|p| *p != PanelId::Projection)
+                    .collect(),
             }],
         }
     }
