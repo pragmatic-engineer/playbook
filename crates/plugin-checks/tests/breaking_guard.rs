@@ -4,7 +4,8 @@
 //! Runs `scripts/check-breaking.sh` against small throwaway repositories: a
 //! commit marked breaking since the previous tag needs an entry in
 //! breaking-changes.json, a marked pull request needs an entry above the
-//! latest tag, and the notes and changelog modes read the same file.
+//! latest tag, the notes and changelog modes read the same file, and
+//! plugin.json lists the plugin entries.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -485,4 +486,105 @@ fn the_body_puts_the_notes_first_then_the_note_for_the_tool() {
         String::from_utf8_lossy(&playbook.stdout),
         "## Upgrade note\n"
     );
+}
+
+const PLUGIN_ENTRY: &str = r#"{"version":"1.1.0","component":"plugin","summary":"Something changed.","action":"playbook init","migration":null}"#;
+
+impl Repo {
+    /// Writes plugin.json with `entries` under metadata.breakingChanges.
+    fn mirror(&self, entries: &str) {
+        self.write(
+            "plugins/playbook/.claude-plugin/plugin.json",
+            &format!(
+                r#"{{"name":"playbook","version":"1.0.0","metadata":{{"breakingChanges":[{entries}]}}}}"#
+            ),
+        );
+    }
+}
+
+#[test]
+fn the_mirror_passes_with_no_plugin_entries_and_no_key() {
+    // Arrange
+    let r = Repo::new();
+    r.entry("playbook", "0.2.0");
+
+    // Act
+    let out = r.run(&["mirror"], "", "");
+
+    // Assert
+    assert_passes(&out);
+}
+
+#[test]
+fn the_mirror_fails_when_plugin_json_lacks_a_plugin_entry() {
+    // Arrange
+    let r = Repo::new();
+    r.entry("plugin", "1.1.0");
+
+    // Act
+    let out = r.run(&["mirror"], "", "");
+
+    // Assert
+    assert_fails(&out, "metadata.breakingChanges");
+}
+
+#[test]
+fn the_mirror_passes_for_the_same_entries_in_any_key_order() {
+    // Arrange
+    let r = Repo::new();
+    r.entry("plugin", "1.1.0");
+    // The keys are reversed on purpose: only the values must match.
+    r.mirror(r#"{"migration":null,"action":"playbook init","summary":"Something changed.","component":"plugin","version":"1.1.0"}"#);
+
+    // Act
+    let out = r.run(&["mirror"], "", "");
+
+    // Assert
+    assert_passes(&out);
+}
+
+#[test]
+fn the_mirror_fails_when_one_field_differs() {
+    // Arrange
+    let r = Repo::new();
+    r.entry("plugin", "1.1.0");
+    r.mirror(&PLUGIN_ENTRY.replace("Something changed.", "Something else."));
+
+    // Act
+    let out = r.run(&["mirror"], "", "");
+
+    // Assert
+    assert_fails(&out, "metadata.breakingChanges");
+}
+
+#[test]
+fn the_mirror_fails_when_plugin_json_has_an_entry_the_file_lacks() {
+    // Arrange
+    let r = Repo::new();
+    r.mirror(PLUGIN_ENTRY);
+
+    // Act
+    let out = r.run(&["mirror"], "", "");
+
+    // Assert
+    assert_fails(&out, "metadata.breakingChanges");
+}
+
+#[test]
+fn the_mirror_checks_the_format_of_the_file_first() {
+    // Arrange
+    let r = Repo::new();
+    r.write(
+        "breaking-changes.json",
+        &format!(
+            r#"{{"entries":[{}]}}"#,
+            PLUGIN_ENTRY.replace("plugin", "desktop")
+        ),
+    );
+
+    // Act
+    let out = r.run(&["mirror"], "", "");
+
+    // Assert
+    assert_fails(&out, "does not match the format");
 }

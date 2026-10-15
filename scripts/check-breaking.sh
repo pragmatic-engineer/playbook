@@ -27,6 +27,13 @@
 #     "## playbook <version>" section of CHANGELOG.md has no "### Breaking"
 #     heading.
 #
+#   check-breaking.sh mirror
+#     Fails when metadata.breakingChanges in plugin.json does not list the
+#     plugin entries of the file, in the same order (ADR 0035 decision 4.6).
+#     The marketplace copies only plugins/playbook, so the binary reads the
+#     plugin's breaking changes from the manifest. No plugin entries and no
+#     key is a match.
+#
 #   check-breaking.sh notes <component> <version>
 #     Prints a "## Breaking changes" markdown section with the entries for
 #     <component> and <version>, or nothing when there are none.
@@ -266,6 +273,22 @@ changelog() {
   echo "PASS the CHANGELOG.md section for playbook $version has a '### Breaking' heading"
 }
 
+mirror() {
+  check_file
+  [ -f "$MANIFEST" ] || fail "$MANIFEST is missing"
+  local want got
+  want="$(jq -cS '[.entries[] | select(.component == "plugin")]' "$FILE")"
+  got="$(jq -cS '.metadata.breakingChanges // []' "$MANIFEST")" \
+    || fail "$MANIFEST is not valid JSON, or its metadata is not an object"
+  if [ "$want" != "$got" ]; then
+    echo "FAIL metadata.breakingChanges in $MANIFEST must list the plugin entries of $FILE, in the same order"
+    echo "  expected: $want"
+    echo "  found:    $got"
+    exit 1
+  fi
+  echo "PASS $MANIFEST lists the $(jq 'length' <<<"$want") plugin entries of $FILE"
+}
+
 notes() {
   local component="${1:?usage: check-breaking.sh notes <component> <version>}"
   local version="${2:?usage: check-breaking.sh notes <component> <version>}"
@@ -298,7 +321,8 @@ case "${1:-}" in
   pr) pr "${2:-}" ;;
   plugin) plugin "${2:-}" ;;
   changelog) changelog "${2:-}" ;;
+  mirror) mirror ;;
   notes) notes "${2:-}" "${3:-}" ;;
   body) body "${2:-}" "${3:-}" "${4:-}" ;;
-  *) echo "usage: check-breaking.sh release <component> <version> | pr <base-ref> | plugin <base-ref> | changelog <version> | notes <component> <version> | body <component> <version> <tool>"; exit 2 ;;
+  *) echo "usage: check-breaking.sh release <component> <version> | pr <base-ref> | plugin <base-ref> | changelog <version> | mirror | notes <component> <version> | body <component> <version> <tool>"; exit 2 ;;
 esac
