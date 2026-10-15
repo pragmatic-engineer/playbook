@@ -19,15 +19,16 @@ use std::process::{Command, Stdio};
 use fx::{both, install_stubs, repo_root, sha256_hex, write_exec, Work};
 
 /// A 0.17.0 binary that knows `breaking` and `migrate`. It lists one entry
-/// only for `breaking --since 0.16.0`, and its `migrate` writes whether the
-/// installer marked the notice as shown.
+/// only for `breaking --since 0.16.0`. Every other call except `--version`
+/// logs its arguments and whether the installer marked the notice as shown.
 const NEW_BINARY: &str = r#"#!/usr/bin/env bash
+case "$*" in
+  --version|version) echo "playbook 0.17.0"; exit 0 ;;
+esac
+printf '%s|%s\n' "$*" "${PLAYBOOK_BREAKING_SHOWN:-unset}" >> "$HOME/calls.log"
 case "$*" in
   "breaking --since 0.16.0") printf 'Breaking changes in this upgrade:\n  playbook 0.17.0: The old flag is gone.\n    Action: playbook init\n' ;;
   breaking*) exit 2 ;;
-  "migrate --help") exit 0 ;;
-  migrate) printf '%s\n' "${PLAYBOOK_BREAKING_SHOWN:-unset}" >> "$HOME/migrate.env" ;;
-  --version|version) echo "playbook 0.17.0" ;;
   *) exit 0 ;;
 esac"#;
 
@@ -118,10 +119,16 @@ impl Sandbox {
         out
     }
 
-    /// What the stub's `migrate` saw in PLAYBOOK_BREAKING_SHOWN, one line per
-    /// run.
-    fn migrate_env(&self) -> String {
-        fs::read_to_string(self.home.join("migrate.env")).unwrap_or_default()
+    /// What the stub saw in PLAYBOOK_BREAKING_SHOWN for the calls whose
+    /// arguments are exactly `args`.
+    fn shown_for(&self, args: &str) -> Vec<String> {
+        fs::read_to_string(self.home.join("calls.log"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| l.split_once('|'))
+            .filter(|(a, _)| *a == args)
+            .map(|(_, shown)| shown.to_string())
+            .collect()
     }
 }
 
@@ -141,7 +148,7 @@ fn an_upgrade_prints_the_breaking_changes_since_the_old_version() {
 }
 
 #[test]
-fn a_shown_notice_is_marked_for_the_migrate_that_runs_next() {
+fn a_shown_notice_is_marked_only_for_the_migrate_and_init_that_run_next() {
     // Arrange
     let upgrade = Sandbox::new("shown").with_installed("playbook 0.16.0");
     let fresh = Sandbox::new("not-shown");
@@ -151,8 +158,11 @@ fn a_shown_notice_is_marked_for_the_migrate_that_runs_next() {
     fresh.install(NEW_BINARY, &["--yes"]);
 
     // Assert
-    assert_eq!(upgrade.migrate_env(), "1\n");
-    assert_eq!(fresh.migrate_env(), "unset\n");
+    assert_eq!(upgrade.shown_for("migrate"), ["1"]);
+    assert_eq!(upgrade.shown_for("init"), ["1"]);
+    assert_eq!(upgrade.shown_for("init --help"), ["unset"]);
+    assert_eq!(fresh.shown_for("migrate"), ["unset"]);
+    assert_eq!(fresh.shown_for("init"), ["unset"]);
 }
 
 #[test]
