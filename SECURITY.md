@@ -58,4 +58,5 @@ Vulnerabilities in this repository's code, including but not limited to:
 This repository is part of the `pragmatic-engineer` repo set and follows a common
 hardening posture: ruleset-managed branch and tag protection, signed
 commits, SHA-pinned third-party actions, and an App-based bot identity
-with narrow per-repo scope. The cross-repo configuration is managed as code in a private repository.
+with narrow per-repo scope. The cross-repo configuration is managed as code
+in a private repository.

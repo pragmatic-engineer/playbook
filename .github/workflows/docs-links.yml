@@ -8,10 +8,7 @@ name: docs-links
 
 on:
   pull_request:
-    paths:
-      - "**/*.md"
-      - "scripts/check-links.sh"
-      - ".github/workflows/docs-links.yml"
+  merge_group:
   workflow_dispatch:
 
 permissions: {}

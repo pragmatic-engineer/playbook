@@ -28,16 +28,19 @@ fn run(name: &str, files: &[(&str, &str)]) -> (bool, String) {
         .output()
         .expect("run");
     let _ = fs::remove_dir_all(&dir);
-    (
-        out.status.success(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-    )
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    (out.status.success(), text)
 }
 
 #[test]
 fn good_links_pass() {
     let (ok, out) = run("good", &[
-        ("a.md", "# Top\n\n## Config keys (v2)\n\n[b](docs/b.md) [k](#config-keys-v2) [t](docs/b.md#the-b-page)\n[w](https://example.invalid/x)\n"),
+        ("a.md", "# Top\n\n## Config keys (v2)\n\n[b](docs/b.md) [k](#config-keys-v2) [t](docs/b.md#the-b-page)\n[w](https://example.invalid/x)\n[d](docs/) [s](docs/run.sh#L1) [m](mailto:a@b.invalid) [v](${VAR}/x.md) [e](docs/b%2Emd?plain=1) [r](/docs/b.md)\n"),
+        ("docs/run.sh", "echo\n"),
         ("docs/b.md", "# The B page\n\nback to [a](../a.md#top)\n"),
     ]);
     assert!(ok, "{out}");
@@ -61,10 +64,37 @@ fn missing_file_and_anchor_fail() {
             ("b.md", "# B\n"),
         ],
     );
-    assert!(!ok);
+    assert!(!ok, "{out}");
     assert!(out.contains("a.md:3 missing file: gone.md"), "{out}");
     assert!(out.contains("a.md:4 missing anchor: #nope"), "{out}");
     assert!(out.contains("a.md:5 missing anchor: b.md#nope"), "{out}");
+}
+
+#[test]
+fn issue_forms_and_pr_template_resolve_from_the_root() {
+    let (ok, out) = run(
+        "tmpl",
+        &[
+            (".github/PULL_REQUEST_TEMPLATE.md", "[x](docs/x.md)\n"),
+            ("docs/x.md", "# X\n"),
+        ],
+    );
+    assert!(ok, "{out}");
+    let (ok, out) = run(
+        "tmpl-other",
+        &[
+            (".github/other.md", "[x](docs/x.md)\n"),
+            ("docs/x.md", "# X\n"),
+        ],
+    );
+    assert!(!ok, "{out}");
+}
+
+#[test]
+fn a_stray_backtick_does_not_hide_later_links() {
+    let (ok, out) = run("tick", &[("a.md", "# A\n\na ` b\n\n[x](gone.md)\n")]);
+    assert!(!ok, "{out}");
+    assert!(out.contains("a.md:5 missing file: gone.md"), "{out}");
 }
 
 #[test]
