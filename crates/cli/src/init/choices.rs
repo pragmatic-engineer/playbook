@@ -9,7 +9,7 @@ use clap::Args;
 use std::io::{self, BufRead, IsTerminal, Write};
 
 /// The flags, each part as a `--x` and `--no-x` pair. The last one given wins.
-#[derive(Args, Debug, Default, Clone)]
+#[derive(Args, Debug, Default, Clone, PartialEq, Eq)]
 pub struct Flags {
     /// Wire every playbook hook into settings.json (guards, session and worktree hooks)
     #[arg(long, overrides_with = "no_hooks")]
@@ -65,7 +65,7 @@ pub struct Flags {
     /// Do not add the `pb` short name
     #[arg(long, overrides_with = "short_name")]
     pub no_short_name: bool,
-    /// Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name), ask nothing and leave everything else untouched. `playbook init --only telemetry` turns telemetry on
+    /// Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
     #[arg(long, value_name = "PART", value_delimiter = ',', num_args = 1..)]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag

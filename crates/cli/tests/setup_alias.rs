@@ -66,33 +66,26 @@ fn run(name: &str, args: &[&str]) -> Run {
 /// Replaces each run of exactly 32 hex digits, such as the random telemetry
 /// token, with `{TOKEN}`.
 fn scrub_tokens(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut run = String::new();
-    let flush = |run: &mut String, out: &mut String| {
-        if run.len() == 32 {
-            out.push_str("{TOKEN}");
+    let hex = regex::Regex::new("[0-9a-fA-F]+").unwrap();
+    hex.replace_all(text, |m: &regex::Captures| {
+        if m[0].len() == 32 {
+            "{TOKEN}".to_string()
         } else {
-            out.push_str(run);
+            m[0].to_string()
         }
-        run.clear();
-    };
-    for c in text.chars() {
-        if c.is_ascii_hexdigit() {
-            run.push(c);
-        } else {
-            flush(&mut run, &mut out);
-            out.push(c);
-        }
-    }
-    flush(&mut run, &mut out);
-    out
+    })
+    .into_owned()
 }
 
 /// The rows of every table in a SQLite file, one line each, with times
 /// replaced by `{TIME}`, since the raw pages differ from run to run.
 fn dump(path: &Path) -> String {
     use rusqlite::types::ValueRef;
-    let db = rusqlite::Connection::open(path).expect("open db");
+    // Opened immutable and read only, so the dump writes no `-wal` or `-shm`
+    // file into the folder the walk is listing.
+    let uri = format!("file:{}?immutable=1", path.display());
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI;
+    let db = rusqlite::Connection::open_with_flags(uri, flags).expect("open db");
     let mut tables = db
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
         .expect("list tables");
@@ -127,20 +120,8 @@ fn dump(path: &Path) -> String {
 /// A backup carries the time in its name, as in `settings.json.bak.1792073671`.
 /// Replaces each run of nine or more digits with `{TIME}`.
 fn stamp_free(name: &str) -> String {
-    let mut out = String::new();
-    let mut digits = String::new();
-    for c in name.chars().chain(std::iter::once('\0')) {
-        if c.is_ascii_digit() {
-            digits.push(c);
-            continue;
-        }
-        out.push_str(if digits.len() >= 9 { "{TIME}" } else { &digits });
-        digits.clear();
-        if c != '\0' {
-            out.push(c);
-        }
-    }
-    out
+    let digits = regex::Regex::new("[0-9]{9,}").unwrap();
+    digits.replace_all(name, "{TIME}").into_owned()
 }
 
 /// Every regular file under `dir`, keyed by its path relative to `root`.
@@ -201,25 +182,34 @@ fn a_full_run_writes_the_same_files_under_both_names() {
 
 #[test]
 fn a_run_with_part_flags_writes_the_same_files_under_both_names() {
-    assert_same(&["--no-hooks", "--statusline", "--security", "--no-telemetry"]);
+    let setup = assert_same(&["--no-hooks", "--statusline", "--security", "--no-telemetry"]);
+    assert_eq!(setup.code, Some(0));
+    assert!(setup.files[".claude/settings.json"].contains("statusLine"));
 }
 
 #[test]
 fn a_run_without_a_terminal_or_yes_matches_under_both_names() {
-    assert_same(&[]);
+    assert_eq!(assert_same(&[]).code, Some(0));
 }
 
 #[test]
 fn a_dry_run_and_explain_match_under_both_names() {
-    assert_same(&["--dry-run"]);
-    assert_same(&["--explain"]);
-    assert_same(&["--explain", "hooks"]);
+    for args in [&["--dry-run"][..], &["--explain"], &["--explain", "hooks"]] {
+        let run = assert_same(args);
+        assert_eq!(run.code, Some(0), "{args:?}");
+        assert!(!run.stdout.is_empty(), "{args:?}");
+    }
 }
 
 #[test]
 fn only_telemetry_and_short_name_match_under_both_names() {
-    assert_same(&["--only", "telemetry"]);
-    assert_same(&["--only", "short-name", "--short-name"]);
+    let telemetry = assert_same(&["--only", "telemetry"]);
+    assert_eq!(telemetry.code, Some(0));
+    assert!(telemetry.files[".claude/settings.json"].contains("OTEL_EXPORTER_OTLP_ENDPOINT"));
+    assert_eq!(
+        assert_same(&["--only", "short-name", "--short-name"]).code,
+        Some(0)
+    );
 }
 
 #[test]

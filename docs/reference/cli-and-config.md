@@ -815,7 +815,7 @@ Subcommands: `list`
 
 Print every hook with its event, matcher and what it does
 
-Lists the hooks init adds to settings.json, grouped by purpose. Changes nothing.
+Lists the hooks setup adds to settings.json, grouped by purpose. Changes nothing.
 
 ### `playbook learn`
 
@@ -1357,7 +1357,7 @@ Example: `playbook setup --no-hooks --aliases`
 - `--no-claude-override`: Do not turn on the `claude` shell function
 - `--short-name`: Add `pb` as a short name for `playbook`, only when `pb` is free (recorded in playbook own config)
 - `--no-short-name`: Do not add the `pb` short name
-- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name), ask nothing and leave everything else untouched. `playbook init --only telemetry` turns telemetry on
+- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing

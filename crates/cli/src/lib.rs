@@ -932,6 +932,15 @@ impl Command {
         )
     }
 
+    /// The flags of `setup`, or of `init`, its deprecated name. Checks that
+    /// treat the two alike use this, so neither name can be left out.
+    pub fn setup_flags(&self) -> Option<&init::choices::Flags> {
+        match self {
+            Command::Setup { flags } | Command::Init { flags } => Some(flags),
+            _ => None,
+        }
+    }
+
     /// The one stderr line a deprecated command name prints before it runs,
     /// or `None`. Only `init` has one, and only when stderr is a terminal, so
     /// scripts and the plugin, which read the output, see the same text as
@@ -2151,7 +2160,7 @@ pub enum HookName {
 pub enum HooksCommand {
     /// Print every hook with its event, matcher and what it does
     ///
-    /// Lists the hooks init adds to settings.json, grouped by purpose.
+    /// Lists the hooks setup adds to settings.json, grouped by purpose.
     /// Changes nothing.
     List,
 }
@@ -2476,7 +2485,7 @@ mod tests {
         };
 
         // Assert
-        assert_eq!(format!("{setup:?}"), format!("{init:?}"));
+        assert_eq!(setup, init);
     }
 
     #[test]
@@ -2503,18 +2512,15 @@ mod tests {
     #[test]
     fn top_level_help_lists_setup_and_not_init() {
         // Arrange
-        let mut cmd = Cli::command();
+        let cmd = Cli::command();
 
         // Act
-        let help = cmd.render_help().to_string();
+        let setup = cmd.find_subcommand("setup");
+        let init = cmd.find_subcommand("init");
 
         // Assert
-        let names: Vec<&str> = help
-            .lines()
-            .filter_map(|l| l.strip_prefix("  ")?.split_whitespace().next())
-            .collect();
-        assert!(names.contains(&"setup"), "{help}");
-        assert!(!names.contains(&"init"), "{help}");
+        assert!(setup.is_some_and(|c| !c.is_hide_set()));
+        assert!(init.is_some_and(clap::Command::is_hide_set));
     }
 }
 

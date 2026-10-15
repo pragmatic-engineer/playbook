@@ -460,12 +460,11 @@ fn notice(line: Option<String>, notices: &crate::notices::Notices) -> Option<Str
 pub fn runs_on_start(command: &crate::Command) -> bool {
     use crate::Command as C;
     !command.is_hot_path()
+        && command.setup_flags().is_none()
         && !matches!(
             command,
             C::Usage { .. }
                 | C::Migrate { .. }
-                | C::Init { .. }
-                | C::Setup { .. }
                 | C::Update { .. }
                 | C::Uninstall { .. }
                 | C::Doctor { .. }
