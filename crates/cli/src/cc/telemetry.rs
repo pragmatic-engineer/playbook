@@ -98,11 +98,11 @@ fn spawn_retrying_busy(cmd: &mut std::process::Command) -> bool {
 /// else dropped. Never the session's terminal.
 fn log_stdio(log: Option<&Path>) -> std::process::Stdio {
     log.and_then(|p| {
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(p)
-            .ok()
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        options.open(p).ok()
     })
     .map_or_else(std::process::Stdio::null, std::process::Stdio::from)
 }
@@ -165,7 +165,10 @@ fn start_collector(
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    if owner {
+    // A lock whose collector has not shown up yet stays, and goes stale by
+    // itself, so a session that starts a moment later does not spawn a second
+    // one while the first is still coming up.
+    if owner && (found.is_some() || !*started) {
         let _ = std::fs::remove_file(&lock);
     }
     found
@@ -251,6 +254,11 @@ pub fn ensure_collector(home: &Path, cwd: &Path, exe: &Path, wait: Duration) -> 
     }
     if running(&state) && probe(state.port) == Probe::Collector {
         return Ensured::Running;
+    }
+    // Something else listens on the recorded port: a new collector could not
+    // bind it, so do not spawn one or make the session wait. Doctor says why.
+    if crate::usage::collector::port_answers(state.port) {
+        return Ensured::Down;
     }
     let log = state_file.with_file_name("collector.log");
     let mut started = false;
@@ -483,7 +491,14 @@ mod tests {
     #[cfg(unix)]
     fn the_session_hook_starts_a_down_collector_once_the_settings_point_at_it() {
         let (_l, port) = listening();
-        let (home, data) = configured_home("cc-ensure-start", port, 999_999);
+        let unused = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        // The state names a port nobody listens on; the fake collector then
+        // records the live one, as a real start would.
+        let (home, data) = configured_home("cc-ensure-start", unused, 0);
         let exe = fake_exe(&data, port);
 
         let got = ensure_collector(&home, &home, &exe, TEST_WAIT);
@@ -500,7 +515,7 @@ mod tests {
     #[cfg(unix)]
     fn a_second_session_at_the_same_moment_does_not_start_a_second_collector() {
         let (_l, port) = listening();
-        let (home, data) = configured_home("cc-ensure-parallel", port, 999_999);
+        let (home, data) = configured_home("cc-ensure-parallel", port, 0);
         let exe = fake_exe(&data, port);
         std::fs::write(data.join("collector.spawn"), "").unwrap();
 
@@ -514,7 +529,7 @@ mod tests {
     #[cfg(unix)]
     fn nothing_is_started_when_telemetry_is_not_pointed_at_the_collector() {
         let (_l, port) = listening();
-        let (home, data) = configured_home("cc-ensure-other", port, 999_999);
+        let (home, data) = configured_home("cc-ensure-other", port, 0);
         std::fs::write(
             home.join(".claude/settings.json"),
             r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"https://mine.example"}}"#,
@@ -543,11 +558,49 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_program_that_cannot_start_is_reported_down_and_never_panics() {
-        let (home, _data) = configured_home("cc-ensure-broken", 1, 999_999);
+        let (home, _data) = configured_home("cc-ensure-broken", 1, 0);
         let exe = home.join("no-such-program");
 
         let got = ensure_collector(&home, &home, &exe, Duration::from_millis(200));
 
         assert_eq!(got, Ensured::Down);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_foreign_listener_on_the_recorded_port_spawns_nothing_and_does_not_wait() {
+        let (_holder, port) = listening();
+        let (home, data) = configured_home("cc-ensure-foreign", port, 0);
+        let exe = fake_exe(&data, port);
+        let began = std::time::Instant::now();
+
+        let got = ensure_collector(&home, &home, &exe, Duration::from_secs(30));
+
+        assert_eq!(got, Ensured::Down);
+        assert!(!data.join("runs").exists());
+        assert!(began.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_lock_stays_when_the_collector_has_not_shown_up_yet() {
+        let dir = scratch_dir("cc-lock-stays");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("slow-playbook");
+        std::fs::write(&exe, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&exe, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let mut started = false;
+
+        let state = start_collector(
+            &dir.join("collector.json"),
+            &exe,
+            &mut started,
+            Duration::from_millis(200),
+            None,
+        );
+
+        assert!(state.is_none() && started);
+        assert!(dir.join("collector.spawn").exists());
     }
 }

@@ -618,6 +618,18 @@ fn worktree_rows(env: &Env) -> Vec<Row> {
     }
 }
 
+/// The endpoint `playbook init` recorded in its marker file, if any.
+fn marker_endpoint(home: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(
+        crate::common::paths::playbook_root_from(home).join("telemetry-env.json"),
+    )
+    .ok()?;
+    let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
+    doc.get("OTEL_EXPORTER_OTLP_ENDPOINT")?
+        .as_str()
+        .map(|e| e.trim_end_matches('/').to_string())
+}
+
 const TELEMETRY_INIT_FIX: &str = "run: playbook init --only telemetry";
 
 /// The telemetry rows: Claude Code's settings point at the playbook
@@ -669,17 +681,24 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
             let endpoint = merged_vars(&env.home, &cwd, false)
                 .and_then(|v| v.get("OTEL_EXPORTER_OTLP_ENDPOINT").cloned());
             let ours = port.map(|p| format!("http://127.0.0.1:{p}"));
-            let local_other_port = endpoint
-                .as_deref()
-                .is_some_and(|e| e.starts_with("http://127.0.0.1:"))
-                && ours.is_some();
-            if local_other_port {
+            let theirs = endpoint.as_deref().map(|e| e.trim_end_matches('/'));
+            let written = marker_endpoint(&env.home);
+            if theirs.is_some() && theirs == ours.as_deref() {
+                return vec![Row::new(
+                    "-",
+                    Level::Warn,
+                    "telemetry points at the playbook collector but CLAUDE_CODE_ENABLE_TELEMETRY is not 1",
+                )
+                .hint(TELEMETRY_INIT_FIX)];
+            }
+            // The endpoint init wrote earlier, now out of step with the port.
+            if theirs.is_some() && theirs == written.as_deref() && ours.is_some() {
                 return vec![Row::new(
                     "-",
                     Level::Warn,
                     format!(
                         "Claude Code settings send telemetry to {} but the collector port is {}",
-                        endpoint.unwrap_or_default(),
+                        theirs.unwrap_or_default(),
                         port.unwrap_or_default()
                     ),
                 )
@@ -703,6 +722,20 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
             Level::Pass,
             format!("collector running (pid {})", state.pid),
         ));
+    } else if crate::usage::collector::port_answers(state.port)
+        && probe(state.port) == Reply::Silent
+    {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                format!(
+                    "the collector port {} is not answering right now",
+                    state.port
+                ),
+            )
+            .hint("run: playbook usage status"),
+        );
     } else if crate::usage::collector::port_answers(state.port) {
         rows.push(
             Row::new(

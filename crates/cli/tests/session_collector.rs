@@ -86,7 +86,11 @@ impl Home {
 
 impl Drop for Home {
     fn drop(&mut self) {
-        if let Some(pid) = self.state().and_then(|s| s["pid"].as_u64()) {
+        if let Some(pid) = self
+            .state()
+            .and_then(|s| s["pid"].as_u64())
+            .filter(|p| *p != 0)
+        {
             let _ = Command::new("kill").arg(pid.to_string()).status();
         }
         let _ = fs::remove_dir_all(&self.0);
@@ -119,4 +123,43 @@ fn a_session_start_without_telemetry_set_up_starts_nothing() {
     home.session_start();
 
     assert!(home.state().is_none());
+}
+
+#[test]
+fn two_sessions_starting_at_once_bring_up_one_collector() {
+    let home = Home::new("race");
+    let init = home
+        .cmd()
+        .args(["init", "--only", "telemetry"])
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+    let spawn = |home: &Home| {
+        home.cmd()
+            .args(["hook", "session-init"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    };
+    let mut a = spawn(&home);
+    let mut b = spawn(&home);
+    for child in [&mut a, &mut b] {
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(br#"{"session_id":"s","source":"startup"}"#)
+            .unwrap();
+    }
+
+    let _ = a.wait();
+    let _ = b.wait();
+    let live = home.wait_for_live_collector();
+
+    let log =
+        fs::read_to_string(home.0.join(".config/playbook/data/collector.log")).unwrap_or_default();
+    assert!(live.is_some(), "no collector came up");
+    assert_eq!(log.matches("listening on").count(), 1, "{log}");
 }

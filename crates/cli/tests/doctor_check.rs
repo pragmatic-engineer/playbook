@@ -972,12 +972,9 @@ fn point_settings_at_collector(b: &Box, port: u16) {
     ));
 }
 
+/// A port nothing listens on: an unprivileged run cannot bind port 1.
 fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    1
 }
 
 #[test]
@@ -1035,6 +1032,16 @@ fn another_program_on_the_collector_port_fails_with_the_move_command() {
     let b = Box::new("tel-conflict");
     let holder = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     point_settings_at_collector(&b, holder.local_addr().unwrap().port());
+    // Another program that answers, but is not a playbook collector.
+    std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        for stream in holder.incoming().flatten().take(20) {
+            let mut stream = stream;
+            let mut buf = [0u8; 512];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        }
+    });
 
     let rows = b.run_with_env(&[]);
 
@@ -1052,14 +1059,19 @@ fn a_port_in_settings_that_differs_from_the_collector_warns() {
     let b = Box::new("tel-stale-port");
     point_settings_at_collector(&b, free_port());
     b.settings(
-        r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:1"}}"#,
+        r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:2"}}"#,
     );
+    fs::write(
+        b.home().join(".config/playbook/telemetry-env.json"),
+        r#"{"OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:2"}"#,
+    )
+    .unwrap();
 
     let rows = b.run_with_env(&[]);
 
     let mine = telemetry_rows(&rows);
     assert!(
-        text(&mine).contains("send telemetry to http://127.0.0.1:1"),
+        text(&mine).contains("send telemetry to http://127.0.0.1:2"),
         "{}",
         text(&mine)
     );
@@ -1118,6 +1130,43 @@ fn the_config_key_off_is_reported_as_info() {
     let mine = telemetry_rows(&rows);
     assert!(
         text(&mine).contains("INFO telemetry is off by the usage.telemetry setting"),
+        "{}",
+        text(&mine)
+    );
+}
+
+#[test]
+fn the_users_own_local_collector_is_not_called_stale() {
+    let b = Box::new("tel-own-local");
+    point_settings_at_collector(&b, free_port());
+    b.settings(
+        r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:4318"}}"#,
+    );
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        text(&mine).contains("INFO telemetry is set up by you"),
+        "{}",
+        text(&mine)
+    );
+}
+
+#[test]
+fn settings_that_name_the_collector_without_the_enable_switch_warn() {
+    let b = Box::new("tel-no-enable");
+    point_settings_at_collector(&b, free_port());
+    b.settings(&format!(
+        r#"{{"env":{{"OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:{}"}}}}"#,
+        free_port()
+    ));
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        text(&mine).contains("CLAUDE_CODE_ENABLE_TELEMETRY is not 1"),
         "{}",
         text(&mine)
     );

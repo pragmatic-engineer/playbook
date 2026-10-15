@@ -250,6 +250,34 @@ pub struct Status {
     pub telemetry_fix: Option<String>,
 }
 
+/// The time of the newest stored telemetry event, unix seconds. Opens the
+/// database read-only with a short wait, so a busy collector cannot stall the
+/// caller, and writes nothing. `None` when there is no database or no event.
+pub fn last_event(paths: &Paths) -> Option<i64> {
+    let conn = rusqlite::Connection::open_with_flags(
+        &paths.db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok()?;
+    conn.busy_timeout(Duration::from_millis(300)).ok()?;
+    let mut newest = None;
+    for table in [
+        "telemetry_requests",
+        "telemetry_tools",
+        "telemetry_errors",
+        "telemetry_metrics",
+    ] {
+        let t: Option<i64> = conn
+            .query_row(&format!("SELECT MAX(timestamp) FROM {table}"), [], |r| {
+                r.get(0)
+            })
+            .ok()
+            .flatten();
+        newest = newest.max(t);
+    }
+    newest
+}
+
 /// Reads the collector state file and the telemetry row counts. Starts
 /// nothing, and never shows the token.
 pub fn status(paths: &Paths, retention: Retention) -> Result<Status, String> {
