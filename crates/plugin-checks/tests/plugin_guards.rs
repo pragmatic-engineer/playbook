@@ -43,7 +43,7 @@ impl Repo {
         );
         repo.write(
             "Cargo.lock",
-            "[[package]]\nname = \"other\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"playbook\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"playbook-code\"\nversion = \"1.0.0\"\n",
+            "[[package]]\nname = \"other\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"playbook\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"playbook-code\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"playbook-telemetry\"\nversion = \"1.0.0\"\n",
         );
         repo.write("README.md", "Pin with `PLAYBOOK_REF=v1.0.0`.\n");
         repo.write(
@@ -217,8 +217,8 @@ fn the_bump_script_sets_one_version_everywhere() {
     );
     assert_eq!(
         r.read("Cargo.lock").matches("version = \"1.1.3\"").count(),
-        2,
-        "only the playbook and playbook-code entries move"
+        3,
+        "only the playbook, playbook-code and playbook-telemetry entries move"
     );
     let manifest = r.read("plugins/playbook/.claude-plugin/plugin.json");
     assert!(manifest.contains("\"version\": \"1.1.3\""), "{manifest}");

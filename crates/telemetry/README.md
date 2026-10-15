@@ -32,7 +32,7 @@ brew install pragmatic-engineer/tap/playbook-telemetry
 pbtop
 ```
 
-Or download the archive for your platform from the [latest `telemetry-v` release](https://github.com/pragmatic-engineer/playbook/releases?q=telemetry-v). Releases carry `playbook-telemetry-<version>-<target>.tar.gz` for macOS (arm64 and x86_64), Linux (arm64 and x86_64, static musl) and Windows (x86_64), each holding both `playbook-telemetry` and `pbtop`, plus a `SHA256SUMS` file with build provenance attestations.
+Or download the archive for your platform from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest). From 0.34.0, `playbook-telemetry` ships in the playbook `vX.Y.Z` release with the same version. Releases carry `playbook-telemetry-<version>-<target>.tar.gz` for macOS (arm64 and x86_64), Linux (arm64 and x86_64, static musl) and Windows (x86_64), each holding both `playbook-telemetry` and `pbtop`, plus a `SHA256SUMS` file with build provenance attestations.
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS
@@ -113,14 +113,14 @@ Settings are playbook's own, from the global tier of its config store (`~/.confi
 The crate `playbook-telemetry` (library `playbook_telemetry`, built from the `crates/telemetry` folder of the playbook repository) exposes the same code the binary runs. A program that embeds it implements the `host::Host` trait (config lookup, state folder, program name, repo layout, sessions panel data) and installs it once with `host::install` before calling `entry::run`. `entry::run` picks the time zone itself when `tz::init` has not run, so an embedder gets the same local-time default and the same `usage.timeZone` setting. Without an installed host the standalone one described above is used.
 
 ```toml
-playbook-telemetry = { git = "https://github.com/pragmatic-engineer/playbook", tag = "telemetry-v<version>", package = "playbook-telemetry" }
+playbook-telemetry = { git = "https://github.com/pragmatic-engineer/playbook", tag = "v<version>", package = "playbook-telemetry" }
 ```
 
-Pin an exact tag. The API is still settling, so expect changes between minor versions until 1.0.
+Pin an exact tag (`telemetry-v<version>` for releases before 0.34.0). The API is still settling, so expect changes between minor versions until 1.0.
 
 ## History
 
-This code lived in its own repository, [pragmatic-engineer/playbook-telemetry](https://github.com/pragmatic-engineer/playbook-telemetry), until version 0.1.7. That repository is archived and keeps the earlier history and releases. From the next version on, releases are tagged `telemetry-vX.Y.Z` in the playbook repository.
+This code lived in its own repository, [pragmatic-engineer/playbook-telemetry](https://github.com/pragmatic-engineer/playbook-telemetry), until version 0.1.7. That repository is archived and keeps the earlier history and releases. Releases were then tagged `telemetry-vX.Y.Z` in the playbook repository, and from 0.34.0 they are the playbook `vX.Y.Z` releases.
 
 ## Develop
 

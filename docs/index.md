@@ -82,7 +82,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0026](adr/0026-local-code-index-in-the-binary.md) | Ship a local code index in the binary, accepting about 5 MB of size | Accepted | 2026-10-12 |
 | [0027](adr/0027-anydoc-as-optional-local-tool.md) | Use anydoc as an optional local tool found on PATH, never vendored | Accepted | 2026-10-12 |
 | [0028](adr/0028-per-agent-auto-budget.md) | Budget auto mode per agent, with the closing steps allowed at a cap | Accepted | 2026-10-12 |
-| [0029](adr/0029-cargo-workspace-monorepo.md) | Keep the Rust crates in one Cargo workspace | Accepted, amended by 0038 | 2026-10-13 |
+| [0029](adr/0029-cargo-workspace-monorepo.md) | Keep the Rust crates in one Cargo workspace | Accepted, amended by 0038 and 0039 | 2026-10-13 |
 | [0030](adr/0030-skills-and-commands-in-their-own-repo.md) | Keep the skills, commands and agents in their own repository | Accepted, partly superseded by 0031 and 0032 | 2026-10-13 |
 | [0031](adr/0031-hooks-in-settings-json.md) | Put the hooks in settings.json | Accepted, amended by 0034 | 2026-10-14 |
 | [0032](adr/0032-plugin-in-the-playbook-repo.md) | Keep the plugin in the playbook repository | Accepted, amended by 0037, partly superseded by 0038 | 2026-10-14 |
@@ -90,6 +90,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0034](adr/0034-self-healing-upgrades.md) | One plugin root resolver and migrations between versions | Accepted, amended by 0037 and 0038 | 2026-10-15 |
 | [0035](adr/0035-breaking-change-notices.md) | Breaking change notices on every update channel | Superseded by 0037 | 2026-10-15 |
 | [0036](adr/0036-release-check-and-automatic-updates.md) | A release check and automatic updates | Accepted, amended by 0037 | 2026-10-15 |
-| [0037](adr/0037-release-notes-from-conventional-commits.md) | Release notes built from Conventional Commits | Accepted, amended by 0038 | 2026-10-16 |
+| [0037](adr/0037-release-notes-from-conventional-commits.md) | Release notes built from Conventional Commits | Accepted, amended by 0038 and 0039 | 2026-10-16 |
 | [0038](adr/0038-one-release-line.md) | One release line for the binary and the plugin | Accepted | 2026-10-16 |
+| [0039](adr/0039-release-workflow.md) | A release workflow that runs every step | Accepted | 2026-10-16 |
 | [0040](adr/0040-rename-init-to-setup.md) | Rename `playbook init` to `playbook setup` and keep `init` as a deprecated name | Accepted | 2026-10-16 |

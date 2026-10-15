@@ -1,7 +1,7 @@
 # Release channels
 
-A tagged release reaches users through two channels: the GitHub release assets
-(built by the `build` and `checksums` jobs of `release.yml`) and the Homebrew
+A release reaches users through two channels: the GitHub release assets
+(built by the `build` and `publish` jobs of `release.yml`) and the Homebrew
 tap `pragmatic-engineer/homebrew-tap`. This repo does not push to the tap. The
 tap runs its own workflow that reads this repo's releases and updates itself. It
 checks every 30 minutes for the newest release under each formula's tag prefix,
@@ -11,9 +11,9 @@ through the GitHub API, so GitHub signs it. The tap follows a release within
 about half an hour. To update sooner, run the `release` workflow by hand in the
 tap repo.
 
-A release attaches the five binaries, `release-notes.json`,
-`breaking-changes.json` and `SHA256SUMS`, which lists all seven. It builds no plugin
-archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as
+A release attaches fifteen assets (three per target), `release-notes.json`,
+`breaking-changes.json` and `SHA256SUMS`, which lists the other seventeen. It
+builds no plugin archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as
 described next.
 
 ## The plugin release
@@ -22,7 +22,7 @@ The binary and the plugin share one version line
 ([ADR 0038](../adr/0038-one-release-line.md)). The `version` in `plugin.json`
 equals the workspace version in `Cargo.toml`, and its
 `metadata.minBinaryVersion` is the `X.Y.0` of that minor line. The `version-sync` check in `plugin-guards.yml` fails a pull
-request or a push to `main` when they differ, and the `verify-version` job of
+request or a push to `main` when they differ, and the `plan` job of
 `release.yml` checks them again before a `v` release. The release pull request
 runs `scripts/bump-version.sh X.Y.Z`, which sets all of them and the
 `PLAYBOOK_REF` pins together. A plugin change between releases needs no bump.
@@ -37,64 +37,104 @@ release is published, starting with the first joint release. There is no separat
 release. The `playbook-plugin-v` tags made before 0.34.0 stay as history. The
 `payload-guard` check keeps the folder to markdown and the manifest.
 
-## One workflow, one tag prefix per tool
+## The release workflow
 
-`.github/workflows/release.yml` releases every tool. It runs on a pushed tag
-matching `v*`, `telemetry-v*` or `code-v*`. Its first job, `resolve`, maps the
-prefix to the package, the binaries, the archive shape, the version file and the
-tool name, and fails on any other tag. `code-v*` is reserved and fails
-until `crates/code` has a binary.
+`.github/workflows/release.yml` releases playbook ([ADR 0039](../adr/0039-release-workflow.md)).
+A maintainer starts it from the Actions tab or with `gh`:
 
-The jobs after `resolve` are shared. `verify-version` checks the tag against the
-tool's `Cargo.toml`. `create-release`
-creates the GitHub release when it is missing, with `--latest=false` for every
-prefix except `v`, so the repository's latest release stays on the playbook
-line. `build` compiles the five targets, ad hoc signs the macOS binaries and
-uploads one asset per target. `checksums` writes `SHA256SUMS` and attests the
-assets. The workflow only publishes.
+```bash
+gh workflow run release.yml -f bump=patch          # or minor, or major
+gh workflow run release.yml -f version=0.35.0
+gh workflow run release.yml -f bump=minor -f dry_run=true
+```
 
-`scripts/release-notes.sh` builds the body of every release from the
-Conventional Commits since the previous tag of the tool that touch its paths
-(ADR 0037). The sections are Breaking changes, Features, Fixes, Performance and
-Other changes, in that order, and an empty one is left out. A commit is breaking
-when it has `!` after its type or scope or a `BREAKING CHANGE:` footer. The same
-notes go into `release-notes.json`, an asset that `SHA256SUMS` lists and the
-`checksums` job attests. A release drafted by hand before the tag keeps its
-body and gets the asset. Run `scripts/release-notes.sh body <component>
-<version> <json-out>` to see the notes before you push a tag.
+`plan` runs `scripts/release-plan.sh`, which reads the versions on `main` and
+the `v` tags and picks where the run starts:
 
-The body of a `v*` release starts with the upgrade note in
-`.github/release-notes-upgrade.md`, above the generated notes. A
-`telemetry-v*` release gets a short assets note there. When most users have
-upgraded from the `playbook-hooks` plugin, delete the file and the line in the
-`body` mode of `scripts/release-notes.sh` that prints it. A dry run prints the
-body and `release-notes.json` in the run summary.
+- `prepare`: the files are below the version. `scripts/release-prepare.sh`
+  runs `scripts/bump-version.sh` and adds the `## playbook X.Y.Z` section to
+  `CHANGELOG.md`. `scripts/release-gh.sh pr` opens the pull request
+  `chore(release): playbook X.Y.Z` on `release/vX.Y.Z` with one commit that
+  GitHub signs, turns on auto-merge, and the job waits for the merge queue to
+  land it.
+- `tag`: `main` carries the version and the tag is missing. The job creates
+  the lightweight tag `vX.Y.Z` on the release commit with the igorjs app
+  token, which the "Protect release tags" ruleset lets through.
+- `publish`: the tag exists. The run builds and publishes, unless the release
+  is already published, in which case it only checks it.
 
-`breaking-changes.json` is still attached for the Homebrew tap, and
-`verify-version` still fails when a commit since the previous tag of the tool
-that touches its paths is marked breaking and that file has no entry for the
-version (ADR 0035). `scripts/check-breaking.sh` holds that check. Run
-`scripts/check-breaking.sh release <component> <version>`, or a dry run of the
-workflow from `main`, before you push a tag. When the check fails on a pushed
-tag, merge the entry, delete the tag, and push a new signed tag on the commit
-that has the entry. A rerun checks out the old commit and fails again.
+After the tag, `draft` creates a draft release with the notes and attaches
+`release-notes.json` and `breaking-changes.json`. `build` compiles the five
+targets with `--locked` and attaches three assets per target: the `playbook`
+binary, `playbook-telemetry-X.Y.Z-<target>.tar.gz` with `playbook-telemetry`
+and `pbtop`, and `pbtop-X.Y.Z-<target>.tar.gz` with `pbtop` alone. `publish`
+writes `SHA256SUMS` over every asset, attests them, and makes the release
+public and the latest. `verify` downloads the published release, checks the
+sums and the attestations, and runs `--version` on each Linux binary.
 
-To rehearse, run the `release` workflow by hand with a `tag` input. A manual run
-is always a dry run: it resolves, verifies and builds, and skips release
-creation, uploads and attestation. The tag's version must match
-the files on the ref you run it from.
+Every step can run again. A pull request, a tag or a release that exists is
+reused, a tag is never moved, and a published release is never rebuilt or
+uploaded again. When a run fails, run the workflow again with
+`version=X.Y.Z`. When GitHub refuses to create the tag, the run summary
+prints the signed `git tag` command to run by hand, and the next run with
+`version=X.Y.Z` goes on from the tag.
+
+A dry run plans, shows the diff of the release pull request in the run
+summary, and builds the five targets from `main`. It opens, tags, uploads and
+publishes nothing.
+
+`scripts/release-notes.sh` builds the body of the release from the
+Conventional Commits since the previous `v` tag that touch the playbook
+paths, the plugin included (ADR 0037). The sections are Breaking changes,
+Features, Fixes, Performance and Other changes, in that order, and an empty one
+is left out. The release commit itself is left out. The same notes go into
+`release-notes.json`, which `SHA256SUMS` lists and the workflow attests. The
+body starts with the upgrade note in `.github/release-notes-upgrade.md`. When
+most users have upgraded from the `playbook-hooks` plugin, delete the file and
+the line in the `body` mode of `scripts/release-notes.sh` that prints it.
+
+`breaking-changes.json` is still attached for the Homebrew tap, and `plan`
+still fails when a commit since the previous `v` tag is marked breaking and
+that file has no entry for the version (ADR 0035). Run
+`scripts/check-breaking.sh release playbook <version>` and
+`scripts/check-breaking.sh release plugin <version>` to check before a run.
+
+## Credentials
+
+The workflow uses `GITHUB_TOKEN` to read, to build the draft and to publish,
+and the igorjs GitHub App token for the release pull request and the tag.
+`BOT_APP_CLIENT_ID` and `BOT_APP_PRIVATE_KEY` are organization secrets. Each step asks the app for only the permissions it needs. The workflow runs only from `workflow_dispatch`, and anything but a dry run only from `main`. Pull
+requests made with the app token run CI, which pull requests made with
+`GITHUB_TOKEN` do not. The app is on the bypass list of the "Protect release
+tags" ruleset, so it can create `v*` tags. The tag is a lightweight ref on the
+squash commit of the merge queue, which GitHub signs.
+
+## Rolling back a release
+
+A published release is not deleted, and its tag is not moved, because
+installs and the tap may already point at them. To pull a bad release:
+
+1. Mark it as a pre-release, so it stops being the latest:
+   `gh release edit vX.Y.Z --prerelease --latest=false`, then mark the
+   previous release as the latest with `gh release edit vA.B.C --latest`.
+   `install.sh` and `playbook update` read the latest release.
+2. Add a warning at the top of its notes with `gh release edit vX.Y.Z
+   --notes-file <file>`, saying what is wrong and which version to use.
+3. Ship the fix as the next patch release.
 
 ## Internal tool crates
 
 `playbook-telemetry` (and later `playbook-code`) are workspace members of this
 repo under `crates/`. `playbook` depends on them by path, so there is one
-`Cargo.lock` and no bump pull requests. Each tool still releases on its own
-tag prefix and keeps its own version in its own `Cargo.toml`:
+`Cargo.lock`. `playbook-telemetry` uses the workspace version and ships in the
+`vX.Y.Z` release (ADR 0038). The `telemetry-v` tags before 0.34.0 stay as
+history.
 
-| Tool | Tag | Release assets |
-| --- | --- | --- |
-| playbook | `vX.Y.Z` | five binaries, `release-notes.json`, `breaking-changes.json`, `SHA256SUMS` |
-| playbook-telemetry | `telemetry-vX.Y.Z` | `playbook-telemetry-<version>-<target>.tar.gz` holding `playbook-telemetry` and `pbtop`, `release-notes.json`, `breaking-changes.json`, `SHA256SUMS` |
-| playbook-code | `code-vX.Y.Z` | `playbook-code-<version>-<target>.tar.gz` holding `playbook-code` and `pbcode`, `release-notes.json`, `breaking-changes.json`, `SHA256SUMS` |
+| Tool | Release assets |
+| --- | --- |
+| playbook | `playbook-<version>-<target>`, the raw binary |
+| playbook-telemetry | `playbook-telemetry-<version>-<target>.tar.gz` holding `playbook-telemetry` and `pbtop` |
+| pbtop | `pbtop-<version>-<target>.tar.gz` holding `pbtop` alone |
 
-The Homebrew tap maps each formula to the repo and tag prefix.
+Every release also carries `release-notes.json`, `breaking-changes.json` and
+`SHA256SUMS`. The Homebrew tap maps each formula to its asset.
