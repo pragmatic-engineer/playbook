@@ -50,6 +50,7 @@ pub mod eval;
 pub mod fastpath;
 pub mod gate;
 pub mod handoff;
+pub mod heal;
 pub mod hooks;
 pub mod init;
 pub mod json;
@@ -381,9 +382,17 @@ pub enum Command {
     /// reports a miss.
     ///
     /// Example: `playbook doctor pending-migrations`
+    ///
+    /// `playbook doctor --fix` repairs playbook's own files after an upgrade
+    /// and prints the command for each change that needs you. It never
+    /// writes Claude Code settings.
+    #[command(args_conflicts_with_subcommands = true, subcommand_required = false)]
     Doctor {
+        /// Run the safe migrations for playbook's own files, then list what needs you
+        #[arg(long)]
+        fix: bool,
         #[command(subcommand)]
-        sub: DoctorCommand,
+        sub: Option<DoctorCommand>,
     },
     /// Read the run mode and effort ceiling a command's Step 0 needs, in one call
     ///

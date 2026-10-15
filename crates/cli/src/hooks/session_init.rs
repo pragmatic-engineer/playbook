@@ -102,7 +102,7 @@ pub fn run(payload: &Payload) {
     }
 
     let (mut system_message, mut extra_context) = check_config_drift(payload, &dir, &home);
-    if let Some(line) = binary_too_old_line() {
+    for line in binary_too_old_line().into_iter().chain(heal_line(&home)) {
         if !system_message.is_empty() {
             system_message.push('\n');
         }
@@ -132,6 +132,12 @@ pub fn run(payload: &Payload) {
     );
 
     emit(&system_message, &extra_context);
+}
+
+/// Runs the safe migrations when this binary is newer than the version
+/// record, and repeats any item that needs the user (ADR 0034).
+fn heal_line(home: &str) -> Option<String> {
+    crate::heal::session_line(Path::new(home))
 }
 
 /// The upgrade line when the installed plugin needs a newer binary than this

@@ -147,6 +147,21 @@ pub fn upgrade_legacy_rc_files(home: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(changed)
 }
 
+/// The rc files `upgrade_legacy_rc_files` would rewrite. Reads only.
+pub fn legacy_rc_files(home: &Path) -> Vec<PathBuf> {
+    ShellKind::ALL
+        .iter()
+        .map(|kind| (home.join(kind.rc_file_name()), *kind))
+        .filter(|(rc_file, kind)| {
+            fs::read(rc_file)
+                .ok()
+                .is_some_and(|existing| rewrite_legacy_lines(&existing, *kind).is_some())
+                && owner_can_write(rc_file)
+        })
+        .map(|(rc_file, _)| rc_file)
+        .collect()
+}
+
 /// One rc file `strip_rc_files` changed, or would change on a dry run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RcStrip {

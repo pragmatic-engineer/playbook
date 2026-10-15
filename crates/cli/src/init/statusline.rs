@@ -36,6 +36,21 @@ pub(crate) fn is_legacy_command(command: &str, home: &Path) -> bool {
 /// Rust renderer, leaving every other value alone. `Ok(true)` when it changed.
 /// With `script_edited` the user owns the script, so the command stays and the
 /// merge baseline drops its `statusLine` so the template cannot repoint it.
+/// Whether `migrate_legacy_command` would rewrite `statusLine.command`. Reads
+/// only. An edited script is left alone by the rewrite, so it is not pending.
+pub fn legacy_command_pending(settings_path: &Path, home: &Path, script_edited: bool) -> bool {
+    !script_edited
+        && fs::read_to_string(settings_path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| {
+                v.pointer("/statusLine/command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| is_legacy_command(c, home))
+            })
+            .unwrap_or(false)
+}
+
 pub fn migrate_legacy_command(
     settings_path: &Path,
     home: &Path,
