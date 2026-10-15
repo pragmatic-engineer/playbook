@@ -371,33 +371,96 @@ fn version_of(bin: &Path) -> String {
         .unwrap_or_default()
 }
 
-fn manifest_version(env: &Env) -> Option<String> {
-    let direct = env
-        .plugin_root
-        .as_ref()
-        .map(|r| r.join(".claude-plugin/plugin.json"))
-        .filter(|p| p.is_file());
-    let path = direct.or_else(|| newest_cached_manifest(&env.home))?;
-    let v = field::plugin_version(&path);
-    (!v.is_empty()).then_some(v)
+/// The plugin the resolver picks, the same one skills and `pb` use.
+fn plugin_dir(env: &Env) -> Option<PathBuf> {
+    crate::plugin_root::find(
+        env.plugin_root.as_ref().and_then(|p| p.to_str()),
+        &env.claude_home,
+    )
 }
 
-fn newest_cached_manifest(home: &Path) -> Option<PathBuf> {
-    let cache = home.join(".claude/plugins/cache");
-    let mut found = Vec::new();
-    for market in fs::read_dir(&cache).ok()?.flatten() {
-        let Ok(versions) = fs::read_dir(market.path().join("playbook")) else {
-            continue;
-        };
-        for v in versions.flatten() {
-            let manifest = v.path().join(".claude-plugin/plugin.json");
-            if manifest.is_file() {
-                found.push((v.file_name().to_string_lossy().into_owned(), manifest));
-            }
-        }
+/// The binary against the plugin (ADR 0034 decision 11): a pass while the
+/// plugin is inside the range this binary supports and the binary is not
+/// older than the plugin's `minBinaryVersion`. Different versions are normal.
+fn version_row(env: &Env, bin: &Path, bin_ver: &str) -> Row {
+    use crate::plugin_root::{binary_too_old, plugin_out_of_range, plugin_version};
+    let plugin = plugin_dir(env);
+    let Some(version) = plugin.as_deref().and_then(plugin_version) else {
+        return Row::new(
+            "6",
+            Level::Info,
+            format!("playbook binary on PATH, version {bin_ver}, no plugin manifest to compare"),
+        );
+    };
+    let homebrew = crate::update::is_homebrew(bin);
+    plugin
+        .as_deref()
+        .and_then(|root| binary_too_old(root, bin_ver, homebrew))
+        .or_else(|| plugin_out_of_range(&version))
+        .map_or_else(
+            || {
+                Row::new(
+                    "6",
+                    Level::Pass,
+                    format!("playbook binary {bin_ver} works with plugin {version}"),
+                )
+            },
+            |line| Row::new("6", Level::Warn, line),
+        )
+}
+
+/// The version record (ADR 0034): whether the last heal ran clean and what
+/// still needs the user. Reads only, and only an existing database.
+fn heal_row(env: &Env) -> Row {
+    let root = crate::common::paths::playbook_root_from(&env.home);
+    let record = crate::config::store::db_path(&root)
+        .is_file()
+        .then(|| crate::heal::Record::read(&root).ok())
+        .flatten()
+        .unwrap_or_default();
+    let fix = "run: playbook doctor --fix";
+    if record.failed_at.is_some() {
+        return Row::new(
+            "6",
+            Level::Warn,
+            "the last upgrade heal failed, so playbook's own files may be out of date",
+        )
+        .hint(fix);
     }
-    found.sort_by(|a, b| resolve::compare(&a.0, &b.0));
-    found.pop().map(|(_, p)| p)
+    if !record.pending.is_empty() {
+        return Row::new(
+            "6",
+            Level::Warn,
+            format!(
+                "{} upgrade item(s) need you: {}",
+                record.pending.len(),
+                record.pending.join(", ")
+            ),
+        )
+        .hint(fix);
+    }
+    match record.binary {
+        Some(b) if b == env!("CARGO_PKG_VERSION") => Row::new(
+            "6",
+            Level::Pass,
+            format!(
+                "upgrade record: binary {b}, migrations up to {}",
+                record.schema
+            ),
+        ),
+        Some(b) => Row::new(
+            "6",
+            Level::Info,
+            format!("the upgrade record names playbook {b}; the next session start updates it"),
+        )
+        .hint(fix),
+        None => Row::new(
+            "6",
+            Level::Info,
+            "no upgrade record yet; the next session start writes it",
+        )
+        .hint(fix),
+    }
 }
 
 fn layer6(env: &Env) -> Vec<Row> {
@@ -423,23 +486,9 @@ fn layer6(env: &Env) -> Vec<Row> {
             ),
         );
     } else {
-        rows.push(match manifest_version(env) {
-            Some(m) if m == bin_ver => {
-                Row::new("6", Level::Pass, format!("playbook binary on PATH, version {bin_ver}"))
-            }
-            Some(m) => Row::new(
-                "6",
-                Level::Info,
-                format!("binary {bin_ver} and plugin {m} differ"),
-            )
-            .hint("update whichever is behind: `playbook update` or `claude plugin update playbook@pragmatic-engineer`"),
-            None => Row::new(
-                "6",
-                Level::Info,
-                format!("playbook binary on PATH, version {bin_ver}, no plugin manifest to compare"),
-            ),
-        });
+        rows.push(version_row(env, first, &bin_ver));
     }
+    rows.push(heal_row(env));
     let mut gate = Command::new(first);
     gate.args(["gate", "record", "--help"]);
     if !output_of(gate).is_some_and(|t| t.contains("--source")) {
