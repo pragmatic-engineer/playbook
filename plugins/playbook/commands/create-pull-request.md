@@ -94,11 +94,11 @@ If `ticket=` holds a real key (not empty, not `none`), the key goes on the very 
 
 ## Step 2: Generate the title (conventional commits)
 
-Derive the title from the diff and commit log gathered in Step 1.
+Derive the title from the diff and commit log gathered in Step 1. Read `$CLAUDE_PLUGIN_ROOT/skills/writing-style/references/conventional-commits.md` before writing it, and follow it for the title only.
 
 - Format: `type(scope): summary`. With a ticket key, the key is the scope: `feat(PROJ-123): add retry to the sync job`. Without one, use a module name as the scope, e.g. `feat(auth): add SSO retry logic`, or no scope.
 - In a stacked PR set, every PR title and every commit carries the key. Squash merge turns the title into the commit message, so the title follows the same format.
-- Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`, `chore`. Pick the type from what the files in the diff are, not from words in it: only docs files is `docs`, only tests is `test`, only CI files is `ci`, a dependency bump (lock files, or manifests next to a lock file) is `build` or `chore`, and a change that restructures code and keeps behavior is `refactor`, not `fix`.
+- Types: `feat`, `fix`, `style`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`, `chore`, `revert`. Pick the type from what the files in the diff are, not from words in it: only docs files is `docs`, only tests is `test`, only CI files is `ci`, a dependency bump (lock files, or manifests next to a lock file) is `build` or `chore`, and a change that restructures code and keeps behavior is `refactor`, not `fix`.
 - Imperative mood ("add", not "added" or "adds"), no trailing period.
 - **Length: 72 characters maximum**, counting the entire line including the `type(scope):` prefix. This is a hard limit, not a target. If the draft exceeds it, tighten the summary (cut filler, shorten wording; drop the scope only when it is a module name, never when it holds the ticket key) until it fits; never open a PR with a title over 72 characters. Step 4 re-checks the length and refuses a longer title before it pushes anything.
 - The summary states the **effect** of the change, not a list of files.
