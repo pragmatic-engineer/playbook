@@ -150,30 +150,16 @@ static PATS: LazyLock<Pats> = LazyLock::new(|| Pats {
     braces: static_regex(r"\{[^}]* => ([^}]*)\}"),
 });
 
+#[rustfmt::skip]
 const LOCKS: &[&str] = &[
-    "Cargo.lock",
-    "package-lock.json",
-    "yarn.lock",
-    "pnpm-lock.yaml",
-    "poetry.lock",
-    "Gemfile.lock",
-    "go.sum",
-    "uv.lock",
-    "composer.lock",
-    "bun.lockb",
-    "Pipfile.lock",
+    "Cargo.lock", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock",
+    "Gemfile.lock", "go.sum", "uv.lock", "composer.lock", "bun.lockb", "Pipfile.lock",
 ];
 
+#[rustfmt::skip]
 const MANIFESTS: &[&str] = &[
-    "Cargo.toml",
-    "package.json",
-    "go.mod",
-    "pyproject.toml",
-    "Gemfile",
-    "pom.xml",
-    "build.gradle",
-    "build.gradle.kts",
-    "Pipfile",
+    "Cargo.toml", "package.json", "go.mod", "pyproject.toml", "Gemfile", "pom.xml",
+    "build.gradle", "build.gradle.kts", "Pipfile",
 ];
 
 fn file_name(path: &str) -> &str {
