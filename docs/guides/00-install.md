@@ -130,9 +130,8 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 
 | Install | Command |
 |---|---|
-| Install script (recommended) | `playbook update` (`--check` to look, `--list` for releases, `--pre` for pre-releases, `--yes` in auto mode) |
+| Install script (recommended) | `playbook update`, or run the installer again (`--check` to look, `--list` for releases, `--pre` for pre-releases, `--yes` in auto mode) |
 | Homebrew | `brew upgrade playbook` |
-| Installer | Run it again |
 
 `playbook update` verifies SHA256SUMS and the attestation, keeps the old binary as `playbook.<version>.bak` (the newest three are kept), refuses a Homebrew install, and warns when another `playbook` earlier on `PATH` hides the new one. It does not compare the plugin version with the binary version, because the plugin has its own version line. Update the plugin with `claude plugin update playbook@pragmatic-engineer` when you want its newer skills. To roll back, move a backup over the binary:
 

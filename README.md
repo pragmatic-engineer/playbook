@@ -13,7 +13,7 @@ claude plugin marketplace add pragmatic-engineer/marketplace
 claude plugin install playbook@pragmatic-engineer
 ```
 
-The binary, optional. The recommended install is the install script. It downloads the release binary, checks its SHA256 checksum and its build attestation (when `gh` is available), puts it on `PATH`, and then asks whether to run `playbook init`:
+The binary, optional. The recommended install is the install script. It downloads the release binary, checks its SHA256 checksum, and its build attestation when `gh` can check it, puts it on `PATH`, and then asks whether to run `playbook init`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
@@ -21,23 +21,22 @@ curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/in
 
 Update later with `playbook update`. Use `playbook update --check` to see whether a newer release exists without installing it.
 
-#### Homebrew
-
-Homebrew is supported too:
-
-```bash
-brew install pragmatic-engineer/tap/playbook
-brew upgrade playbook
-playbook init
-```
-
-A Homebrew install updates with brew. On a brew-managed install, `playbook update` stops and tells you to run `brew upgrade playbook`.
-
 `playbook init` adds the hook entries to `~/.claude/settings.json`. In a terminal it asks first, and it keeps your own entries. `playbook uninstall` removes only the entries whose command is exactly one `playbook hook <name>` command that `init` writes. Run `playbook doctor check` to see what is in place. If you also installed the skills, open a Claude Code session and run `/playbook:doctor`. It checks every layer and tells you how to fix a miss.
 
 The installer only installs the `playbook` binary (checksum verified) and puts it on `PATH`. It never installs or removes a plugin. `playbook init` also sets the status line and asks before adding the launcher and system prompt. Pass `--yes` to the installer to say yes to every question.
 
 To see what `playbook init` changes before you agree, read [What init installs](docs/guides/06-what-init-installs.md) and the [hook reference](docs/reference/hooks.md).
+
+### Homebrew
+
+Homebrew is supported too:
+
+```bash
+brew install pragmatic-engineer/tap/playbook
+playbook init
+```
+
+A Homebrew install updates with `brew upgrade playbook`. On a brew-managed install, `playbook update` stops and tells you to run `brew upgrade playbook`.
 
 ### Telemetry
 
