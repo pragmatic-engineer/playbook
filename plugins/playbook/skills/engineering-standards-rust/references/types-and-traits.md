@@ -94,8 +94,7 @@ Use the type system to make wrong states fail to compile, and pick the right tra
     Check: rustc `missing_debug_implementations` (allow by default), `clippy::derive_partial_eq_without_eq` (nursery).
     No lint checks derive order. Canonical's guide puts `Copy` first, then the rest in alphabetical order. Pick one order per project.
 
-12. **Hide secrets in `Debug`.** Write `Debug` by hand, or wrap the value in a type such as `secrecy::SecretString`.
-    Why: `{:?}` ends up in logs and panic messages.
+12. **Hide secrets in `Debug`.** The rule and its fixes are in security-and-input, rule 7.
 
 13. **Get `to_string` from `Display`.** Do not write an inherent `to_string` method.
     Check: `clippy::inherent_to_string`.

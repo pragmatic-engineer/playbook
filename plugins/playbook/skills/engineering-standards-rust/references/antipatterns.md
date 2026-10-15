@@ -23,7 +23,7 @@ A review checklist. Each entry names the smell and the fix, and the check where 
 
 8. **`Deref` to fake inheritance.** Fix: composition with explicit methods, or a trait. [types-and-traits]
 
-9. **`#![deny(warnings)]` in source.** A new compiler or Clippy release adds lints and breaks the build on the next toolchain update. Fix: deny warnings in CI, or deny named lints in the `[lints]` table of `Cargo.toml`.
+9. **`#![deny(warnings)]` in source.** A new compiler or Clippy release adds lints and breaks the build on the next toolchain update. Fix: deny warnings in CI, or deny named lints in the `[lints]` table of `Cargo.toml`. [tooling-and-ci]
 
 10. **Truncating `as` casts.** `len as u32`. Fix: `u32::try_from(len)` with the error mapped to your type. [types-and-traits]
     Check: `clippy::cast_possible_truncation` (pedantic).
@@ -39,4 +39,4 @@ A review checklist. Each entry names the smell and the fix, and the check where 
 
 14. **Public fields on a type with an invariant.** Fix: private fields, a validating constructor and accessors. [api-design]
 
-15. **A secret in `Debug` output.** A derived `Debug` on a struct that holds a token or password. Fix: a manual `Debug` or a secret wrapper type. [types-and-traits]
+15. **A secret in `Debug` output.** A derived `Debug` on a struct that holds a token or password. Fix: a manual `Debug` or a secret wrapper type. [security-and-input]

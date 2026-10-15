@@ -59,7 +59,7 @@ Load `references/style-and-naming.md` when you name things, write imports or `ma
 ### Async and concurrency
 
 - Do not block an async runtime thread. Move blocking work to `spawn_blocking`, `rayon` or a dedicated thread.
-- Do not hold a lock guard across `.await`. Use bounded channels, track every spawned task, and put a timeout on each remote call.
+- Do not hold a `std` lock guard or a `RefCell` borrow across `.await`. Use bounded channels, track every spawned task, and put a timeout on each remote call.
 
 Load `references/async-and-concurrency.md` when you write `async` code, spawn a task or thread, or add a lock, channel or atomic.
 
@@ -103,7 +103,7 @@ Load `references/testing.md` when you write or review a test, or reproduce a bug
 - CI runs `cargo fmt --check` and Clippy on all targets with warnings denied. Lint levels live in `[workspace.lints]`.
 - Check dependencies with `cargo deny` or `cargo audit`, keep features additive, and test the MSRV.
 
-Load `references/tooling-and-ci.md` when you change `Cargo.toml` lints, CI, the toolchain, features or dependencies. It ends with the playbook repository's own setup as a worked example.
+Load `references/tooling-and-ci.md` when you change `Cargo.toml` lints, CI, the toolchain, features or dependencies. It ends with the setup of pragmatic-engineer/playbook, this plugin's source, as a worked example.
 
 ### Project structure
 

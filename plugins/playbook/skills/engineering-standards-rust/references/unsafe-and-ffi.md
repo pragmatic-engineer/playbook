@@ -19,23 +19,25 @@ Keep `unsafe` rare, small, documented and tested. A lint marked (pedantic), (nur
 3. **Each `unsafe` block has a `// SAFETY:` comment** that says why each precondition holds. Keep blocks small, with one unsafe operation each where you can.
 
    ```rust
-   // SAFETY: `idx < self.len` was checked above, and `self.ptr`
-   // points to `self.len` initialized elements.
-   let item = unsafe { &*self.ptr.add(idx) };
+   // SAFETY: `idx < self.len` was checked above, and the buffer
+   // behind `self.ptr` holds `self.len` elements.
+   let slot = unsafe { self.ptr.add(idx) };
+   // SAFETY: `slot` is in bounds and the element is initialized.
+   let item = unsafe { &*slot };
    ```
 
    Check: `clippy::undocumented_unsafe_blocks` (restriction), `clippy::multiple_unsafe_ops_per_block` (restriction).
    Sources differ here. Canonical's guide asks for a `// SAFETY:` comment on an `unsafe fn` as well. This skill follows the Rust API Guidelines and Clippy: an `unsafe fn` gets a `# Safety` doc section (rule 4), because callers read it in rustdoc.
 
-4. **Each `pub unsafe fn` has a `# Safety` doc section** that lists what the caller must uphold.
-   Check: `clippy::missing_safety_doc`.
+4. **Each `unsafe fn` has a `# Safety` doc section** that lists what the caller must uphold.
+   Check: `clippy::missing_safety_doc` (public functions only).
 
 5. **Use explicit `unsafe {}` blocks inside an `unsafe fn`.**
    Why: "unsafe to call" and "does unsafe things here" are two separate facts. The 2024 edition warns on the implicit form.
    Check: rustc `unsafe_op_in_unsafe_fn` (allow by default before the 2024 edition, warn from 2024).
 
 6. **A safe function does not dereference a raw pointer it receives.** Make the function `unsafe` or take a reference.
-   Check: `clippy::not_unsafe_ptr_arg_deref`.
+   Check: `clippy::not_unsafe_ptr_arg_deref` (public functions only).
 
 7. **Run tests under Miri for any crate with unsafe code.** `cargo +nightly miri test`. Mark tests Miri cannot run with `#[cfg_attr(miri, ignore)]`.
    Why: Miri finds out-of-bounds access, use after free and aliasing errors on the paths your tests run. A clean run proves nothing about other paths, and Miri cannot run most FFI calls.
@@ -54,4 +56,4 @@ Keep `unsafe` rare, small, documented and tested. A lint marked (pedantic), (nur
 11. **Make ownership across the boundary explicit.** The side that allocates also frees, with the same allocator. Wrap a foreign resource in a Rust type whose `Drop` releases it.
     Why: this prevents leaks and double frees, including on early return.
 
-12. **Model nullable pointers and callbacks as `Option`.** `Option<&T>`, `Option<Box<T>>` and `Option<extern "C" fn(...)>` have the same size as a pointer, with `None` as null.
+12. **Model nullable pointers and callbacks as `Option`.** `Option<&T>`, `Option<Box<T>>` and `Option<extern "C" fn(...)>` have the same size as a pointer, with `None` as null. Use `Option<Box<T>>` only for memory Rust allocated and gets back, and `Option<&T>` only when C promises an aligned, valid pointer for the whole borrow. Otherwise take a raw pointer and check it.

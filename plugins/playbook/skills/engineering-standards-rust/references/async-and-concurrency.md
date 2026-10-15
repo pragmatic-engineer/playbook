@@ -19,7 +19,7 @@ Threads, locks, channels and async tasks, with Tokio as the example runtime. A l
 3. **Use `std::sync::Mutex` for plain data, even in async code.** Use `tokio::sync::Mutex` only when the guard must live across an `.await`, usually around an I/O resource.
    Why: the async mutex is slower, and a short lock with low contention is fine.
 
-4. **Do not hold a lock guard or a `RefCell` borrow across `.await`.** Lock in a small sync function, or end the guard's scope with a block before the await.
+4. **Do not hold a sync lock guard or a `RefCell` borrow across `.await`.** This covers `std::sync` and `parking_lot` guards. A `tokio::sync` guard may cross an `.await` (rule 3). Lock in a small sync function, or end the guard's scope with a block before the await.
 
    ```rust
    // wrong: the guard is alive at the await
@@ -67,14 +67,14 @@ Threads, locks, channels and async tasks, with Tokio as the example runtime. A l
 
 ## Sharing between threads
 
-13. **`tokio::spawn` needs `Send + 'static`.** Move owned data in with `async move` and share it through `Arc`. Keep `Rc`, `RefCell` and guards out of scope at each `.await`.
+13. **`tokio::spawn` needs `Send + 'static`.** Move owned data in with `async move` and share it through `Arc`. Keep `Rc`, `RefCell` borrows and sync lock guards out of scope at each `.await`.
     Check: `clippy::future_not_send` (nursery), `clippy::arc_with_non_send_sync`.
 
 14. **Prefer one owner task for a shared I/O resource.** Callers send messages over `mpsc` and get replies on a `oneshot`.
     Why: the owner task needs no lock, and it can process requests in order.
 
 15. **Use scoped threads to borrow local data.** `std::thread::scope` joins every thread before it returns.
-    Why: no `'static` bound and no `Arc` just to share a borrow.
+    Why: no `'static` bound and no `Arc` to share a borrow.
 
 16. **Prefer a lock or a channel to hand-written atomics.** For a plain counter, `Relaxed` is enough. To publish data, pair `Release` on the store with `Acquire` on the load. Comment the reason for each ordering.
     Sources disagree on the default. Mara Bos (Rust Atomics and Locks) says `SeqCst` is rarely needed and can hide unclear reasoning. A common rule is to start with `SeqCst`. This skill prefers a lock first and a comment on each ordering, because an ordering that is too weak causes bugs that tests rarely catch.

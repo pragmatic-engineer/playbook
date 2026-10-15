@@ -5,8 +5,9 @@ Release notes for the playbook plugin in `plugins/playbook`. The binary has its 
 ## playbook 0.33.0
 
 - `engineering-standards-rust` gets eight more references: async and concurrency, iterators and collections, performance, unsafe and FFI, security and input, testing, tooling and CI, and project structure. The rules index in `SKILL.md` lists each one with a load-when line.
-- The tooling reference ends with the playbook repository's own Rust setup as a worked example.
-- `systematic-debugging` points to the Rust skill for writing a failing test, the same way it points to the JavaScript one.
+- The tooling reference ends with the Rust setup of pragmatic-engineer/playbook as a worked example.
+- `systematic-debugging` and its condition-based-waiting guide point to the Rust skill, the same way they point to the JavaScript one.
+- Secrets in `Debug` and error responses for network services now have one home, in the security reference.
 
 ## playbook 0.32.0
 

@@ -30,7 +30,7 @@ Iterator chains, `collect`, and how to pick a collection. A lint marked (pedanti
    ```
 
    Why: it stops at the first error with no hand-written loop. The same works for `Option`.
-   Use `partition` when you need every error. `filter_map(Result::ok)` drops errors in silence, so use it only when that is the intent.
+   Use `partition` when you need every error. `filter_map(Result::ok)` drops errors in silence. Use it only when that is the intent.
 
 5. **Pick `iter`, `iter_mut` or `into_iter` on purpose.** Borrow by default. `into_iter()` and `for x in v` move `v`.
    Check: `clippy::into_iter_on_ref`.
@@ -39,21 +39,21 @@ Iterator chains, `collect`, and how to pick a collection. A lint marked (pedanti
    Why: only the items you keep get cloned.
    Check: `clippy::iter_overeager_cloned`.
 
-7. **Use `extend` to add items to an existing collection.**
+7. **Use `extend` to add items to an existing collection.** To move all items of one `Vec` into another, use `append`.
    Why: it reuses the buffer and can reserve space once.
-   Check: `clippy::extend_with_drain`.
+   Check: review. `clippy::extend_with_drain` catches only `extend(other.drain(..))`.
 
 8. **Use the entry API for insert-or-update.**
 
    ```rust
    // wrong: two lookups
-   if !counts.contains_key(&word) { counts.insert(word.clone(), 0); }
-   *counts.get_mut(&word).unwrap() += 1;
+   if !index.contains_key(&id) { index.insert(id, Vec::new()); }
    // right
-   *counts.entry(word).or_insert(0) += 1;
+   index.entry(id).or_default();
    ```
 
-   Check: `clippy::map_entry`.
+   `entry` takes an owned key. When the key is a borrowed `&str` and most lookups hit, call `get_mut` first and build the owned key only on a miss.
+   Check: `clippy::map_entry` catches `contains_key` followed by `insert`.
 
 9. **Use `retain` to remove items in place.**
    Check: `clippy::manual_retain`.
@@ -64,5 +64,5 @@ Iterator chains, `collect`, and how to pick a collection. A lint marked (pedanti
 11. **Do not depend on `HashMap` order.** Sort the output, or use `BTreeMap`, when order matters.
     Why: iteration order changes between runs and breaks tests and diffs.
 
-12. **A custom iterator implements `size_hint`** (or `ExactSizeIterator` when the length is known).
-    Why: `collect` and `extend` can allocate once.
+12. **A custom iterator overrides `size_hint`.** When the length is exact, it returns `(n, Some(n))` and the type also implements `ExactSizeIterator`.
+    Why: `collect` and `extend` read `size_hint` to allocate once, and `ExactSizeIterator::len` panics on the default `(0, None)`.

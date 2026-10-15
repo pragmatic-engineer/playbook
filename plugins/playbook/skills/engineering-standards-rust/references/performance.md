@@ -26,14 +26,14 @@ Measure first, then cut allocations and copies on the hot path. A lint marked (p
 
 ## Allocations and copies
 
-6. **Size collections up front when you know the size.** Use `Vec::with_capacity`, `String::with_capacity` or `reserve`.
-   Check: `clippy::vec_init_then_push`.
+6. **Size collections up front when you know the size.** Use `Vec::with_capacity`, `String::with_capacity` or `reserve`. When the size comes from input, clamp it to a fixed maximum first (security-and-input, rule 3).
+   Check: review. `clippy::vec_init_then_push` catches only a fixed run of pushes after `Vec::new()`.
 
 7. **Reuse a buffer in a loop.** `clear()` keeps the capacity. Read lines into one `String` with `read_line` on a hot path.
    Why: `lines()` and a new `Vec` per pass allocate on every iteration.
 
 8. **Avoid clones and `to_string` on hot paths.** Borrow, or use `Cow` when you change the value only sometimes.
-   Check: `clippy::unnecessary_to_owned`, `clippy::redundant_clone` (nursery), `clippy::inefficient_to_string` (pedantic).
+   Check: `clippy::unnecessary_to_owned`, `clippy::redundant_clone` (nursery).
 
 9. **Write into an existing `String` with `write!`.** Avoid `format!` in a loop and `push_str(&format!(...))`.
    Check: `clippy::format_push_string` (pedantic), `clippy::format_collect` (pedantic).
@@ -42,8 +42,8 @@ Measure first, then cut allocations and copies on the hot path. A lint marked (p
     Why: an enum is as big as its largest variant, and big values cost a copy on each move.
     Check: `clippy::large_enum_variant`, `clippy::box_collection`, `clippy::large_stack_arrays` (pedantic).
 
-11. **Buffer I/O.** Wrap files and sockets in `BufReader` or `BufWriter`, call `flush()` and handle its error, and lock `stdout` once for many writes.
-    Why: Rust file I/O is not buffered, `println!` takes the lock on each call, and an error on the implicit flush at drop is lost.
+11. **Buffer I/O.** Wrap files and sockets in `BufReader` or `BufWriter`, and call `flush()` and handle its error. For many lines to `stdout`, write to `BufWriter::new(io::stdout().lock())`.
+    Why: Rust file I/O is not buffered, `stdout` flushes on each newline, `println!` takes the lock on each call, and an error on the implicit flush at drop is lost.
 
 ## Build settings
 
@@ -53,5 +53,5 @@ Measure first, then cut allocations and copies on the hot path. A lint marked (p
 13. **Use `-C target-cpu=native` only for binaries that run on the build machine's CPU type.**
     Why: the binary can use instructions that other CPUs lack, and it crashes there.
 
-14. **Switch to a faster hasher only when the profile shows hashing and the keys do not come from users.** Enforce the choice with `clippy::disallowed_types`.
+14. **Switch to a faster hasher only when the profile shows hashing and the keys do not come from users.** Choose it per map. A crate-wide ban of `std::collections::HashMap` with `clippy::disallowed_types` fits only a crate that hashes no user-controlled keys.
     Why: the default `HashMap` hasher resists hash flooding attacks, and faster hashers do not.

@@ -25,7 +25,7 @@ Workspace layout, crate boundaries, modules and visibility. A lint marked (pedan
    Why: each `pub` item in a library is a semver promise.
    Check: rustc `unreachable_pub` (allow by default).
 
-8. **Re-export the public API at the crate root** with `pub use`, so users write `mycrate::Client`. Re-export a dependency whose types appear in your API.
+8. **Re-export the public API at the crate root** with `pub use`. Users then write `mycrate::Client`. Re-export a dependency whose types appear in your API.
    Why: you can move internal modules without breaking users.
 
 9. **Pick one module file style per repository.** The Rust Book prefers `foo.rs` next to a `foo/` folder. Canonical's guide prefers `foo/mod.rs`.
