@@ -74,6 +74,8 @@ pub const KNOWN_KEYS: &[&str] = &[
     "launcher.shortName",
     "hooks.rmGuard.allowedRoots",
     "hooks.proseLint.mode",
+    "update.mode",
+    "update.checkIntervalHours",
 ];
 
 /// The component kinds an `effort.<kind>.<name>` key can name.
@@ -165,6 +167,8 @@ pub fn default_value(key: &str) -> Option<Value> {
         "launcher.claudeOverride" | "launcher.shortName" => Some(Value::Bool(false)),
         "hooks.rmGuard.allowedRoots" => Some(Value::Array(Vec::new())),
         "hooks.proseLint.mode" => Some(Value::String("warn".to_string())),
+        "update.mode" => Some(Value::String("notify".to_string())),
+        "update.checkIntervalHours" => Some(Value::Number(24.into())),
         _ => None,
     }
 }
@@ -188,6 +192,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "usage.telemetry" => Some(&["auto", "off"]),
         "docs.convert" => Some(&["auto", "off"]),
         "hooks.proseLint.mode" => Some(&["warn", "block", "off"]),
+        "update.mode" => Some(&["notify", "auto", "off"]),
         "pr.rules.template"
         | "pr.rules.length"
         | "pr.rules.issue"

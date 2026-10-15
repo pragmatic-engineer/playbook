@@ -88,6 +88,8 @@ fn main() {
         }
     }
 
+    update::check::on_start(&args);
+
     match cli.command {
         Command::Hook { name } => run_hook(name),
         // Launcher subcommands land in a later Work Unit; stub for now.
@@ -2259,7 +2261,12 @@ fn main() {
             list,
             pre,
             yes,
+            refresh_check,
         } => {
+            if refresh_check {
+                update::check::run_refresh();
+                return;
+            }
             let opts = update::Options {
                 version,
                 check,
@@ -2271,7 +2278,10 @@ fn main() {
                 let mut outcome = update::run(
                     &opts,
                     &env,
-                    &update::download::HttpFetcher { local_http: false },
+                    &update::download::HttpFetcher {
+                        local_http: false,
+                        timeout: update::download::DOWNLOAD_TIMEOUT,
+                    },
                     &update::verify::GhAttest,
                     &update::swap::run_version,
                 )?;
