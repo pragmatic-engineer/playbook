@@ -2,6 +2,10 @@
 
 Release notes for the playbook plugin in `plugins/playbook`. The binary has its own releases. Each plugin release has a section named `## playbook <version>`, newest first, and the top section always matches the version in `plugins/playbook/.claude-plugin/plugin.json`.
 
+## playbook 0.31.2
+
+- The doctor command text matches the binary: a version difference no longer shows, layer 6 adds the upgrade record row, and `playbook init --hooks` removes dead hook entries under `~/.claude/hooks`.
+
 ## playbook 0.31.1
 
 - The plugin now declares `minBinaryVersion` 0.26.0 in its metadata. The field is informational for now: nothing in the binary reads it yet.

@@ -1,7 +1,7 @@
 {
   "name": "playbook",
   "displayName": "Playbook",
-  "version": "0.31.1",
+  "version": "0.31.2",
   "metadata": {
     "minBinaryVersion": "0.26.0"
   },
