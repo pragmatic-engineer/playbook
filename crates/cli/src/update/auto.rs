@@ -414,6 +414,7 @@ mod tests {
             current_version: "0.16.0".into(),
             api_base: API.into(),
             download_base: DL.into(),
+            announce: |_| {},
         };
         let bin = script("0.17.0");
         let mut f = FakeFetcher::default();
