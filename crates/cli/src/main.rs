@@ -137,7 +137,7 @@ fn main() {
             let claude_home = home.join(".claude");
             let cwd = std::env::current_dir().unwrap_or_default();
             let claude = effort::claude_cap(&claude_home, &cwd);
-            let root = init::self_root::skills_root_from_env(
+            let root = playbook::plugin_root::find(
                 std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
                 &claude_home,
             );
@@ -296,7 +296,7 @@ fn main() {
                 let claude_home = home.join(".claude");
                 let cwd = std::env::current_dir().unwrap_or_default();
                 let claude = effort::claude_cap(&claude_home, &cwd);
-                let root = init::self_root::skills_root_from_env(
+                let root = playbook::plugin_root::find(
                     std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
                     &claude_home,
                 );
@@ -542,10 +542,9 @@ fn main() {
             let plugin_root = std::env::var("CLAUDE_PLUGIN_ROOT").ok();
             let self_root = if flags.dry_run {
                 // A dry run must not write the embedded copies.
-                init::self_root::resolve(plugin_root.as_deref(), &claude_home)
-                    .filter(|root| init::self_root::has_seed_files(root))
+                init::self_root::seed_root(plugin_root.as_deref())
             } else {
-                init::self_root::resolve_or_embedded(plugin_root.as_deref(), &claude_home, &home)
+                init::self_root::resolve_or_embedded(plugin_root.as_deref(), &home)
             };
             let shell_kind = std::env::var("SHELL")
                 .ok()
@@ -1154,10 +1153,9 @@ fn main() {
                 } => {
                     let root = plugin_root
                         .or_else(|| {
-                            let home = common::home_dir();
-                            init::self_root::skills_root_from_env(
+                            playbook::plugin_root::find(
                                 std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
-                                &home.join(".claude"),
+                                &common::home_dir().join(".claude"),
                             )
                         })
                         .unwrap_or_default();
@@ -1872,6 +1870,16 @@ fn main() {
             }
         }
         Command::Path { kind, create } => {
+            if matches!(kind, playbook::PathKind::PluginRoot) {
+                match playbook::plugin_root::resolve_here() {
+                    Ok(found) => println!("{}", found.root.display()),
+                    Err(err) => {
+                        eprintln!("playbook path: {err}");
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
             if matches!(kind, playbook::PathKind::Data) {
                 let dir = common::data::data_dir();
                 if create {
@@ -1898,7 +1906,9 @@ fn main() {
                 playbook::PathKind::Plans => Some(storage::Kind::Plans),
                 playbook::PathKind::Implement => Some(storage::Kind::Implement),
                 playbook::PathKind::Worktrees => Some(storage::Kind::Worktrees),
-                playbook::PathKind::Handoff | playbook::PathKind::Data => None,
+                playbook::PathKind::Handoff
+                | playbook::PathKind::Data
+                | playbook::PathKind::PluginRoot => None,
             };
             let resolved = if matches!(kind, playbook::PathKind::Handoff) {
                 // Outside a repo this is the old shared folder, the same one
@@ -2065,7 +2075,7 @@ fn main() {
             DoctorCommand::PendingMigrations => {
                 let home = common::home_dir();
                 let claude_home = home.join(".claude");
-                let self_root = init::self_root::skills_root_from_env(
+                let self_root = playbook::plugin_root::find(
                     std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
                     &claude_home,
                 );

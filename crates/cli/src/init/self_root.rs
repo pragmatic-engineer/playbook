@@ -1,28 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Resolves `InitPaths::self_root`: `CLAUDE_PLUGIN_ROOT` when Claude Code set
-//! it, or the marketplace cache directory a direct terminal run has neither.
+//! Resolves `InitPaths::self_root`, the files `init` seeds from:
+//! `CLAUDE_PLUGIN_ROOT` when it holds them (a dev checkout), else the copies
+//! compiled into this binary. A plugin cache directory is never a source,
+//! because an old plugin there ships an old settings template (ADR 0034).
+//! The plugin's skills, commands and agents are found by `crate::plugin_root`.
 
 use std::path::{Path, PathBuf};
-
-/// An empty or absent `claude_plugin_root_env` falls back to the marketplace
-/// cache under `claude_home`. The cache directory for the running version
-/// wins. When it is missing (a package manager upgraded the binary before the
-/// plugin cache caught up), the newest cached version is used instead, since
-/// the shipped template and prompt files are still the best source available.
-/// `None` when neither resolves.
-pub fn resolve(claude_plugin_root_env: Option<&str>, claude_home: &Path) -> Option<PathBuf> {
-    if let Some(root) = claude_plugin_root_env.filter(|s| !s.is_empty()) {
-        return Some(PathBuf::from(root));
-    }
-    let cache = claude_home.join("plugins/cache/pragmatic-engineer/playbook");
-    let exact = cache.join(env!("CARGO_PKG_VERSION"));
-    if exact.is_dir() {
-        return Some(exact);
-    }
-    newest_cached(&cache)
-}
 
 const EMBEDDED_SETTINGS: &str = include_str!("../../../../settings.shared.json");
 const EMBEDDED_PROMPT: &str = include_str!("../../../../prompts/SYSTEM_PROMPT.md");
@@ -35,57 +20,22 @@ pub fn has_seed_files(root: &Path) -> bool {
     root.join("settings.shared.json").is_file() && root.join("prompts/SYSTEM_PROMPT.md").is_file()
 }
 
-/// `resolve`, then the copies of the settings template and system prompt
-/// compiled into this binary. A Homebrew install ships only the binary, and a
-/// skills-only plugin install ships neither file, so without a root that holds
-/// them nothing else would exist for `init` to seed from.
-/// The embedded copies are written under `$HOME/.config/playbook/embedded/`
-/// (playbook's own state, never Claude Code's) and that directory is returned.
-pub fn resolve_or_embedded(
-    claude_plugin_root_env: Option<&str>,
-    claude_home: &Path,
-    home: &Path,
-) -> Option<PathBuf> {
-    resolve(claude_plugin_root_env, claude_home)
-        .filter(|root| has_seed_files(root))
-        .or_else(|| write_embedded(home).ok())
-}
-
-/// The root that holds the shipped skills, which `init` hashes to notice later
-/// edits. The seed root is the hooks plugin or the embedded copy and has no
-/// `skills/`, so fall back to the `playbook` plugin's own cache directory.
-pub fn skills_root(self_root: Option<&Path>, claude_home: &Path) -> Option<PathBuf> {
-    self_root
-        .filter(|root| root.join("skills").is_dir())
-        .map(Path::to_path_buf)
-        .or_else(|| resolve(None, claude_home).filter(|root| root.join("skills").is_dir()))
-}
-
-/// The root that holds the skills, commands and agents: `claude_plugin_root_env`
-/// when it holds them, else the cached `playbook` skills plugin. `None` when no
-/// skills plugin is installed, which callers treat as "no plugin files", never
-/// as an error. The hooks plugin sets `CLAUDE_PLUGIN_ROOT` for its own hooks,
-/// so the variable alone is not enough.
-pub fn skills_root_from_env(
-    claude_plugin_root_env: Option<&str>,
-    claude_home: &Path,
-) -> Option<PathBuf> {
-    let has_components = |root: &Path| {
-        ["agents", "commands", "skills"]
-            .iter()
-            .any(|dir| root.join(dir).is_dir())
-    };
-    // The env root wins when it holds components. The cache is searched by
-    // newest version, not by the binary's version, because the skills plugin
-    // has its own version line.
+/// The env root when it holds the seed files and is not another plugin, such
+/// as the retired `playbook-hooks`, else `None`. Writes nothing, for a dry run.
+pub fn seed_root(claude_plugin_root_env: Option<&str>) -> Option<PathBuf> {
     claude_plugin_root_env
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
-        .filter(|root| has_components(root))
-        .or_else(|| {
-            newest_cached(&claude_home.join("plugins/cache/pragmatic-engineer/playbook"))
-                .filter(|root| has_components(root))
-        })
+        .filter(|root| has_seed_files(root) && crate::plugin_root::is_ours(root))
+}
+
+/// `seed_root`, then the copies of the settings template and system prompt
+/// compiled into this binary. A Homebrew install ships only the binary, and
+/// the plugin ships neither file.
+/// The embedded copies are written under `$HOME/.config/playbook/embedded/`
+/// (playbook's own state, never Claude Code's) and that directory is returned.
+pub fn resolve_or_embedded(claude_plugin_root_env: Option<&str>, home: &Path) -> Option<PathBuf> {
+    seed_root(claude_plugin_root_env).or_else(|| write_embedded(home).ok())
 }
 
 /// The embedded Brewfile, written under the same embedded directory.
@@ -104,32 +54,6 @@ fn write_embedded(home: &Path) -> std::io::Result<PathBuf> {
     Ok(root)
 }
 
-/// The highest version directory directly under `cache`. Names that do not
-/// parse as `major.minor.patch` (with an optional pre-release suffix) are
-/// ignored, and a pre-release sorts below its release.
-fn newest_cached(cache: &Path) -> Option<PathBuf> {
-    std::fs::read_dir(cache)
-        .ok()?
-        .filter_map(Result::ok)
-        .filter(|e| e.path().is_dir())
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
-            Some((version_key(&name)?, e.path()))
-        })
-        .max_by(|a, b| a.0.cmp(&b.0))
-        .map(|(_, path)| path)
-}
-
-fn version_key(name: &str) -> Option<(u64, u64, u64, bool)> {
-    let (core, pre) = match name.split_once('-') {
-        Some((core, _)) => (core, true),
-        None => (name, false),
-    };
-    let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
-    let key = (parts.next()??, parts.next()??, parts.next()??, !pre);
-    parts.next().is_none().then_some(key)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,150 +69,19 @@ mod tests {
         dir
     }
 
-    fn cache_dir_for(claude_home: &Path) -> PathBuf {
-        claude_home
-            .join("plugins/cache/pragmatic-engineer/playbook")
-            .join(env!("CARGO_PKG_VERSION"))
+    fn seeded(root: &Path) {
+        fs::create_dir_all(root.join("prompts")).expect("prompts dir");
+        fs::write(root.join("settings.shared.json"), "{}").expect("settings");
+        fs::write(root.join("prompts/SYSTEM_PROMPT.md"), "p").expect("prompt");
     }
 
     #[test]
-    fn explicit_env_var_wins_even_when_the_cache_also_matches() {
-        // Arrange
-        let claude_home = scratch("env-wins");
-        fs::create_dir_all(cache_dir_for(&claude_home)).expect("cache dir");
-
-        // Act
-        let got = resolve(Some("/explicit/plugin/root"), &claude_home);
-
-        // Assert
-        assert_eq!(got, Some(PathBuf::from("/explicit/plugin/root")));
-    }
-
-    #[test]
-    fn empty_env_var_falls_back_to_the_versioned_cache_dir() {
-        // Arrange
-        let claude_home = scratch("empty-env-falls-back");
-        let cache_dir = cache_dir_for(&claude_home);
-        fs::create_dir_all(&cache_dir).expect("cache dir");
-
-        // Act
-        let got = resolve(Some(""), &claude_home);
-
-        // Assert
-        assert_eq!(got, Some(cache_dir));
-    }
-
-    #[test]
-    fn absent_env_var_falls_back_to_the_versioned_cache_dir() {
-        // Arrange
-        let claude_home = scratch("absent-env-falls-back");
-        let cache_dir = cache_dir_for(&claude_home);
-        fs::create_dir_all(&cache_dir).expect("cache dir");
-
-        // Act
-        let got = resolve(None, &claude_home);
-
-        // Assert
-        assert_eq!(got, Some(cache_dir));
-    }
-
-    #[test]
-    fn no_env_var_and_no_cache_dir_resolves_to_none() {
-        // Arrange
-        let claude_home = scratch("nothing-resolves");
-
-        // Act
-        let got = resolve(None, &claude_home);
-
-        // Assert
-        assert_eq!(got, None);
-    }
-
-    fn cache_root(claude_home: &Path) -> PathBuf {
-        claude_home.join("plugins/cache/pragmatic-engineer/playbook")
-    }
-
-    #[test]
-    fn a_different_cached_version_is_used_when_the_running_one_is_missing() {
-        // Arrange
-        let claude_home = scratch("other-version");
-        let older = cache_root(&claude_home).join("0.15.0");
-        fs::create_dir_all(&older).expect("cache dir");
-
-        // Act
-        let got = resolve(None, &claude_home);
-
-        // Assert
-        assert_eq!(got, Some(older));
-    }
-
-    #[test]
-    fn the_newest_cached_version_wins_by_number_not_by_text() {
-        // Arrange
-        let claude_home = scratch("newest-wins");
-        for v in ["0.9.0", "0.15.0", "0.2.0", "not-a-version"] {
-            fs::create_dir_all(cache_root(&claude_home).join(v)).expect("cache dir");
-        }
-
-        // Act
-        let got = resolve(None, &claude_home);
-
-        // Assert
-        assert_eq!(got, Some(cache_root(&claude_home).join("0.15.0")));
-    }
-
-    #[test]
-    fn a_release_beats_its_own_prerelease() {
-        // Arrange
-        let claude_home = scratch("release-over-pre");
-        for v in ["1.0.0-rc.1", "1.0.0"] {
-            fs::create_dir_all(cache_root(&claude_home).join(v)).expect("cache dir");
-        }
-
-        // Act
-        let got = resolve(None, &claude_home);
-
-        // Assert
-        assert_eq!(got, Some(cache_root(&claude_home).join("1.0.0")));
-    }
-
-    #[test]
-    fn the_running_version_wins_over_a_newer_cached_one() {
-        // Arrange
-        let claude_home = scratch("exact-over-newer");
-        let exact = cache_dir_for(&claude_home);
-        fs::create_dir_all(&exact).expect("cache dir");
-        fs::create_dir_all(cache_root(&claude_home).join("999.0.0")).expect("cache dir");
-
-        // Act
-        let got = resolve(None, &claude_home);
-
-        // Assert
-        assert_eq!(got, Some(exact));
-    }
-
-    #[test]
-    fn a_file_at_the_cache_path_instead_of_a_directory_does_not_match() {
-        // Arrange
-        let claude_home = scratch("file-not-dir");
-        let cache_dir = cache_dir_for(&claude_home);
-        fs::create_dir_all(cache_dir.parent().unwrap()).expect("parent dir");
-        fs::write(&cache_dir, b"not a directory").expect("write file");
-
-        // Act
-        let got = resolve(None, &claude_home);
-
-        // Assert
-        assert_eq!(got, None);
-    }
-
-    #[test]
-    fn with_no_plugin_the_embedded_files_are_written_and_returned() {
+    fn with_no_env_root_the_embedded_files_are_written_and_returned() {
         // Arrange
         let home = scratch("embedded");
 
         // Act
-        let got = resolve_or_embedded(None, &home.join(".claude"), &home).expect("embedded root");
+        let got = resolve_or_embedded(None, &home).expect("embedded root");
 
         // Assert
         assert!(got.starts_with(home.join(".config/playbook/embedded")));
@@ -301,16 +94,14 @@ mod tests {
     }
 
     #[test]
-    fn a_found_plugin_root_is_preferred_over_the_embedded_files() {
+    fn an_env_root_with_the_seed_files_is_preferred_over_the_embedded_files() {
         // Arrange
         let home = scratch("embedded-not-needed");
         let root = home.join("plugin-root");
-        fs::create_dir_all(root.join("prompts")).expect("prompts dir");
-        fs::write(root.join("settings.shared.json"), "{}").expect("settings");
-        fs::write(root.join("prompts/SYSTEM_PROMPT.md"), "p").expect("prompt");
+        seeded(&root);
 
         // Act
-        let got = resolve_or_embedded(root.to_str(), &home.join(".claude"), &home);
+        let got = resolve_or_embedded(root.to_str(), &home);
 
         // Assert
         assert_eq!(got, Some(root));
@@ -318,31 +109,14 @@ mod tests {
     }
 
     #[test]
-    fn the_skills_root_is_the_cached_playbook_plugin_when_the_seed_root_has_no_skills() {
-        // Arrange
-        let claude_home = scratch("skills-root");
-        let cache = cache_dir_for(&claude_home);
-        fs::create_dir_all(cache.join("skills")).expect("skills dir");
-        let seed_root = scratch("skills-root-seed");
-
-        // Act
-        let got = skills_root(Some(&seed_root), &claude_home);
-
-        // Assert
-        assert_eq!(got, Some(cache));
-        assert_eq!(skills_root(None, &scratch("skills-root-none")), None);
-    }
-
-    #[test]
-    fn a_plugin_root_without_the_seed_files_falls_back_to_the_embedded_files() {
-        // Arrange: the skills plugin ships neither file.
+    fn an_env_root_without_the_seed_files_falls_back_to_the_embedded_files() {
+        // Arrange: the plugin ships neither file.
         let home = scratch("skills-only-root");
         let root = home.join("skills-plugin");
         fs::create_dir_all(root.join("skills")).expect("skills dir");
 
         // Act
-        let got =
-            resolve_or_embedded(root.to_str(), &home.join(".claude"), &home).expect("embedded");
+        let got = resolve_or_embedded(root.to_str(), &home).expect("embedded");
 
         // Assert
         assert!(got.starts_with(home.join(".config/playbook/embedded")));
@@ -350,46 +124,39 @@ mod tests {
     }
 
     #[test]
-    fn the_hooks_plugin_env_root_does_not_hide_the_cached_skills_plugin() {
-        // Arrange: CLAUDE_PLUGIN_ROOT points at the hooks plugin, which has no skills.
-        let claude_home = scratch("skills-env-hooks");
-        let cache = cache_dir_for(&claude_home);
-        fs::create_dir_all(cache.join("skills")).expect("skills dir");
-        let hooks_root = scratch("skills-env-hooks-root");
+    fn an_old_plugin_cache_with_seed_files_is_never_a_seed_source() {
+        // Arrange: a 0.25 era plugin cache dir shipped the seed files.
+        let home = scratch("old-cache-seed");
+        seeded(&home.join(".claude/plugins/cache/pragmatic-engineer/playbook/0.25.0"));
 
         // Act
-        let got = skills_root_from_env(hooks_root.to_str(), &claude_home);
+        let dry = seed_root(None);
+        let got = resolve_or_embedded(None, &home).expect("embedded");
 
         // Assert
-        assert_eq!(got, Some(cache));
+        assert_eq!(dry, None);
+        assert!(got.starts_with(home.join(".config/playbook/embedded")));
     }
 
     #[test]
-    fn with_no_skills_plugin_anywhere_the_skills_root_is_none() {
-        // Arrange
-        let claude_home = scratch("skills-env-none");
-        let hooks_root = scratch("skills-env-none-root");
+    fn an_empty_env_var_counts_as_unset() {
+        assert_eq!(seed_root(Some("")), None);
+    }
+
+    #[test]
+    fn the_retired_hooks_plugin_is_never_a_seed_source() {
+        // Arrange: the old playbook-hooks plugin shipped the seed files.
+        let home = scratch("hooks-plugin-seed");
+        let root = home.join("playbook-hooks");
+        seeded(&root);
+        fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+        fs::write(
+            root.join(".claude-plugin/plugin.json"),
+            r#"{"name":"playbook-hooks","version":"0.25.0"}"#,
+        )
+        .unwrap();
 
         // Act and assert
-        assert_eq!(
-            skills_root_from_env(hooks_root.to_str(), &claude_home),
-            None
-        );
-        assert_eq!(skills_root_from_env(None, &claude_home), None);
-    }
-
-    #[test]
-    fn an_env_root_with_components_beats_the_cached_skills_plugin() {
-        // Arrange: a dev checkout and a cached plugin are both present.
-        let claude_home = scratch("skills-env-wins");
-        fs::create_dir_all(cache_dir_for(&claude_home).join("skills")).expect("cache skills");
-        let checkout = scratch("skills-env-wins-checkout");
-        fs::create_dir_all(checkout.join("skills")).expect("checkout skills");
-
-        // Act
-        let got = skills_root_from_env(checkout.to_str(), &claude_home);
-
-        // Assert
-        assert_eq!(got, Some(checkout));
+        assert_eq!(seed_root(root.to_str()), None);
     }
 }

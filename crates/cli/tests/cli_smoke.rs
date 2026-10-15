@@ -635,6 +635,7 @@ fn table() -> Vec<Case> {
     for kind in ["plans", "implement", "worktrees", "handoff", "data"] {
         t.push(case(&format!("path {kind}"), &["path", kind]).out("/.config/playbook/"));
     }
+    t.push(case("path plugin-root", &["path", "plugin-root"]).code(1).err("playbook plugin not found"));
     t.extend(hook_cases());
     t
 }

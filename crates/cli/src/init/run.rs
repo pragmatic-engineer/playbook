@@ -166,7 +166,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 
     // The skills live in the `playbook` plugin, not in the root the seed files
     // come from, so the skill-edit tracking looks for them separately.
-    let skills_root = crate::init::self_root::skills_root(self_root, &paths.claude_home);
+    let skills_root =
+        crate::plugin_root::find(self_root.and_then(Path::to_str), &paths.claude_home);
     let ctx = migrate::Ctx {
         home: paths.home.clone(),
         claude_home: paths.claude_home.clone(),

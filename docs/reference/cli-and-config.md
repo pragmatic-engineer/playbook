@@ -940,7 +940,7 @@ Print the path of one of this repo's playbook storage folders
 
 First moves any legacy folders from the old repo-local location.
 
-- `<KIND>`: Which folder to print (one of `plans`, `implement`, `worktrees`, `handoff`, `data`)
+- `<KIND>`: Which folder to print (one of `plans`, `implement`, `worktrees`, `handoff`, `data`, `plugin-root`)
 - `--create`: Create the folder when it does not exist
 
 ### `playbook plan`

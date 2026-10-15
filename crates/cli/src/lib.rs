@@ -61,6 +61,7 @@ pub mod models;
 pub mod plan_cleanup;
 pub mod planning;
 pub mod plans;
+pub mod plugin_root;
 pub mod pr;
 pub mod prose;
 pub mod review;
@@ -978,6 +979,9 @@ pub enum PathKind {
     Handoff,
     /// The shared data folder holding every database (not tied to a repo)
     Data,
+    /// The installed playbook plugin folder, for skills and agents that need
+    /// a plugin file (not tied to a repo)
+    PluginRoot,
 }
 
 impl PathKind {
@@ -989,6 +993,7 @@ impl PathKind {
             PathKind::Worktrees => "worktrees",
             PathKind::Handoff => "handoff",
             PathKind::Data => "data",
+            PathKind::PluginRoot => "plugin-root",
         }
     }
 }

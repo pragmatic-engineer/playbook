@@ -537,7 +537,7 @@ pub fn run(
     now: i64,
 ) -> Result<Report, String> {
     let root =
-        root.ok_or("no plugin root found: run from an installed plugin or set CLAUDE_PLUGIN_ROOT")?;
+        root.ok_or("no plugin root found: run `playbook path plugin-root` to see what was tried")?;
     if !db_path.is_file() {
         return Err(format!(
             "no usage store at {}: run `playbook usage --summary` once to create it",
