@@ -123,20 +123,27 @@ fn passes(out: &Output) -> bool {
     out.status.success()
 }
 
-#[test]
-fn a_release_without_a_breaking_marker_passes() {
-    let r = Repo::new();
-    r.change("crates/cli/src/lib.rs", "feat(cli): add a flag");
+#[track_caller]
+fn assert_passes(out: &Output) {
+    assert!(passes(out), "{}", text_of(out));
+}
 
-    let out = r.run(&["release", "playbook", "0.2.0"], "", "");
-
-    assert!(passes(&out), "{}", text_of(&out));
+/// Fails, and says `reason` when it is not empty.
+#[track_caller]
+fn assert_fails(out: &Output, reason: &str) {
+    assert!(
+        !passes(out) && text_of(out).contains(reason),
+        "{}",
+        text_of(out)
+    );
 }
 
 #[test]
 fn a_marked_commit_since_the_previous_tag_needs_an_entry_for_the_version() {
     // Arrange
     let r = Repo::new();
+    r.change("crates/cli/src/lib.rs", "feat(cli): add a flag");
+    let unmarked = r.run(&["release", "playbook", "0.2.0"], "", "");
     r.change("crates/cli/src/lib.rs", "feat(cli)!: drop the old flag");
 
     // Act
@@ -147,19 +154,12 @@ fn a_marked_commit_since_the_previous_tag_needs_an_entry_for_the_version() {
     let present = r.run(&["release", "playbook", "0.2.0"], "", "");
 
     // Assert
-    assert!(!passes(&missing));
-    assert!(
-        text_of(&missing).contains("drop the old flag"),
-        "{}",
-        text_of(&missing)
-    );
-    assert!(
-        text_of(&missing).contains("playbook 0.2.0"),
-        "{}",
-        text_of(&missing)
-    );
-    assert!(!passes(&wrong_version));
-    assert!(passes(&present), "{}", text_of(&present));
+    assert_passes(&unmarked);
+    assert_fails(&missing, "");
+    assert_fails(&missing, "drop the old flag");
+    assert_fails(&missing, "playbook 0.2.0");
+    assert_fails(&wrong_version, "");
+    assert_passes(&present);
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn a_breaking_change_footer_counts_as_a_marker() {
 
     let out = r.run(&["release", "playbook", "0.2.0"], "", "");
 
-    assert!(!passes(&out), "{}", text_of(&out));
+    assert_fails(&out, "");
 }
 
 #[test]
@@ -192,8 +192,8 @@ fn a_marker_before_the_previous_tag_or_in_another_component_does_not_count() {
     let telemetry = r.run(&["release", "telemetry", "0.1.0"], "", "");
 
     // Assert
-    assert!(passes(&playbook), "{}", text_of(&playbook));
-    assert!(!passes(&telemetry), "{}", text_of(&telemetry));
+    assert_passes(&playbook);
+    assert_fails(&telemetry, "");
 }
 
 #[test]
@@ -208,13 +208,9 @@ fn a_plugin_release_counts_a_marked_pull_request_title() {
         "",
     );
 
-    assert!(passes(&unmarked), "{}", text_of(&unmarked));
-    assert!(!passes(&marked), "{}", text_of(&marked));
-    assert!(
-        text_of(&marked).contains("pull request"),
-        "{}",
-        text_of(&marked)
-    );
+    assert_passes(&unmarked);
+    assert_fails(&marked, "");
+    assert_fails(&marked, "pull request");
 }
 
 #[test]
@@ -240,11 +236,11 @@ fn a_marked_pull_request_needs_an_entry_above_the_latest_tag_of_a_component_it_t
     );
 
     // Assert
-    assert!(!passes(&missing), "{}", text_of(&missing));
-    assert!(!passes(&released), "{}", text_of(&released));
-    assert!(!passes(&other_component), "{}", text_of(&other_component));
-    assert!(passes(&next), "{}", text_of(&next));
-    assert!(passes(&footer), "{}", text_of(&footer));
+    assert_fails(&missing, "");
+    assert_fails(&released, "");
+    assert_fails(&other_component, "");
+    assert_passes(&next);
+    assert_passes(&footer);
 }
 
 #[test]
@@ -256,8 +252,8 @@ fn an_unmarked_pull_request_passes_and_so_does_one_that_touches_no_component() {
     let unmarked = r.run(&["pr", "base"], "docs: x", "");
     let docs_only = r.run(&["pr", "base"], "docs!: x", "");
 
-    assert!(passes(&unmarked), "{}", text_of(&unmarked));
-    assert!(passes(&docs_only), "{}", text_of(&docs_only));
+    assert_passes(&unmarked);
+    assert_passes(&docs_only);
 }
 
 #[test]
@@ -298,10 +294,10 @@ fn a_plugin_entry_needs_a_breaking_heading_in_its_changelog_section() {
     let older_heading = r.run(&["changelog", "1.1.0"], "", "");
 
     // Assert
-    assert!(!passes(&missing), "{}", text_of(&missing));
-    assert!(passes(&present), "{}", text_of(&present));
-    assert!(passes(&other_version), "{}", text_of(&other_version));
-    assert!(!passes(&older_heading), "{}", text_of(&older_heading));
+    assert_fails(&missing, "");
+    assert_passes(&present);
+    assert_passes(&other_version);
+    assert_fails(&older_heading, "");
 }
 
 #[test]
@@ -371,21 +367,9 @@ fn a_bad_component_version_or_base_ref_fails_with_its_reason() {
     let version = r.run(&["release", "playbook", "1.2"], "", "");
     let base = r.run(&["pr", "no-such-ref"], "feat!: x", "");
 
-    assert!(
-        text_of(&component).contains("unknown component 'plugins'"),
-        "{}",
-        text_of(&component)
-    );
-    assert!(
-        text_of(&version).contains("not MAJOR.MINOR.PATCH"),
-        "{}",
-        text_of(&version)
-    );
-    assert!(
-        text_of(&base).contains("not available"),
-        "{}",
-        text_of(&base)
-    );
+    assert_fails(&component, "unknown component 'plugins'");
+    assert_fails(&version, "not MAJOR.MINOR.PATCH");
+    assert_fails(&base, "not available");
 }
 
 #[test]
@@ -407,9 +391,9 @@ fn tags_are_ordered_as_numbers() {
     let above = r.run(&["pr", "base"], "feat(cli)!: x", "");
 
     // Assert
-    assert!(passes(&release), "{}", text_of(&release));
-    assert!(!passes(&below), "{}", text_of(&below));
-    assert!(passes(&above), "{}", text_of(&above));
+    assert_passes(&release);
+    assert_fails(&below, "");
+    assert_passes(&above);
 }
 
 #[test]
@@ -428,14 +412,10 @@ fn a_shared_crate_counts_for_both_binaries_and_cargo_lock_for_neither() {
     let prompt = r.run(&["release", "playbook", "0.3.0"], "", "");
 
     // Assert
-    assert!(!passes(&shared), "{}", text_of(&shared));
-    assert!(passes(&lock), "{}", text_of(&lock));
-    assert!(!passes(&prompt), "{}", text_of(&prompt));
-    assert!(
-        text_of(&prompt).contains("new rules"),
-        "{}",
-        text_of(&prompt)
-    );
+    assert_fails(&shared, "");
+    assert_passes(&lock);
+    assert_fails(&prompt, "");
+    assert_fails(&prompt, "new rules");
 }
 
 #[test]
@@ -448,8 +428,8 @@ fn a_marked_pull_request_on_a_component_with_no_tag_needs_any_entry() {
     r.entry("telemetry", "0.1.0");
     let present = r.run(&["pr", "base"], "feat(telemetry)!: x", "");
 
-    assert!(!passes(&missing), "{}", text_of(&missing));
-    assert!(passes(&present), "{}", text_of(&present));
+    assert_fails(&missing, "");
+    assert_passes(&present);
 }
 
 #[test]
@@ -476,14 +456,10 @@ fn the_plugin_mode_checks_only_when_the_version_rises() {
     let done = r.run(&["plugin", "base"], title, "");
 
     // Assert
-    assert!(passes(&unchanged), "{}", text_of(&unchanged));
-    assert!(!passes(&missing), "{}", text_of(&missing));
-    assert!(
-        text_of(&no_heading).contains("### Breaking"),
-        "{}",
-        text_of(&no_heading)
-    );
-    assert!(passes(&done), "{}", text_of(&done));
+    assert_passes(&unchanged);
+    assert_fails(&missing, "");
+    assert_fails(&no_heading, "### Breaking");
+    assert_passes(&done);
 }
 
 #[test]
