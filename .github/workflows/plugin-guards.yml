@@ -3,7 +3,9 @@
 #
 # Guards for the playbook plugin in plugins/playbook, which the marketplace
 # serves as it is.
-#   payload-guard: the directory holds only markdown and the manifest.
+#   payload-guard: the directory holds only markdown and the manifest, and
+#   metadata.breakingChanges in plugin.json lists the plugin entries of
+#   breaking-changes.json (ADR 0035 decision 4.6).
 #   version-bump: a plugin change comes with a higher version in plugin.json
 #   and a matching "## playbook <version>" section at the top of CHANGELOG.md.
 #   When the version rises, it also checks for breaking changes (ADR 0035).
@@ -58,7 +60,7 @@ jobs:
         run: scripts/check-plugin.sh payload
 
       - name: Check the breaking changes mirror in plugin.json
-        run: scripts/check-plugin.sh mirror
+        run: scripts/check-breaking.sh mirror
 
   version-bump:
     if: github.event_name == 'pull_request'

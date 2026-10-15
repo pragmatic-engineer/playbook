@@ -15,13 +15,6 @@
 #     CHANGELOG.md. Claude Code updates the plugin only when the version
 #     changes, so a content change that keeps the version never reaches users.
 #
-#   check-plugin.sh mirror
-#     Fails when metadata.breakingChanges in the manifest differs from the
-#     plugin entries in breaking-changes.json (ADR 0035 decision 4.6). The
-#     marketplace copies only the plugin folder, so the binary reads the
-#     plugin's breaking changes from the manifest. No plugin entries and no
-#     key is a match.
-#
 # Run from anywhere inside the repository.
 set -euo pipefail
 
@@ -29,7 +22,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN="plugins/playbook"
 MANIFEST="$PLUGIN/.claude-plugin/plugin.json"
 CHANGELOG="CHANGELOG.md"
-RECORD="breaking-changes.json"
 cd "$ROOT"
 
 fail() { echo "FAIL $*"; exit 1; }
@@ -99,26 +91,8 @@ version() {
   echo "PASS the plugin changed and its version is $head_v with a changelog section"
 }
 
-mirror() {
-  [ -f "$MANIFEST" ] || fail "$MANIFEST is missing"
-  [ -f "$RECORD" ] || fail "$RECORD is missing"
-  local want got
-  want="$(jq -cS '[.entries[] | select(.component == "plugin")]' "$RECORD")" \
-    || fail "$RECORD is not valid JSON"
-  got="$(jq -cS '.metadata.breakingChanges // []' "$MANIFEST")" \
-    || fail "$MANIFEST is not valid JSON"
-  if [ "$want" != "$got" ]; then
-    echo "FAIL metadata.breakingChanges in $MANIFEST must list the plugin entries of $RECORD, in the same order"
-    echo "  expected: $want"
-    echo "  found:    $got"
-    exit 1
-  fi
-  echo "PASS $MANIFEST mirrors the $(jq 'length' <<<"$want") plugin entries of $RECORD"
-}
-
 case "${1:-}" in
   payload) payload ;;
   version) version "${2:-}" ;;
-  mirror) mirror ;;
-  *) echo "usage: check-plugin.sh payload | version <base-ref> | mirror"; exit 2 ;;
+  *) echo "usage: check-plugin.sh payload | version <base-ref>"; exit 2 ;;
 esac

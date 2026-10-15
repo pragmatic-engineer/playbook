@@ -196,14 +196,32 @@ pub fn entries_between(from: &str, to: &str) -> Vec<Entry> {
 /// from a plugin manifest's `metadata.breakingChanges` (ADR 0035 decision
 /// 4.6). The list is read with `lenient`, since a newer plugin can carry
 /// fields or components this binary does not know. A manifest without the
-/// key has no entries.
-pub fn plugin_entries(manifest: &serde_json::Value, from: &str, to: &str) -> Vec<Entry> {
+/// key has no entries. A plugin entry this binary cannot read is an error,
+/// so the caller can say to update the binary instead of showing nothing.
+pub fn plugin_entries(
+    manifest: &serde_json::Value,
+    from: &str,
+    to: &str,
+) -> Result<Vec<Entry>, String> {
     let values = manifest
         .pointer("/metadata/breakingChanges")
         .and_then(serde_json::Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or_default();
-    select(&lenient(values), Component::Plugin, from, to)
+    let entries = lenient(values);
+    let plugin = |v: &serde_json::Value| v["component"].as_str() == Some(Component::Plugin.name());
+    let raw = values.iter().filter(|v| plugin(v)).count();
+    let read = entries
+        .iter()
+        .filter(|e| e.component == Component::Plugin)
+        .count();
+    if read != raw {
+        return Err(
+            "the plugin lists a breaking change this playbook version cannot read; run playbook update"
+                .into(),
+        );
+    }
+    Ok(select(&entries, Component::Plugin, from, to))
 }
 
 /// One short block for the user, or an empty string when there is nothing.
@@ -467,7 +485,7 @@ mod tests {
         .unwrap();
 
         // Act
-        let got = plugin_entries(&manifest, "0.31.0", "0.32.0");
+        let got = plugin_entries(&manifest, "0.31.0", "0.32.0").unwrap();
 
         // Assert
         assert_eq!(got.len(), 1);
@@ -482,11 +500,26 @@ mod tests {
         let wrong_type = serde_json::json!({"metadata": {"breakingChanges": "none"}});
 
         // Act
-        let from_bare = plugin_entries(&bare, "0.1.0", "9.0.0");
-        let from_wrong_type = plugin_entries(&wrong_type, "0.1.0", "9.0.0");
+        let from_bare = plugin_entries(&bare, "0.1.0", "9.0.0").unwrap();
+        let from_wrong_type = plugin_entries(&wrong_type, "0.1.0", "9.0.0").unwrap();
 
         // Assert
         assert!(from_bare.is_empty());
         assert!(from_wrong_type.is_empty());
+    }
+
+    #[test]
+    fn plugin_entries_is_an_error_when_a_plugin_entry_cannot_be_read() {
+        // Arrange
+        let manifest = serde_json::json!({"metadata": {"breakingChanges": [
+            {"version": "0.32.0", "component": "plugin", "summary": "new", "action": "none needed", "migration": null},
+            {"version": "0.33", "component": "plugin", "summary": "odd", "action": "none needed", "migration": null}
+        ]}});
+
+        // Act
+        let got = plugin_entries(&manifest, "0.31.0", "0.32.0");
+
+        // Assert
+        assert!(got.unwrap_err().contains("run playbook update"));
     }
 }
