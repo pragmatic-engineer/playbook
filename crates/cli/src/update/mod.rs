@@ -72,27 +72,80 @@ pub struct Outcome {
     pub installed: Option<String>,
 }
 
-/// The first release whose binary has `doctor --fix`.
-pub const FIRST_FIX_VERSION: &str = "0.27.0";
+/// The first release whose binary has `doctor --fix`. The `-0` sorts below
+/// every 0.27.0 pre-release, so a release candidate counts too.
+pub const FIRST_FIX_VERSION: &str = "0.27.0-0";
+
+/// How long `update` waits for the new binary's `doctor --fix`.
+const HEAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// After a swap, runs `<exe> doctor --fix` so the new binary runs its own
 /// migrations (ADR 0034). Best effort: a release older than
-/// `FIRST_FIX_VERSION` is skipped, and any failure is a warning.
+/// `FIRST_FIX_VERSION` is skipped, and any failure is a warning that carries
+/// the lines `doctor --fix` printed.
 pub fn heal_after_swap(exe: &Path, installed: &str) -> Result<Option<String>, String> {
     if resolve::compare(installed, FIRST_FIX_VERSION).is_lt() {
         return Ok(None);
     }
-    let out = std::process::Command::new(exe)
-        .args(["doctor", "--fix"])
-        .output()
-        .map_err(|e| format!("could not run the new binary's doctor --fix: {e}"))?;
+    let out = run_fix(exe).ok_or_else(|| {
+        format!(
+            "the new binary's doctor --fix did not run or took over {} s; run `playbook doctor --fix` by hand",
+            HEAL_TIMEOUT.as_secs()
+        )
+    })?;
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
     if !out.status.success() {
+        let detail: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
         return Err(format!(
-            "doctor --fix exited with {}; run `playbook doctor --fix` by hand",
-            out.status
+            "doctor --fix exited with {}{}; run `playbook doctor --fix` by hand",
+            out.status,
+            if detail.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", detail.join("; "))
+            }
         ));
     }
-    Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()))
+    Ok(Some(text))
+}
+
+/// Runs `<exe> doctor --fix` with a deadline. A spawn that fails at once (a
+/// fresh binary can be refused while another process still holds it open)
+/// is tried again twice.
+fn run_fix(exe: &Path) -> Option<std::process::Output> {
+    for _ in 0..3 {
+        let started = std::time::Instant::now();
+        let mut cmd = std::process::Command::new(exe);
+        cmd.args(["doctor", "--fix"])
+            .stdin(std::process::Stdio::null());
+        if let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, HEAL_TIMEOUT) {
+            return Some(out);
+        }
+        if started.elapsed() > std::time::Duration::from_secs(1) {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    None
+}
+
+/// Runs the heal after a swap, when `outcome` names an installed version,
+/// and adds its lines to `outcome`.
+pub fn finish_with_heal(outcome: &mut Outcome, exe: &Path) {
+    let Some(version) = outcome.installed.clone() else {
+        return;
+    };
+    match heal_after_swap(exe, &version) {
+        Ok(Some(text)) => outcome
+            .out
+            .extend(text.lines().map(|l| format!("doctor --fix: {l}"))),
+        Ok(None) => {}
+        Err(warning) => outcome.warnings.push(warning),
+    }
 }
 
 pub fn is_homebrew(exe: &Path) -> bool {
@@ -338,6 +391,7 @@ mod tests {
         )
         .unwrap();
         assert!(out.out[0].contains("0.16.0 -> 0.17.0"), "{:?}", out.out);
+        assert_eq!(out.installed, None);
         assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.16.0");
     }
 
@@ -386,17 +440,35 @@ mod tests {
 
     #[test]
     fn the_heal_after_a_swap_runs_the_new_binary_and_reports_its_failure() {
+        // Arrange
         let env = env_in("heal-run");
         std::fs::write(&env.exe, "#!/bin/sh\necho \"fixed: $1 $2\"\n").unwrap();
         swap::make_executable(&env.exe).unwrap();
-        assert_eq!(
-            heal_after_swap(&env.exe, "0.27.0"),
-            Ok(Some("fixed: doctor --fix\n".to_string()))
+        let mut done = Outcome {
+            installed: Some("0.27.0-rc.1".into()),
+            ..Outcome::default()
+        };
+
+        // Act
+        finish_with_heal(&mut done, &env.exe);
+        let mut untouched = Outcome::default();
+        finish_with_heal(&mut untouched, &env.exe);
+        std::fs::write(
+            &env.exe,
+            "#!/bin/sh\necho 'failed: state: locked'\nexit 1\n",
+        )
+        .unwrap();
+        let failed = heal_after_swap(&env.exe, "1.0.0").unwrap_err();
+
+        // Assert
+        assert_eq!(done.out, vec!["doctor --fix: fixed: doctor --fix"]);
+        assert!(done.warnings.is_empty());
+        assert!(untouched.out.is_empty() && untouched.warnings.is_empty());
+        assert!(failed.contains(": failed: state: locked;"), "{failed}");
+        assert!(
+            failed.contains("run `playbook doctor --fix` by hand"),
+            "{failed}"
         );
-        std::fs::write(&env.exe, "#!/bin/sh\nexit 3\n").unwrap();
-        assert!(heal_after_swap(&env.exe, "1.0.0")
-            .unwrap_err()
-            .contains("run `playbook doctor --fix` by hand"));
     }
 
     #[test]

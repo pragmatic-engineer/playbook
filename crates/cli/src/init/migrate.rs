@@ -987,6 +987,9 @@ mod tests {
         let dirty = run_with(&registry(), &ctx(&h));
         assert_eq!(dirty.warnings.len(), 1);
         assert!(dirty.warnings[0].contains("edited"));
+        let notes = owned_notes(&ctx(&h));
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].starts_with("0003-system-prompt-edited: "));
     }
 
     #[test]

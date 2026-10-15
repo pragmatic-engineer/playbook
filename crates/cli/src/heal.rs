@@ -82,8 +82,8 @@ impl Record {
 
 /// Writes one key of the record, so a run never copies back fields another
 /// process changed since this one read them.
-fn set_key(root: &Path, key: &str, value: &str) {
-    let _ = crate::state::transaction(root, |tx| tx.set(key, value));
+fn set_key(root: &Path, key: &str, value: &str) -> bool {
+    crate::state::transaction(root, |tx| tx.set(key, value)).is_ok()
 }
 
 /// Who runs the heal.
@@ -143,11 +143,13 @@ impl Outcome {
         }
     }
 
-    /// The `doctor --fix` exit code: 1 when a migration failed or could not
-    /// run, so `playbook update` reports it.
+    /// The `doctor --fix` exit code: 1 when a migration failed, could not
+    /// run, or the record was not written, so `playbook update` reports it.
+    /// A downgrade is not a failure.
     pub fn exit_code(&self) -> i32 {
         let blocked = matches!(self.skipped, Some(Skip::StateUnreadable | Skip::LockBusy));
-        i32::from(blocked || !self.failed.is_empty())
+        let unrecorded = self.skipped.is_none() && !self.recorded;
+        i32::from(blocked || unrecorded || !self.failed.is_empty())
     }
 
     /// One line for the session message, or `None` when there is nothing to say.
@@ -275,7 +277,7 @@ fn recheck_pending(ctx: &Ctx, root: &Path, record: &Record) -> Outcome {
     let open = migrate::open_items(ctx, Some(&record.pending));
     let pending = ids(&open);
     if pending != record.pending {
-        set_key(root, PENDING_KEY, &pending.join(","));
+        let _ = set_key(root, PENDING_KEY, &pending.join(","));
     }
     Outcome {
         open,
@@ -296,14 +298,17 @@ fn heal_now(ctx: &Ctx, root: &Path, retries: u32, now: u64) -> Outcome {
         .into_iter()
         .filter(|s| matches!(s.status, StepStatus::Wired | StepStatus::Failed))
         .partition(|s| s.status == StepStatus::Failed);
-    let out = Outcome {
+    let mut out = Outcome {
         changed,
         failed,
         warnings: report.warnings,
         ..Outcome::default()
     };
     if report.failed {
-        set_key(root, FAILED_AT_KEY, &now.to_string());
+        if !set_key(root, FAILED_AT_KEY, &now.to_string()) {
+            out.warnings
+                .push("could not save the failure time, so the hook may retry at once".into());
+        }
         return out;
     }
     record_clean(
@@ -446,9 +451,12 @@ mod tests {
 
         // Act
         let out = run(&ctx(&home), Trigger::Hook, 1000);
+        let fix = run(&ctx(&home), Trigger::Fix, 1000);
 
         // Assert
-        assert!(out.skipped.is_some());
+        assert_eq!(out.skipped, Some(Skip::Downgrade));
+        assert_eq!(fix.exit_code(), 0);
+        assert!(render_fix(&fix).starts_with("nothing ran: a newer playbook ran here"));
         assert_eq!(Record::read(&root(&home)).unwrap(), newer);
     }
 
@@ -589,7 +597,11 @@ mod tests {
         assert_eq!(out.failed.len(), 1);
         assert!(out.changed.is_empty());
         assert_eq!(out.exit_code(), 1);
-        assert!(out.line().unwrap().contains("1 migration(s) failed"));
+        assert!(out
+            .line()
+            .unwrap()
+            .contains("1 migration(s) failed: run `playbook doctor --fix`"));
+        assert!(render_fix(&out).contains("failed: config-hash: "));
         let rec = Record::read(&root(&home)).unwrap();
         assert_eq!(rec.binary.as_deref(), Some("0.25.0"));
         assert_eq!(rec.failed_at, Some(5000));
@@ -611,5 +623,20 @@ mod tests {
         assert_eq!(out.exit_code(), 0);
         assert_eq!(Record::read(&root(&home)).unwrap().failed_at, None);
         assert!(render_fix(&out).contains("(run `playbook init --statusline`)"));
+    }
+
+    #[test]
+    fn the_fix_report_has_one_line_per_change_and_note() {
+        let out = Outcome {
+            changed: vec![StepReport::wired("config-hash", "removed")],
+            warnings: vec!["0003-system-prompt-edited: edited".into()],
+            recorded: true,
+            ..Outcome::default()
+        };
+        assert_eq!(
+            render_fix(&out),
+            "fixed: config-hash: removed\nnote: 0003-system-prompt-edited: edited\n"
+        );
+        assert_eq!(out.exit_code(), 0);
     }
 }

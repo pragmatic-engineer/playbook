@@ -2274,15 +2274,7 @@ fn main() {
                     &update::verify::GhAttest,
                     &update::swap::run_version,
                 )?;
-                if let Some(version) = outcome.installed.clone() {
-                    match update::heal_after_swap(&env.exe, &version) {
-                        Ok(Some(text)) => outcome
-                            .out
-                            .extend(text.lines().map(|l| format!("doctor --fix: {l}"))),
-                        Ok(None) => {}
-                        Err(warning) => outcome.warnings.push(warning),
-                    }
-                }
+                update::finish_with_heal(&mut outcome, &env.exe);
                 Ok(outcome)
             });
             match result {
