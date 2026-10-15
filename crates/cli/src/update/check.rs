@@ -443,6 +443,51 @@ pub fn execute(root: &Path, plan: &Plan, now: u64, spawn: &dyn Fn(), print: &mut
     }
 }
 
+impl UpdateMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            UpdateMode::Off => "off",
+            UpdateMode::Notify => "notify",
+            UpdateMode::Auto => "auto",
+        }
+    }
+}
+
+/// One line on the check for `doctor` and `update --check`: the mode, when
+/// the last check ran and what it found, and why auto holds a release back.
+pub fn status_line(settings: Settings, cache: &Cache, now: u64) -> String {
+    let mut line = format!("update.mode is {}", settings.mode.label());
+    if settings.mode == UpdateMode::Off {
+        line.push_str(", so no release check runs");
+        return line;
+    }
+    if cache.checked_at == 0 {
+        line.push_str("; no release check has run yet");
+        return line;
+    }
+    let at = crate::common::time::iso_utc(i64::try_from(cache.checked_at).unwrap_or(0));
+    line.push_str(&format!("; last check {at}"));
+    if let Some(latest) = &cache.latest {
+        line.push_str(&format!(", latest release {latest}"));
+        if let Some(reason) = cache.held_reason(latest, now) {
+            line.push_str(&format!(", auto update held: {reason}"));
+        }
+    }
+    line
+}
+
+/// `status_line` for this machine.
+pub fn status_here() -> String {
+    let home = crate::common::home_dir();
+    let root = crate::common::paths::playbook_root_from(&home);
+    let cache = Cache::read(&root).unwrap_or_default();
+    status_line(
+        Settings::read(&home),
+        &cache,
+        crate::common::time::now_epoch_secs(),
+    )
+}
+
 /// Starts `<exe> update --refresh-check` detached, in its own process group
 /// so a Ctrl-C in the terminal does not reach it, with no stdio.
 fn spawn_refresh() {
@@ -967,6 +1012,33 @@ mod tests {
                 vec!["playbook 0.27.0 is available (you have 0.26.0). Run: playbook update".into()],
                 0
             )
+        );
+    }
+
+    #[test]
+    fn the_status_line_names_the_mode_the_last_check_and_a_hold() {
+        let cache = Cache {
+            checked_at: 1_792_024_626,
+            latest: Some("0.27.0".into()),
+            held: Some(Held {
+                version: "0.27.0".into(),
+                reason: "the install directory is not writable".into(),
+                until: u64::MAX,
+            }),
+            ..Cache::default()
+        };
+        assert_eq!(
+            status_line(settings(UpdateMode::Auto), &cache, NOW),
+            "update.mode is auto; last check 2026-10-15T00:37:06Z, latest release 0.27.0, \
+             auto update held: the install directory is not writable"
+        );
+        assert_eq!(
+            status_line(notify(), &Cache::default(), NOW),
+            "update.mode is notify; no release check has run yet"
+        );
+        assert_eq!(
+            status_line(settings(UpdateMode::Off), &cache, NOW),
+            "update.mode is off, so no release check runs"
         );
     }
 }

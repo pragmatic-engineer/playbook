@@ -2304,6 +2304,9 @@ fn main() {
                     &update::swap::run_version,
                 )?;
                 update::finish_with_heal(&mut outcome, &env.exe);
+                if opts.check {
+                    outcome.out.push(update::check::status_here());
+                }
                 Ok(outcome)
             });
             match result {
