@@ -1541,17 +1541,23 @@ pub enum ReviewCommand {
     /// branch, no network) or from `gh` when a PR number is given, and applies
     /// a fixed rule list: size, files, packages touched, risky paths (auth,
     /// crypto, secrets, CI, release, hooks, guards, migrations, dependencies,
-    /// the command surface), a security label, the test ratio, and changes
+    /// the command surface, plugin commands, skills and agents over the small
+    /// cut), a security label, the test ratio, and changes
     /// that cannot alter behavior (docs, lock files, renames, tests). Prints
     /// `recommendation=quick|deep`, `confidence=high|low`, up to four
     /// `reason:` lines and a `signals:` line. Low confidence means no rule
-    /// was decisive. The cuts are the `review.suggest.*` config keys.
+    /// was decisive; the answer then leans quick for your own change (a local
+    /// branch always is) and deep otherwise. Docs and lock file lines do not
+    /// count toward size, and files outside crates, packages, apps, services,
+    /// libs and plugins count together as one `root` package. The cuts are
+    /// the `review.suggest.*` config keys.
     ///
     /// Example: `playbook review suggest 4265 --json`
     Suggest {
-        /// PR number (default: the current branch against its base)
+        /// PR number (default: the current branch against the default branch)
         pr: Option<String>,
-        /// Base branch when no PR number is given (default: the repo's default branch)
+        /// Base branch when no PR number is given (default: the repo's default
+        /// branch; pass the parent branch for a stacked change)
         #[arg(long)]
         base: Option<String>,
         /// Work in this directory instead of the current one

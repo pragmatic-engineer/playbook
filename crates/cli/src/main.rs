@@ -1805,19 +1805,20 @@ fn main() {
                 base,
                 dir,
                 json,
-            } => match review::suggest::run(pr.as_deref(), base.as_deref(), dir.as_deref()) {
-                Ok(sug) if json => {
-                    println!(
+            } => {
+                enter_dir("review suggest", dir.as_deref());
+                match review::suggest::run(pr.as_deref(), base.as_deref()) {
+                    Ok(sug) if json => println!(
                         "{}",
                         serde_json::to_string_pretty(&sug).unwrap_or_else(|_| "{}".to_string())
-                    )
+                    ),
+                    Ok(sug) => println!("{}", review::suggest::render(&sug)),
+                    Err(err) => {
+                        eprintln!("error: {err}");
+                        std::process::exit(1);
+                    }
                 }
-                Ok(sug) => println!("{}", review::suggest::render(&sug)),
-                Err(err) => {
-                    eprintln!("error: {err}");
-                    std::process::exit(1);
-                }
-            },
+            }
             ReviewCommand::Checks { dir } => println!("{}", review::checks::run_checks(&dir)),
             ReviewCommand::Size {
                 base,

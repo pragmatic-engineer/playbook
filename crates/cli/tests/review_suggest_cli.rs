@@ -7,13 +7,24 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// A scratch home, so neither the user's config nor their global git settings reach a test.
+fn home(dir: &Path) -> PathBuf {
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    home
+}
+
+fn isolate(cmd: &mut Command, dir: &Path) {
+    cmd.env("HOME", home(dir))
+        .env("XDG_CONFIG_HOME", home(dir).join(".config"))
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+}
+
 fn git(dir: &Path, args: &[&str]) {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .expect("git");
+    let mut cmd = Command::new("git");
+    isolate(&mut cmd, dir);
+    let out = cmd.arg("-C").arg(dir).args(args).output().expect("git");
     assert!(out.status.success(), "git {args:?}");
 }
 
@@ -41,9 +52,16 @@ fn repo(name: &str, files: &[(&str, usize)]) -> PathBuf {
 }
 
 fn suggest(dir: &Path, extra: &[&str]) -> (i32, String, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .args(["review", "suggest", "--base", "main", "--dir"])
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+    isolate(&mut cmd, dir);
+    let out = cmd
+        .args(["review", "suggest", "--dir"])
         .arg(dir)
+        .args(if extra.iter().any(|a| a.starts_with("--base")) {
+            vec![]
+        } else {
+            vec!["--base", "main"]
+        })
         .args(extra)
         .output()
         .expect("playbook");
@@ -97,11 +115,37 @@ fn no_changes_and_a_bad_base_fail_with_a_message() {
     let (code, _, err) = suggest(&dir, &[]);
     assert_eq!(code, 1);
     assert!(err.contains("no changed files"), "{err}");
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .args(["review", "suggest", "--base", "nope", "--dir"])
-        .arg(&dir)
+    let (code, _, err) = suggest(&dir, &["--base", "nope"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("not found"), "{err}");
+    let (code, _, err) = suggest(&dir, &["--base=-x"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("as an option"), "{err}");
+}
+
+#[test]
+fn a_config_key_moves_the_cut() {
+    let dir = repo("cfg", &[("src/a.rs", 10)]);
+    let mut set = Command::new(env!("CARGO_BIN_EXE_playbook"));
+    isolate(&mut set, &dir);
+    let out = set
+        .args([
+            "config",
+            "set",
+            "--global",
+            "review.suggest.quickLines",
+            "5",
+        ])
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("not found"));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let (_, out, _) = suggest(&dir, &[]);
+    assert!(
+        out.starts_with("recommendation=quick\nconfidence=low\n"),
+        "{out}"
+    );
 }
