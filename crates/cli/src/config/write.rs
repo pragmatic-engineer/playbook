@@ -209,7 +209,8 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         | "review.suggest.quickLines"
         | "review.suggest.deepFiles"
         | "review.suggest.packageSpan"
-        | "review.suggest.untestedLines" => (whole.is_some_and(|n| n >= 1), "a positive integer"),
+        | "review.suggest.untestedLines"
+        | "update.checkIntervalHours" => (whole.is_some_and(|n| n >= 1), "a positive integer"),
         "pr.bodyMaxChars"
         | "docs.maxBytes"
         | "docs.timeoutSeconds"

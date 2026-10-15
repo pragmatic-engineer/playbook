@@ -355,6 +355,9 @@ pub enum Command {
         /// Confirm the update when auto mode is on
         #[arg(long)]
         yes: bool,
+        /// Refresh the cached release check and exit (started in the background)
+        #[arg(long, hide = true)]
+        refresh_check: bool,
     },
     /// Print the installed version, same as `--version`
     Version,
