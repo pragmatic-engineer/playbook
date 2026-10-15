@@ -73,6 +73,7 @@ Loops, comprehensions, resources, strings and paths, written the way Python expe
    ```
 
    Why: the resource closes when the block ends, also when an exception is raised.
+   Open a resource in the function that uses it, and return data to the caller. Return an open handle only when the caller owns closing it.
    Check: `SIM115` for `open` outside a `with`, `SIM117` for nested `with` blocks.
 
 10. **Write your own context manager with `contextlib.contextmanager`** for paired setup and cleanup. Put the cleanup in a `finally` around the `yield`. Use `contextlib.ExitStack` for a number of resources known only at run time. To ignore one named exception, see error-handling, rule 3.

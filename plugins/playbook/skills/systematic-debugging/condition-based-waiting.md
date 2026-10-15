@@ -27,7 +27,7 @@ await waitFor(() => getResult() !== undefined);
 expect(getResult()).toBeDefined();
 ```
 
-A generic poller (adapt to your stack; JS/TS teams should prefer the framework helper, e.g. Testing Library `waitFor` or Vitest `vi.waitFor`, per `playbook:engineering-standards-javascript`; Rust teams poll the condition with a deadline the same way and pause Tokio's clock only for timer logic, per `playbook:engineering-standards-rust`):
+A generic poller (adapt to your stack; JS/TS teams should prefer the framework helper, e.g. Testing Library `waitFor` or Vitest `vi.waitFor`, per `playbook:engineering-standards-javascript`; Rust teams poll the condition with a deadline the same way and pause Tokio's clock only for timer logic, per `playbook:engineering-standards-rust`; Python teams poll with `time.monotonic()` and a deadline, or wait on a `threading.Event` or `asyncio.timeout`, per `playbook:engineering-standards-python`):
 
 ```js
 async function waitFor(condition, description, timeoutMs = 5000) {

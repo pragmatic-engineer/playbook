@@ -46,7 +46,17 @@ A review checklist. Each entry names the smell and the fix, and the check where 
 16. **Files opened without `with`.** Fix: a `with` block, or `Path.read_text`. [idioms]
     Check: `SIM115`.
 
-17. **Getters and setters.** `get_name()` and `set_name()` around a plain attribute. Fix: a public attribute, and a `@property` when logic arrives. [functions-and-classes]
+17. **Over-mocking.** `mock.patch` on five internals and assertions on each call. The test checks how the code is written and breaks on every refactor. Fix: inject the one external client as a fake and use real objects for the rest. [testing]
 
-18. **`assert` for input checks.** `python -O` removes every `assert`. Fix: `if` and `raise ValueError`. Keep `assert` for tests and internal invariants. [functions-and-classes]
+18. **Blocking calls inside `async def`.** `requests.get` or `time.sleep` in a coroutine. Fix: an async client, or `asyncio.to_thread`. [async-and-concurrency]
+    Check: `ASYNC210`, `ASYNC251`.
+
+19. **Getters and setters.** `get_name()` and `set_name()` around a plain attribute. Fix: a public attribute, and a `@property` when logic arrives. [functions-and-classes]
+
+20. **`assert` for input checks.** `python -O` removes every `assert`. Fix: `if` and `raise ValueError`. Keep `assert` for tests and internal invariants. [functions-and-classes]
     Check: `S101`. Turn it off for test files, and mark a kept invariant with `# noqa: S101` and a reason.
+
+21. **`shell=True` or string-built SQL with user input.** Fix: an argument list, and bound parameters. [security-and-input]
+    Check: `S602`, `S608`.
+
+22. **`sleep` in a test to wait for work.** Fix: poll the condition with a deadline, or wait on an event. [testing]
