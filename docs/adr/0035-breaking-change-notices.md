@@ -1,8 +1,8 @@
 # ADR-0035: Breaking Change Notices on Every Update Channel
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR 0037](0037-release-notes-from-conventional-commits.md)
 - **Date created:** 2026-10-15
-- **Date modified:** 2026-10-15
+- **Date modified:** 2026-10-16
 - **Extends:** [ADR 0034](0034-self-healing-upgrades.md), whose migrations fix what playbook owns after an upgrade. This record tells the user about the changes they need to know of.
 
 ## Context

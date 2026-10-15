@@ -3,17 +3,19 @@
 #
 # Releases the playbook plugin. The plugin has its own version line in
 # plugins/playbook/.claude-plugin/plugin.json. When a push to main changes that
-# file or CHANGELOG.md, this workflow reads the version and stops if the tag
+# file, this workflow reads the version and stops if the tag
 # playbook-plugin-v<version> exists. Otherwise it creates the tag and a GitHub
-# release whose notes are the "## playbook <version>" section of CHANGELOG.md.
+# release. scripts/release-notes.sh builds the notes from the Conventional
+# Commits since the previous plugin tag that touch plugins/playbook (ADR 0037).
 #
 # The tag starts with "playbook-plugin-", so the binary release workflow, which
 # runs on v*, telemetry-v* and code-v* tags, never sees it. The release is
 # created with --latest=false, so the repository's latest release stays on the
-# binary line. A changelog fix re-runs the job, so a release that failed for a
-# missing section can be recovered. When several versions land while one run is
-# still going, GitHub keeps only the newest queued run, so a skipped version is
-# released by hand with gh release create.
+# binary line. When several versions land while one run is still going, GitHub
+# keeps only the newest queued run, so a skipped version is released by hand:
+# check out the commit that set that version, run
+# `scripts/release-notes.sh body plugin <version> <json-out>` there, and pass
+# its output to gh release create with --target and --notes-file.
 
 name: plugin-release
 
@@ -22,7 +24,6 @@ on:
     branches: [main]
     paths:
       - "plugins/playbook/.claude-plugin/plugin.json"
-      - "CHANGELOG.md"
 
 permissions: {}
 
@@ -44,8 +45,11 @@ jobs:
             api.github.com:443
             github.com:443
 
+      # Full history and tags, so the notes can list the commits since the
+      # previous plugin tag.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Read the version and stop when the tag exists
@@ -70,21 +74,14 @@ jobs:
             echo "release=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Cut the notes from the changelog
+      - name: Build the notes from the commits
         if: steps.version.outputs.release == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          awk -v h="## playbook $VERSION" '
-            $0 == h { on = 1; next }
-            on && /^## / { exit }
-            on { print }
-          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
-            echo "::error::CHANGELOG.md has no '## playbook $VERSION' section"
-            exit 1
-          fi
+          scripts/release-notes.sh body plugin "$VERSION" "$RUNNER_TEMP/release-notes.json" \
+            > "$RUNNER_TEMP/notes.md"
 
       - name: Create the tag and the release
         if: steps.version.outputs.release == 'true'
