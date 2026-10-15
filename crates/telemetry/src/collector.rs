@@ -13,7 +13,7 @@
 //! or a free port when that one is taken on the first run. It is then
 //! recorded and never changed on its own, because the OTLP endpoint in
 //! Claude Code's settings names it. A restart binds the same port again,
-//! retrying for a few seconds while a killed predecessor lets go of it; when
+//! retrying for up to a second while a killed predecessor lets go of it; when
 //! another program owns it the start fails with a message. It stops by
 //! itself after the idle time (default 10 minutes,
 //! 0 means never) and clears the pid on a clean exit.
