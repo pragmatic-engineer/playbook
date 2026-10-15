@@ -138,7 +138,7 @@ This file holds the universal rules. Load the reference that matches the prose y
 - Removing filler phrases, jargon or emphasis crutches: `phrases`.
 - Fixing binary contrasts, fragmentation, rhetorical setups or rhythm: `structures`.
 - Before and after rewrites of general prose: `examples`.
-- Commit message, PR title or PR body: `commits-and-prs`, plus `phrases` and `structures`.
+- Commit message, PR title or PR body: `commits-and-prs` and `conventional-commits`, plus `phrases` and `structures`.
 - Review comment, reply to feedback, or issue or PR comment on GitHub: `github-review-comments` and `review-examples`.
 - Anything posted to GitHub, including a PR body: `github-prohibited`.
 - A `gh api -f body=` call: `shell-quoting`.
