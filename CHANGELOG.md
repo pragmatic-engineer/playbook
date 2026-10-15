@@ -4,7 +4,7 @@ Release notes for the playbook plugin in `plugins/playbook`. The binary has its 
 
 ## playbook 0.31.2
 
-- The doctor command text matches the binary: a version difference no longer shows, layer 6 adds the upgrade record row, and `playbook init --hooks` removes dead hook entries under `~/.claude/hooks`.
+- The doctor command text now matches the binary: it says a version difference still passes, describes the layer 6 upgrade record row, and names `playbook init --hooks` as the fix for dead hook entries under `~/.claude/hooks`.
 
 ## playbook 0.31.1
 
