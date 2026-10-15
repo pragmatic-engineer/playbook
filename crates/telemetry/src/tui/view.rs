@@ -10,6 +10,7 @@ use super::budget;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
 use super::keys::{self, HelpLine};
+use super::layout::PanelId;
 use super::notice::{self, Notice};
 use super::panels;
 use super::theme::Palette;
@@ -92,6 +93,98 @@ pub fn layout(area: Rect) -> Panels {
     }
 }
 
+/// Where the parts of one tab go.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Placed {
+    pub header: Rect,
+    /// Empty when the layout has one tab.
+    pub tabbar: Rect,
+    /// Empty when the tab has no budget panel or the screen is short.
+    pub budget: Rect,
+    /// Each panel of the tab with its place, budget excluded.
+    pub panels: Vec<(PanelId, Rect)>,
+    pub footer: Rect,
+}
+
+/// The screen height of a tabbed layout from which the budget strip is drawn.
+/// A tab can be all about the budget, so this is lower than the classic one.
+const TAB_BUDGET_MIN_ROWS: u16 = 24;
+
+/// Splits `body` for `n` panels: one or two panels stack, three and four make
+/// two rows, five and six make three rows of two (the last row of five is
+/// one wide panel). Six panels land exactly where the classic screen puts them.
+fn grid(body: Rect, n: usize) -> Vec<Rect> {
+    let rows: Vec<(usize, u16)> = match n {
+        0 => return Vec::new(),
+        1 => vec![(1, 1)],
+        2 => vec![(1, 1), (1, 1)],
+        3 => vec![(2, 1), (1, 1)],
+        4 => vec![(2, 1), (2, 1)],
+        5 => vec![(2, 40), (2, 26), (1, 34)],
+        _ => vec![(2, 40), (2, 26), (2, 34)],
+    };
+    let bands = Layout::vertical(rows.iter().map(|(_, w)| Constraint::Fill(*w))).split(body);
+    let mut out = Vec::new();
+    for ((cols, _), band) in rows.iter().zip(bands.iter()) {
+        if *cols == 1 {
+            out.push(*band);
+        } else {
+            let halves =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .split(*band);
+            out.extend(halves.iter().copied());
+        }
+    }
+    out
+}
+
+/// Places the header, the optional tab bar, the budget strip, the panels of
+/// a tab and the footer on `area`. A layout with one tab keeps the classic
+/// screen: no tab bar, and the budget strip from 36 rows as before.
+pub fn place(area: Rect, ids: &[PanelId], tabbed: bool) -> Placed {
+    let wants_budget = ids.contains(&PanelId::Budget);
+    let min_rows = if tabbed {
+        TAB_BUDGET_MIN_ROWS
+    } else {
+        BUDGET_MIN_ROWS
+    };
+    let budget_height = if wants_budget && area.height >= min_rows {
+        budget::HEIGHT
+    } else {
+        0
+    };
+    let [header, tabbar, budget, body, footer] = Layout::vertical([
+        Constraint::Length(HEADER_HEIGHT),
+        Constraint::Length(u16::from(tabbed)),
+        Constraint::Length(budget_height),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+    let shown: Vec<PanelId> = ids
+        .iter()
+        .copied()
+        .filter(|id| *id != PanelId::Budget)
+        .collect();
+    let panels = shown.iter().copied().zip(grid(body, shown.len())).collect();
+    Placed {
+        header,
+        tabbar,
+        budget,
+        panels,
+        footer,
+    }
+}
+
+/// The place of one panel of a tab on `area`, `None` when the tab lacks it.
+pub fn panel_rect(area: Rect, ids: &[PanelId], tabbed: bool, id: PanelId) -> Option<Rect> {
+    place(area, ids, tabbed)
+        .panels
+        .into_iter()
+        .find(|(p, _)| *p == id)
+        .map(|(_, r)| r)
+}
+
 /// Table rows that fit in a panel: its height less two borders and the header.
 pub fn visible_rows(area: Rect) -> usize {
     usize::from(area.height.saturating_sub(3))
@@ -116,27 +209,36 @@ pub fn render(frame: &mut Frame, app: &App) {
         frame.render_widget(Paragraph::new(msg), area);
         return;
     }
-    let p = layout(area);
+    let tabbed = app.layout.tabs.len() > 1;
+    let p = place(area, app.tab_ids(), tabbed);
     render_header(frame, p.header, app, &pal);
-    let body = Rect::new(
-        p.spend.x,
-        p.spend.y,
-        area.width,
-        p.sessions.bottom().saturating_sub(p.spend.y),
-    );
+    if tabbed {
+        render_tabbar(frame, p.tabbar, app, &pal);
+    }
+    let top = p.tabbar.bottom();
+    let body = Rect::new(0, top, area.width, p.footer.y.saturating_sub(top));
     match (&app.data, notice::body(app)) {
         (Some(data), None) => {
-            budget::render(frame, p.budget, data, &pal);
-            panels::spend(frame, p.spend, app, data, &pal);
-            panels::tokens(frame, p.tokens, app, data, &pal);
-            panels::models(frame, p.models, app, data, &pal);
-            panels::projects(frame, p.projects, app, data, &pal);
-            panels::live(frame, p.live, app, data, &pal);
-            panels::sessions(frame, p.sessions, app, data, &pal);
+            if p.budget.height > 0 {
+                budget::render(frame, p.budget, data, &pal);
+            }
+            for (id, rect) in &p.panels {
+                match id {
+                    PanelId::Spend => panels::spend(frame, *rect, app, data, &pal),
+                    PanelId::Tokens => panels::tokens(frame, *rect, app, data, &pal),
+                    PanelId::Models => panels::models(frame, *rect, app, data, &pal),
+                    PanelId::Breakdown => panels::projects(frame, *rect, app, data, &pal),
+                    PanelId::Live => panels::live(frame, *rect, app, data, &pal),
+                    PanelId::Sessions => panels::sessions(frame, *rect, app, data, &pal),
+                    PanelId::Budget => {}
+                }
+            }
         }
         (data, Some(n)) => {
             if let Some(data) = data {
-                budget::render(frame, p.budget, data, &pal);
+                if p.budget.height > 0 {
+                    budget::render(frame, p.budget, data, &pal);
+                }
             }
             render_notice(frame, body, &n, &pal);
         }
@@ -214,6 +316,20 @@ fn render_help(frame: &mut Frame, area: Rect, scroll: usize, pal: &Palette) {
     );
 }
 
+/// The tab bar: each tab with its number, the selected one in the accent.
+fn render_tabbar(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
+    let plain = Style::default().fg(pal.color(pal.fg));
+    let chosen = Style::default()
+        .fg(pal.color(pal.hi))
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+    let mut spans = Vec::new();
+    for (i, tab) in app.layout.tabs.iter().enumerate() {
+        let style = if i == app.tab { chosen } else { plain };
+        spans.push(Span::styled(format!(" F{} {} ", i + 1, tab.name), style));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
 /// Draws a message in a bordered box that clears what is under it.
 fn render_notice(frame: &mut Frame, area: Rect, n: &Notice, pal: &Palette) {
     let ink = if n.error { pal.error } else { pal.hi };
@@ -253,6 +369,7 @@ fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
     // drop in the table's `drop` order, so the ones that matter most stay.
     let mut hints: Vec<(&str, String, u8)> = keys::footer_hints()
         .into_iter()
+        .filter(|h| app.layout.tabs.len() > 1 || h.key != "Tab")
         .map(|h| {
             let verb = if h.verb == "theme" {
                 theme.clone()
@@ -1152,5 +1269,113 @@ mod tests {
         let app = App::new(Range::All);
         assert!(screen(&app, 60, 20).contains("Terminal too small"));
         assert!(!screen(&app, 100, 30).contains("Terminal too small"));
+    }
+
+    use super::super::layout::{Layout, ALL};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn tabbed_app() -> App {
+        let mut app = app_with(&[event("opus", "alpha", 1.0)]);
+        app.layout = Layout::default();
+        app
+    }
+
+    #[test]
+    fn the_classic_placement_matches_the_old_fixed_layout() {
+        for (w, h) in [(80, 24), (100, 30), (120, 36), (160, 50)] {
+            let area = Rect::new(0, 0, w, h);
+            let old = layout(area);
+
+            let placed = place(area, &ALL, false);
+
+            let rect = |id| panel_rect(area, &ALL, false, id).unwrap();
+            assert_eq!(rect(PanelId::Spend), old.spend, "{w}x{h}");
+            assert_eq!(rect(PanelId::Tokens), old.tokens, "{w}x{h}");
+            assert_eq!(rect(PanelId::Models), old.models, "{w}x{h}");
+            assert_eq!(rect(PanelId::Breakdown), old.projects, "{w}x{h}");
+            assert_eq!(rect(PanelId::Live), old.live, "{w}x{h}");
+            assert_eq!(rect(PanelId::Sessions), old.sessions, "{w}x{h}");
+            assert_eq!(placed.budget, old.budget, "{w}x{h}");
+            assert_eq!(placed.footer, old.footer, "{w}x{h}");
+        }
+    }
+
+    #[test]
+    fn a_tab_with_two_panels_stacks_them_and_fills_the_body() {
+        let area = Rect::new(0, 0, 100, 30);
+
+        let placed = place(area, &[PanelId::Spend, PanelId::Tokens], true);
+
+        let (_, top) = placed.panels[0];
+        let (_, bottom) = placed.panels[1];
+        assert_eq!(top.width, 100);
+        assert_eq!(top.bottom(), bottom.y);
+        assert_eq!(bottom.bottom(), placed.footer.y);
+        assert_eq!(placed.tabbar.height, 1);
+    }
+
+    #[test]
+    fn the_tab_bar_names_every_tab_and_the_footer_hints_the_tab_key() {
+        let app = tabbed_app();
+
+        let text = screen(&app, 140, 30);
+
+        assert!(text.contains("F1 Charts"), "{text}");
+        assert!(text.contains("F3 Sessions"), "{text}");
+        assert!(text.contains("Tab tab"), "{text}");
+    }
+
+    #[test]
+    fn a_single_tab_layout_shows_no_tab_bar() {
+        let app = app_with(&[event("opus", "alpha", 1.0)]);
+
+        let text = screen(&app, 140, 30);
+
+        assert!(!text.contains("F1 All"), "{text}");
+    }
+
+    #[test]
+    fn tab_switches_between_tabs_and_wraps_and_function_keys_jump() {
+        let mut app = tabbed_app();
+
+        app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        let second = app.tab;
+        app.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        app.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        let wrapped = app.tab;
+        app.key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+
+        assert_eq!(second, 1);
+        assert_eq!(wrapped, 2);
+        assert_eq!(app.tab, 1);
+    }
+
+    #[test]
+    fn the_focus_moves_to_a_panel_the_new_tab_shows() {
+        let mut app = tabbed_app();
+        app.focus = crate::tui::sort::Panel::Spend;
+
+        app.key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
+
+        assert_eq!(app.focus, crate::tui::sort::Panel::Live);
+    }
+
+    #[test]
+    fn a_number_key_ignores_a_panel_the_tab_does_not_show() {
+        let mut app = tabbed_app();
+
+        app.key(KeyEvent::new(KeyCode::Char('6'), KeyModifiers::NONE));
+
+        assert_ne!(app.focus, crate::tui::sort::Panel::Sessions);
+    }
+
+    #[test]
+    fn the_numbers_tab_shows_the_budget_strip_on_a_24_row_screen() {
+        let mut app = tabbed_app();
+        app.tab = 1;
+
+        let text = screen(&app, 100, 24);
+
+        assert!(text.contains("Budget"), "{text}");
     }
 }

@@ -196,7 +196,7 @@ impl App {
             sources: String::new(),
             telemetry: None,
             refresh_every: Duration::from_secs(DEFAULT_REFRESH_SECONDS),
-            layout: super::layout::Layout::default(),
+            layout: super::layout::Layout::classic(),
             tab: 0,
         }
     }
@@ -380,9 +380,45 @@ impl App {
         }
     }
 
+    /// The panel ids of the selected tab. The layout is never empty, but a
+    /// stale index falls back to the first tab.
+    pub fn tab_ids(&self) -> &[super::layout::PanelId] {
+        self.layout
+            .tabs
+            .get(self.tab)
+            .or_else(|| self.layout.tabs.first())
+            .map_or(&[][..], |t| t.panels.as_slice())
+    }
+
+    /// The focusable panels of the selected tab, in the order they are drawn.
+    fn tab_panels(&self) -> Vec<Panel> {
+        self.tab_ids().iter().filter_map(|id| id.panel()).collect()
+    }
+
+    /// Keeps the focus on a panel the selected tab shows.
+    fn fix_focus(&mut self) {
+        let shown = self.tab_panels();
+        if !shown.contains(&self.focus) {
+            if let Some(first) = shown.first() {
+                self.focus = *first;
+            }
+        }
+    }
+
+    /// Shows tab `to`, wrapping around the ends.
+    pub fn go_tab(&mut self, to: isize) {
+        let n = self.layout.tabs.len().max(1) as isize;
+        self.tab = to.rem_euclid(n) as usize;
+        self.fix_focus();
+    }
+
     fn focus_next(&mut self, by: isize) {
-        let at = self.focus.index() as isize;
-        self.focus = PANELS[(at + by).rem_euclid(PANELS.len() as isize) as usize];
+        let shown = self.tab_panels();
+        if shown.is_empty() {
+            return;
+        }
+        let at = shown.iter().position(|p| *p == self.focus).unwrap_or(0) as isize;
+        self.focus = shown[(at + by).rem_euclid(shown.len() as isize) as usize];
     }
 
     /// The laid out chart of a chart panel, once there is data to chart.
@@ -395,19 +431,24 @@ impl App {
         {
             return None;
         }
-        let p = view::layout(self.area);
-        let area = if panel == Panel::Tokens {
-            p.tokens
+        let id = if panel == Panel::Tokens {
+            super::layout::PanelId::Tokens
         } else {
-            p.spend
+            super::layout::PanelId::Spend
         };
+        let area = view::panel_rect(self.area, self.tab_ids(), self.layout.tabs.len() > 1, id)?;
         Some(panels::chart_plot(area, data, panel))
     }
 
     /// Moves the chart cursor by `by` bars, or to an end of the chart with
     /// `isize::MIN` or `isize::MAX` steps. With no cursor yet it starts from today's bar.
     fn move_cursor(&mut self, by: isize) {
-        let Some(plot) = self.plot(Panel::Spend) else {
+        let chart = if self.tab_panels().contains(&Panel::Spend) {
+            Panel::Spend
+        } else {
+            Panel::Tokens
+        };
+        let Some(plot) = self.plot(chart) else {
             return;
         };
         let last = plot.bars.len().saturating_sub(1);
@@ -509,7 +550,19 @@ impl App {
             Cmd::ClearFilter => {}
             Cmd::FocusPanel => {
                 if let KeyCode::Char(c @ '1'..='6') = code {
-                    self.focus = PANELS[usize::from(c as u8 - b'1')];
+                    let panel = PANELS[usize::from(c as u8 - b'1')];
+                    if self.tab_panels().contains(&panel) {
+                        self.focus = panel;
+                    }
+                }
+            }
+            Cmd::NextTab => self.go_tab(self.tab as isize + 1),
+            Cmd::PrevTab => self.go_tab(self.tab as isize - 1),
+            Cmd::GoTab => {
+                if let KeyCode::F(n @ 1..=9) = code {
+                    if usize::from(n) <= self.layout.tabs.len() {
+                        self.go_tab(isize::from(n) - 1);
+                    }
                 }
             }
             Cmd::NextPanel => self.focus_next(1),
@@ -853,15 +906,15 @@ mod tests {
     }
 
     #[test]
-    fn number_keys_and_tab_move_the_focus() {
+    fn number_keys_and_the_bracket_keys_move_the_focus() {
         let mut app = App::new(Range::All);
         app.key(press(KeyCode::Char('5')));
         assert_eq!(app.focus, Panel::Live);
-        app.key(press(KeyCode::Tab));
+        app.key(press(KeyCode::Char(']')));
         assert_eq!(app.focus, Panel::Sessions);
-        app.key(press(KeyCode::Tab));
+        app.key(press(KeyCode::Char(']')));
         assert_eq!(app.focus, Panel::Spend);
-        app.key(press(KeyCode::BackTab));
+        app.key(press(KeyCode::Char('[')));
         assert_eq!(app.focus, Panel::Sessions);
         app.key(press(KeyCode::Char('7')));
         assert_eq!(app.focus, Panel::Sessions);
@@ -1243,6 +1296,9 @@ mod tests {
         use keys::Cmd::*;
         for cmd in [
             Quit,
+            NextTab,
+            PrevTab,
+            GoTab,
             Theme,
             Today,
             Week,
@@ -1304,6 +1360,7 @@ mod tests {
         let text = first.ui_state().to_text();
 
         let mut second = App::new(Range::All);
+        second.layout = super::super::layout::Layout::default();
         second.apply_ui_state(&super::super::ui_state::UiState::parse(&text));
 
         assert_eq!(second.tab, 1);
