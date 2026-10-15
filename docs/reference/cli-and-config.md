@@ -402,7 +402,7 @@ List every setting with its value and source tier
 
 Change a setting
 
-Writes to the repo tier unless you pass `--org` or `--global`.
+Writes to the repo tier unless you pass `--org` or `--global`. The per-user `update.*` keys always go to the global tier.
 
 - `<KEY>`: Dotted setting name, such as `autoReview.enabled`
 - `<VALUE>`: New value; it is read as the type the setting expects

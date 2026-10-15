@@ -30,6 +30,9 @@ pub fn set(
     repo_slug: Option<&str>,
 ) -> Result<(), ConfigError> {
     validate_key_and_value(key, &value)?;
+    if keys::is_user_key(key) && tier != Tier::Global {
+        return Err(ConfigError::GlobalOnly(key.to_string()));
+    }
     let root = crate::common::paths::playbook_root_from(home);
     super::store::put(&root, tier, repo_slug, key, &value)
 }

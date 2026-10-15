@@ -78,6 +78,12 @@ pub const KNOWN_KEYS: &[&str] = &[
     "update.checkIntervalHours",
 ];
 
+/// Whether `key` is a per-user setting that lives only in the global tier.
+/// `config set` writes it there without `--global` and refuses `--org`.
+pub fn is_user_key(key: &str) -> bool {
+    key.starts_with("update.")
+}
+
 /// The component kinds an `effort.<kind>.<name>` key can name.
 pub const EFFORT_COMPONENT_KINDS: [&str; 3] = ["agents", "commands", "skills"];
 
