@@ -1099,9 +1099,9 @@ Asks a small model three times. Anything but a unanimous `quick` becomes `deep`.
 
 Cut the skill rules a PR title and body need
 
-Reads the writing-style and engineering-standards skills from the plugin root (`playbook path plugin-root` prints it), writes four files under `/tmp`, checks each, and prints their paths. A failed check prints `ERROR: ...` and exits 1. With `--commit` it writes only the commit-message slice of writing-style.
+Reads the writing-style and engineering-standards skills from the plugin root (`playbook path plugin-root` prints it), writes four files under `/tmp`, checks each, and prints their paths. A failed check prints `ERROR: ...` and exits 1. With `--commit` it writes only the commit-message slice of writing-style. When the plugin lacks one of the files, the copies built into this binary are used and stderr says so.
 
-- `--plugin-root <PLUGIN_ROOT>`: Plugin root (default: the installed skills plugin)
+- `--plugin-root <PLUGIN_ROOT>`: Plugin root (default: `playbook path plugin-root`, else the built-in copies)
 - `--commit`: Write only the slice a commit message needs
 
 ### `playbook pr stack`

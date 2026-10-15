@@ -92,6 +92,7 @@ fn run_hook(
         .env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")
         .env_remove("CLAUDE_PLUGIN_ROOT")
+        .env_remove("PLAYBOOK_PLUGIN_DIR")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

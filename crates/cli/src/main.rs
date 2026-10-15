@@ -1149,13 +1149,16 @@ fn main() {
                     let home = common::home_dir();
                     let root = plugin_root
                         .or_else(|| {
-                            let found = playbook::plugin_root::rules_root(
-                                playbook::plugin_root::resolve_here().ok(),
-                                &home,
-                            )?;
+                            let resolved = playbook::plugin_root::resolve_here().ok();
+                            let plugin = resolved.as_ref().map(|r| r.root.display().to_string());
+                            let found = playbook::plugin_root::rules_root(resolved, &home)?;
                             if found.source == playbook::plugin_root::Source::Embedded {
+                                let why = match plugin {
+                                    Some(dir) => format!("the plugin at {dir} lacks the rule files"),
+                                    None => "no playbook plugin was found".to_string(),
+                                };
                                 eprintln!(
-                                    "pr rules: the plugin files were not found, so the copies embedded in playbook {} are used",
+                                    "pr rules: {why}, so the copies embedded in playbook {} are used",
                                     env!("CARGO_PKG_VERSION")
                                 );
                             }

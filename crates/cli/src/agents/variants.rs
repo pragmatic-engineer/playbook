@@ -230,7 +230,7 @@ pub fn session_agents(
 /// by `root`. Claude Code fills the variable with the directory of the plugin
 /// that holds the file, which for a variant copy has no `skills/`.
 fn pin_plugin_root(content: &str, root: Option<&Path>) -> String {
-    let Some(root) = root.and_then(Path::to_str) else {
+    let Some(root) = root.and_then(Path::to_str).filter(|r| !r.is_empty()) else {
         return content.to_string();
     };
     content

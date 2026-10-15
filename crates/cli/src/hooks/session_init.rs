@@ -139,6 +139,8 @@ pub fn run(payload: &Payload) {
 fn binary_too_old_line() -> Option<String> {
     let root = crate::plugin_root::resolve_here().ok()?.root;
     let exe = std::env::current_exe().unwrap_or_default();
+    // A Homebrew binary is often reached through a symlink in /usr/local/bin.
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
     crate::plugin_root::binary_too_old(
         &root,
         env!("CARGO_PKG_VERSION"),
