@@ -36,15 +36,15 @@ For general before and after rewrites see `examples`. These show review comments
 
 **Review finding, blocking label** (bad: argues priority the label already carries):
 
-> blocking: the retry loop has no max attempt count, and since a stuck dependency means this runs forever, it's worth capping now while the change is small.
+> issue (blocking): the retry loop has no max attempt count, and since a stuck dependency means this runs forever, it's worth capping now while the change is small.
 
 **Review finding, blocking label** (good: the label already says urgent, the sentence only needs the defect):
 
-> blocking: the retry loop has no max attempt count. A stuck dependency retries forever.
+> issue (blocking): the retry loop has no max attempt count. A stuck dependency retries forever.
 
 **Review finding, complex fix** (bad: hands over a full working implementation):
 
-> blocking: this retries without a backoff, so a flaky dependency gets hammered. Here's the fix:
+> issue (blocking): this retries without a backoff, so a flaky dependency gets hammered. Here's the fix:
 > ```js
 > async function withRetry(fn, { attempts = 3, baseMs = 200 } = {}) {
 >   for (let i = 0; i < attempts; i++) {
@@ -56,7 +56,7 @@ For general before and after rewrites see `examples`. These show review comments
 
 **Review finding, complex fix** (good: states the problem, sketches the idea in pseudocode, leaves the implementation to the author):
 
-> blocking: this retries without a backoff. A flaky dependency gets too many calls. Something like: retry N times, sleep `baseDelay * 2^attempt` between each, give up after the last one.
+> issue (blocking): this retries without a backoff. A flaky dependency gets too many calls. Something like: retry N times, sleep `baseDelay * 2^attempt` between each, give up after the last one.
 
 **More good examples:**
 

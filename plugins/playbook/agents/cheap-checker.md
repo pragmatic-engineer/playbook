@@ -19,7 +19,7 @@ You are handed exactly one narrow concern (for example, "check only for committe
 Return findings as a JSON array, one object per finding, in EXACTLY this shape, matching `agents/reviewer.md`'s finding fields:
 
 ```json
-{"file": "...", "line": N, "side": "RIGHT", "label": "blocking",
+{"file": "...", "line": N, "side": "RIGHT", "label": "issue", "decorations": ["blocking"],
  "category": "...", "confidence": "HIGH", "evidence": "<exact code>", "body": "<short plain finding; the problem then what breaks, 1 sentence when possible, a second only when the mechanism is non-obvious>", "fix": "<one fix, in plain words>"}
 ```
 

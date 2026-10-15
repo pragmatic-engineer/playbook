@@ -47,7 +47,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag name to resolve and build, for example v0.25.0 or telemetry-v0.2.0. Its version must match the files on the selected ref.'
+        description: 'Tag name to resolve and build, for example v0.26.0 or telemetry-v0.2.0. Its version must match the files on the selected ref.'
         required: true
         type: string
       dry_run:
@@ -190,6 +190,23 @@ jobs:
           fi
           echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
 
+      # A dry run never creates the release, so show what the body of a plain
+      # vX.Y.Z release would start with. The create-release job puts the same
+      # file above the generated notes.
+      - name: Show the release notes preview on a dry run
+        if: needs.resolve.outputs.dry_run == 'true' && needs.resolve.outputs.is_playbook == 'true'
+        run: |
+          set -euo pipefail
+          {
+            echo "## Release body preview"
+            echo
+            echo "The body starts with .github/release-notes-upgrade.md, then the generated notes follow."
+            echo
+            echo '~~~markdown'
+            cat .github/release-notes-upgrade.md
+            echo '~~~'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   # Create the release for the tag when it is missing, so a pushed tag is all a
   # maintainer has to do. Releases for tools other than playbook are created
   # with --latest=false, which keeps the playbook vX.Y.Z release as the
@@ -207,6 +224,10 @@ jobs:
           allowed-endpoints: >
             api.github.com:443
             github.com:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Create the release when it does not exist
         env:
@@ -228,7 +249,8 @@ jobs:
             args+=("$LATEST_FLAG")
           fi
           if [ "$IS_PLAYBOOK" = "true" ]; then
-            args+=(--generate-notes)
+            # The upgrade note goes above the generated notes.
+            args+=(--notes-file .github/release-notes-upgrade.md --generate-notes)
           else
             args+=(--notes "Release of $TOOL $VERSION. The archives below hold both binaries for each platform, and SHA256SUMS lists their checksums.")
           fi

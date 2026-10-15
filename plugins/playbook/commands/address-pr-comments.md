@@ -124,6 +124,18 @@ PR-level:
 
 If `DRY_RUN=true`, stop here. Print "dry-run: no edits applied, no replies posted."
 
+## Reading and writing Conventional Comments
+
+Read `playbook:grounding-review` `references/conventional-comments.md` once before Step 4. Reviewers may write comments as `<label> [decorations]: <subject>`. Read them like this:
+
+- Must fix by default: `(blocking)`, `issue`, `chore`, `todo`, `typo`.
+- Optional: `nitpick`, `thought`, `polish`, `(non-blocking)`.
+- Needs an answer: `question`.
+- Judge it and fix or decline with a reason: `suggestion`.
+- A bare `blocking:` from an older comment reads as `issue (blocking)`. A comment with no label is judged on its text.
+
+When a reply is a review comment, write it in the same format, for example `question: ...`. A plain reply such as "Fixed, pushed." stays plain.
+
 ## Step 4: Iterate one at a time
 
 For each indexed item, do this loop:
