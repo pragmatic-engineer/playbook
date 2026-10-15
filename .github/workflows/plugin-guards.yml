@@ -57,6 +57,9 @@ jobs:
       - name: Check the plugin payload
         run: scripts/check-plugin.sh payload
 
+      - name: Check the breaking changes mirror in plugin.json
+        run: scripts/check-plugin.sh mirror
+
   version-bump:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

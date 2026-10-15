@@ -192,6 +192,20 @@ pub fn entries_between(from: &str, to: &str) -> Vec<Entry> {
     select(all(), Component::Playbook, from, to)
 }
 
+/// The plugin entries an upgrade from plugin `from` to `to` crosses, read
+/// from a plugin manifest's `metadata.breakingChanges` (ADR 0035 decision
+/// 4.6). The list is read with `lenient`, since a newer plugin can carry
+/// fields or components this binary does not know. A manifest without the
+/// key has no entries.
+pub fn plugin_entries(manifest: &serde_json::Value, from: &str, to: &str) -> Vec<Entry> {
+    let values = manifest
+        .pointer("/metadata/breakingChanges")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    select(&lenient(values), Component::Plugin, from, to)
+}
+
 /// One short block for the user, or an empty string when there is nothing.
 pub fn render(entries: &[Entry]) -> String {
     if entries.is_empty() {
@@ -437,5 +451,42 @@ mod tests {
         // Assert
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].version, "0.32.0");
+    }
+
+    #[test]
+    fn plugin_entries_reads_the_manifest_mirror_between_two_plugin_versions() {
+        // Arrange
+        let manifest: serde_json::Value = serde_json::from_str(
+            r#"{"name":"playbook","metadata":{"breakingChanges":[
+              {"version":"0.31.0","component":"plugin","summary":"old","action":"none needed","migration":null},
+              {"version":"0.32.0","component":"plugin","summary":"new","action":"run /playbook:doctor","migration":null,"extra":1},
+              {"version":"0.32.0","component":"playbook","summary":"binary","action":"playbook init","migration":null},
+              {"version":"0.32.0","component":"desktop","summary":"later","action":"none needed","migration":null}
+            ]}}"#,
+        )
+        .unwrap();
+
+        // Act
+        let got = plugin_entries(&manifest, "0.31.0", "0.32.0");
+
+        // Assert
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].summary, "new");
+        assert_eq!(got[0].component, Component::Plugin);
+    }
+
+    #[test]
+    fn plugin_entries_is_empty_for_a_manifest_without_the_mirror() {
+        // Arrange
+        let bare = serde_json::json!({"name": "playbook"});
+        let wrong_type = serde_json::json!({"metadata": {"breakingChanges": "none"}});
+
+        // Act
+        let from_bare = plugin_entries(&bare, "0.1.0", "9.0.0");
+        let from_wrong_type = plugin_entries(&wrong_type, "0.1.0", "9.0.0");
+
+        // Assert
+        assert!(from_bare.is_empty());
+        assert!(from_wrong_type.is_empty());
     }
 }
