@@ -15,7 +15,7 @@ use super::sort::Panel;
 use super::theme::{ColorDepth, Theme};
 use super::view::render;
 use crate::limits::LimitPeriod;
-use crate::limits_source::{Snapshot, Window};
+use crate::limits_source::{Snapshot, Sources, Window};
 use crate::query::{live_view, Range, WeekStart};
 use crate::UsageEvent;
 use ratatui::backend::TestBackend;
@@ -298,15 +298,24 @@ fn the_daily_table_marks_today_and_the_peak_day() {
 }
 
 fn with_limits(
-    mut a: App,
+    a: App,
     snapshot: Option<&Snapshot>,
     budgets: &[(LimitPeriod, f64)],
     range: Range,
 ) -> App {
+    let sources = Sources {
+        snapshot: snapshot.cloned(),
+        budgets: budgets.to_vec(),
+        ..Sources::default()
+    };
+    with_sources(a, &sources, range)
+}
+
+fn with_sources(mut a: App, sources: &Sources, range: Range) -> App {
     let events = fixture();
     let live = live_view(&events, &events, &events, NOW);
     let mut data = Data::build(&events, live, NOW, range, "");
-    data.limits = LimitsView::build(snapshot, budgets, &events, NOW, WeekStart::Monday, range);
+    data.limits = LimitsView::build(sources, &events, NOW, WeekStart::Monday, range);
     a.range = range;
     a.data = Some(data);
     a
@@ -955,4 +964,68 @@ fn the_projection_panel_shows_both_paces_for_a_budget_and_the_window_average() {
     assert!(text.contains("last 24h"), "{text}");
     assert!(text.contains("window average"), "{text}");
     check("projection_140x40", &text);
+}
+
+fn enterprise_sources(cache_age: i64) -> Sources {
+    use crate::plan::{Account, Plan, SpendLimit, UsageCache};
+    Sources {
+        account: Account {
+            plan: Plan::EnterpriseOrUnknown,
+            cache: Some(UsageCache {
+                fetched_at: NOW - cache_age,
+                five_hour: None,
+                seven_day: None,
+                spend: Some(SpendLimit {
+                    limit_usd: 500.0,
+                    used_usd: Some(120.0),
+                }),
+            }),
+        },
+        ..Sources::default()
+    }
+}
+
+#[test]
+fn an_enterprise_account_shows_the_cached_spend_limit_and_says_the_windows_are_not_available() {
+    let mut a = with_sources(tabbed(1), &enterprise_sources(600), Range::LastDays(30));
+    a.layout = crate::tui::layout::Layout::default();
+    a.go_tab(1);
+
+    let text = draw(&a, 140, 40);
+
+    assert!(text.contains("[cached 10m ago]"), "{text}");
+    assert!(text.contains("$120.00/$500.00"), "{text}");
+    assert!(
+        text.contains("5 hour and weekly windows: not available for this plan"),
+        "{text}"
+    );
+    check("projection_enterprise_140x40", &text);
+}
+
+#[test]
+fn a_stale_cached_limit_is_labeled_with_its_age() {
+    let a = with_sources(
+        tabbed(1),
+        &enterprise_sources(46 * 3600),
+        Range::LastDays(30),
+    );
+
+    let text = draw(&a, 140, 40);
+
+    assert!(text.contains("[cached, stale 1d 22h ago]"), "{text}");
+}
+
+#[test]
+fn with_no_limit_and_no_windows_both_panels_say_what_is_missing() {
+    let a = with_sources(tabbed(1), &Sources::default(), Range::LastDays(30));
+
+    let text = draw(&a, 140, 40);
+
+    assert!(text.contains("Limit unknown:"), "{text}");
+    assert_eq!(
+        text.matches("5 hour and weekly windows: not available for this plan")
+            .count(),
+        2,
+        "{text}"
+    );
 }
