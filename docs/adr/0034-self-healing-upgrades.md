@@ -18,7 +18,7 @@ A user upgraded the binary from 0.25 to 0.26 and a skill failed with "could not 
 ## Decision
 
 1. **One resolver.** `plugin_root::resolve` finds the plugin's files. It takes the Claude home, the environment value and the current directory as inputs, and returns the directory and its source (`InstallPath`, `Env` or `Cache`). Callers read the version from the directory's `plugin.json`. The order is:
-   1. `PLAYBOOK_PLUGIN_ROOT`, an explicit override for a dev checkout;
+   1. `PLAYBOOK_PLUGIN_DIR`, an explicit override for a dev checkout. The name differs from `PLAYBOOK_PLUGIN_ROOT`, which the repository's cargo config sets for every test run;
    2. the `installPath` of `playbook@pragmatic-engineer` in `installed_plugins.json`. Both the list shape (version 2) and the single object shape (version 1) are read. An entry whose `projectPath` holds the current directory wins, the deepest one first, then the user entry. A missing or malformed file skips this step;
    3. `CLAUDE_PLUGIN_ROOT`, when it is set;
    4. the newest version directory in the cache.
@@ -57,7 +57,7 @@ A user upgraded the binary from 0.25 to 0.26 and a skill failed with "could not 
 
 ## Alternatives considered
 
-- **Trust `CLAUDE_PLUGIN_ROOT` first.** Rejected: Claude Code exports it only to hooks and MCP servers, and `pb` points it at the variants plugin. `installPath` is what Claude Code loads. A dev checkout uses `PLAYBOOK_PLUGIN_ROOT`.
+- **Trust `CLAUDE_PLUGIN_ROOT` first.** Rejected: Claude Code exports it only to hooks and MCP servers, and `pb` points it at the variants plugin. `installPath` is what Claude Code loads. A dev checkout uses `PLAYBOOK_PLUGIN_DIR`.
 - **Embed the whole plugin in the binary.** Rejected: it adds about 700 KB. Only the four files the binary reads itself are embedded.
 - **Delete orphaned plugin cache directories.** Rejected: Claude Code owns and removes them, and an old directory holds any skill edits a user made there.
 - **Rewrite old `.sh` hook entries to `playbook hook <name>`.** Rejected: an entry whose script exists is the user's own. A missing script proves the entry is dead.
@@ -68,7 +68,7 @@ A user upgraded the binary from 0.25 to 0.26 and a skill failed with "could not 
 
 - A binary upgrade through `playbook update`, Homebrew or a copied file heals the playbook files on the next session start, without a run of `init`.
 - Settings problems still need the user. The hook repeats the command each session until the item is fixed.
-- A dev checkout no longer wins over an installed plugin through `CLAUDE_PLUGIN_ROOT`. It needs `PLAYBOOK_PLUGIN_ROOT`.
+- A dev checkout no longer wins over an installed plugin through `CLAUDE_PLUGIN_ROOT`. It needs `PLAYBOOK_PLUGIN_DIR`.
 - The embedded rule files follow the binary's release, so they can lag the plugin. `pr rules` uses them only when the plugin files are missing, and says so. This replaces the error ADR 0030 describes.
 - A new breaking change adds a registry entry with a `Kind` and a `Scope`. A wrong scope is the main risk, and the registry wide test catches an `Owned` migration that writes outside playbook's files.
 - The doctor row stops warning about versions that differ by design. The wording in the plugin's `doctor` command changes in the plugin, tracked in issue #1024.
