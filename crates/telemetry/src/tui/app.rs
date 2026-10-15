@@ -159,6 +159,8 @@ pub struct App {
     pub tab: usize,
     /// The layout editor, while it is open.
     pub editor: Option<super::editor::Editor>,
+    /// A line that replaces the footer hints until the next key.
+    pub note: Option<String>,
 }
 
 /// What the loop must do after a key.
@@ -203,6 +205,7 @@ impl App {
             layout: super::layout::Layout::classic(),
             tab: 0,
             editor: None,
+            note: None,
         }
     }
 
@@ -487,6 +490,7 @@ impl App {
 
     pub fn key(&mut self, key: KeyEvent) -> Effect {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        self.note = None;
         if self.editing {
             return self.edit(key.code, ctrl);
         }

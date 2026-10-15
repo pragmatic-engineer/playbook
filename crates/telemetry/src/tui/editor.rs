@@ -58,10 +58,8 @@ impl Editor {
             KeyCode::Esc | KeyCode::Char('q') => return Outcome::Cancel,
             KeyCode::Down | KeyCode::Char('j') => self.row = (self.row + 1).min(ALL.len() - 1),
             KeyCode::Up | KeyCode::Char('k') => self.row = self.row.saturating_sub(1),
-            KeyCode::Right => self.tab = (self.tab + 1) % self.layout.tabs.len(),
-            KeyCode::Left => {
-                self.tab = (self.tab + self.layout.tabs.len() - 1) % self.layout.tabs.len();
-            }
+            KeyCode::Right => self.go(1),
+            KeyCode::Left => self.go(-1),
             KeyCode::Char(' ') | KeyCode::Enter => self.toggle(),
             KeyCode::Char('K') => self.move_panel(-1),
             KeyCode::Char('J') => self.move_panel(1),
@@ -85,6 +83,12 @@ impl Editor {
             _ => {}
         }
         Outcome::Stay
+    }
+
+    /// Edits the next or previous tab, wrapping around.
+    fn go(&mut self, by: isize) {
+        let n = self.layout.tabs.len().max(1) as isize;
+        self.tab = (self.tab as isize + by).rem_euclid(n) as usize;
     }
 
     /// Adds the highlighted panel to the tab, or takes it off. A tab keeps at
@@ -189,6 +193,7 @@ impl Editor {
                         tab.name = new;
                     }
                     self.rename = None;
+                    self.message = None;
                 }
             }
             _ => {}
@@ -350,5 +355,120 @@ mod tests {
         let mut e = editor();
 
         assert_eq!(e.key(KeyCode::Char('R')), Outcome::Reset);
+    }
+
+    #[test]
+    fn the_line_keys_stop_at_the_first_and_last_panel() {
+        let mut e = editor();
+
+        for _ in 0..10 {
+            e.key(KeyCode::Char('j'));
+        }
+        let bottom = e.row;
+        for _ in 0..10 {
+            e.key(KeyCode::Char('k'));
+        }
+
+        assert_eq!(bottom, ALL.len() - 1);
+        assert_eq!(e.row, 0);
+    }
+
+    #[test]
+    fn left_and_right_wrap_around_the_tabs() {
+        let mut e = editor();
+
+        e.key(KeyCode::Left);
+        let last = e.tab;
+        e.key(KeyCode::Right);
+
+        assert_eq!(last, 2);
+        assert_eq!(e.tab, 0);
+    }
+
+    #[test]
+    fn escape_while_renaming_cancels_the_rename_and_keeps_the_editor_open() {
+        let mut e = editor();
+        e.key(KeyCode::Char('r'));
+        e.key(KeyCode::Char('x'));
+
+        let outcome = e.key(KeyCode::Esc);
+
+        assert_eq!(outcome, Outcome::Stay);
+        assert!(e.rename.is_none());
+        assert_eq!(names(&e)[0], "Charts");
+    }
+
+    #[test]
+    fn a_name_longer_than_the_limit_is_cut_while_typing() {
+        let mut e = editor();
+        e.key(KeyCode::Char('r'));
+        e.rename = Some(String::new());
+
+        for _ in 0..20 {
+            e.key(KeyCode::Char('a'));
+        }
+
+        assert_eq!(
+            e.rename.as_deref().map(|n| n.chars().count()),
+            Some(MAX_NAME)
+        );
+    }
+
+    #[test]
+    fn moving_a_panel_not_in_the_tab_changes_nothing_and_says_why() {
+        let mut e = editor();
+        e.row = 4;
+
+        e.key(KeyCode::Char('K'));
+
+        assert_eq!(e.layout.tabs[0].panels, [PanelId::Spend, PanelId::Tokens]);
+        assert!(e.message.is_some());
+    }
+
+    #[test]
+    fn moving_a_panel_past_either_end_changes_nothing() {
+        let mut e = editor();
+        e.row = 0;
+        e.key(KeyCode::Char('K'));
+        e.row = 1;
+        e.key(KeyCode::Char('J'));
+
+        assert_eq!(e.layout.tabs[0].panels, [PanelId::Spend, PanelId::Tokens]);
+    }
+
+    #[test]
+    fn moving_a_tab_past_either_end_changes_nothing() {
+        let mut e = editor();
+
+        e.key(KeyCode::Char('<'));
+        e.tab = 2;
+        e.key(KeyCode::Char('>'));
+
+        assert_eq!(names(&e), ["Charts", "Numbers", "Sessions"]);
+        assert_eq!(e.tab, 2);
+    }
+
+    #[test]
+    fn deleting_the_last_tab_selects_the_new_last_tab() {
+        let mut e = editor();
+        e.tab = 2;
+
+        e.key(KeyCode::Char('x'));
+
+        assert_eq!(e.tab, 1);
+    }
+
+    #[test]
+    fn k_moves_a_panel_earlier_and_a_successful_rename_clears_a_stale_message() {
+        let mut e = editor();
+        e.row = 1;
+        e.key(KeyCode::Char('K'));
+        e.key(KeyCode::Char('r'));
+        e.message = Some("old".into());
+        e.rename = Some("Fresh".into());
+        e.key(KeyCode::Enter);
+
+        assert_eq!(e.layout.tabs[0].panels, [PanelId::Tokens, PanelId::Spend]);
+        assert!(e.message.is_none());
     }
 }

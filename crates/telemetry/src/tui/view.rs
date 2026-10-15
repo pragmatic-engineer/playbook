@@ -280,8 +280,19 @@ fn render_editor(frame: &mut Frame, area: Rect, ed: &super::editor::Editor, pal:
     let plain = Style::default().fg(pal.color(pal.fg));
     let mut lines: Vec<Line> = Vec::new();
     let mut tabs = vec![Span::raw(" ")];
+    let full: usize = ed
+        .layout
+        .tabs
+        .iter()
+        .map(|t| t.name.chars().count() + 2)
+        .sum();
+    let names = full < usize::from(width).saturating_sub(4);
     for (i, tab) in ed.layout.tabs.iter().enumerate() {
-        let shown = format!(" {} ", tab.name);
+        let shown = if names || i == ed.tab {
+            format!(" {} ", tab.name)
+        } else {
+            format!(" {} ", i + 1)
+        };
         tabs.push(if i == ed.tab {
             Span::styled(shown, accent.add_modifier(Modifier::UNDERLINED))
         } else {
@@ -440,6 +451,9 @@ fn render_notice(frame: &mut Frame, area: Rect, n: &Notice, pal: &Palette) {
 /// and at the right when the view was last refreshed.
 fn footer(app: &App, pal: &Palette, area_width: u16) -> Line<'static> {
     let plain = Style::default().fg(pal.color(pal.fg));
+    if let Some(note) = &app.note {
+        return Line::styled(format!(" {note}"), Style::default().fg(pal.color(pal.hi)));
+    }
     if app.editing {
         return Line::styled(
             format!(" filter: {}_   enter apply   esc cancel", app.draft),
@@ -1614,7 +1628,7 @@ mod tests {
             )
         );
         assert_eq!(app.layout.tabs.len(), 2);
-        assert!(app.tab < 2);
+        assert_eq!(app.tab, 0);
         assert!(app.editor.is_none());
     }
 
@@ -1651,5 +1665,45 @@ mod tests {
         app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
         assert!(app.quit);
+    }
+
+    #[test]
+    fn the_rename_prompt_and_a_refusal_are_drawn_in_the_editor() {
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+        app.key(press(KeyCode::Char('r')));
+        let prompt = screen(&app, 100, 30);
+        for _ in 0..6 {
+            app.key(press(KeyCode::Backspace));
+        }
+        app.key(press(KeyCode::Enter));
+        let refusal = screen(&app, 100, 30);
+
+        assert!(prompt.contains("New name:"), "{prompt}");
+        assert!(refusal.contains("A tab needs a name"), "{refusal}");
+    }
+
+    #[test]
+    fn reset_from_another_tab_goes_back_to_the_first_tab_and_closes_the_editor() {
+        let mut app = tabbed_app();
+        app.go_tab(2);
+        app.key(press(KeyCode::Char('e')));
+
+        app.key(press(KeyCode::Char('R')));
+
+        assert_eq!(app.tab, 0);
+        assert!(app.editor.is_none());
+    }
+
+    #[test]
+    fn a_note_replaces_the_footer_hints_until_the_next_key() {
+        let mut app = tabbed_app();
+        app.note = Some("Layout kept for this run only".into());
+
+        let shown = screen(&app, 140, 30);
+        app.key(press(KeyCode::Char('t')));
+
+        assert!(shown.contains("Layout kept for this run only"), "{shown}");
+        assert!(app.note.is_none());
     }
 }
