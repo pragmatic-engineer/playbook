@@ -457,10 +457,14 @@ fn manifest_with(root: &Path, version: &str, extra: &str) {
     .unwrap();
 }
 
-/// The layer 6 version row, without the upgrade record row that follows it.
+/// The layer 6 version row, which comes first when a binary is found.
 fn version_row(rows: &[Value]) -> String {
-    let l6 = layer(rows, "6");
-    text(&l6[..l6.len() - 1])
+    text(&layer(rows, "6")[..1])
+}
+
+/// The layer 6 upgrade record row, which comes second when a binary is found.
+fn record_row(rows: &[Value]) -> String {
+    text(&layer(rows, "6")[1..2])
 }
 
 #[test]
@@ -539,30 +543,52 @@ fn l6_the_newest_cached_plugin_is_the_baseline() {
 }
 
 #[test]
-fn l6_the_upgrade_record_row_names_what_needs_the_user() {
+fn l6_the_upgrade_record_row_follows_the_record_of_the_binary_on_path() {
     let b = Box::new("l6r");
     let bin = b.stub("bin1", "0.19.0", true);
-    let before = b.run(&[&bin], "/bin/zsh", None);
-    let fresh = layer(&before, "6");
-    let last = text(&fresh[fresh.len() - 1..]);
-    assert!(
-        last.starts_with("INFO") && last.contains("no upgrade record yet"),
-        "{last}"
-    );
-
     let root = playbook::common::paths::playbook_root_from(&b.home());
-    playbook::state::transaction(&root, |tx| {
-        tx.set("versions/binary", env!("CARGO_PKG_VERSION"))?;
-        tx.set("versions/pending", "0011-dead-hook-scripts")
-    })
-    .unwrap();
-    let after = b.run(&[&bin], "/bin/zsh", None);
-    let rows = layer(&after, "6");
-    let last = text(&rows[rows.len() - 1..]);
+    let set = |pairs: &[(&str, &str)]| {
+        playbook::state::transaction(&root, |tx| {
+            for (k, v) in pairs {
+                tx.set(k, v)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    };
+    let row = || record_row(&b.run(&[&bin], "/bin/zsh", None));
+
+    let t = row();
     assert!(
-        last.starts_with("WARN")
-            && last.contains("1 upgrade item(s) need you: 0011-dead-hook-scripts"),
-        "{last}"
+        t.starts_with("INFO") && t.contains("no upgrade record yet"),
+        "{t}"
+    );
+    set(&[("versions/binary", "0.19.0")]);
+    let t = row();
+    assert!(t.starts_with("PASS") && t.contains("binary 0.19.0"), "{t}");
+    set(&[("versions/binary", "0.18.0")]);
+    let t = row();
+    assert!(
+        t.starts_with("INFO") && t.contains("next session start updates it"),
+        "{t}"
+    );
+    set(&[("versions/binary", "0.20.0")]);
+    let t = row();
+    assert!(
+        t.starts_with("INFO") && t.contains("nothing runs after a downgrade"),
+        "{t}"
+    );
+    set(&[("versions/pending", "0011-dead-hook-scripts")]);
+    let t = row();
+    assert!(
+        t.starts_with("WARN") && t.contains("1 upgrade item(s) need you: 0011-dead-hook-scripts"),
+        "{t}"
+    );
+    set(&[("versions/failed-at", "1000")]);
+    let t = row();
+    assert!(
+        t.starts_with("WARN") && t.contains("last upgrade heal failed"),
+        "{t}"
     );
 }
 

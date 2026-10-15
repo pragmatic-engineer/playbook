@@ -371,12 +371,19 @@ fn version_of(bin: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// The plugin the resolver picks, the same one skills and `pb` use.
+/// The plugin the resolver picks, the same one `playbook path plugin-root`
+/// and the session hook use, `PLAYBOOK_PLUGIN_DIR` included.
 fn plugin_dir(env: &Env) -> Option<PathBuf> {
-    crate::plugin_root::find(
-        env.plugin_root.as_ref().and_then(|p| p.to_str()),
-        &env.claude_home,
-    )
+    let override_env = std::env::var(crate::plugin_root::OVERRIDE_ENV).ok();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    crate::plugin_root::resolve(&crate::plugin_root::Inputs {
+        claude_home: &env.claude_home,
+        override_env: override_env.as_deref(),
+        env: env.plugin_root.as_ref().and_then(|p| p.to_str()),
+        cwd: &cwd,
+    })
+    .ok()
+    .map(|r| r.root)
 }
 
 /// The binary against the plugin (ADR 0034 decision 11): a pass while the
@@ -392,7 +399,9 @@ fn version_row(env: &Env, bin: &Path, bin_ver: &str) -> Row {
             format!("playbook binary on PATH, version {bin_ver}, no plugin manifest to compare"),
         );
     };
-    let homebrew = crate::update::is_homebrew(bin);
+    // A Homebrew binary is often reached through a symlink in /usr/local/bin.
+    let homebrew =
+        crate::update::is_homebrew(&fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf()));
     plugin
         .as_deref()
         .and_then(|root| binary_too_old(root, bin_ver, homebrew))
@@ -402,7 +411,14 @@ fn version_row(env: &Env, bin: &Path, bin_ver: &str) -> Row {
                 Row::new(
                     "6",
                     Level::Pass,
-                    format!("playbook binary {bin_ver} works with plugin {version}"),
+                    if bin_ver == env!("CARGO_PKG_VERSION") {
+                        format!("playbook binary {bin_ver} works with plugin {version}")
+                    } else {
+                        format!(
+                            "playbook binary {bin_ver} works with plugin {version} (range checked by playbook {}, which runs this check)",
+                            env!("CARGO_PKG_VERSION")
+                        )
+                    },
                 )
             },
             |line| Row::new("6", Level::Warn, line),
@@ -410,15 +426,23 @@ fn version_row(env: &Env, bin: &Path, bin_ver: &str) -> Row {
 }
 
 /// The version record (ADR 0034): whether the last heal ran clean and what
-/// still needs the user. Reads only, and only an existing database.
-fn heal_row(env: &Env) -> Row {
+/// still needs the user. The hooks run `bin_ver`, the first `playbook` on
+/// PATH, so the record is compared with that one. Reads through a read-only
+/// connection, so the check changes nothing on disk.
+fn heal_row(env: &Env, bin_ver: &str) -> Row {
     let root = crate::common::paths::playbook_root_from(&env.home);
-    let record = crate::config::store::db_path(&root)
-        .is_file()
-        .then(|| crate::heal::Record::read(&root).ok())
-        .flatten()
-        .unwrap_or_default();
     let fix = "run: playbook doctor --fix";
+    let record = match crate::heal::Record::read_only(&root) {
+        Ok(record) => record,
+        Err(err) => {
+            return Row::new(
+                "6",
+                Level::Warn,
+                format!("the upgrade record could not be read: {err}"),
+            )
+            .hint(fix)
+        }
+    };
     if record.failed_at.is_some() {
         return Row::new(
             "6",
@@ -439,25 +463,29 @@ fn heal_row(env: &Env) -> Row {
         )
         .hint(fix);
     }
-    match record.binary {
-        Some(b) if b == env!("CARGO_PKG_VERSION") => Row::new(
-            "6",
-            Level::Pass,
-            format!(
-                "upgrade record: binary {b}, migrations up to {}",
-                record.schema
-            ),
-        ),
-        Some(b) => Row::new(
-            "6",
-            Level::Info,
-            format!("the upgrade record names playbook {b}; the next session start updates it"),
-        )
-        .hint(fix),
-        None => Row::new(
+    let Some(b) = record.binary else {
+        return Row::new(
             "6",
             Level::Info,
             "no upgrade record yet; the next session start writes it",
+        )
+        .hint(fix);
+    };
+    match resolve::compare(&b, bin_ver) {
+        std::cmp::Ordering::Equal => Row::new(
+            "6",
+            Level::Pass,
+            format!("upgrade record: binary {b}, migrations up to {}", record.schema),
+        ),
+        std::cmp::Ordering::Greater => Row::new(
+            "6",
+            Level::Info,
+            format!("the upgrade record names playbook {b}, newer than {bin_ver}; nothing runs after a downgrade"),
+        ),
+        std::cmp::Ordering::Less => Row::new(
+            "6",
+            Level::Info,
+            format!("the upgrade record names playbook {b}; the next session start updates it"),
         )
         .hint(fix),
     }
@@ -487,8 +515,8 @@ fn layer6(env: &Env) -> Vec<Row> {
         );
     } else {
         rows.push(version_row(env, first, &bin_ver));
+        rows.push(heal_row(env, &bin_ver));
     }
-    rows.push(heal_row(env));
     let mut gate = Command::new(first);
     gate.args(["gate", "record", "--help"]);
     if !output_of(gate).is_some_and(|t| t.contains("--source")) {
