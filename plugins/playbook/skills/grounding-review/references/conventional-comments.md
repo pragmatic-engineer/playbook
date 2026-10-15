@@ -58,7 +58,7 @@ Use `blocking` or `non-blocking` first when you add a lens: `issue (blocking, se
 issue (blocking, security): The export endpoint returns every tenant's rows.
 
 The query has no tenant filter, so any signed-in user can read other tenants' data.
-Add `a tenant filter on the query` and pass the tenant from the session.
+Add a tenant filter to the query and pass the tenant from the session.
 ```
 
 ```
