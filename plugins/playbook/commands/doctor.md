@@ -63,15 +63,24 @@ and stop.
    - **Upgrade record row.** Reads the version record in `config.db` read-only
      and compares it with the `playbook` first on PATH. It warns when the last
      heal failed, when upgrade items are pending, or when the record cannot be
-     read, with the hint `run: playbook doctor --fix`. No record yet is INFO
-     (the next session start writes it), an older record is INFO (the next
-     session start updates it), and both carry the same hint. A record newer
+     read, with the hint `run: playbook migrate`. No record yet, or an older
+     one, is INFO with the same hint. The next session start or `playbook
+     migrate` brings it up to date. A record newer
      than the binary (a downgrade) is INFO because nothing runs after a downgrade.
    - It also requires the quality gate flags this plugin expects, and warns when an older `playbook` earlier on
      PATH hides a newer one.
 
    Install hint: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`
    or `brew install pragmatic-engineer/tap/playbook`, with its directory on PATH.
+
+   After an upgrade, `playbook migrate` (binary 0.27.0 or later) brings
+   playbook's own files up to date, and `playbook doctor --fix` runs the same
+   step. `--status` and `--dry-run` show what is pending and write nothing.
+   `playbook update` runs it and prints the breaking changes since your
+   previous version. The install script does the same with a terminal or
+   `--yes`, unless `--no-init` is set. After `brew upgrade`, the caveats list
+   that release's breaking changes, and `playbook breaking --since <version>`
+   lists earlier ones.
 7. **No hook command points at a missing file.** A hook that names a path
    which does not exist fails open: it never runs and nothing says so. Bare
    binary hook commands are skipped, as is any path with an
