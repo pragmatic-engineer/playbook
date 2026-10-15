@@ -77,9 +77,6 @@ pub enum Scope {
         check: fn(&Ctx) -> Option<String>,
         command: &'static str,
     },
-    /// Reports on files Claude Code owns and writes nothing. A `Manual`
-    /// migration whose warning the session hook repeats until it clears.
-    Report,
 }
 
 pub struct Migration {
@@ -519,17 +516,16 @@ pub fn record_skills(home: &Path, skills_root: &Path) {
     record_many(home, &fresh, Some(&stale));
 }
 
-/// One item a run left for the user: a `Consent` migration's pending change or
-/// a `Report` warning.
+/// One item a run left for the user: a `Consent` migration's pending change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenItem {
     pub id: &'static str,
     pub message: String,
-    /// The init command that fixes a `Consent` item. `None` for a report.
+    /// The init command that applies the change.
     pub command: Option<&'static str>,
 }
 
-/// The open `Consent` and `Report` items, writing nothing. `only` limits the
+/// The open `Consent` items, writing nothing. `only` limits the
 /// checks to those ids.
 pub fn open_items(ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
     registry()
@@ -541,14 +537,6 @@ pub fn open_items(ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
                 message,
                 command: Some(command),
             }),
-            Scope::Report => match (m.run)(ctx) {
-                Outcome::Warn(message) => Some(OpenItem {
-                    id: m.id,
-                    message,
-                    command: None,
-                }),
-                _ => None,
-            },
             Scope::Owned => None,
         })
         .collect()
@@ -1048,7 +1036,7 @@ mod tests {
     }
 
     #[test]
-    fn owned_and_report_migrations_write_nothing_outside_the_playbook_folder() {
+    fn owned_migrations_write_nothing_outside_the_playbook_folder() {
         // Arrange: user files that the Consent migrations would change.
         let h = home("scope-guard");
         let script = crate::init::statusline::playbook_statusline_path(&h);

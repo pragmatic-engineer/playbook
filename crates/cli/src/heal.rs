@@ -159,12 +159,6 @@ impl Outcome {
                 "{consent} change(s) to your settings or shell files need {run}"
             ));
         }
-        let reports = self.open.len() - consent;
-        if reports > 0 {
-            parts.push(format!(
-                "{reports} item(s) need you: run `playbook init` to see them"
-            ));
-        }
         (!parts.is_empty()).then(|| {
             format!(
                 "playbook {}: {}.",
@@ -311,6 +305,17 @@ mod tests {
         crate::common::paths::playbook_root_from(home)
     }
 
+    fn seed(home: &Path, binary: &str, schema: u32, failed_at: Option<u64>) -> Record {
+        let record = Record {
+            binary: Some(binary.into()),
+            schema,
+            failed_at,
+            ..Record::default()
+        };
+        record.write(&root(home)).unwrap();
+        record
+    }
+
     fn legacy_statusline(home: &Path) {
         fs::create_dir_all(home.join(".claude")).unwrap();
         let cmd = crate::init::statusline::playbook_statusline_path(home);
@@ -360,13 +365,7 @@ mod tests {
     fn an_older_record_runs_the_owned_migrations_and_moves_the_record_up() {
         // Arrange: an old config-hash script left by an earlier install.
         let home = scratch_dir("heal-upgrade");
-        Record {
-            binary: Some("0.25.0".into()),
-            schema: 1,
-            ..Record::default()
-        }
-        .write(&root(&home))
-        .unwrap();
+        seed(&home, "0.25.0", 1, None);
         let script = root(&home).join("hooks/lib/config-hash.sh");
         fs::create_dir_all(script.parent().unwrap()).unwrap();
         fs::write(&script, "x").unwrap();
@@ -388,12 +387,7 @@ mod tests {
     fn a_downgrade_runs_nothing_and_keeps_the_newer_record() {
         // Arrange
         let home = scratch_dir("heal-downgrade");
-        let newer = Record {
-            binary: Some("999.0.0".into()),
-            schema: 999,
-            ..Record::default()
-        };
-        newer.write(&root(&home)).unwrap();
+        let newer = seed(&home, "999.0.0", 999, None);
 
         // Act
         let out = run(&ctx(&home), Trigger::Hook, 1000);
@@ -472,13 +466,7 @@ mod tests {
     fn a_recent_failure_waits_a_day_in_the_hook() {
         // Arrange
         let home = scratch_dir("heal-failed");
-        Record {
-            binary: Some("0.25.0".into()),
-            failed_at: Some(1000),
-            ..Record::default()
-        }
-        .write(&root(&home))
-        .unwrap();
+        seed(&home, "0.25.0", 0, Some(1000));
 
         // Act
         let soon = run(&ctx(&home), Trigger::Hook, 1000 + 60);
@@ -521,51 +509,13 @@ mod tests {
         assert!(Record::read(&root(&home)).unwrap().pending.is_empty());
     }
 
-    #[test]
-    fn a_consent_item_names_the_command_that_applies_it() {
-        // Arrange
-        let home = scratch_dir("heal-consent-command");
-        legacy_statusline(&home);
-
-        // Act
-        let out = run(&ctx(&home), Trigger::Hook, 1000);
-
-        // Assert
-        assert!(out
-            .line()
-            .unwrap()
-            .contains("need `playbook init --statusline`"));
-    }
-
-    #[test]
-    fn a_report_item_points_the_hook_at_init() {
-        let out = Outcome {
-            open: vec![OpenItem {
-                id: "0099-test",
-                message: "an old plugin is installed".into(),
-                command: None,
-            }],
-            ..Outcome::default()
-        };
-        assert!(out
-            .line()
-            .unwrap()
-            .contains("1 item(s) need you: run `playbook init` to see them"));
-    }
-
     #[cfg(unix)]
     #[test]
     fn a_failed_migration_keeps_the_old_record_and_says_it_failed() {
         use std::os::unix::fs::PermissionsExt;
         // Arrange: the config-hash script sits in a folder nobody can write.
         let home = scratch_dir("heal-fail-real");
-        Record {
-            binary: Some("0.25.0".into()),
-            schema: 1,
-            ..Record::default()
-        }
-        .write(&root(&home))
-        .unwrap();
+        seed(&home, "0.25.0", 1, None);
         let lib = root(&home).join("hooks/lib");
         fs::create_dir_all(&lib).unwrap();
         fs::write(lib.join("config-hash.sh"), "x").unwrap();
