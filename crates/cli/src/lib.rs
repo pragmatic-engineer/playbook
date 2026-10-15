@@ -1775,7 +1775,9 @@ pub enum ConfigCommand {
     },
     /// Change a setting
     ///
-    /// Writes to the repo tier unless you pass `--org` or `--global`.
+    /// Writes to the repo tier unless you pass `--org` or `--global`. The
+    /// per-user `update.*` keys go to the global tier, and `--org` is
+    /// refused for them.
     Set {
         /// Dotted setting name, such as `autoReview.enabled`
         key: String,

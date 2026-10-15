@@ -6,7 +6,9 @@
 //! `state` table under `update-check/cache`, so a command reads one row and
 //! never waits on the network: a stale row starts a detached
 //! `playbook update --refresh-check`, and the notice shows on a later run.
-//! Every failure is silent and the check runs again after the next interval.
+//! In `auto` mode that process also installs the release (see `auto`), and
+//! the next command prints what happened. Every failed check is silent and
+//! runs again after the next interval.
 
 use super::download::Fetcher;
 use super::resolve::{self, compare};
@@ -24,6 +26,11 @@ pub const CACHE_KEY: &str = "update-check/cache";
 pub const REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
 
 const DAY_SECS: u64 = 86_400;
+
+/// How long after a spawn an auto update counts as running. Within it no
+/// command starts another process or shows the notice; after it, an attempt
+/// that was never claimed (offline, say) falls back to the notice.
+const APPLY_GRACE_SECS: u64 = 15 * 60;
 const DEFAULT_INTERVAL_HOURS: u64 = 24;
 
 /// What `update.mode` asks for. This is separate from the playbook
@@ -53,14 +60,35 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// Reads `update.mode` and `update.checkIntervalHours` through the usual
-    /// tiers. An unreadable store or a bad value falls back to the default.
-    pub fn read(home: &Path, repo_slug: Option<&str>) -> Settings {
-        let mode = crate::config::resolve_valid("update.mode", home, repo_slug)
+    /// Whether the check acts at all: never when off, and without a terminal
+    /// only in `auto`, which needs no person to see it.
+    pub fn acts(&self, stderr_tty: bool) -> bool {
+        self.mode != UpdateMode::Off && (stderr_tty || self.mode == UpdateMode::Auto)
+    }
+
+    /// Reads only `update.mode`, through a read-only connection that
+    /// creates and changes nothing, for a piped run that stops unless the
+    /// mode is `auto`.
+    pub fn peek_mode(root: &Path) -> UpdateMode {
+        crate::config::store::global_read_only(root, "update.mode")
+            .and_then(|v| v.as_str().map(UpdateMode::parse))
+            .unwrap_or(UpdateMode::Notify)
+    }
+
+    /// Reads `update.mode` and `update.checkIntervalHours` from the global
+    /// tier, where `config set` puts these per-user keys. An unreadable store
+    /// or a bad value falls back to the default.
+    pub fn read(home: &Path) -> Settings {
+        let mode = crate::config::resolve_valid("update.mode", home, None)
             .ok()
             .and_then(|(v, _, _)| v.as_str().map(UpdateMode::parse))
             .unwrap_or(UpdateMode::Notify);
-        let hours = crate::config::resolve("update.checkIntervalHours", home, repo_slug)
+        Settings::with_mode(home, mode)
+    }
+
+    /// The settings for a mode already read, with the interval from config.
+    pub fn with_mode(home: &Path, mode: UpdateMode) -> Settings {
+        let hours = crate::config::resolve("update.checkIntervalHours", home, None)
             .ok()
             .and_then(|(v, _)| v.as_u64())
             .filter(|h| *h > 0)
@@ -90,6 +118,10 @@ pub struct Cache {
     /// `<version>@<unix seconds>` of the last auto update attempt.
     #[serde(default)]
     pub tried: Option<String>,
+    /// `<version>@<unix seconds>` of the last time a command started the
+    /// detached process to install `version`.
+    #[serde(default)]
+    pub spawned: Option<String>,
     /// Why auto holds a version back, found by the detached process.
     #[serde(default)]
     pub held: Option<Held>,
@@ -146,6 +178,13 @@ impl Cache {
         .map_err(|e| e.to_string())
     }
 
+    /// The cached release when it is newer than `current`.
+    pub fn newer_than(&self, current: &str) -> Option<&str> {
+        self.latest
+            .as_deref()
+            .filter(|latest| compare(latest, current).is_gt())
+    }
+
     /// Whether the notice for `version` showed less than a day before `now`.
     fn shown_recently(&self, version: &str, now: u64) -> bool {
         stamped_recently(self.notified.as_deref(), version, now)
@@ -154,6 +193,12 @@ impl Cache {
     /// Whether auto tried `version` less than a day before `now`.
     pub fn tried_recently(&self, version: &str, now: u64) -> bool {
         stamped_recently(self.tried.as_deref(), version, now)
+    }
+
+    /// Whether a command started an auto update of `version` less than a day
+    /// before `now`.
+    fn spawned_recently(&self, version: &str, now: u64) -> bool {
+        stamped_recently(self.spawned.as_deref(), version, now)
     }
 
     /// Why auto still holds `version` back at `now`, if it does.
@@ -167,17 +212,19 @@ impl Cache {
 
 /// Whether `command` may run the check. Hooks, the status line,
 /// `shell-init` (it runs on every new shell), `version`, `json`, `update`
-/// itself and any run with a `--json` argument never do.
+/// itself, the background `usage warm` and `usage collect` runs that the
+/// session hooks start, and any run with a `--json` argument never do.
 pub fn applies(command: &Command, args: &[OsString]) -> bool {
-    let skipped = matches!(
-        command,
-        Command::Hook { .. }
-            | Command::Statusline
-            | Command::ShellInit { .. }
-            | Command::Version
-            | Command::Json { .. }
-            | Command::Update { .. }
-    );
+    use crate::UsageCommand;
+    let skipped = command.is_hot_path()
+        || matches!(
+            command,
+            Command::Update { .. }
+                | Command::Usage {
+                    sub: Some(UsageCommand::Warm | UsageCommand::Collect { .. }),
+                    ..
+                }
+        );
     !skipped
         && !args.iter().any(|a| {
             a.to_str()
@@ -213,7 +260,7 @@ pub struct Probe {
     pub current: String,
     pub now: u64,
     pub stderr_tty: bool,
-    pub homebrew: bool,
+    pub install: super::auto::Install,
 }
 
 /// A notice to print, and the version it names.
@@ -232,40 +279,100 @@ pub struct Plan {
     pub seen_checked_at: u64,
     /// Print this line on stderr and record it.
     pub notice: Option<Notice>,
+    /// Start the detached process for an auto update of this version, and
+    /// record the start. The process reads its target again from the cache.
+    pub apply: Option<String>,
+    /// Print and clear the report the last auto update left.
+    pub report: bool,
+}
+
+impl Plan {
+    /// Whether the plan has nothing to do.
+    pub fn is_empty(&self) -> bool {
+        !self.refresh && self.notice.is_none() && self.apply.is_none() && !self.report
+    }
+}
+
+/// What the notice adds after the command to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tail<'a> {
+    Nothing,
+    /// Why auto did not install the release.
+    Skipped(&'a str),
+    /// How to turn on auto, for an install that can update itself.
+    Hint,
 }
 
 /// The one line the notice prints.
-pub fn notice_text(latest: &str, current: &str, homebrew: bool) -> String {
+pub fn notice_text(latest: &str, current: &str, homebrew: bool, tail: Tail) -> String {
     let fix = if homebrew {
         "brew upgrade playbook"
     } else {
         "playbook update"
     };
-    format!("playbook {latest} is available (you have {current}). Run: {fix}")
+    let tail = match tail {
+        Tail::Nothing => String::new(),
+        Tail::Skipped(reason) => format!(" (auto update skipped: {reason})"),
+        Tail::Hint => {
+            ". To update on its own: playbook config set --global update.mode auto".to_string()
+        }
+    };
+    format!("playbook {latest} is available (you have {current}). Run: {fix}{tail}")
 }
 
-/// Decides what to do from the settings, the cached row and this run. A
-/// run without a terminal on stderr neither refreshes nor prints, since
-/// nobody would see the notice. `auto` behaves as `notify` here.
+/// Decides what to do from the settings, the cached row and this run. In
+/// `auto` mode a newer release that nothing holds back goes to the detached
+/// process, once a day at most, and the notice stays quiet while that
+/// attempt runs or after it claimed the version. Otherwise the notice shows.
+/// A run without a terminal on stderr prints nothing, and in `notify` mode
+/// it does nothing.
 pub fn plan(settings: Settings, cache: &Cache, probe: &Probe) -> Plan {
-    if settings.mode == UpdateMode::Off || !probe.stderr_tty {
+    if !settings.acts(probe.stderr_tty) {
         return Plan::default();
     }
-    let age = probe.now.saturating_sub(cache.checked_at);
-    let notice = cache
-        .latest
-        .as_deref()
-        .filter(|latest| compare(latest, &probe.current).is_gt())
-        .filter(|latest| !cache.shown_recently(latest, probe.now))
-        .map(|latest| Notice {
-            version: latest.to_string(),
-            line: notice_text(latest, &probe.current, probe.homebrew),
-        });
-    Plan {
-        refresh: cache.checked_at > probe.now || age >= settings.interval_secs,
+    let now = probe.now;
+    let age = now.saturating_sub(cache.checked_at);
+    // A clock that moved back counts as due too.
+    let due = |secs: u64| cache.checked_at > now || age >= secs;
+    let mut plan = Plan {
+        refresh: due(settings.interval_secs),
         seen_checked_at: cache.checked_at,
-        notice,
+        report: probe.stderr_tty && !cache.report.is_empty(),
+        ..Plan::default()
+    };
+    let Some(latest) = cache.newer_than(&probe.current) else {
+        return plan;
+    };
+    let auto = settings.mode == UpdateMode::Auto;
+    let held = if auto {
+        super::auto::hold_reason(&probe.install, cache, latest, now)
+    } else {
+        None
+    };
+    if auto && held.is_none() {
+        let running = !due(APPLY_GRACE_SECS);
+        if running || cache.tried_recently(latest, now) {
+            return plan;
+        }
+        if !cache.spawned_recently(latest, now) {
+            plan.apply = Some(latest.to_string());
+            return plan;
+        }
+        // The last start never claimed its attempt, so the notice shows.
     }
+    if !probe.stderr_tty || cache.shown_recently(latest, now) {
+        return plan;
+    }
+    let tail = match &held {
+        Some(reason) => Tail::Skipped(reason),
+        None if !auto && super::auto::install_reason(&probe.install).is_none() => Tail::Hint,
+        None => Tail::Nothing,
+    };
+    plan.notice = Some(Notice {
+        version: latest.to_string(),
+        line: notice_text(latest, &probe.current, probe.install.homebrew, tail),
+    });
+    plan
 }
 
 /// The newest plain release in a `GET /releases` body, with its publish
@@ -295,16 +402,20 @@ pub fn refresh(root: &Path, fetcher: &dyn Fetcher, api_base: &str) -> Result<(),
 
 /// Applies `plan`. Each action is claimed inside one transaction against
 /// the current row, so of two commands that start together only one spawns
-/// the refresh and only one prints. A store that cannot be written stops
-/// both. `spawn` starts the refresh and `print` writes the notice.
+/// the detached process and only one prints. A store that cannot be written
+/// stops everything. `spawn` starts the process and `print` writes a line.
 pub fn execute(root: &Path, plan: &Plan, now: u64, spawn: &dyn Fn(), print: &mut dyn FnMut(&str)) {
-    if !plan.refresh && plan.notice.is_none() {
+    if plan.is_empty() {
         return;
     }
     let claimed = Cache::update(root, |cache| {
-        let refresh = plan.refresh && cache.checked_at == plan.seen_checked_at;
-        if refresh {
+        let claim =
+            (plan.refresh || plan.apply.is_some()) && cache.checked_at == plan.seen_checked_at;
+        if claim {
             cache.checked_at = now;
+            if let Some(version) = &plan.apply {
+                cache.spawned = Some(stamp(version, now));
+            }
         }
         let notice = plan
             .notice
@@ -313,16 +424,22 @@ pub fn execute(root: &Path, plan: &Plan, now: u64, spawn: &dyn Fn(), print: &mut
         if let Some(n) = notice {
             cache.notified = Some(stamp(&n.version, now));
         }
-        (refresh, notice.map(|n| n.line.clone()))
+        let mut lines = if plan.report {
+            std::mem::take(&mut cache.report)
+        } else {
+            Vec::new()
+        };
+        lines.extend(notice.map(|n| n.line.clone()));
+        (claim, lines)
     });
-    let Ok((refresh, notice)) = claimed else {
+    let Ok((spawned, lines)) = claimed else {
         return;
     };
-    if refresh {
+    if spawned {
         spawn();
     }
-    if let Some(line) = notice {
-        print(&line);
+    for line in &lines {
+        print(line);
     }
 }
 
@@ -345,43 +462,48 @@ fn spawn_refresh() {
     let _ = cmd.spawn();
 }
 
-/// The repo slug for config lookups, only when a repo or org tier exists,
-/// so most runs skip reading the git config.
-fn config_slug(root: &Path) -> Option<String> {
-    if !crate::config::any_scoped_config(root) {
-        return None;
-    }
-    Some(crate::common::repo_slug()).filter(|s| !s.is_empty())
-}
-
 /// The entry point `main` calls before it dispatches a command. It never
 /// fails and never waits on the network.
 pub fn on_start(command: &Command, args: &[OsString]) {
     use std::io::IsTerminal;
-    // The cheap checks come first, so a piped run never opens config.db.
+    // The cheap checks come first.
     let stderr_tty = std::io::stderr().is_terminal();
-    if !stderr_tty
-        || !applies(command, args)
+    if !applies(command, args)
         || crate::common::headless::is_headless()
         || ci_vendor_env(|name| std::env::var(name).ok())
     {
         return;
     }
+    let current = env!("CARGO_PKG_VERSION");
     let home = crate::common::home_dir();
     let root = crate::common::paths::playbook_root_from(&home);
-    let settings = Settings::read(&home, config_slug(&root).as_deref());
-    if settings.mode == UpdateMode::Off {
+    let settings = if stderr_tty {
+        Settings::read(&home)
+    } else {
+        // Without a terminal only an auto update acts. A development build
+        // never installs itself, and the mode is read through a read-only
+        // connection, so a piped run that stops here writes nothing.
+        if super::auto::Install::is_dev_build(current) {
+            return;
+        }
+        match Settings::peek_mode(&root) {
+            UpdateMode::Auto => Settings::with_mode(&home, UpdateMode::Auto),
+            _ => return,
+        }
+    };
+    if !settings.acts(stderr_tty) {
         return;
     }
     let Ok(cache) = Cache::read(&root) else {
         return;
     };
     let exe = std::env::current_exe().unwrap_or_default();
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
     let probe = Probe {
-        current: env!("CARGO_PKG_VERSION").to_string(),
+        current: current.to_string(),
         now: crate::common::time::now_epoch_secs(),
         stderr_tty,
-        homebrew: super::is_homebrew(&std::fs::canonicalize(&exe).unwrap_or(exe)),
+        install: super::auto::Install::real(&exe, current),
     };
     let plan = plan(settings, &cache, &probe);
     execute(&root, &plan, probe.now, &spawn_refresh, &mut |line| {
@@ -389,7 +511,9 @@ pub fn on_start(command: &Command, args: &[OsString]) {
     });
 }
 
-/// The body of the hidden `playbook update --refresh-check`.
+/// The body of the hidden `playbook update --refresh-check`: refresh the
+/// cache, then run the auto update when `update.mode` is `auto`. A failed
+/// refresh stops there, so an offline machine leaves no warning.
 pub fn run_refresh() {
     let home = crate::common::home_dir();
     let root = crate::common::paths::playbook_root_from(&home);
@@ -397,7 +521,19 @@ pub fn run_refresh() {
         local_http: false,
         timeout: REFRESH_TIMEOUT,
     };
-    let _ = refresh(&root, &fetcher, &super::api_base());
+    refresh_then(&root, &fetcher, &super::api_base(), &|| {
+        let settings = Settings::read(&home);
+        if settings.mode == UpdateMode::Auto {
+            super::auto::run_detached(&root, settings);
+        }
+    });
+}
+
+/// Refreshes the cache and runs `next` only when the refresh worked.
+pub fn refresh_then(root: &Path, fetcher: &dyn Fetcher, api_base: &str, next: &dyn Fn()) {
+    if refresh(root, fetcher, api_base).is_ok() {
+        next();
+    }
 }
 
 #[cfg(test)]
@@ -443,7 +579,12 @@ mod tests {
             current: "0.26.0".into(),
             now,
             stderr_tty: true,
-            homebrew: false,
+            install: super::super::auto::Install {
+                homebrew: false,
+                dev_build: false,
+                dir_writable: true,
+                supported: true,
+            },
         }
     }
 
@@ -474,7 +615,10 @@ mod tests {
     }
 
     fn line(version: &str) -> String {
-        format!("playbook {version} is available (you have 0.26.0). Run: playbook update")
+        format!(
+            "playbook {version} is available (you have 0.26.0). Run: playbook update. \
+             To update on its own: playbook config set --global update.mode auto"
+        )
     }
 
     #[test]
@@ -508,12 +652,98 @@ mod tests {
     }
 
     #[test]
-    fn auto_mode_notifies_like_notify_for_now() {
+    fn auto_mode_hands_a_newer_release_to_the_detached_process_once_a_day() {
+        // Arrange
         let root = root("check-auto");
         fetched(&root);
+        Cache::update(&root, |c| c.checked_at = NOW - HOUR).unwrap();
+        let auto = settings(UpdateMode::Auto);
+
+        // Act
+        let first = start(&root, auto, &probe(NOW));
+        // The detached process claims the attempt.
+        Cache::update(&root, |c| c.tried = Some(stamp("0.27.0", NOW))).unwrap();
+        let again = start(&root, auto, &probe(NOW + HOUR));
+        let mut piped = probe(NOW + DAY_SECS);
+        piped.stderr_tty = false;
+        let next_day = plan(auto, &Cache::read(&root).unwrap(), &piped);
+
+        // Assert
+        assert_eq!(first, (vec![], 1));
+        assert_eq!(again, (vec![], 0));
+        assert_eq!(next_day.apply.as_deref(), Some("0.27.0"));
+        assert_eq!(run_plan(&root, &next_day, piped.now), (vec![], 1));
+    }
+
+    #[test]
+    fn the_next_terminal_run_prints_the_auto_report_once() {
+        let root = root("check-report");
+        let lines = vec!["playbook updated from 0.25.0 to 0.26.0".to_string()];
+        Cache::update(&root, |c| {
+            c.checked_at = NOW;
+            c.report = lines.clone();
+        })
+        .unwrap();
+        let auto = settings(UpdateMode::Auto);
+        let mut piped = probe(NOW);
+        piped.stderr_tty = false;
+        assert_eq!(start(&root, auto, &piped), (vec![], 0));
+        assert_eq!(start(&root, auto, &probe(NOW)), (lines, 0));
+        assert_eq!(start(&root, auto, &probe(NOW)), (vec![], 0));
+    }
+
+    #[test]
+    fn auto_falls_back_to_the_notice_with_the_reason() {
+        // Arrange
+        let brew_root = root("check-auto-brew");
+        fetched(&brew_root);
+        let held_root = root("check-auto-held");
+        fetched(&held_root);
+        Cache::update(&held_root, |c| {
+            c.held = Some(Held {
+                version: "0.27.0".into(),
+                reason: "this release has breaking changes that need you".into(),
+                until: u64::MAX,
+            })
+        })
+        .unwrap();
+        let auto = settings(UpdateMode::Auto);
+        let mut brew = probe(NOW);
+        brew.install.homebrew = true;
+        let brew_plan = plan(auto, &Cache::read(&brew_root).unwrap(), &brew);
+        let held_plan = plan(auto, &Cache::read(&held_root).unwrap(), &probe(NOW));
+
+        // Act
+        let (brew_lines, _) = run_plan(&brew_root, &brew_plan, NOW);
+        let (held_lines, _) = run_plan(&held_root, &held_plan, NOW);
+
+        // Assert
         assert_eq!(
-            start(&root, settings(UpdateMode::Auto), &probe(NOW)),
-            (vec![line("0.27.0")], 1)
+            brew_lines,
+            vec![
+                "playbook 0.27.0 is available (you have 0.26.0). Run: brew upgrade playbook \
+                 (auto update skipped: Homebrew manages this install)"
+            ]
+        );
+        assert!(
+            held_lines[0].ends_with(
+                "(auto update skipped: this release has breaking changes that need you)"
+            ),
+            "{held_lines:?}"
+        );
+        assert_eq!((brew_plan.apply, held_plan.apply), (None, None));
+    }
+
+    #[test]
+    fn the_auto_hint_shows_only_where_auto_can_run() {
+        let root = root("check-hint");
+        fetched(&root);
+        let mut dev = probe(NOW);
+        dev.install.dev_build = true;
+        let (printed, _) = start(&root, notify(), &dev);
+        assert_eq!(
+            printed,
+            vec!["playbook 0.27.0 is available (you have 0.26.0). Run: playbook update"]
         );
     }
 
@@ -556,6 +786,7 @@ mod tests {
                 version: "9.0.0".into(),
                 line: "x".into(),
             }),
+            ..Plan::default()
         };
         assert_eq!(run_plan(&file, &plan, NOW), (vec![], 0));
     }
@@ -590,7 +821,7 @@ mod tests {
         let root = root("check-brew");
         fetched(&root);
         let mut p = probe(NOW);
-        p.homebrew = true;
+        p.install.homebrew = true;
         let (printed, _) = start(&root, notify(), &p);
         assert_eq!(
             printed,
@@ -638,6 +869,8 @@ mod tests {
             &["playbook", "update", "--check"],
             &["playbook", "upgrade"],
             &["playbook", "version"],
+            &["playbook", "usage", "warm"],
+            &["playbook", "usage", "collect"],
         ] {
             assert!(!applies_to(parts), "{parts:?}");
         }
@@ -674,7 +907,7 @@ mod tests {
     fn the_settings_come_from_config_and_a_zero_interval_is_the_default() {
         // Arrange
         let home = root("check-settings");
-        let before = Settings::read(&home, None);
+        let before = Settings::read(&home);
         let root = crate::common::paths::playbook_root_from(&home);
         let global = crate::config::write::Tier::Global;
         let put = |key: &str, value: serde_json::Value| {
@@ -684,9 +917,9 @@ mod tests {
         // Act
         put("update.checkIntervalHours", 6.into());
         put("update.mode", "off".into());
-        let set = Settings::read(&home, None);
+        let set = Settings::read(&home);
         put("update.checkIntervalHours", 0.into());
-        let zero = Settings::read(&home, None);
+        let zero = Settings::read(&home);
 
         // Assert
         assert_eq!(before, notify());
@@ -698,5 +931,42 @@ mod tests {
             }
         );
         assert_eq!(zero.interval_secs, 24 * HOUR);
+    }
+
+    #[test]
+    fn an_offline_refresh_stops_before_the_auto_update() {
+        let root = root("check-offline-auto");
+        let ran = Cell::new(false);
+        refresh_then(&root, &FakeFetcher::default(), API, &|| ran.set(true));
+        assert!(!ran.get());
+        let mut f = FakeFetcher::default();
+        f.0.insert(format!("{API}{}", resolve::RELEASES_PAGE), LIST.into());
+        refresh_then(&root, &f, API, &|| ran.set(true));
+        assert!(ran.get());
+    }
+
+    #[test]
+    fn an_auto_update_that_never_claims_its_attempt_falls_back_to_the_notice() {
+        // Arrange
+        let root = root("check-respawn");
+        fetched(&root);
+        Cache::update(&root, |c| c.checked_at = NOW - APPLY_GRACE_SECS).unwrap();
+        let auto = settings(UpdateMode::Auto);
+
+        // Act: the detached process exits without claiming `tried`.
+        let first = start(&root, auto, &probe(NOW));
+        let soon = start(&root, auto, &probe(NOW + 60));
+        let later = start(&root, auto, &probe(NOW + 60 + APPLY_GRACE_SECS));
+
+        // Assert
+        assert_eq!(first, (vec![], 1));
+        assert_eq!(soon, (vec![], 0), "the attempt may still be running");
+        assert_eq!(
+            later,
+            (
+                vec!["playbook 0.27.0 is available (you have 0.26.0). Run: playbook update".into()],
+                0
+            )
+        );
     }
 }

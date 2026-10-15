@@ -1307,7 +1307,9 @@ fn main() {
                         eprintln!("config set: --org and --global are mutually exclusive");
                         std::process::exit(1);
                     }
-                    let tier = if global {
+                    // A per-user key goes to the global tier unless `--org`
+                    // asks otherwise, which `write::set` then refuses.
+                    let tier = if global || (config::keys::is_user_key(&key) && !org) {
                         config::write::Tier::Global
                     } else if org {
                         config::write::Tier::Org

@@ -9,7 +9,6 @@
 
 use super::check::{stamp, Cache, Held, Settings, UpdateMode};
 use super::download::Fetcher;
-use super::resolve::compare;
 use super::verify::Attest;
 use super::{Env, Options, Outcome};
 use crate::breaking::{self, Component, Entry};
@@ -31,6 +30,10 @@ pub const MIN_RELEASE_AGE_SECS: u64 = 3600;
 /// How long a busy lock holds auto back before it tries again.
 const BUSY_RETRY_SECS: u64 = 3600;
 
+/// How long a hold lasts when its cause can go away on its own, such as a
+/// network error or a missing `gh`.
+const DAY_HOLD_SECS: u64 = 24 * 3600;
+
 /// The release asset that lists breaking changes (ADR 0035).
 const BREAKING_ASSET: &str = "breaking-changes.json";
 
@@ -51,28 +54,40 @@ impl Install {
         let os = std::env::consts::OS;
         Install {
             homebrew: super::is_homebrew(exe),
-            dev_build: cfg!(debug_assertions) || current.contains('-'),
+            dev_build: Install::is_dev_build(current),
             dir_writable: exe.parent().is_some_and(crate::common::paths::is_writable),
             supported: !cfg!(windows)
                 && super::resolve::asset_name(current, os, std::env::consts::ARCH).is_ok(),
         }
+    }
+
+    /// Whether a binary of version `current` is a development build, which
+    /// never updates itself.
+    pub fn is_dev_build(current: &str) -> bool {
+        cfg!(debug_assertions) || current.contains('-')
+    }
+}
+
+/// Why this install can never update itself, whatever the release.
+pub fn install_reason(install: &Install) -> Option<&'static str> {
+    if install.homebrew {
+        Some("Homebrew manages this install")
+    } else if !install.supported {
+        Some("playbook update does not support this platform")
+    } else if install.dev_build {
+        Some("this is a development or pre-release build")
+    } else if !install.dir_writable {
+        Some("the install directory is not writable")
+    } else {
+        None
     }
 }
 
 /// Why auto falls back to the notice, from what any process can see: the
 /// install, the release time and a hold the detached process recorded.
 pub fn hold_reason(install: &Install, cache: &Cache, latest: &str, now: u64) -> Option<String> {
-    if install.homebrew {
-        return Some("Homebrew manages this install".into());
-    }
-    if !install.supported {
-        return Some("playbook update does not support this platform".into());
-    }
-    if install.dev_build {
-        return Some("this is a development or pre-release build".into());
-    }
-    if !install.dir_writable {
-        return Some("the install directory is not writable".into());
+    if let Some(reason) = install_reason(install) {
+        return Some(reason.into());
     }
     let published = cache
         .published_at
@@ -216,7 +231,7 @@ pub fn apply(root: &Path, settings: Settings, deps: &Deps) {
     let Ok(cache) = Cache::read(root) else {
         return;
     };
-    let Some(latest) = cache.latest.clone().filter(|v| compare(v, current).is_gt()) else {
+    let Some(latest) = cache.newer_than(current).map(str::to_string) else {
         return;
     };
     if settings.mode != UpdateMode::Auto
@@ -262,7 +277,7 @@ pub fn apply(root: &Path, settings: Settings, deps: &Deps) {
         Err(err) => {
             hold(
                 &format!("its breaking changes could not be read ({err})"),
-                deps.now + 24 * 3600,
+                deps.now + DAY_HOLD_SECS,
             );
             return;
         }
@@ -289,13 +304,19 @@ pub fn apply(root: &Path, settings: Settings, deps: &Deps) {
         Err(_) if attest.gap.borrow().is_some() => {
             hold(
                 "the build attestation could not be checked; install gh and run gh auth login",
-                u64::MAX,
+                deps.now + DAY_HOLD_SECS,
             );
             return;
         }
         Err(err) => vec![failure_line(&latest, &err)],
     };
-    let _ = Cache::update(root, |c| c.report.extend(report));
+    // A warning from an earlier failed try at this version is replaced, so
+    // runs without a terminal do not pile up one warning a day.
+    let earlier = failure_prefix(&latest);
+    let _ = Cache::update(root, |c| {
+        c.report.retain(|line| !line.starts_with(&earlier));
+        c.report.extend(report);
+    });
 }
 
 /// The real dependencies, for the detached process.
@@ -326,11 +347,16 @@ fn success_report(from: &str, to: &str, entries: &[Entry], outcome: &Outcome) ->
     lines
 }
 
+/// How every failure line for `version` starts.
+fn failure_prefix(version: &str) -> String {
+    format!("warning: playbook could not update itself to {version}:")
+}
+
 /// The one warning a failed auto update leaves, with the fix.
 pub fn failure_line(version: &str, err: &str) -> String {
     format!(
-        "warning: playbook could not update itself to {version}: {}. Run: playbook update, \
-         or set update.mode to notify",
+        "{} {}. Run: playbook update, or set update.mode to notify",
+        failure_prefix(version),
         err.trim_end_matches('.')
     )
 }
@@ -591,6 +617,7 @@ mod tests {
             .held_reason("0.17.0", LATER)
             .unwrap()
             .contains("attestation"));
+        assert!(cache.held_reason("0.17.0", LATER + DAY_HOLD_SECS).is_none());
         assert!(cache.report.is_empty());
     }
 
@@ -668,6 +695,26 @@ mod tests {
         assert!(report[0].starts_with("warning: playbook could not update itself to 0.17.0"));
         assert!(report[0].contains("Run: playbook update"));
         assert_eq!(installed(&env), "playbook 0.16.0");
+    }
+
+    #[test]
+    fn a_failure_on_the_next_day_replaces_the_earlier_warning() {
+        let (root, env, mut fetcher) = setup("auto-fail-twice");
+        fetcher
+            .0
+            .insert(format!("{DL}/v0.17.0/SHA256SUMS"), b"bad".to_vec());
+        Cache::update(&root, |c| c.report = vec!["earlier".into()]).unwrap();
+        run_apply(&root, &env, &fetcher);
+        run_with(
+            &root,
+            &env,
+            &fetcher,
+            &FakeAttest::new(Ok(None)),
+            LATER + DAY_HOLD_SECS,
+        );
+        let report = Cache::read(&root).unwrap().report;
+        assert_eq!(report.len(), 2, "{report:?}");
+        assert_eq!(report[0], "earlier");
     }
 
     #[test]
