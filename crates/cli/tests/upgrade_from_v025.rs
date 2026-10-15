@@ -554,9 +554,10 @@ fn the_breaking_changes_block_shows_once_in_the_session_and_on_stderr() {
 
     // Assert: shown once per channel, never on stdout, and not again after
     // the install script showed it.
-    if block.is_empty() {
-        return;
-    }
+    assert!(
+        !block.is_empty(),
+        "expected a block from 0.0.0 to this binary"
+    );
     assert!(first.contains(block.trim_end()), "{first}");
     assert!(!second.contains("Breaking changes"), "{second}");
     assert!(String::from_utf8_lossy(&run.stderr).contains(block.trim_end()));
@@ -567,4 +568,55 @@ fn the_breaking_changes_block_shows_once_in_the_session_and_on_stderr() {
     for out in [&quiet, &after, &later] {
         assert!(!String::from_utf8_lossy(&out.stderr).contains("Breaking changes"));
     }
+}
+
+#[test]
+fn init_prints_the_block_once_and_the_session_shows_plugin_changes() {
+    // Arrange
+    let entries = playbook::breaking::entries_between("0.0.0", env!("CARGO_PKG_VERSION"));
+    let block = playbook::breaking::render(&entries);
+    let h = ran_before("notice-init");
+    let init =
+        |envs: &[(&str, &str)]| h.playbook_env(&["init", "--yes", "--no-telemetry"], "", envs);
+
+    // Act
+    let first = init(&[]);
+    let second = init(&[]);
+
+    // Assert
+    assert_eq!(first.status.code(), Some(0), "{}", stdout(&first));
+    assert!(String::from_utf8_lossy(&first.stderr).contains(block.trim_end()));
+    assert!(!String::from_utf8_lossy(&second.stderr).contains("Breaking changes"));
+
+    // Arrange: the plugin updates itself to a release with a breaking entry,
+    // then to one with an entry this binary cannot read.
+    let installed = h.home.join(
+        ".claude/plugins/cache/pragmatic-engineer/playbook/0.25.0/.claude-plugin/plugin.json",
+    );
+    let manifest = |version: &str, summary: Value| {
+        let value = json!({
+            "name": "playbook",
+            "version": version,
+            "metadata": {"breakingChanges": [
+                {"version": version, "component": "plugin", "summary": summary, "action": "restart Claude Code"}
+            ]}
+        });
+        fs::write(&installed, value.to_string()).unwrap();
+    };
+    h.session_message();
+    manifest("0.33.0", json!("the plugin moved its skills"));
+
+    // Act
+    let changed = h.session_message();
+    let next = h.session_message();
+    manifest("0.34.0", Value::Null);
+    let unreadable = h.session_message();
+
+    // Assert
+    assert!(
+        changed.contains("plugin 0.33.0: the plugin moved its skills"),
+        "{changed}"
+    );
+    assert!(!next.contains("Breaking changes"), "{next}");
+    assert!(unreadable.contains("run playbook update"), "{unreadable}");
 }

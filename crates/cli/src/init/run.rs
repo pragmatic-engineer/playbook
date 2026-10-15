@@ -189,7 +189,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         crate::common::time::now_epoch_secs(),
     );
     // The breaking changes this upgrade crossed (ADR 0035), on stderr.
-    eprint!("{}", crate::breaking::render(&healed.breaking));
+    eprint!("{}", healed.notices.render());
 
     let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);
     if step_confirmed(&system_prompt_step) {

@@ -27,7 +27,7 @@ pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
     match mode {
         Mode::Run => {
             let out = heal::run(&ctx, Trigger::Fix, crate::common::time::now_epoch_secs());
-            eprint!("{}", crate::breaking::render(&out.breaking));
+            eprint!("{}", out.notices.render());
             if json {
                 println!("{}", run_json(&out));
             } else {

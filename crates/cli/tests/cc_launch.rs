@@ -43,6 +43,14 @@ fn env(tag: &str) -> Env {
         &bin.join("claude"),
         "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"$FAKE_LOG.path\"\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '%s\\n' \"$PWD\" >> \"$FAKE_LOG.pwd\"\nprintf '%s\\n' \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-unset}\" >> \"$FAKE_LOG.mem\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS:-unset}\" >> \"$FAKE_LOG.var\"\nprintf '%s\\n' \"${ANTHROPIC_DEFAULT_SONNET_MODEL:-unset}\" >> \"$FAKE_LOG.env\"\nprintf '%s\\n' \"${PLAYBOOK_AGENT_VARIANTS_PLUGIN:-unset}\" >> \"$FAKE_LOG.vplug\"\nprintf '%s\\n' \"${CLAUDE_CODE_EFFORT_LEVEL:-unset}\" >> \"$FAKE_LOG.eff\"\nprev=; for a in \"$@\"; do if [ \"$prev\" = --plugin-dir ]; then cp -R \"$a\" \"$FAKE_LOG.plug\"; fi; prev=$a; done\nexit ${FAKE_EXIT:-0}\n",
     );
+    // A real home has the upgrade record from install, so the first-run step
+    // (ADR 0034 decision 13) stays quiet during a launch.
+    let seeded = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .arg("migrate")
+        .env("HOME", &home)
+        .output()
+        .expect("run playbook migrate");
+    assert!(seeded.status.success(), "{seeded:?}");
     Env { root, home, work }
 }
 
@@ -306,7 +314,8 @@ fn ccd_with_a_user_replace_flag_adds_only_skip_permissions() {
         e.calls()[0],
         "--dangerously-skip-permissions --system-prompt-file=/y -n proj"
     );
-    assert!(!String::from_utf8_lossy(&out.stderr).contains("playbook:"));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("playbook:"), "{stderr}");
 }
 
 #[test]

@@ -288,11 +288,18 @@ fn manifest_name(dir: &Path) -> Option<String> {
     manifest_field(dir, "/name")
 }
 
+/// The directory's `.claude-plugin/plugin.json`, parsed.
+pub fn manifest(dir: &Path) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(dir.join(".claude-plugin/plugin.json")).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
 /// The string at JSON `pointer` in the directory's `.claude-plugin/plugin.json`.
 fn manifest_field(dir: &Path, pointer: &str) -> Option<String> {
-    let text = std::fs::read_to_string(dir.join(".claude-plugin/plugin.json")).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    value.pointer(pointer)?.as_str().map(str::to_string)
+    manifest(dir)?
+        .pointer(pointer)?
+        .as_str()
+        .map(str::to_string)
 }
 
 /// The `installPath` values Claude Code lists for the plugin, best first: an
