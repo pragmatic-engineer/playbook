@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! PATH checks: find every `playbook` on PATH, warn when an earlier one hides
-//! the updated binary, and compare the Claude Code plugin to the binary.
+//! the updated binary.
 
-use serde_json::Value;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -79,25 +78,6 @@ pub fn shadow_warning(path_var: &OsStr, updated: &Path) -> Option<String> {
     ))
 }
 
-/// The plugin version Claude Code has installed for `playbook@pragmatic-engineer`.
-fn installed_plugin_version(home: &Path) -> Option<String> {
-    let raw = fs::read_to_string(home.join(".claude/plugins/installed_plugins.json")).ok()?;
-    let json: Value = serde_json::from_str(&raw).ok()?;
-    json["plugins"]["playbook@pragmatic-engineer"][0]["version"]
-        .as_str()
-        .map(str::to_string)
-}
-
-/// A hint with the exact command when the installed plugin differs from the binary.
-pub fn plugin_hint(home: &Path, binary_version: &str) -> Option<String> {
-    let plugin = installed_plugin_version(home)?;
-    (plugin != binary_version).then(|| {
-        format!(
-            "the Claude Code plugin is at {plugin} but the binary is {binary_version}; run: claude plugin update playbook@pragmatic-engineer"
-        )
-    })
-}
-
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -152,24 +132,6 @@ mod tests {
         let new = bin_in("brew-new");
         let warning = shadow_warning(&path_of(&[&brew, &new]), &new).unwrap();
         assert!(warning.contains("brew uninstall playbook"), "{warning}");
-    }
-
-    #[test]
-    fn the_plugin_hint_names_the_update_command_only_on_a_mismatch() {
-        let home = scratch_dir("plugin-home");
-        fs::create_dir_all(home.join(".claude/plugins")).unwrap();
-        fs::write(
-            home.join(".claude/plugins/installed_plugins.json"),
-            r#"{"plugins":{"playbook@pragmatic-engineer":[{"version":"0.15.0"}]}}"#,
-        )
-        .unwrap();
-        let hint = plugin_hint(&home, "0.17.0").unwrap();
-        assert!(
-            hint.contains("claude plugin update playbook@pragmatic-engineer"),
-            "{hint}"
-        );
-        assert!(plugin_hint(&home, "0.15.0").is_none());
-        assert!(plugin_hint(&scratch_dir("no-plugin-home"), "0.17.0").is_none());
     }
 
     #[test]
