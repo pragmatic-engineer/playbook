@@ -1,0 +1,30 @@
+╭─┤playbook usage├──┤UTC├──────────────────────────────────────────────────────────────────────────╮
+│last 30 days Aug 5 to Sep 3, 2026  (no previous period to compare)                                │
+│cost          $20.27                                                                              │
+│tokens        618.8K                                                                              │
+│messages          26                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ F1 Charts  F2 Numbers  F3 Sessions
+╭─┤¹Spend per day, USD├─┤v view: total├────────────────────────────────────────────────────────────╮
+│total $20.╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮          │
+│Thu 2026-0│  Charts  Numbers  Sessions                                                 │          │
+│ $8┤┄┄┄┄┄┄│                                                                            │┄┄┄┄┄┄┄┄┄┄│
+│   │      │ > [1] spend      cost per day as a chart or a daily table                  │          │
+│ $4┤┄┄┄┄┄┄│   [2] tokens     tokens per day as a chart                                 │┄┄┄┄┄┄┄┄┄┄│
+│   │      │   [ ] models     cost and tokens per model                                 │▁▁        │
+│ $0┤▁▁ ▇▇ │   [ ] breakdown  projects, agents, skills, tools or health (v switches)    │██    ▆▆▆ │
+│    We Th │   [ ] live       sessions with a message in the last 15 minutes            │Tu We Th  │
+│    5  6  │   [ ] sessions   every session of the period, grouped by day               │1  2  3   │
+╰──────────│   [ ] budget     limits and how fast you are using them                    │■■■ high├─╯
+╭─┤²Tokens │                                                                            │──────────╮
+│total 618.│ Left/Right tab   j/k line   space add or remove   J/K move panel           │          │
+│Thu 2026-0│ < > move tab   n new   x delete   r rename   w save   R reset   esc cancel │          │
+│ 50K┤┄┄┄┄┄╰────────────────────────────────────────────────────────────────────────────╯▆▆┄┄┄┄▆▆▆┄│
+│    │                           ███                                ██                   ██    ███ │
+│ 25K┤▃▃┄▃▃┄▃▃┄┄┄┄▃▃┄▃▃┄▃▃┄▃▃┄┄┄┄███┄▃▃┄▃▃┄▃▃┄┄┄┄▃▃┄▃▃┄▃▃┄▃▃┄┄┄┄┄┄┄┄██┄▃▃┄▃▃┄┄┄┄▃▃┄▃▃┄┄┄┄██┄┄┄┄███┄│
+│    │██ ██ ██    ██ ██ ██ ██    ███ ██ ██ ██    ██ ██ ██ ██        ██ ██ ██    ██ ██    ██    ███ │
+│   0┤██ ██ ██    ██ ██ ██ ██    ███ ██ ██ ██    ██ ██ ██ ██        ██ ██ ██    ██ ██    ██    ███ │
+│     We Th Fr Sa Su Mo Tu We Th Fr  Sa Su Mo Tu We Th Fr Sa Su Mo  Tu We Th Fr Sa Su Mo Tu We Th  │
+│     5  6  7  8  9  10 11 12 13 14  15 16 17 18 19 20 21 22 23 24  25 26 27 28 29 30 31 1  2  3   │
+╰──────────────────────────────────────────────────────────────────────────┤tokens low ■■■■■ high├─╯
+ Tab tab w week m month r range v view / filter h help q quit        updated 01:46:40 UTC, every 5s

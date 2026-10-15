@@ -1,8 +1,8 @@
 ╭─┤playbook usage├──┤UTC├──────────────────────────────────────────────────────╮
 │╭┤ Help: keys by group ├─────────────────────────────────────────────────────╮│
-││v          Next view of the focused panel           Spend, Projects         ││
 ││t          Next color theme (off with NO_COLOR)     all panels              ││
 ││p          Open the full screen Sessions list       all panels              ││
+││e          Edit the tabs and the panels on each     all panels              ││
 ╰│h, ?       Show this help                           all panels              │╯
 ╭│                                                                            │╮
 ││Sorting                                                                     ││
