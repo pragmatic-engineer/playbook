@@ -32,6 +32,24 @@ pub(crate) fn is_legacy_command(command: &str, home: &Path) -> bool {
     interp == "bash" && Path::new(&expanded) == playbook_statusline_path(home)
 }
 
+/// The parsed settings when their `statusLine.command` runs the playbook
+/// `statusline.sh`, else `None` (also for a missing or invalid file).
+fn settings_with_legacy_command(settings_path: &Path, home: &Path) -> Option<serde_json::Value> {
+    let text = fs::read_to_string(settings_path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    value
+        .pointer("/statusLine/command")
+        .and_then(|c| c.as_str())
+        .is_some_and(|c| is_legacy_command(c, home))
+        .then_some(value)
+}
+
+/// Whether `migrate_legacy_command` would rewrite `statusLine.command`. Reads
+/// only. An edited script is left alone by the rewrite, so it is not pending.
+pub fn legacy_command_pending(settings_path: &Path, home: &Path, script_edited: bool) -> bool {
+    !script_edited && settings_with_legacy_command(settings_path, home).is_some()
+}
+
 /// Point a `statusLine.command` that runs the playbook `statusline.sh` at the
 /// Rust renderer, leaving every other value alone. `Ok(true)` when it changed.
 /// With `script_edited` the user owns the script, so the command stays and the
@@ -41,16 +59,10 @@ pub fn migrate_legacy_command(
     home: &Path,
     script_edited: bool,
 ) -> io::Result<bool> {
-    let Ok(text) = fs::read_to_string(settings_path) else {
+    let Some(mut value) = settings_with_legacy_command(settings_path, home) else {
         return Ok(false);
     };
-    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return Ok(false);
-    };
-    let Some(command) = value
-        .pointer_mut("/statusLine/command")
-        .filter(|c| c.as_str().is_some_and(|c| is_legacy_command(c, home)))
-    else {
+    let Some(command) = value.pointer_mut("/statusLine/command") else {
         return Ok(false);
     };
     if script_edited {

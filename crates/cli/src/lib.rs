@@ -50,6 +50,7 @@ pub mod eval;
 pub mod fastpath;
 pub mod gate;
 pub mod handoff;
+pub mod heal;
 pub mod hooks;
 pub mod init;
 pub mod json;

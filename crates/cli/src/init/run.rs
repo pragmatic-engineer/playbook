@@ -177,6 +177,16 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         repo: paths.repo.clone(),
     };
     let migrated = migrate::run_pending_for(&ctx, paths.statusline);
+    // Record this binary in the version record, so the session hook does not
+    // run the same migrations again (ADR 0034).
+    crate::heal::run(
+        &ctx,
+        crate::heal::Trigger::Init {
+            failed: migrated.failed || migrated.lock_busy,
+            statusline: paths.statusline,
+        },
+        crate::common::time::now_epoch_secs(),
+    );
 
     let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);
     if step_confirmed(&system_prompt_step) {

@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Ordered migration registry run from `playbook init` (ADR 0016). Auto
-//! migrations run once and are recorded; Manual ones only warn.
+//! Ordered migration registry (ADR 0016, ADR 0034). Auto migrations run once
+//! and are recorded; Manual ones only warn. `init` runs every entry; the
+//! session hook and `doctor --fix` run only the `Owned` ones (`run_owned`).
 
 use crate::common::atomic::{acquire_dir_lock, ensure_private_dir, remove_stale_lock_dir};
 use crate::common::paths::playbook_root_from;
@@ -26,6 +27,22 @@ pub struct Ctx {
     pub repo: Option<(PathBuf, PathBuf)>,
 }
 
+impl Ctx {
+    /// A context for `home` alone: no plugin tree and no repo, as the session
+    /// hook and `doctor --fix` run.
+    pub fn for_home(home: &Path) -> Ctx {
+        Ctx {
+            home: home.to_path_buf(),
+            claude_home: home.join(".claude"),
+            self_root: None,
+            repo: None,
+        }
+    }
+}
+
+/// How many times a waiting caller tries the migration lock, 100 ms apart.
+pub const LOCK_RETRIES: u32 = 50;
+
 pub enum Kind {
     /// Runs until it succeeds once, then is recorded and never run again.
     Auto,
@@ -48,9 +65,24 @@ pub enum Outcome {
     Failed(StepReport),
 }
 
+/// What a migration writes, next to `Kind`, which says how often it runs.
+#[derive(Clone, Copy)]
+pub enum Scope {
+    /// Writes only playbook's own files, or nothing. Safe to run unattended.
+    Owned,
+    /// Writes a file the user owns, so only `init` runs it. `check` says,
+    /// without writing, what the run would change, or `None`. `command` is
+    /// the init command that applies it.
+    Consent {
+        check: fn(&Ctx) -> Option<String>,
+        command: &'static str,
+    },
+}
+
 pub struct Migration {
     pub id: &'static str,
     pub kind: Kind,
+    pub scope: Scope,
     pub run: fn(&Ctx) -> Outcome,
 }
 
@@ -59,6 +91,10 @@ pub struct Migration {
 pub struct Report {
     pub steps: Vec<StepReport>,
     pub warnings: Vec<String>,
+    /// A migration failed, or the applied record could not be read or written.
+    pub failed: bool,
+    /// Another process held the migration lock, so the locked part did not run.
+    pub lock_busy: bool,
 }
 
 /// Shipped migrations in apply order. Append only; never reorder or reuse an id.
@@ -67,51 +103,67 @@ pub fn registry() -> Vec<Migration> {
         Migration {
             id: "0001-memory-store-move",
             kind: Kind::Idempotent,
+            scope: Scope::Owned,
             run: memory_store_move,
         },
         Migration {
             id: "0002-gate-repo-local-move",
             kind: Kind::Idempotent,
+            scope: Scope::Owned,
             run: gate_repo_local_move,
         },
         Migration {
             id: "0003-system-prompt-edited",
             kind: Kind::Manual,
+            scope: Scope::Owned,
             run: system_prompt_edited,
         },
         Migration {
             id: "0004-skills-edited",
             kind: Kind::Manual,
+            scope: Scope::Owned,
             run: skills_edited,
         },
         Migration {
             id: "0005-statusline-edited",
             kind: Kind::Manual,
+            scope: Scope::Owned,
             run: statusline_edited,
         },
         Migration {
             id: "0006-statusline-rust-command",
             kind: Kind::Idempotent,
+            scope: Scope::Consent {
+                check: statusline_rust_command_pending,
+                command: "playbook init --statusline",
+            },
             run: statusline_rust_command,
         },
         Migration {
             id: "0007-shell-init-rc-line",
             kind: Kind::Idempotent,
+            scope: Scope::Consent {
+                check: shell_init_rc_line_pending,
+                command: "playbook init",
+            },
             run: shell_init_rc_line,
         },
         Migration {
             id: "0008-remove-config-hash-script",
             kind: Kind::Idempotent,
+            scope: Scope::Owned,
             run: remove_config_hash_script,
         },
         Migration {
             id: "0009-adopt-late-config-json",
             kind: Kind::Idempotent,
+            scope: Scope::Owned,
             run: adopt_late_config_json,
         },
         Migration {
             id: "0010-state-files-to-sqlite",
             kind: Kind::Idempotent,
+            scope: Scope::Owned,
             run: state_files_to_sqlite,
         },
     ]
@@ -200,15 +252,40 @@ fn shell_init_rc_line(ctx: &Ctx) -> Outcome {
             "shell-init",
             format!(
                 "{} now loads the launcher with `playbook shell-init`",
-                files
-                    .iter()
-                    .map(|f| f.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                join_paths(&files)
             ),
         )),
         Err(err) => Outcome::Failed(StepReport::failed("shell-init", err.to_string())),
     }
+}
+
+fn statusline_rust_command_pending(ctx: &Ctx) -> Option<String> {
+    let script = crate::init::statusline::playbook_statusline_path(&ctx.home);
+    let edited = user_edited(&ctx.home, STATUSLINE_KEY, &script);
+    crate::init::statusline::legacy_command_pending(
+        &ctx.claude_home.join("settings.json"),
+        &ctx.home,
+        edited,
+    )
+    .then(|| "statusLine.command in settings.json still runs the old script".to_string())
+}
+
+fn shell_init_rc_line_pending(ctx: &Ctx) -> Option<String> {
+    let files = crate::init::shim::legacy_rc_files(&ctx.home);
+    (!files.is_empty()).then(|| {
+        format!(
+            "{} still loads the launcher the old way",
+            join_paths(&files)
+        )
+    })
+}
+
+fn join_paths(files: &[PathBuf]) -> String {
+    files
+        .iter()
+        .map(|f| f.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn statusline_rust_command(ctx: &Ctx) -> Outcome {
@@ -439,6 +516,57 @@ pub fn record_skills(home: &Path, skills_root: &Path) {
     record_many(home, &fresh, Some(&stale));
 }
 
+/// One item a run left for the user: a `Consent` migration's pending change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenItem {
+    pub id: &'static str,
+    pub message: String,
+    /// The init command that applies the change.
+    pub command: Option<&'static str>,
+}
+
+/// The open `Consent` items, writing nothing. `only` limits the
+/// checks to those ids.
+pub fn open_items(ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
+    registry()
+        .iter()
+        .filter(|m| only.is_none_or(|ids| ids.iter().any(|id| id == m.id)))
+        .filter_map(|m| match m.scope {
+            Scope::Consent { check, command } => check(ctx).map(|message| OpenItem {
+                id: m.id,
+                message,
+                command: Some(command),
+            }),
+            Scope::Owned => None,
+        })
+        .collect()
+}
+
+/// Runs the `Owned` migrations that write, under the migration lock, taken
+/// with `retries` tries 100 ms apart. A `Consent` migration never runs here.
+pub fn run_owned(ctx: &Ctx, retries: u32) -> Report {
+    let owned: Vec<Migration> = registry()
+        .into_iter()
+        .filter(|m| matches!(m.scope, Scope::Owned) && !matches!(m.kind, Kind::Manual))
+        .collect();
+    let mut report = Report::default();
+    let locked = with_lock_retry(&ctx.home, retries, || {
+        run_idempotent(&owned, ctx, &mut report);
+        run_auto(&owned, ctx, &mut report);
+    });
+    report.lock_busy = !locked;
+    report
+}
+
+/// The highest migration number in the registry, from the id prefix.
+pub fn schema() -> u32 {
+    registry()
+        .iter()
+        .filter_map(|m| m.id.split('-').next()?.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0)
+}
+
 /// Manual findings only, for `playbook doctor`; runs nothing else.
 pub fn pending_manual(ctx: &Ctx) -> Vec<String> {
     registry()
@@ -457,7 +585,7 @@ pub fn record_system_prompt(home: &Path) {
 }
 
 fn with_lock(home: &Path, f: impl FnOnce()) -> bool {
-    with_lock_retry(home, 50, f)
+    with_lock_retry(home, LOCK_RETRIES, f)
 }
 
 /// A migration can copy a whole store, so the stale age is far above the default.
@@ -509,7 +637,7 @@ pub fn run_pending_for(ctx: &Ctx, statusline: bool) -> Report {
 
 /// Runs `migrations` in order: Manual ones always, Auto ones once each.
 pub fn run_with(migrations: &[Migration], ctx: &Ctx) -> Report {
-    run_with_retries(migrations, ctx, 50)
+    run_with_retries(migrations, ctx, LOCK_RETRIES)
 }
 
 fn run_with_retries(migrations: &[Migration], ctx: &Ctx, retries: u32) -> Report {
@@ -519,68 +647,87 @@ fn run_with_retries(migrations: &[Migration], ctx: &Ctx, retries: u32) -> Report
             report.warnings.push(format!("{}: {msg}", m.id));
         }
     }
-    for m in migrations
-        .iter()
-        .filter(|m| matches!(m.kind, Kind::Idempotent))
-    {
-        match (m.run)(ctx) {
-            Outcome::Done(step) | Outcome::Repeat(step) | Outcome::Failed(step) => {
-                report.steps.push(step);
-            }
-            Outcome::Warn(msg) => report.warnings.push(format!("{}: {msg}", m.id)),
-            Outcome::Quiet => {}
-        }
-    }
-    let applied = |lines: &[String]| -> Vec<String> {
-        lines
-            .iter()
-            .filter_map(|l| l.strip_prefix("applied ").map(str::to_string))
-            .collect()
-    };
+    run_idempotent(migrations, ctx, &mut report);
     let done = applied(&read_state(&ctx.home));
     let pending = |m: &&Migration| matches!(m.kind, Kind::Auto) && !done.iter().any(|d| d == m.id);
     if !migrations.iter().any(|m| pending(&m)) {
         return report;
     }
     let locked = with_lock_retry(&ctx.home, retries, || {
-        for m in migrations.iter().filter(|m| matches!(m.kind, Kind::Auto)) {
-            let Some(mut lines) = load_state(&ctx.home) else {
-                report
-                    .warnings
-                    .push("migrations skipped: could not read the migration record".to_string());
-                break;
-            };
-            if applied(&lines).iter().any(|d| d == m.id) {
-                continue;
-            }
-            match (m.run)(ctx) {
-                Outcome::Done(step) => {
-                    lines.push(format!("applied {}", m.id));
-                    if let Err(err) = write_state(&ctx.home, &lines) {
-                        report
-                            .warnings
-                            .push(format!("{}: could not record: {err}", m.id));
-                        break;
-                    }
-                    report.steps.push(step);
-                }
-                Outcome::Repeat(step) => report.steps.push(step),
-                Outcome::Quiet => {}
-                Outcome::Warn(msg) => report.warnings.push(format!("{}: {msg}", m.id)),
-                Outcome::Failed(step) => {
-                    report.steps.push(step);
-                    break;
-                }
-            }
-        }
+        run_auto(migrations, ctx, &mut report)
     });
     if !locked {
+        report.lock_busy = true;
         report.steps.push(StepReport::skipped(
             "migrations",
             "could not take the migration lock; will retry next init",
         ));
     }
     report
+}
+
+fn applied(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .filter_map(|l| l.strip_prefix("applied ").map(str::to_string))
+        .collect()
+}
+
+/// Runs every `Idempotent` migration in `migrations`. A failure is reported
+/// and the rest still run.
+fn run_idempotent(migrations: &[Migration], ctx: &Ctx, report: &mut Report) {
+    for m in migrations
+        .iter()
+        .filter(|m| matches!(m.kind, Kind::Idempotent))
+    {
+        match (m.run)(ctx) {
+            Outcome::Failed(step) => {
+                report.failed = true;
+                report.steps.push(step);
+            }
+            Outcome::Done(step) | Outcome::Repeat(step) => report.steps.push(step),
+            Outcome::Warn(msg) => report.warnings.push(format!("{}: {msg}", m.id)),
+            Outcome::Quiet => {}
+        }
+    }
+}
+
+/// Runs each `Auto` migration not yet applied, in order, and records it. The
+/// caller holds the migration lock. A failure stops the later ones.
+fn run_auto(migrations: &[Migration], ctx: &Ctx, report: &mut Report) {
+    for m in migrations.iter().filter(|m| matches!(m.kind, Kind::Auto)) {
+        let Some(mut lines) = load_state(&ctx.home) else {
+            report.failed = true;
+            report
+                .warnings
+                .push("migrations skipped: could not read the migration record".to_string());
+            break;
+        };
+        if applied(&lines).iter().any(|d| d == m.id) {
+            continue;
+        }
+        match (m.run)(ctx) {
+            Outcome::Done(step) => {
+                lines.push(format!("applied {}", m.id));
+                if let Err(err) = write_state(&ctx.home, &lines) {
+                    report.failed = true;
+                    report
+                        .warnings
+                        .push(format!("{}: could not record: {err}", m.id));
+                    break;
+                }
+                report.steps.push(step);
+            }
+            Outcome::Repeat(step) => report.steps.push(step),
+            Outcome::Quiet => {}
+            Outcome::Warn(msg) => report.warnings.push(format!("{}: {msg}", m.id)),
+            Outcome::Failed(step) => {
+                report.failed = true;
+                report.steps.push(step);
+                break;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -601,12 +748,7 @@ mod tests {
     }
 
     fn ctx(home: &Path) -> Ctx {
-        Ctx {
-            home: home.to_path_buf(),
-            claude_home: home.join(".claude"),
-            self_root: None,
-            repo: None,
-        }
+        Ctx::for_home(home)
     }
 
     fn done(name: &'static str) -> Outcome {
@@ -617,6 +759,7 @@ mod tests {
         Migration {
             id,
             kind: Kind::Auto,
+            scope: Scope::Owned,
             run,
         }
     }
@@ -774,7 +917,22 @@ mod tests {
         let report = run_with(&ms, &ctx(&h));
         assert_eq!(report.steps.len(), 1);
         assert_eq!(report.steps[0].status, StepStatus::Failed);
+        assert!(report.failed);
         assert!(!read_state(&h).iter().any(|l| l == "applied f"));
+    }
+
+    #[test]
+    fn a_held_lock_marks_the_report_busy_when_an_auto_migration_waits() {
+        // Arrange
+        let h = home("busy");
+        fs::create_dir_all(playbook_root_from(&h).join(LOCK_DIR)).unwrap();
+
+        // Act
+        let report = run_with_retries(&[auto("n", never)], &ctx(&h), 0);
+
+        // Assert
+        assert!(report.lock_busy);
+        assert!(!report.failed);
     }
 
     fn slow(_: &Ctx) -> Outcome {
@@ -851,11 +1009,78 @@ mod tests {
         let ms = [Migration {
             id: "r",
             kind: Kind::Idempotent,
+            scope: Scope::Owned,
             run: repeats,
         }];
         run_with(&ms, &ctx(&h));
         let second = run_with(&ms, &ctx(&h));
         assert_eq!(second.steps.len(), 1);
         assert!(!read_state(&h).iter().any(|l| l.starts_with("applied")));
+    }
+
+    fn snapshot(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else {
+                    out.push((p.clone(), fs::read(&p).unwrap_or_default()));
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn owned_migrations_write_nothing_outside_the_playbook_folder() {
+        // Arrange: user files that the Consent migrations would change.
+        let h = home("scope-guard");
+        let script = crate::init::statusline::playbook_statusline_path(&h);
+        settings_with(&h, &format!("bash {}", script.display()));
+        fs::write(h.join(".zshrc"), "source ~/.claude/shell/zsh/cc.zsh\n").unwrap();
+        fs::create_dir_all(h.join("project")).unwrap();
+        fs::write(h.join("project/notes.md"), "mine").unwrap();
+        let outside = |h: &Path| -> Vec<(PathBuf, Vec<u8>)> {
+            snapshot(h)
+                .into_iter()
+                .filter(|(p, _)| !p.starts_with(playbook_root_from(h)))
+                .collect()
+        };
+        let before = outside(&h);
+
+        // Act
+        let run = run_owned(&ctx(&h), 0);
+        let open = open_items(&ctx(&h), None);
+
+        // Assert
+        assert!(!run.lock_busy && !run.failed);
+        assert_eq!(outside(&h), before);
+        let command = |id: &str| open.iter().find(|i| i.id == id).and_then(|i| i.command);
+        assert_eq!(
+            command("0006-statusline-rust-command"),
+            Some("playbook init --statusline")
+        );
+        assert_eq!(command("0007-shell-init-rc-line"), Some("playbook init"));
+    }
+
+    #[test]
+    fn the_statusline_check_matches_the_rewrite_and_skips_an_edited_script() {
+        let h = home("statusline-pending");
+        let script = crate::init::statusline::playbook_statusline_path(&h);
+        let path = settings_with(&h, &format!("bash {}", script.display()));
+        let pending = |edited| crate::init::statusline::legacy_command_pending(&path, &h, edited);
+        assert!(pending(false));
+        assert!(!pending(true));
+        settings_with(&h, "my-own-statusline");
+        assert!(!pending(false));
+    }
+
+    #[test]
+    fn the_schema_is_the_highest_registry_number() {
+        assert_eq!(schema(), 10);
     }
 }

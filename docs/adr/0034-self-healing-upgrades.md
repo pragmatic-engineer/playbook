@@ -28,13 +28,13 @@ A user's skill failed with "could not find the plugin root folder". The binary p
 3. **Skills and agents ask the binary.** `playbook path plugin-root` prints the resolved directory, or the one line error with exit code 1. It does not print the embedded directory, because that holds only a few files. `intents.json` gets a `plugin-root` intent, so the contract check from ADR 0032 notices if the command goes away.
 4. **Variant agents point at the real plugin.** `pb` replaces `${CLAUDE_PLUGIN_ROOT}` and `$CLAUDE_PLUGIN_ROOT` in the copied agent bodies with the resolved directory.
 5. **A version record.** The `state` table of `config.db` in the data folder gets four keys next to the applied migration record: `versions/schema` (the highest migration number of the binary that last ran clean), `versions/binary` (its version), `versions/plugin` (the plugin version it saw, for doctor) and `versions/pending` (the ids of `Consent` and `Report` items still open). They are written in one transaction.
-6. **Scope sits beside `Kind`.** `Kind` (`Auto`, `Idempotent`, `Manual`) still says how often a migration runs. A new `Scope` says what it writes. `Owned` writes only playbook's own files. `Consent` writes a file the user owns and has a check that reports without writing. `Manual` migrations write nothing and are the report items. The ten existing entries get these scopes:
+6. **Scope sits beside `Kind`.** `Kind` (`Auto`, `Idempotent`, `Manual`) still says how often a migration runs. A new `Scope` says what it writes. `Owned` writes only playbook's own files. `Consent` writes a file the user owns, has a check that reports without writing, and names the `init` command that applies it. `Report` writes nothing and reports on files Claude Code owns, and the hook repeats it until it clears. The ten existing entries get these scopes:
 
    | Id | Kind | Scope |
    |---|---|---|
    | 0001 memory store move | Idempotent | Owned (it moves playbook's memory files out of `~/.claude`, and `session-init` already runs it) |
    | 0002 gate repo local move | Idempotent | Owned (runs only with a repo, and the hook passes none) |
-   | 0003, 0004, 0005 edited files | Manual | report |
+   | 0003, 0004, 0005 edited files | Manual | Owned (they write nothing. `init` and `doctor --fix` show the note, and the hook does not repeat it, because the user made the edit on purpose) |
    | 0006 statusline command | Idempotent | Consent (writes `settings.json`) |
    | 0007 shell rc line | Idempotent | Consent (writes a shell rc file) |
    | 0008, 0009, 0010 | Idempotent | Owned |
@@ -43,8 +43,8 @@ A user's skill failed with "could not find the plugin root folder". The binary p
 7. **Four triggers run the same code.**
    1. `playbook init` runs every migration, as it does today, with the consent `init` already asks for.
    2. `playbook update` runs `<new binary> doctor --fix` after the swap, so the new binary runs its own migrations. The step is skipped when the new version is older than the first release with `--fix`, and a failure is a warning, not an update failure.
-   3. The `session-init` hook reads the version record. When the running binary's version and schema match it and `versions/pending` is empty, it does nothing more. When `versions/pending` is not empty, it reruns only those checks. When the binary is newer, it runs the `Owned` migrations under the migration lock, without waiting for it, then the `Consent` and `Manual` checks. It adds one line to the session message naming what changed and the one command to run. It asks no question, writes no Claude settings and does not fail the hook. When the record is newer than the running binary, a downgrade, the hook runs nothing and leaves the record alone.
-   4. `playbook doctor --fix` runs the `Owned` migrations, then prints the command for each open `Consent` or `Manual` item.
+   3. The `session-init` hook reads the version record. When the running binary's version and schema match it and `versions/pending` is empty, it does nothing more. When `versions/pending` is not empty, it reruns only those checks. When the binary is newer, it runs the `Owned` migrations under the migration lock, without waiting for it, then the `Consent` and `Report` checks. It adds one line to the session message naming what changed and the command to run. It asks no question, writes no Claude settings and does not fail the hook. When the record is newer than the running binary, a downgrade, the hook runs nothing and leaves the record alone.
+   4. `playbook doctor --fix` runs the `Owned` migrations, then prints the command for each open `Consent` or `Report` item and the notes of the `Owned` `Manual` checks. It exits 1 when a migration failed or the lock was busy, so `playbook update` shows a warning.
 
    Every trigger writes the version record only when it held the lock and every `Owned` migration finished. A busy lock or a failed migration leaves the record unchanged. After a failure the hook retries at most once a day, and `init` and `doctor --fix` retry at once. The per session cost on the fast path is one read of the `state` table, which the hook already opens for the worktree sweep.
 8. **Only consent changes settings.** `init`, `uninstall` and `config` write `~/.claude/settings.json`, with consent. The hook and `doctor --fix` only report what needs `playbook init`.

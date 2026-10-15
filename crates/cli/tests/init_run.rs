@@ -1443,3 +1443,20 @@ fn claude_override_is_written_only_with_consent_and_never_touches_claude_setting
         settings_before
     );
 }
+
+#[test]
+fn init_records_this_binary_in_the_version_record() {
+    // Arrange
+    let home = scratch_home("version-record");
+    let paths = base_paths(&home, Some(ShellKind::Bash));
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert
+    assert!(outcome.ok());
+    let root = playbook::common::paths::playbook_root_from(&home);
+    let record = playbook::heal::Record::read(&root).unwrap();
+    assert_eq!(record.binary.as_deref(), Some(env!("CARGO_PKG_VERSION")));
+    assert_eq!(record.schema, playbook::init::migrate::schema());
+}
