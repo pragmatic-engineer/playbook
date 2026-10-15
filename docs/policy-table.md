@@ -40,6 +40,7 @@ and ADR 0021, 0022 and 0023).
 | skill | `atlassian` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `delegating-subagents` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `engineering-standards-javascript` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
+| skill | `engineering-standards-python` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `engineering-standards-rust` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `engineering-standards` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |
 | skill | `finish-pull-request` | - | - | Knowledge loaded into the caller. A skill never sets a model or effort, so the caller decides. |

@@ -333,19 +333,40 @@ fn intent_ids_and_reference_paths_in_the_prose_resolve() {
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
-/// The Rust standards index loads references only through its load-when
-/// lines, so a reference it does not name is never read.
+/// A language standards index loads references only through its load-when
+/// lines, so a reference it does not name is never read. The structural lint
+/// accepts a pointer that resolves in any skill, and the language skills share
+/// file names, so each pointer must also resolve in its own skill.
 #[test]
-fn rust_standards_names_every_reference() {
-    let skill = read_skill("engineering-standards-rust/SKILL.md");
-    let named = reference_pointers(&skill);
-    let refs = skills_dir().join("engineering-standards-rust/references");
-    for entry in fs::read_dir(refs).unwrap().filter_map(Result::ok) {
-        let path = entry.path();
-        let name = path.file_stem().unwrap().to_string_lossy().to_string();
+fn language_standards_name_every_reference_and_only_their_own() {
+    let mut checked = Vec::new();
+    for dir in skill_dirs() {
+        let skill_name = dir.file_name().unwrap().to_string_lossy().to_string();
+        let refs = dir.join("references");
+        if !skill_name.starts_with("engineering-standards-") || !refs.is_dir() {
+            continue;
+        }
+        let named = reference_pointers(&read_skill(&format!("{skill_name}/SKILL.md")));
+        for entry in fs::read_dir(&refs).unwrap().filter_map(Result::ok) {
+            let path = entry.path();
+            let name = path.file_stem().unwrap().to_string_lossy().to_string();
+            assert!(
+                named.contains(&name),
+                "{skill_name}/SKILL.md does not name references/{name}.md"
+            );
+        }
+        for name in &named {
+            assert!(
+                refs.join(format!("{name}.md")).is_file(),
+                "{skill_name}/SKILL.md names references/{name}.md, which is not in its own references/"
+            );
+        }
+        checked.push(skill_name);
+    }
+    for expected in ["engineering-standards-python", "engineering-standards-rust"] {
         assert!(
-            named.contains(&name),
-            "engineering-standards-rust/SKILL.md does not name references/{name}.md"
+            checked.iter().any(|s| s == expected),
+            "{expected} has no references/ folder to check"
         );
     }
 }
