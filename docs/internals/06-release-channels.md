@@ -1,15 +1,13 @@
 # Release channels
 
-A release reaches users through two channels: the GitHub release assets
-(built by the `build` and `publish` jobs of `release.yml`) and the Homebrew
-tap `pragmatic-engineer/homebrew-tap`. This repo does not push to the tap. The
-tap runs its own workflow that reads this repo's releases and updates itself. It
-checks every 30 minutes for the newest release under each formula's tag prefix,
-rewrites the URLs and checksums in `Formula/playbook.rb` from the release's
-`SHA256SUMS`, then audits, installs and tests the formula. The commit goes
-through the GitHub API, so GitHub signs it. The tap follows a release within
-about half an hour. To update sooner, run the `release` workflow by hand in the
-tap repo.
+A release reaches users through three channels: the GitHub release assets
+(built by the `build` and `publish` jobs of `release.yml`), the Homebrew tap
+`pragmatic-engineer/homebrew-tap` and the plugin marketplace
+`pragmatic-engineer/marketplace`. After a release is published and checked,
+the `downstream` job of `release.yml` opens a pull request in the tap and in the
+marketplace, as the section on the release workflow describes. The tap also
+checks every 30 minutes for a newer release and bumps a formula itself when the
+`downstream` job has not done it within an hour.
 
 A release attaches fifteen assets (three per target), `release-notes.json`,
 `breaking-changes.json` and `SHA256SUMS`, which lists the other seventeen. It
@@ -28,13 +26,12 @@ runs `scripts/bump-version.sh X.Y.Z`, which sets all of them and the
 `PLAYBOOK_REF` pins together. A plugin change between releases needs no bump.
 
 The marketplace repository `pragmatic-engineer/marketplace` lists the plugin as
-a `git-subdir` source that points at `plugins/playbook` in this repository, with
-no `ref` and no `version`. Claude Code follows the default branch, copies only
-that folder and updates the plugin when the `version` in `plugin.json` rises,
-which happens when the release pull request merges. ADR 0038 moves the entry
-to a `ref` on the release tag, which the release workflow sets after the
-release is published, starting with the first joint release. There is no separate plugin
-release. The `playbook-plugin-v` tags made before 0.34.0 stay as history. The
+a `git-subdir` source that points at `plugins/playbook` in this repository.
+The `downstream` job pins its `ref` to the release tag `vX.Y.Z` and sets
+`metadata.version` once the release is published. Claude Code copies only that
+folder at the tag and updates the plugin when the pin moves. Until the first
+release that runs `downstream`, the entry has no `ref` and follows the default
+branch. There is no separate plugin release. The `playbook-plugin-v` tags made before 0.34.0 stay as history. The
 `payload-guard` check keeps the folder to markdown and the manifest.
 
 ## The release workflow
@@ -83,9 +80,27 @@ uploaded again. When a run fails, run the workflow again with
 prints the signed `git tag` command to run by hand, and the next run with
 `version=X.Y.Z` goes on from the tag.
 
+After `verify`, `downstream` moves the tap and the marketplace to the release
+([ADR 0039](../adr/0039-release-workflow.md) decision 9). It runs the tap's
+`.github/scripts/bump-formula.sh` for `playbook`, `pbtop` and
+`playbook-telemetry`, which reads the release's `SHA256SUMS`, and sets the
+marketplace `ref` to `vX.Y.Z` and `metadata.version` to `X.Y.Z`. Each change
+goes to a `release/vX.Y.Z` pull request titled `chore(release): playbook X.Y.Z`,
+made with `scripts/release-gh.sh pr` and the app token, with auto-merge on.
+When a pull request merges, a workflow in that repository tags the merge
+commit `vX.Y.Z` and publishes a release. The job waits up to 30 minutes for both
+merges and both releases, and the run summary links them. When a repository has
+not published its release five minutes after the merge, the job tags and
+releases it through the API. When something here fails, the playbook release
+stays published, the job fails, and the summary prints the commands to finish
+it. Running the workflow again with `version=X.Y.Z` goes on from where it
+stopped.
+
 A dry run plans, shows the diff of the release pull request in the run
-summary, and builds the five targets from `main`. It opens, tags, uploads and
-publishes nothing.
+summary, and builds the five targets from `main`. It also shows the tap and
+marketplace diffs, with placeholder checksums for the formulas, and checks the
+app tokens with read-only calls. It opens, tags, uploads and publishes
+nothing.
 
 `scripts/release-notes.sh` builds the body of the release from the
 Conventional Commits since the previous `v` tag that touch the playbook
@@ -106,8 +121,17 @@ that file has no entry for the version (ADR 0035). Run
 ## Credentials
 
 The workflow uses `GITHUB_TOKEN` to read, to build the draft and to publish,
-and the igorjs GitHub App token for the release pull request and the tag.
-`BOT_APP_CLIENT_ID` and `BOT_APP_PRIVATE_KEY` are organization secrets. Each step asks the app for only the permissions it needs. The workflow runs only from `workflow_dispatch`, and anything but a dry run only from `main`. Pull
+and the igorjs GitHub App token for the release pull request, the tag and the
+`downstream` pull requests. `BOT_APP_CLIENT_ID` and `BOT_APP_PRIVATE_KEY` are
+organization secrets that the playbook, tap and marketplace repositories can
+read. Each step asks the app for only the permissions it needs, and
+`downstream` mints one token for each repository. The workflow runs only from
+`workflow_dispatch`, anything but a dry run only from `main`, and `downstream`
+only from `main`. The key can be read by any workflow in those three
+repositories, so the guards are the rulesets and the checks in each workflow:
+the downstream release workflows act only on a merged pull request from the
+app on a `release/v*` branch. An organization admin rotates the key and
+updates both secrets. Pull
 requests made with the app token run CI, which pull requests made with
 `GITHUB_TOKEN` do not. The app is on the bypass list of the "Protect release
 tags" ruleset, so it can create `v*` tags. The tag is a lightweight ref on the
@@ -127,9 +151,18 @@ installs and the tap may already point at them. To pull a bad release:
    current notes: `gh release view vX.Y.Z --json body --jq .body > notes.md`,
    add the warning at the top of `notes.md`, then
    `gh release edit vX.Y.Z --notes-file notes.md`.
-3. Ship the fix as the next patch release. The plugin only moves forward:
-   Claude Code never installs a lower plugin version, so a bad plugin is
-   fixed by that patch too.
+3. Move the plugin back: open a pull request in `pragmatic-engineer/marketplace`
+   that sets the `ref` of the `playbook` entry to `vA.B.C` and
+   `metadata.version` to `A.B.C`. New installs then get the previous plugin.
+   Claude Code never installs a lower plugin version over an installed one,
+   so users who already updated keep the bad plugin until the next patch.
+4. Move the formulas back: in `pragmatic-engineer/homebrew-tap`, run
+   `SOURCE_REPO=playbook TAG_PREFIX=v .github/scripts/bump-formula.sh A.B.C
+   Formula/<formula>.rb` for `playbook`, `pbtop` and `playbook-telemetry`, and
+   open a pull request with the result. The tap's scheduled check never moves
+   a formula back to a lower version, and it skips a pre-release.
+5. Ship the fix as the next patch release, which moves the tap and the
+   marketplace forward again.
 
 ## Internal tool crates
 
