@@ -2,14 +2,14 @@
 
 To see every change `playbook init` makes before you agree to it, read [What init installs](06-what-init-installs.md) and the [hook reference](../reference/hooks.md).
 
-The quickest route is one command. This page covers every route, requirements, how the binary reaches `PATH`, upgrades, the settings merge and uninstall.
+The recommended route is the install script, one command, and `playbook update` keeps it current. Homebrew is supported too. This page covers every route, requirements, how the binary reaches `PATH`, upgrades, the settings merge and uninstall.
 
 ## Pick an install mode
 
 | Mode | Commands, in order | You get | You lack |
 |---|---|---|---|
 | Skills only | `claude plugin marketplace add pragmatic-engineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer` | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
-| Binary only | Install script: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash`. Or Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook init` | The `playbook` command, hooks, guards, status line, memory and usage | The skills and slash commands |
+| Binary only | Install script (recommended): `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash`. Or Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook init` | The `playbook` command, hooks, guards, status line, memory and usage | The skills and slash commands |
 | Both (recommended) | The binary first, then the two skills commands | Everything | Nothing |
 
 The skills are a Claude Code plugin and work on their own. The binary is optional. Installing one never installs the other, and playbook never installs or removes a plugin for you.
@@ -30,7 +30,7 @@ Which one? Choose skills only if you want to read the skills and nothing else ru
 
 ## Install
 
-### One command
+### Install script (recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
@@ -68,7 +68,7 @@ brew install pragmatic-engineer/tap/playbook
 playbook init
 ```
 
-`playbook init` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `init` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Upgrade with `brew upgrade playbook`.
+`playbook init` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `init` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew installs update with `brew upgrade playbook`, and `playbook update` refuses a Homebrew install and tells you to use brew.
 
 ### Optional: the standalone telemetry tool
 
@@ -130,7 +130,7 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 
 | Install | Command |
 |---|---|
-| Any | `playbook update` (`--check` to look, `--list` for releases, `--pre` for pre-releases, `--yes` in auto mode) |
+| Install script (recommended) | `playbook update` (`--check` to look, `--list` for releases, `--pre` for pre-releases, `--yes` in auto mode) |
 | Homebrew | `brew upgrade playbook` |
 | Installer | Run it again |
 

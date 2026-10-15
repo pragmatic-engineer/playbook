@@ -13,18 +13,25 @@ claude plugin marketplace add pragmatic-engineer/marketplace
 claude plugin install playbook@pragmatic-engineer
 ```
 
-The binary, optional. The install script installs it and then asks whether to run `playbook init`:
+The binary, optional. The recommended install is the install script. It downloads the release binary, checks its SHA256 checksum and its build attestation (when `gh` is available), puts it on `PATH`, and then asks whether to run `playbook init`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 ```
 
-On macOS or Linux you can use Homebrew instead, then run `playbook init` once:
+Update later with `playbook update`. Use `playbook update --check` to see whether a newer release exists without installing it.
+
+#### Homebrew
+
+Homebrew is supported too:
 
 ```bash
 brew install pragmatic-engineer/tap/playbook
+brew upgrade playbook
 playbook init
 ```
+
+A Homebrew install updates with brew. On a brew-managed install, `playbook update` stops and tells you to run `brew upgrade playbook`.
 
 `playbook init` adds the hook entries to `~/.claude/settings.json`. In a terminal it asks first, and it keeps your own entries. `playbook uninstall` removes only the entries whose command is exactly one `playbook hook <name>` command that `init` writes. Run `playbook doctor check` to see what is in place. If you also installed the skills, open a Claude Code session and run `/playbook:doctor`. It checks every layer and tells you how to fix a miss.
 
@@ -44,12 +51,12 @@ To see what `playbook init` changes before you agree, read [What init installs](
 
 Optional: the standalone usage dashboard for machines without playbook, `brew install pragmatic-engineer/tap/playbook-telemetry`, then run `pbtop`. `pbtop` is the short alias of `playbook-telemetry`. With playbook installed you do not need it, because `playbook usage` runs the same code. The code index gets the same treatment: `pbcode` is the planned alias of the standalone `playbook-code` tool, which has no release yet, so use `playbook code` today.
 
-Pin a version with `PLAYBOOK_REF=v0.26.0`. Update later with `playbook update`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
+Pin a version with `PLAYBOOK_REF=v0.26.0`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
 
 | Mode | What you get | Commands |
 |---|---|---|
 | Skills only | Skills, commands and subagents. No guards, hooks or status line. | The two `claude plugin` commands above |
-| Binary only | The `playbook` command, hooks, guards, status line, memory and usage | The install script, or Homebrew then `playbook init` |
+| Binary only | The `playbook` command, hooks, guards, status line, memory and usage | The install script (recommended), or Homebrew then `playbook init` |
 | Both (recommended) | Everything | Both of the above |
 
 The hooks, guards, status line and usage need the binary. Only the skill text works without it. See [Pick an install mode](docs/guides/00-install.md#pick-an-install-mode).
