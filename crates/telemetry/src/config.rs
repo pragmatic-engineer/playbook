@@ -9,7 +9,8 @@
 //! playbook has moved that store, `~/.config/playbook/playbook.db` is read.
 //! A playbook that predates it keeps them in
 //! `~/.config/playbook/config.json` as a nested JSON object, which is read
-//! when the store does not exist. This module only reads; settings are changed
+//! when the store does not exist. This module reads; the one write is
+//! `save_app`, for pbtop's own `usage.ui.*` keys. Other settings are changed
 //! with `playbook config set`.
 
 use serde_json::Value;

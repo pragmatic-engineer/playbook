@@ -77,7 +77,7 @@ When an older database exists, the first run brings it in, and the view never pr
 - If an older playbook keeps writing to the old path, its new rows are merged quietly on later refreshes, and one line at exit asks you to upgrade it (`brew upgrade playbook` or `playbook update`).
 - A file that cannot be read is skipped with a warning and left untouched.
 
-Settings are playbook's own, from the global tier of its config store (`~/.config/playbook/playbook.db`), and from the nested `usage` object of `~/.config/playbook/config.json` when that store does not exist. The tool has no config file of its own and only reads them. Set them with `playbook config set usage.<key> <value>`. An invalid value is ignored with a warning, and a missing one means the default. An old `~/.config/playbook-telemetry/config.json` is no longer read; the tool names it on stderr if it exists.
+Settings are playbook's own, from the global tier of its config store (`~/.config/playbook/playbook.db`), and from the nested `usage` object of `~/.config/playbook/config.json` when that store does not exist. It reads them, and writes only `usage.ui.layout` and `usage.ui.state` to its own app tier of `~/.config/playbook/data/config.db`, and only when that store exists. Set them with `playbook config set usage.<key> <value>`. An invalid value is ignored with a warning, and a missing one means the default. An old `~/.config/playbook-telemetry/config.json` is no longer read; the tool names it on stderr if it exists.
 
 | Key | Default | Values |
 | --- | --- | --- |
@@ -92,8 +92,8 @@ Settings are playbook's own, from the global tier of its config store (`~/.confi
 | `usage.autoIngestMinutes` | `10` | number |
 | `usage.budget.monthlyUsd` | `0` | number |
 | `usage.budget.weeklyUsd` | `0` | number |
-| `usage.ui.layout` | empty | text | The pbtop tabs and their panels, like `Charts=spend,tokens;Numbers=models`. |
-| `usage.ui.state` | empty | text | Written by pbtop: the screen setup it restores on the next start. |
+| `usage.ui.layout` | empty | text like `Charts=spend,tokens;Numbers=models`; press `e` in pbtop to edit |
+| `usage.ui.state` | empty | text written by pbtop: the screen setup it restores |
 
 ## Telemetry receiver
 

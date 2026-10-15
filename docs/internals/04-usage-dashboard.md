@@ -66,6 +66,7 @@ Keys:
 |---|---|
 | `Tab`, `Shift-Tab` | Show the next or previous tab. With one tab they move the panel focus instead. |
 | `F1` to `F9` | Show a tab by its number. |
+| `e` | Open the layout editor: `Left`, `Right` pick the tab, `j`, `k` pick a panel, `Space` adds or removes it, `J`, `K` reorder panels, `<`, `>` reorder tabs, `n` adds a tab, `x` deletes one, `r` renames, `w` saves, `R` resets to the default tabs, `Esc` cancels. Saving writes `usage.ui.layout`; when there is no config store the footer shows the command to run instead, until the next key. `R` writes an empty layout, which means the default tabs. |
 | `1` to `6`, `]`, `[` | Focus a panel of the current tab by its number, or the next or previous one. The focused panel's hint is a badge. |
 | `Left`, `Right` | Move the chart cursor one day (or one bar). `Home`, `End`, `g`, `G` jump to the ends while a chart has the focus. |
 | `Up`, `Down`, `j`, `k`, `PageUp`, `PageDown`, `Home`, `End`, `g`, `G` | Move the selected row of the focused table. |
