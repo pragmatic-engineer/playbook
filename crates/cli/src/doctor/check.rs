@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 15] = [
+const PROBES: [Probe; 16] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -111,6 +111,7 @@ const PROBES: [Probe; 15] = [
     hooks_rows,
     atlassian_rows,
     old_launcher_rows,
+    telemetry_rows,
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -615,6 +616,130 @@ fn worktree_rows(env: &Env) -> Vec<Row> {
             format!("worktree check failed: {err}"),
         )],
     }
+}
+
+const TELEMETRY_INIT_FIX: &str = "run: playbook init --only telemetry";
+
+/// The telemetry rows: Claude Code's settings point at the playbook
+/// collector, the collector runs, and rows arrived in the last day. Each
+/// failing row names the one command that fixes it.
+fn telemetry_rows(env: &Env) -> Vec<Row> {
+    use crate::usage::collector::{probe, read_state, running, state_path, Probe as Reply};
+    use crate::usage::telemetry_detect::{merged_vars, Configured};
+    let off = matches!(
+        crate::config::resolve_valid("usage.telemetry", &env.home, None),
+        Ok((serde_json::Value::String(v), _, _)) if v == "off"
+    );
+    if off {
+        return vec![Row::new(
+            "-",
+            Level::Info,
+            "telemetry is off by the usage.telemetry setting",
+        )
+        .hint("run: playbook config set usage.telemetry auto")];
+    }
+    let paths = crate::usage::run::Paths::from_home(&env.home);
+    let state = read_state(&state_path(&paths)).filter(|s| s.port != 0);
+    let cwd = env.repo_root.clone().unwrap_or_else(|| env.home.clone());
+    let port = state.as_ref().map(|s| s.port);
+    let kind = crate::usage::telemetry_detect::configured_from_files(&env.home, &cwd, port);
+    let mut rows = Vec::new();
+    match kind {
+        Configured::Playbook => rows.push(Row::new(
+            "-",
+            Level::Pass,
+            format!(
+                "telemetry env points at the playbook collector (127.0.0.1:{})",
+                port.unwrap_or_default()
+            ),
+        )),
+        Configured::Nothing | Configured::Disabled => {
+            return vec![Row::new(
+                "-",
+                Level::Warn,
+                if kind == Configured::Disabled {
+                    "telemetry is switched off in Claude Code settings"
+                } else {
+                    "telemetry is not set up in Claude Code settings"
+                },
+            )
+            .hint(TELEMETRY_INIT_FIX)];
+        }
+        Configured::Other => {
+            let endpoint = merged_vars(&env.home, &cwd, false)
+                .and_then(|v| v.get("OTEL_EXPORTER_OTLP_ENDPOINT").cloned());
+            let ours = port.map(|p| format!("http://127.0.0.1:{p}"));
+            let local_other_port = endpoint
+                .as_deref()
+                .is_some_and(|e| e.starts_with("http://127.0.0.1:"))
+                && ours.is_some();
+            if local_other_port {
+                return vec![Row::new(
+                    "-",
+                    Level::Warn,
+                    format!(
+                        "Claude Code settings send telemetry to {} but the collector port is {}",
+                        endpoint.unwrap_or_default(),
+                        port.unwrap_or_default()
+                    ),
+                )
+                .hint(TELEMETRY_INIT_FIX)];
+            }
+            return vec![Row::new(
+                "-",
+                Level::Info,
+                "telemetry is set up by you and does not point at the playbook collector",
+            )
+            .hint("run: playbook usage status")];
+        }
+    }
+    let Some(state) = state else {
+        return rows;
+    };
+    let up = running(&state) && probe(state.port) == Reply::Collector;
+    if up {
+        rows.push(Row::new(
+            "-",
+            Level::Pass,
+            format!("collector running (pid {})", state.pid),
+        ));
+    } else if crate::usage::collector::port_answers(state.port) {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Fail,
+                format!(
+                    "another program owns the collector port {}, so telemetry is lost",
+                    state.port
+                ),
+            )
+            .hint("free the port, or run: playbook usage collect --port <N>, then playbook init --only telemetry"),
+        );
+    } else {
+        rows.push(
+            Row::new(
+                "-",
+                Level::Warn,
+                "collector not running (it starts with your next Claude Code session)",
+            )
+            .hint("run: playbook usage collect"),
+        );
+    }
+    let last =
+        crate::usage::collector::status(&paths, crate::usage::collector::configured_retention())
+            .ok()
+            .and_then(|s| s.last_event);
+    let now = i64::try_from(crate::common::time::now_epoch_secs()).unwrap_or(i64::MAX);
+    rows.push(match last {
+        Some(t) if now.saturating_sub(t) <= 86_400 => {
+            Row::new("-", Level::Pass, "telemetry rows arrived in the last day")
+        }
+        Some(_) => Row::new("-", Level::Warn, "no telemetry rows in the last day")
+            .hint("restart Claude Code so it reads the new settings, then start a session"),
+        None => Row::new("-", Level::Warn, "no telemetry rows yet")
+            .hint("restart Claude Code so it reads the new settings, then start a session"),
+    });
+    rows
 }
 
 /// One row for the data folder: path, files, sizes and any `*.migrated`

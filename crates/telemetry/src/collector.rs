@@ -90,7 +90,7 @@ fn pid_alive(_pid: u32) -> bool {
     false
 }
 
-fn port_answers(port: u16) -> bool {
+pub fn port_answers(port: u16) -> bool {
     TcpStream::connect_timeout(
         &SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
         Duration::from_millis(300),

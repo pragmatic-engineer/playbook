@@ -939,3 +939,186 @@ fn an_installed_hooks_plugin_is_reported_because_its_hooks_would_run_twice() {
         "{row}"
     );
 }
+
+/// Rows from the telemetry checks: the ones whose message mentions telemetry
+/// or the collector.
+fn telemetry_rows(rows: &[Value]) -> Vec<&Value> {
+    rows.iter()
+        .filter(|r| {
+            let m = r["message"].as_str().unwrap_or("");
+            m.contains("telemetry") || m.contains("collector")
+        })
+        .collect()
+}
+
+fn hints(rows: &[&Value]) -> String {
+    rows.iter()
+        .filter_map(|r| r["hint"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Records a collector on `port` and settings that point at it.
+fn point_settings_at_collector(b: &Box, port: u16) {
+    let data = b.home().join(".config/playbook/data");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(
+        data.join("collector.json"),
+        format!(r#"{{"pid":0,"port":{port},"token":"t"}}"#),
+    )
+    .unwrap();
+    b.settings(&format!(
+        r#"{{"env":{{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:{port}"}}}}"#
+    ));
+}
+
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+#[test]
+fn telemetry_that_is_not_set_up_warns_with_the_init_command() {
+    let b = Box::new("tel-none");
+    b.settings("{}");
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        text(&mine).contains("WARN telemetry is not set up"),
+        "{}",
+        text(&mine)
+    );
+    assert!(hints(&mine).contains("playbook init --only telemetry"));
+}
+
+#[test]
+fn an_off_switch_warns_with_the_init_command() {
+    let b = Box::new("tel-off");
+    b.settings(r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#);
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        text(&mine).contains("WARN telemetry is switched off"),
+        "{}",
+        text(&mine)
+    );
+    assert!(hints(&mine).contains("playbook init --only telemetry"));
+}
+
+#[test]
+fn a_collector_that_is_not_running_and_has_no_rows_warns_with_each_fix() {
+    let b = Box::new("tel-down");
+    point_settings_at_collector(&b, free_port());
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    let all = text(&mine);
+    assert!(
+        all.contains("PASS telemetry env points at the playbook collector"),
+        "{all}"
+    );
+    assert!(all.contains("WARN collector not running"), "{all}");
+    assert!(all.contains("WARN no telemetry rows yet"), "{all}");
+    assert!(hints(&mine).contains("playbook usage collect"));
+}
+
+#[test]
+fn another_program_on_the_collector_port_fails_with_the_move_command() {
+    let b = Box::new("tel-conflict");
+    let holder = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    point_settings_at_collector(&b, holder.local_addr().unwrap().port());
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        text(&mine).contains("FAIL another program owns the collector port"),
+        "{}",
+        text(&mine)
+    );
+    assert!(hints(&mine).contains("playbook usage collect --port"));
+}
+
+#[test]
+fn a_port_in_settings_that_differs_from_the_collector_warns() {
+    let b = Box::new("tel-stale-port");
+    point_settings_at_collector(&b, free_port());
+    b.settings(
+        r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:1"}}"#,
+    );
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        text(&mine).contains("send telemetry to http://127.0.0.1:1"),
+        "{}",
+        text(&mine)
+    );
+    assert!(hints(&mine).contains("playbook init --only telemetry"));
+}
+
+#[test]
+fn rows_from_the_last_day_pass() {
+    let b = Box::new("tel-rows");
+    point_settings_at_collector(&b, free_port());
+    let db = b.home().join(".config/playbook/data/usage.db");
+    let conn = playbook::usage::db::open_db(&db).unwrap();
+    playbook::usage::telemetry_db::migrate_up(&conn).unwrap();
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )
+    .unwrap();
+    playbook::usage::telemetry_db::insert_error(
+        &conn,
+        &playbook::usage::telemetry_db::TelemetryError {
+            session_id: "s".into(),
+            sequence: 1,
+            timestamp: now,
+            model: "m".into(),
+            status_code: 500,
+            attempt: 1,
+            duration_ms: 10,
+        },
+    )
+    .unwrap();
+    drop(conn);
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        text(&mine).contains("PASS telemetry rows arrived in the last day"),
+        "{}",
+        text(&mine)
+    );
+}
+
+#[test]
+fn the_config_key_off_is_reported_as_info() {
+    let b = Box::new("tel-config-off");
+    b.settings("{}");
+    let cfg = b.home().join(".config/playbook");
+    fs::create_dir_all(&cfg).unwrap();
+    fs::write(cfg.join("config.json"), r#"{"usage":{"telemetry":"off"}}"#).unwrap();
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        text(&mine).contains("INFO telemetry is off by the usage.telemetry setting"),
+        "{}",
+        text(&mine)
+    );
+}
