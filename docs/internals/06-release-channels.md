@@ -51,8 +51,9 @@ assets. The workflow only publishes.
 The release notes for a `v*` release start with the upgrade note in
 `.github/release-notes-upgrade.md`. The `create-release` job puts that file
 above the generated notes for plain `vX.Y.Z` releases and not for
-`telemetry-v*` releases. Delete the file's content (and the `--notes-file`
-argument) when most users have upgraded from the `playbook-hooks` plugin. A
+`telemetry-v*` releases. When most users have upgraded from the
+`playbook-hooks` plugin, remove the `--notes-file` argument, the dry-run
+preview step and the file together. A
 dry run prints the start of the body in the run summary.
 
 To rehearse, run the `release` workflow by hand with a `tag` input. A manual run
