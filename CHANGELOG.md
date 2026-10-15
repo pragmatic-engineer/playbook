@@ -2,6 +2,14 @@
 
 Release notes for the playbook plugin in `plugins/playbook`. The binary has its own releases. Each plugin release has a section named `## playbook <version>`, newest first, and the top section always matches the version in `plugins/playbook/.claude-plugin/plugin.json`.
 
+## playbook 0.28.0
+
+- Review comments now follow the Conventional Comments standard (https://conventionalcomments.org/): `<label> [decorations]: <subject>` with an optional discussion.
+- The grounding-review skill has one definition of the nine labels and the decorations, in a new reference file with a label table and examples.
+- A bare `blocking:` becomes `issue (blocking):`. Old comments in the bare form are still read.
+- quick-review, deep-review, address-pr-comments, implement, finish-pull-request and the reviewer agents read that reference. The posting tiers now group comments by what must be fixed.
+- The format is for code review comments only.
+
 ## playbook 0.27.3
 
 - The install command in the doctor hint now names pragmatic-engineer/marketplace, the new name of the marketplace repository.
