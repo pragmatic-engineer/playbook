@@ -260,6 +260,9 @@ pub enum EffortCommand {
     },
 }
 
+/// The line `playbook init` prints on stderr in a terminal.
+pub const INIT_DEPRECATION: &str = "playbook init is deprecated, use: playbook setup";
+
 /// Top-level subcommand groups.
 #[derive(Subcommand, Debug)]
 pub enum Command {
@@ -279,27 +282,37 @@ pub enum Command {
     ///
     /// The security defaults (permissions rules)
     /// are never asked about and stay off unless you pass `--security` or set
-    /// `security.defaults` to true. Without them, `init` leaves any
+    /// `security.defaults` to true. Without them, `setup` leaves any
     /// permissions you already have untouched.
     ///
-    /// Before it asks anything, init prints a plan of each part and the files
+    /// Before it asks anything, setup prints a plan of each part and the files
     /// it edits. `--dry-run` shows what would change on your machine and
     /// changes nothing. `--explain` describes a part, or every part, and
     /// changes nothing.
     ///
-    /// Example: `playbook init --no-hooks --aliases`
+    /// Example: `playbook setup --no-hooks --aliases`
+    Setup {
+        #[command(flatten)]
+        flags: init::choices::Flags,
+    },
+    /// Deprecated name for `playbook setup`
+    ///
+    /// Runs `playbook setup` with the same flags and exit codes. In a terminal
+    /// it also prints one line on stderr that names `playbook setup`. Hidden
+    /// from the command list and kept for the whole 0.x line (ADR-0040).
+    #[command(hide = true)]
     Init {
         #[command(flatten)]
         flags: init::choices::Flags,
     },
-    /// List the hooks that `playbook init` wires into Claude Code
+    /// List the hooks that `playbook setup` wires into Claude Code
     Hooks {
         #[command(subcommand)]
         sub: HooksCommand,
     },
     /// Remove what playbook installed from this machine
     ///
-    /// Takes out the hook entries and status line that `playbook init` wrote
+    /// Takes out the hook entries and status line that `playbook setup` wrote
     /// into `settings.json`, the launcher block in your shell rc files, and
     /// the files playbook placed under `~/.config/playbook`. Everything else
     /// in `settings.json` and the rc files stays, each changed file is backed
@@ -917,6 +930,17 @@ impl Command {
                 | Command::Version
                 | Command::Json { .. }
         )
+    }
+
+    /// The one stderr line a deprecated command name prints before it runs,
+    /// or `None`. Only `init` has one, and only when stderr is a terminal, so
+    /// scripts and the plugin, which read the output, see the same text as
+    /// `setup` prints.
+    pub fn deprecation_notice(&self, stderr_is_terminal: bool) -> Option<&'static str> {
+        match self {
+            Command::Init { .. } if stderr_is_terminal => Some(INIT_DEPRECATION),
+            _ => None,
+        }
     }
 }
 
@@ -2420,13 +2444,77 @@ mod tests {
         // Assert
         let mut hidden = hidden;
         hidden.sort();
-        assert_eq!(hidden, ["hook", "json"]);
+        assert_eq!(hidden, ["hook", "init", "json"]);
         assert!(Cli::command()
             .try_get_matches_from(["playbook", "json", "array-length"])
             .is_ok());
         assert!(Cli::command()
             .try_get_matches_from(["playbook", "hook", "session-init"])
             .is_ok());
+    }
+    #[test]
+    fn init_parses_to_the_same_flags_as_setup() {
+        // Arrange
+        let args = [
+            "--no-hooks",
+            "--short-name",
+            "--only",
+            "telemetry,path",
+            "--dry-run",
+        ];
+        let parse = |name: &str| {
+            let mut all = vec!["playbook", name];
+            all.extend_from_slice(&args);
+            Cli::try_parse_from(all).unwrap().command
+        };
+
+        // Act
+        let (Command::Setup { flags: setup }, Command::Init { flags: init }) =
+            (parse("setup"), parse("init"))
+        else {
+            panic!("setup and init should parse to their own variants");
+        };
+
+        // Assert
+        assert_eq!(format!("{setup:?}"), format!("{init:?}"));
+    }
+
+    #[test]
+    fn only_init_in_a_terminal_gets_the_deprecation_line() {
+        // Arrange
+        let parse = |args: &[&str]| {
+            let mut all = vec!["playbook"];
+            all.extend_from_slice(args);
+            Cli::try_parse_from(all).unwrap().command
+        };
+        let init = parse(&["init", "--yes"]);
+        let setup = parse(&["setup", "--yes"]);
+
+        // Act, Assert
+        assert_eq!(
+            init.deprecation_notice(true),
+            Some("playbook init is deprecated, use: playbook setup")
+        );
+        assert_eq!(init.deprecation_notice(false), None);
+        assert_eq!(setup.deprecation_notice(true), None);
+        assert_eq!(parse(&["plans"]).deprecation_notice(true), None);
+    }
+
+    #[test]
+    fn top_level_help_lists_setup_and_not_init() {
+        // Arrange
+        let mut cmd = Cli::command();
+
+        // Act
+        let help = cmd.render_help().to_string();
+
+        // Assert
+        let names: Vec<&str> = help
+            .lines()
+            .filter_map(|l| l.strip_prefix("  ")?.split_whitespace().next())
+            .collect();
+        assert!(names.contains(&"setup"), "{help}");
+        assert!(!names.contains(&"init"), "{help}");
     }
 }
 

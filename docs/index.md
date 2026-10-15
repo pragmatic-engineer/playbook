@@ -92,3 +92,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0036](adr/0036-release-check-and-automatic-updates.md) | A release check and automatic updates | Accepted, amended by 0037 | 2026-10-15 |
 | [0037](adr/0037-release-notes-from-conventional-commits.md) | Release notes built from Conventional Commits | Accepted, amended by 0038 | 2026-10-16 |
 | [0038](adr/0038-one-release-line.md) | One release line for the binary and the plugin | Accepted | 2026-10-16 |
+| [0040](adr/0040-rename-init-to-setup.md) | Rename `playbook init` to `playbook setup` and keep `init` as a deprecated name | Accepted | 2026-10-16 |

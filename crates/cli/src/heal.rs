@@ -454,7 +454,7 @@ fn notice(line: Option<String>, notices: &crate::notices::Notices) -> Option<Str
 /// it (`Command::is_hot_path`), and neither does `usage`, which the session
 /// hooks start in the background; the `session-init` hook is the trigger on
 /// that side. Commands that run their own heal (`migrate`, `doctor --fix`,
-/// `init`), replace the binary (`update`) or remove playbook (`uninstall`)
+/// `setup` and its old name `init`), replace the binary (`update`) or remove playbook (`uninstall`)
 /// skip it too. So do `doctor` and `state`, which show the home as it is;
 /// the doctor names `playbook migrate` when a heal is due.
 pub fn runs_on_start(command: &crate::Command) -> bool {
@@ -465,6 +465,7 @@ pub fn runs_on_start(command: &crate::Command) -> bool {
             C::Usage { .. }
                 | C::Migrate { .. }
                 | C::Init { .. }
+                | C::Setup { .. }
                 | C::Update { .. }
                 | C::Uninstall { .. }
                 | C::Doctor { .. }
@@ -629,6 +630,7 @@ mod tests {
             &["usage", "warm"],
             &["migrate"],
             &["init", "--yes"],
+            &["setup", "--yes"],
             &["update"],
             &["uninstall", "--yes"],
             &["doctor", "--fix"],
