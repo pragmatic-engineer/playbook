@@ -752,9 +752,11 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
 fn hand_added_hook_entry_survives_composed_init() {
     // Arrange: a `settings.json` with a hook entry the template does not
     // know about, alongside the four guards a real unwired install ships.
+    // Its script exists, so it is the user's own and not a dead entry.
     let home = scratch_home("hand-added");
     let claude_home = claude_home_of(&home);
     let hand_added_command = "~/.claude/hooks/my-custom-guard.sh";
+    write_text(&claude_home.join("hooks/my-custom-guard.sh"), "#!/bin/sh\n");
     write_json(
         &claude_home.join("settings.json"),
         &json!({
@@ -1459,4 +1461,32 @@ fn init_records_this_binary_in_the_version_record() {
     let record = playbook::heal::Record::read(&root).unwrap();
     assert_eq!(record.binary.as_deref(), Some(env!("CARGO_PKG_VERSION")));
     assert_eq!(record.schema, playbook::init::migrate::schema());
+}
+
+#[test]
+fn init_with_the_hooks_left_off_keeps_a_dead_hook_entry() {
+    // Arrange
+    let home = scratch_home("dead-hook-declined");
+    let claude_home = claude_home_of(&home);
+    let dead = "bash ~/.claude/hooks/gone.sh";
+    write_json(
+        &claude_home.join("settings.json"),
+        &json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": dead}]}]}}),
+    );
+    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    paths.hooks = false;
+
+    // Act
+    let outcome = run(&paths);
+
+    // Assert
+    assert!(outcome.ok());
+    let settings = read_json(&claude_home.join("settings.json"));
+    assert!(all_hook_commands(&settings).contains(&dead.to_string()));
+    let root = playbook::common::paths::playbook_root_from(&home);
+    let record = playbook::heal::Record::read(&root).unwrap();
+    assert!(record
+        .pending
+        .iter()
+        .any(|id| id == "0011-dead-hook-scripts"));
 }

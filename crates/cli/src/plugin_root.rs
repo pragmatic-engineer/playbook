@@ -239,6 +239,51 @@ pub fn binary_too_old(root: &Path, binary: &str, homebrew: bool) -> Option<Strin
     ))
 }
 
+/// The oldest plugin this binary supports. Plugins before 0.30.1 read the
+/// commit format through a bare `$CLAUDE_PLUGIN_ROOT`, which Claude Code does
+/// not fill in, so skills failed to find the plugin folder.
+pub const MIN_PLUGIN_VERSION: &str = "0.30.1";
+
+/// The plugin major version this binary knows.
+pub const PLUGIN_MAJOR: u64 = 0;
+
+/// One line when the plugin `version` is outside the range this binary
+/// supports, naming the command that fixes it, else `None`. `homebrew`
+/// picks the binary upgrade command for a newer major.
+pub fn plugin_out_of_range(version: &str, homebrew: bool) -> Option<String> {
+    let key = version_key(version)?;
+    if key.0 > PLUGIN_MAJOR {
+        let command = if homebrew {
+            "brew upgrade playbook"
+        } else {
+            "playbook update"
+        };
+        return Some(format!(
+            "the playbook plugin {version} is newer than this binary knows. Run: {command}"
+        ));
+    }
+    (Some(key) < version_key(MIN_PLUGIN_VERSION)).then(|| {
+        format!(
+            "the playbook plugin {version} is older than this binary supports ({MIN_PLUGIN_VERSION}). Run: claude plugin update playbook@pragmatic-engineer"
+        )
+    })
+}
+
+/// Version folders in the plugin cache that Claude Code marked orphaned. The
+/// resolver skips them; Claude Code deletes them later.
+pub fn orphaned_cache_dirs(claude_home: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(claude_home.join(CACHE_DIR)) else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.join(ORPHAN_MARKER).exists())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
 fn manifest_name(dir: &Path) -> Option<String> {
     manifest_field(dir, "/name")
 }
@@ -770,5 +815,39 @@ mod tests {
         assert_eq!(min_binary_version(&root), None);
         with_min(&root, "1.2.3-rc.1");
         assert_eq!(min_binary_version(&root).as_deref(), Some("1.2.3-rc.1"));
+    }
+
+    #[test]
+    fn a_plugin_inside_the_supported_range_passes() {
+        assert_eq!(plugin_out_of_range(MIN_PLUGIN_VERSION, false), None);
+        assert_eq!(plugin_out_of_range("0.99.0", false), None);
+        assert_eq!(plugin_out_of_range("not a version", false), None);
+    }
+
+    #[test]
+    fn an_old_or_newer_major_plugin_names_its_fix() {
+        let old = plugin_out_of_range("0.30.1-rc.1", true).unwrap();
+        assert!(
+            old.contains("claude plugin update playbook@pragmatic-engineer"),
+            "{old}"
+        );
+        let newer = plugin_out_of_range("1.0.0", true).unwrap();
+        assert!(newer.ends_with("Run: brew upgrade playbook"), "{newer}");
+        let newer = plugin_out_of_range("1.0.0", false).unwrap();
+        assert!(newer.ends_with("Run: playbook update"), "{newer}");
+    }
+
+    #[test]
+    fn only_marked_cache_folders_count_as_orphaned() {
+        let home = scratch_dir("orphans");
+        let cache = home.join(".claude").join(CACHE_DIR);
+        fs::create_dir_all(cache.join("0.25.0")).unwrap();
+        fs::write(cache.join("0.25.0").join(ORPHAN_MARKER), "1").unwrap();
+        fs::create_dir_all(cache.join("0.31.1")).unwrap();
+        assert_eq!(
+            orphaned_cache_dirs(&home.join(".claude")),
+            vec![cache.join("0.25.0")]
+        );
+        assert!(orphaned_cache_dirs(&home.join("missing")).is_empty());
     }
 }

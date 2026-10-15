@@ -40,7 +40,7 @@ pub const PARTS: &[Part] = &[
         default_on: true,
         flags: "--hooks, --no-hooks",
         question: "Wire the playbook hooks into ~/.claude/settings.json? (see them with `playbook hooks list`)",
-        does: "Adds playbook's hooks: safety guards, session helpers, memory and token hygiene checks, and a background warm-up of the usage store.",
+        does: "Adds playbook's hooks: safety guards, session helpers, memory and token hygiene checks, and a background warm-up of the usage store. Also removes hook entries whose ~/.claude/hooks script is gone, after a backup.",
         changes: "~/.claude/settings.json (the hooks block) and ~/.claude/.settings.base.json",
         undo: SETTINGS_UNDO,
     },

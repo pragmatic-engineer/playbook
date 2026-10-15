@@ -18,9 +18,6 @@ const PLUGIN_KEY: &str = "versions/plugin";
 const PENDING_KEY: &str = "versions/pending";
 const FAILED_AT_KEY: &str = "versions/failed-at";
 
-/// The Consent item `init` leaves open when the user declines the status line.
-const STATUSLINE_ID: &str = "0006-statusline-rust-command";
-
 /// How long the hook waits before it retries after a failed run.
 const RETRY_AFTER_SECS: u64 = 24 * 60 * 60;
 
@@ -95,6 +92,8 @@ pub enum Trigger {
     Fix,
     /// `playbook init`, after it ran every migration itself. `statusline` is
     /// false when the user declined the status line, so its item is dropped.
+    /// The dead hook item stays even when hooks were left off, because those
+    /// entries fail on every event.
     Init { failed: bool, statusline: bool },
 }
 
@@ -181,6 +180,12 @@ impl Outcome {
                 "{consent} change(s) to your settings or shell files need {run}"
             ));
         }
+        let reports = self.open.len() - consent;
+        if reports > 0 {
+            parts.push(format!(
+                "{reports} item(s) need you: run `playbook doctor --fix`"
+            ));
+        }
         (!parts.is_empty()).then(|| {
             format!(
                 "playbook {}: {}.",
@@ -252,9 +257,7 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
         }
         Trigger::Init { failed, statusline } => {
             let mut open = migrate::open_items(ctx, None);
-            if !statusline {
-                open.retain(|i| i.id != STATUSLINE_ID);
-            }
+            open.retain(|i| statusline || i.id != migrate::STATUSLINE_MIGRATION);
             let out = Outcome {
                 open,
                 ..Outcome::default()
