@@ -95,22 +95,25 @@ const BREAKING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10)
 
 /// Asks the binary at `exe` for the playbook entries newer than `since`
 /// (ADR 0035), as JSON, and renders them with this binary. A binary without
-/// the `breaking` command is older than this one, so any failure or output
-/// that is not the JSON list means there is nothing to show.
-pub fn breaking_notice(exe: &Path, since: &str) -> String {
-    let mut cmd = std::process::Command::new(exe);
-    cmd.args(["breaking", "--since", since, "--json"])
-        .stdin(std::process::Stdio::null());
-    let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, BREAKING_TIMEOUT) else {
-        return String::new();
-    };
+/// the `breaking` command is older than this one, so a failed exit or output
+/// that is not the JSON list means there is nothing to show. A binary that
+/// did not start or did not answer in time is an error, so the update can say
+/// the check did not run.
+pub fn breaking_notice(exe: &Path, since: &str) -> Result<String, String> {
+    let out = run_fresh(exe, &["breaking", "--since", since, "--json"], BREAKING_TIMEOUT)
+        .ok_or_else(|| {
+            format!(
+                "could not read the breaking changes of the new binary within {} s; run `playbook breaking --since {since}` after the update",
+                BREAKING_TIMEOUT.as_secs()
+            )
+        })?;
     if !out.status.success() {
-        return String::new();
+        return Ok(String::new());
     }
     let Ok(values) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) else {
-        return String::new();
+        return Ok(String::new());
     };
-    crate::breaking::render(&crate::breaking::lenient(&values))
+    Ok(crate::breaking::render(&crate::breaking::lenient(&values)))
 }
 
 /// How long `update` waits for the new binary's `doctor --fix`.
@@ -150,16 +153,24 @@ pub fn heal_after_swap(exe: &Path, installed: &str) -> Result<Option<String>, St
     Ok(Some(text))
 }
 
-/// Runs `<exe> doctor --fix` with a deadline. A spawn that fails at once (a
-/// fresh binary can be refused while another process still holds it open)
-/// is tried again twice.
+/// Runs `<exe> doctor --fix` with a deadline.
 fn run_fix(exe: &Path) -> Option<std::process::Output> {
+    run_fresh(exe, &["doctor", "--fix"], HEAL_TIMEOUT)
+}
+
+/// Runs a freshly written binary with a deadline. A spawn that fails at once
+/// (a fresh binary can be refused while another process still holds it open)
+/// is tried again twice.
+fn run_fresh(
+    exe: &Path,
+    args: &[&str],
+    timeout: std::time::Duration,
+) -> Option<std::process::Output> {
     for _ in 0..3 {
         let started = std::time::Instant::now();
         let mut cmd = std::process::Command::new(exe);
-        cmd.args(["doctor", "--fix"])
-            .stdin(std::process::Stdio::null());
-        if let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, HEAL_TIMEOUT) {
+        cmd.args(args).stdin(std::process::Stdio::null());
+        if let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, timeout) {
             return Some(out);
         }
         if started.elapsed() > std::time::Duration::from_secs(1) {
@@ -318,7 +329,10 @@ pub fn run(
     }
 
     if order.is_gt() {
-        o.breaking = breaking_notice(&stage, current);
+        match breaking_notice(&stage, current) {
+            Ok(text) => o.breaking = text,
+            Err(warning) => o.warnings.push(warning),
+        }
         if !o.breaking.is_empty() {
             (env.announce)(&o.breaking);
         }
@@ -395,10 +409,11 @@ mod tests {
     fn breaking_script() -> Vec<u8> {
         concat!(
             "#!/bin/sh\n",
-            "if [ \"$1\" = breaking ]; then\n",
+            "if [ \"$*\" = 'breaking --since 0.16.0 --json' ]; then\n",
             "  echo '[{\"version\":\"0.17.0\",\"component\":\"playbook\",",
             "\"summary\":\"The old flag is gone.\",\"action\":\"playbook init\",",
             "\"migration\":null}]'\n",
+            "elif [ \"$1\" = breaking ]; then exit 2\n",
             "else echo 'playbook 0.17.0'; fi\n"
         )
         .as_bytes()
@@ -527,6 +542,26 @@ mod tests {
         );
         assert_eq!(announced(), vec![out.breaking.clone()]);
         assert_eq!(out.installed.as_deref(), Some("0.17.0"));
+    }
+
+    #[test]
+    fn the_block_is_shown_before_a_swap_that_fails() {
+        let env = env_in("up-breaking-fail");
+        let bin = breaking_script();
+        announced();
+
+        let err = run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &|_: &Path| Err("smoke test failed".to_string()),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("smoke test"), "{err}");
+        assert_eq!(announced().len(), 1);
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.16.0");
     }
 
     #[test]

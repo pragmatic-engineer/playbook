@@ -362,9 +362,10 @@ pub enum Command {
     ///
     /// Reads the record built into this binary (ADR 0035). With `--since`, it
     /// lists the playbook entries newer than that version, up to this one.
-    /// Without it, it lists every entry. `playbook update` runs it on the new
-    /// binary to show what an upgrade crosses. Prints nothing when there is
-    /// nothing to list.
+    /// Without it, it lists every entry for every component: playbook, plugin
+    /// and telemetry. `playbook update` runs it with `--json` on the new
+    /// binary to show what an upgrade crosses. Prints nothing, or `[]` with
+    /// `--json`, when there is nothing to list.
     ///
     /// Example: `playbook breaking --since 0.25.0`
     Breaking {

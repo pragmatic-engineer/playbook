@@ -168,7 +168,8 @@ pub fn is_version(v: &str) -> bool {
 }
 
 /// The entries as a JSON list, the shape `lenient` reads back. `playbook
-/// breaking --json` prints it, so an older binary can read a newer one.
+/// breaking --since <version> --json` prints it, and an older binary's
+/// `playbook update` reads it, so the argv and this shape stay stable.
 pub fn to_json(entries: &[Entry]) -> String {
     serde_json::to_string(entries).unwrap_or_else(|_| "[]".into())
 }
@@ -195,18 +196,50 @@ pub fn select(entries: &[Entry], component: Component, from: &str, to: &str) -> 
     found
 }
 
+/// What `playbook breaking` prints: the playbook entries since `since` up to
+/// this binary, or every entry, as text or as JSON.
+pub fn command(since: Option<&str>, json: bool) -> Result<String, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let (entries, text) = match since {
+        Some(v) if !is_version(v) => {
+            return Err(format!("'{v}' is not a version such as 0.25.0"));
+        }
+        Some(v) => {
+            let e = entries_between(v, current);
+            let t = render(&e);
+            (e, t)
+        }
+        None => (all().to_vec(), render_all(all())),
+    };
+    Ok(if json {
+        format!("{}\n", to_json(&entries))
+    } else {
+        text
+    })
+}
+
 /// The playbook entries an upgrade from `from` to `to` crosses, from the
 /// embedded record.
 pub fn entries_between(from: &str, to: &str) -> Vec<Entry> {
     select(all(), Component::Playbook, from, to)
 }
 
-/// One short block for the user, or an empty string when there is nothing.
+/// One short block for the user about an upgrade, or an empty string when
+/// there is nothing.
 pub fn render(entries: &[Entry]) -> String {
+    render_titled("Breaking changes in this upgrade:", entries)
+}
+
+/// The same block for a full listing, which belongs to no upgrade.
+pub fn render_all(entries: &[Entry]) -> String {
+    render_titled("Breaking changes this binary knows about:", entries)
+}
+
+fn render_titled(title: &str, entries: &[Entry]) -> String {
     if entries.is_empty() {
         return String::new();
     }
-    let mut out = String::from("Breaking changes in this upgrade:\n");
+    let mut out = format!("{title}\n");
     for e in entries {
         out.push_str(&format!(
             "  {} {}: {}\n    Action: {}\n",
@@ -426,6 +459,29 @@ mod tests {
         .unwrap_err()
         .contains("exactly"));
         assert!(parse(&auto(AUTO_ACTION, "\"0001-memory-store-move\"")).is_ok());
+    }
+
+    #[test]
+    fn to_json_keeps_the_shape_older_binaries_read() {
+        // Older binaries parse this exact shape in `playbook update`.
+        assert_eq!(
+            to_json(&[entry("0.26.0", Component::Playbook)]),
+            r#"[{"version":"0.26.0","component":"playbook","summary":"change in 0.26.0","action":"playbook init","migration":null}]"#
+        );
+    }
+
+    #[test]
+    fn command_lists_since_a_version_or_everything_and_refuses_a_bad_version() {
+        assert_eq!(command(Some("0.26.0"), true).unwrap(), "[]\n");
+        assert!(command(Some("0.25.0"), false)
+            .unwrap()
+            .starts_with("Breaking changes in this upgrade:\n"));
+        assert!(command(None, false)
+            .unwrap()
+            .starts_with("Breaking changes this binary knows about:\n"));
+        assert!(command(Some("latest"), false)
+            .unwrap_err()
+            .contains("not a version"));
     }
 
     #[test]

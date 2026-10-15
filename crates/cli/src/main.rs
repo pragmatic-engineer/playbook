@@ -2288,15 +2288,17 @@ fn main() {
                 update::finish_with_heal(&mut outcome, &env.exe);
                 Ok(outcome)
             });
+            // Shown again after the swap and the heal, also when the heal
+            // failed (ADR 0035).
+            if let Ok(outcome) = &result {
+                eprint!("{}", outcome.breaking);
+            }
             match result {
                 Ok(outcome) if std::io::stdout().is_terminal() => {
                     print!(
                         "{}",
                         update::style::render(&playbook::ui::Caps::detect(), &outcome)
                     );
-                    // Shown again after the swap and the heal, also when the
-                    // heal failed (ADR 0035).
-                    eprint!("{}", outcome.breaking);
                 }
                 Ok(outcome) => {
                     for line in &outcome.out {
@@ -2305,7 +2307,6 @@ fn main() {
                     for warning in &outcome.warnings {
                         eprintln!("warning: {warning}");
                     }
-                    eprint!("{}", outcome.breaking);
                 }
                 Err(err) => {
                     eprintln!("update: {err}");
@@ -2314,18 +2315,12 @@ fn main() {
             }
         }
         Command::Breaking { since, json } => {
-            let entries = match since.as_deref() {
-                Some(v) if !playbook::breaking::is_version(v) => {
-                    eprintln!("breaking: '{v}' is not a version such as 0.25.0");
+            match playbook::breaking::command(since.as_deref(), json) {
+                Ok(text) => print!("{text}"),
+                Err(err) => {
+                    eprintln!("breaking: {err}");
                     std::process::exit(1);
                 }
-                Some(v) => playbook::breaking::entries_between(v, env!("CARGO_PKG_VERSION")),
-                None => playbook::breaking::all().to_vec(),
-            };
-            if json {
-                println!("{}", playbook::breaking::to_json(&entries));
-            } else {
-                print!("{}", playbook::breaking::render(&entries));
             }
         }
         Command::Mode { sub } => {
