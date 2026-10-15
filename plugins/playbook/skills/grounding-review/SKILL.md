@@ -20,7 +20,7 @@ You're a senior engineer leaving a review for a teammate. Simple, direct sentenc
 - **Always explain why,** but in a clause, not a paragraph. Every finding answers "why does this matter?" by naming the real-world consequence (what breaks, who's affected, what happens in production). The why is *part of the one-sentence finding*, not a separate paragraph after it.
 - Use "we" and "this" instead of "you" and "your code". "this could lead to..." not "you should...".
 - **Skip the praise.** Don't open with compliments. Jump straight to what you found.
-- For blocking issues, be clear and direct. For suggestions, name the change: "consider changing X to Y".
+- For `(blocking)` comments, be clear and direct. For suggestions, name the change: "consider changing X to Y".
 
 Full voice rules for posted comments are in the `playbook:writing-style` skill.
 
@@ -52,14 +52,14 @@ Claims without supporting proof MUST be tagged `[unverified]`.
 The orchestrator's prompt names the output shape. A finding in the review report looks like this:
 
 ```
-N. <label>: <one-line subject naming the consequence>
+N. <label> [decorations]: <one-line subject naming the consequence>
    `<file>:<line>` · <category> · <HIGH|MEDIUM|LOW>
    Evidence: `<exact code at that line>`
    <1 sentence body when possible, 2 at most: the problem and the failure it causes>
    Fix: <one fix, in plain words>
 ```
 
-- Labels: `blocking`, `issue`, `suggestion`, `question`, `nitpick`. `blocking` replaces `issue` specifically for a finding that must be fixed before merge; `issue` is reserved for a real problem that is not merge-blocking. `suggestion`, `question`, and `nitpick` are non-blocking by definition, so they never take the `blocking` label. The label sets both the finding order (see Findings in the skeleton) and the report subject (see the finding block); the posted comment uses the exact same bare label, no separate decoration needed.
+- Labels: the nine Conventional Comments labels, with decorations, as defined in `references/conventional-comments.md`. Write `<label> (<decorations>): <subject>`, for example `issue (blocking): ...`. The label and decoration set the finding order (see Findings in the skeleton) and the report subject; the posted comment uses the exact same text.
 - Subject names the consequence, not a rule: "user input runs as SQL", not "SQL injection".
 - Location line: `` `file:line` `` then category (security, logic, perf, tests, types, data, maintainability, and so on) then confidence, `·`-separated.
 - Body: 1 sentence when possible, 2 at most. State the problem plainly, skip restating what the code already shows (the reader can see the diff). The why is part of the sentence, not a separate paragraph. No bullet lists inside a finding.
@@ -67,6 +67,12 @@ N. <label>: <one-line subject naming the consequence>
 - `Fix:` one fix, not a menu, the smallest change that works.
 - No comment body here. A finding is plain; the posting step of the review command drafts each GitHub comment from the swept finding and adds it as a `Draft:` block under the finding. Reviewers never write that block.
 - Report-only finding (evidence not on a changed diff line, so no inline anchor): end with `Report-only: not on a changed line, no inline comment.` The posting step skips it.
+
+## Conventional Comments
+
+Review comments follow [Conventional Comments](https://conventionalcomments.org/): `<label> [decorations]: <subject>`, then an optional blank line and discussion. Read `references/conventional-comments.md` only when you write or read code review comments, and skip it otherwise. It holds the canonical definition, the label table, the decoration table and two full examples. The format is for code review comments only. Do not use it in chat, PR bodies, commit messages or plans.
+
+Finding codes such as F1 stay internal IDs. The posted comment text follows the standard.
 
 ## Evaluation Categories
 
