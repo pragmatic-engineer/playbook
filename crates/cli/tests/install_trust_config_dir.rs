@@ -137,7 +137,9 @@ fn project_field(c: &Case, project: &str, field: &str) -> Value {
 fn no_claude_json_is_a_clean_noop() {
     let c = run("trust-none", Trust::Ok, None);
     assert_eq!(c.rc, 0, "{}", c.log);
-    assert!(c.log.contains("Running playbook init"), "{}", c.log);
+    let migrate = c.log.find("Running playbook migrate");
+    assert!(migrate < c.log.find("Running playbook init"), "{}", c.log);
+    assert!(migrate.is_some(), "{}", c.log);
     assert!(!c.home.join(".claude.json").exists(), "file was created");
     assert!(fs::read_to_string(&c.record).unwrap().is_empty());
     let _ = &c.work;

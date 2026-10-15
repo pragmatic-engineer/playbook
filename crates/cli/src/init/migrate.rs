@@ -693,6 +693,97 @@ pub fn owned_notes(ctx: &Ctx) -> Vec<String> {
         .collect()
 }
 
+/// Where a migration stands, read without writing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum State {
+    /// An `Auto` migration in the applied record.
+    Applied,
+    /// An `Auto` migration not in the applied record yet.
+    Pending,
+    /// An `Idempotent` `Owned` migration, which runs on every heal.
+    EachHeal,
+    /// A check that found nothing to do.
+    Clear,
+    /// A check that found something for the user, with the command that
+    /// applies it when it is a `Consent` change.
+    Open {
+        message: String,
+        command: Option<&'static str>,
+    },
+    /// Not checked, because the check reads the state table and it does not
+    /// exist yet.
+    Unknown,
+}
+
+/// One registry entry and where it stands.
+pub struct Planned {
+    pub id: &'static str,
+    pub kind: &'static str,
+    pub scope: &'static str,
+    pub state: State,
+}
+
+/// Checks that read the state table, which a read-only caller skips when the
+/// table does not exist, so that reading never creates it.
+const READS_STATE: [&str; 4] = [
+    "0003-system-prompt-edited",
+    "0004-skills-edited",
+    "0005-statusline-edited",
+    STATUSLINE_MIGRATION,
+];
+
+/// Where every migration stands, writing nothing. `state_ready` says whether
+/// the state table exists; without it the checks that read it are skipped.
+pub fn plan(ctx: &Ctx, state_ready: bool) -> Vec<Planned> {
+    let applied_ids = if state_ready {
+        applied(&read_state(&ctx.home))
+    } else {
+        Vec::new()
+    };
+    registry()
+        .iter()
+        .map(|m| {
+            let needs_state = matches!(m.kind, Kind::Auto) || READS_STATE.contains(&m.id);
+            let state = if needs_state && !state_ready {
+                State::Unknown
+            } else {
+                match (&m.kind, m.scope) {
+                    (_, Scope::Consent { check, command }) => {
+                        check(ctx).map_or(State::Clear, |message| State::Open {
+                            message,
+                            command: Some(command),
+                        })
+                    }
+                    (Kind::Manual, _) => match (m.run)(ctx) {
+                        Outcome::Warn(message) => State::Open {
+                            message,
+                            command: None,
+                        },
+                        _ => State::Clear,
+                    },
+                    (Kind::Auto, _) if applied_ids.iter().any(|d| d == m.id) => State::Applied,
+                    (Kind::Auto, _) => State::Pending,
+                    (Kind::Idempotent, _) => State::EachHeal,
+                }
+            };
+            Planned {
+                id: m.id,
+                kind: match m.kind {
+                    Kind::Auto => "auto",
+                    Kind::Idempotent => "idempotent",
+                    Kind::Manual => "manual",
+                },
+                scope: match m.scope {
+                    Scope::Owned => "owned",
+                    Scope::Consent { .. } => "consent",
+                    Scope::Report => "report",
+                },
+                state,
+            }
+        })
+        .collect()
+}
+
 /// The highest migration number in the registry, from the id prefix.
 pub fn schema() -> u32 {
     registry()

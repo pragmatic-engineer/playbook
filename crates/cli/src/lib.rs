@@ -58,6 +58,7 @@ pub mod json;
 pub mod learn;
 pub mod manifest;
 pub mod memory_import;
+pub mod migrate_cli;
 pub mod mode;
 pub mod models;
 pub mod plan_cleanup;
@@ -385,8 +386,8 @@ pub enum Command {
     /// Example: `playbook doctor pending-migrations`
     ///
     /// `playbook doctor --fix` repairs playbook's own files after an upgrade
-    /// and prints the command for each change that needs you. It never
-    /// writes Claude Code settings.
+    /// and prints the command for each change that needs you, the same as
+    /// `playbook migrate`. It never writes Claude Code settings.
     #[command(args_conflicts_with_subcommands = true, subcommand_required = false)]
     Doctor {
         /// Run the safe migrations for playbook's own files, then list what needs you
@@ -394,6 +395,31 @@ pub enum Command {
         fix: bool,
         #[command(subcommand)]
         sub: Option<DoctorCommand>,
+    },
+    /// Bring playbook's own files up to date with this binary
+    ///
+    /// Runs the migrations for the gap between the version the upgrade record
+    /// names and this binary. Migrations that write only playbook's own files
+    /// run here; a change to Claude Code settings or a shell file prints the
+    /// `playbook init` command that applies it, and a report prints its own
+    /// fix. It never writes Claude Code settings. `update`, the install script
+    /// and `doctor --fix` run the same step.
+    ///
+    /// Exit codes: 0 when it finished or had nothing to do, 1 when a migration
+    /// failed, another playbook process held the lock, or the record could not
+    /// be written.
+    ///
+    /// Example: `playbook migrate --status`
+    Migrate {
+        /// List each migration with its scope and state, and the recorded and running versions, writing nothing
+        #[arg(long, conflicts_with = "dry_run")]
+        status: bool,
+        /// Show what a run would change, writing nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Print JSON for tools
+        #[arg(long)]
+        json: bool,
     },
     /// Read the run mode and effort ceiling a command's Step 0 needs, in one call
     ///

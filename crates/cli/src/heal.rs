@@ -119,7 +119,7 @@ pub enum Skip {
 }
 
 impl Skip {
-    fn reason(self) -> &'static str {
+    pub fn reason(self) -> &'static str {
         match self {
             Skip::StateUnreadable => "the state table could not be read",
             Skip::Downgrade => "a newer playbook ran here; nothing runs after a downgrade",

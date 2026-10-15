@@ -22,9 +22,9 @@ struct V025Home {
 }
 
 impl V025Home {
-    fn new() -> V025Home {
+    fn new(tag: &str) -> V025Home {
         let home = std::env::temp_dir().join(format!(
-            "playbook-upgrade-v025-{}",
+            "playbook-upgrade-v025-{tag}-{}",
             playbook::testing::run_id()
         ));
         let _ = fs::remove_dir_all(&home);
@@ -176,7 +176,7 @@ fn hook_commands(settings: &Path) -> Vec<String> {
 #[test]
 fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     // Arrange
-    let h = V025Home::new();
+    let h = V025Home::new("heal");
     let user_files = h.user_files();
     let config_hash =
         playbook::common::paths::playbook_root_from(&h.home).join("hooks/lib/config-hash.sh");
@@ -247,4 +247,89 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     let settled = h.session_message();
     assert!(!settled.contains("playbook init"), "{settled}");
     assert!(settled.contains("2 item(s) need you"), "{settled}");
+}
+
+/// Every file under `dir` with its bytes, sorted by path.
+fn tree(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for entry in fs::read_dir(&d).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                out.push((path.clone(), fs::read(&path).unwrap_or_default()));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+fn stdout(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn migrate_on_a_v025_home_previews_runs_once_and_leaves_user_files_alone() {
+    // Arrange
+    let h = V025Home::new("migrate");
+    let user_files = h.user_files();
+    let before = tree(&h.home);
+
+    // Act: look first, without writing.
+    let status = h.playbook(&["migrate", "--status"], "");
+    let dry = h.playbook(&["migrate", "--dry-run"], "");
+    let dry_json = h.playbook(&["migrate", "--dry-run", "--json"], "");
+
+    // Assert: both previews exit 0, name the work, and write nothing.
+    assert_eq!(tree(&h.home), before);
+    assert_eq!(status.status.code(), Some(0));
+    let status = stdout(&status);
+    assert!(status.contains("recorded: nothing yet"), "{status}");
+    let dead = status
+        .lines()
+        .find(|l| l.starts_with("0011-dead-hook-scripts "))
+        .unwrap_or_default();
+    assert!(
+        dead.contains("consent") && dead.contains("needs you"),
+        "{status}"
+    );
+    let dry = stdout(&dry);
+    assert!(dry.starts_with("would run: "), "{dry}");
+    assert!(dry.contains("(run `playbook init --hooks`)"), "{dry}");
+    assert!(dry.ends_with("dry run: nothing was written\n"), "{dry}");
+    let preview: Value = serde_json::from_slice(&dry_json.stdout).unwrap();
+    assert_eq!(preview["written"], false);
+    assert!(!preview["would_run"].as_array().unwrap().is_empty());
+
+    // Act: run it, then again.
+    let first = h.playbook(&["migrate", "--json"], "");
+    let second = h.playbook(&["migrate", "--json"], "");
+    let healed = tree(&h.home);
+    let after = h.playbook(&["migrate", "--dry-run"], "");
+    let status_after = stdout(&h.playbook(&["migrate", "--status"], ""));
+
+    // Assert: the first run heals and records, the second changes nothing,
+    // and Claude Code's settings and the shell rc file stay as they were.
+    assert_eq!(first.status.code(), Some(0), "{}", stdout(&first));
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let second: Value = serde_json::from_slice(&second.stdout).unwrap();
+    assert_eq!(first["recorded"], true);
+    assert!(!first["changed"].as_array().unwrap().is_empty(), "{first}");
+    assert_eq!(second["changed"], json!([]), "{second}");
+    assert!(second["open"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["command"] == "playbook init --hooks"));
+    assert!(
+        stdout(&after).starts_with("nothing would run"),
+        "{}",
+        stdout(&after)
+    );
+    assert!(!status_after.contains("not checked"), "{status_after}");
+    assert_eq!(tree(&h.home), healed);
+    assert_eq!(h.user_files(), user_files);
 }

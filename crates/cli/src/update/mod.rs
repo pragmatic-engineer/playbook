@@ -72,27 +72,33 @@ pub struct Outcome {
     pub installed: Option<String>,
 }
 
-/// The first release whose binary has `doctor --fix`. The `-0` sorts below
-/// every 0.27.0 pre-release, so a release candidate counts too.
+/// The first release whose binary has `doctor --fix`; `migrate` comes in the
+/// same or a later one. The `-0` sorts below every 0.27.0 pre-release, so a
+/// release candidate counts too.
 pub const FIRST_FIX_VERSION: &str = "0.27.0-0";
 
-/// How long `update` waits for the new binary's `doctor --fix`.
+/// How long `update` waits for the new binary's `migrate`.
 const HEAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
-/// After a swap, runs `<exe> doctor --fix` so the new binary runs its own
-/// migrations (ADR 0034). Best effort: a release older than
-/// `FIRST_FIX_VERSION` is skipped, and any failure is a warning that carries
-/// the lines `doctor --fix` printed.
+/// After a swap, runs `<exe> migrate` so the new binary runs its own
+/// migrations (ADR 0034). A release that has `doctor --fix` but not
+/// `migrate` answers with a usage error (exit 2), and gets `doctor --fix`
+/// instead. Best effort: a release older than `FIRST_FIX_VERSION` is
+/// skipped, and any failure is a warning that carries the lines it printed.
 pub fn heal_after_swap(exe: &Path, installed: &str) -> Result<Option<String>, String> {
     if resolve::compare(installed, FIRST_FIX_VERSION).is_lt() {
         return Ok(None);
     }
-    let out = run_fix(exe).ok_or_else(|| {
+    let late = || {
         format!(
-            "the new binary's doctor --fix did not run or took over {} s; run `playbook doctor --fix` by hand",
+            "the new binary's migrate did not run or took over {} s; run `playbook migrate` by hand",
             HEAL_TIMEOUT.as_secs()
         )
-    })?;
+    };
+    let mut out = run_heal(exe, &["migrate"]).ok_or_else(late)?;
+    if out.status.code() == Some(2) {
+        out = run_heal(exe, &["doctor", "--fix"]).ok_or_else(late)?;
+    }
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     if !out.status.success() {
         let detail: Vec<&str> = text
@@ -101,7 +107,7 @@ pub fn heal_after_swap(exe: &Path, installed: &str) -> Result<Option<String>, St
             .filter(|l| !l.is_empty())
             .collect();
         return Err(format!(
-            "doctor --fix exited with {}{}; run `playbook doctor --fix` by hand",
+            "migrate exited with {}{}; run `playbook migrate` by hand",
             out.status,
             if detail.is_empty() {
                 String::new()
@@ -113,15 +119,14 @@ pub fn heal_after_swap(exe: &Path, installed: &str) -> Result<Option<String>, St
     Ok(Some(text))
 }
 
-/// Runs `<exe> doctor --fix` with a deadline. A spawn that fails at once (a
-/// fresh binary can be refused while another process still holds it open)
-/// is tried again twice.
-fn run_fix(exe: &Path) -> Option<std::process::Output> {
+/// Runs `<exe> <args>` with a deadline. A spawn that fails at once (a fresh
+/// binary can be refused while another process still holds it open) is
+/// tried again twice.
+fn run_heal(exe: &Path, args: &[&str]) -> Option<std::process::Output> {
     for _ in 0..3 {
         let started = std::time::Instant::now();
         let mut cmd = std::process::Command::new(exe);
-        cmd.args(["doctor", "--fix"])
-            .stdin(std::process::Stdio::null());
+        cmd.args(args).stdin(std::process::Stdio::null());
         if let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, HEAL_TIMEOUT) {
             return Some(out);
         }
@@ -142,7 +147,7 @@ pub fn finish_with_heal(outcome: &mut Outcome, exe: &Path) {
     match heal_after_swap(exe, &version) {
         Ok(Some(text)) => outcome
             .out
-            .extend(text.lines().map(|l| format!("doctor --fix: {l}"))),
+            .extend(text.lines().map(|l| format!("migrate: {l}"))),
         Ok(None) => {}
         Err(warning) => outcome.warnings.push(warning),
     }
@@ -442,7 +447,7 @@ mod tests {
     fn the_heal_after_a_swap_runs_the_new_binary_and_reports_its_failure() {
         // Arrange
         let env = env_in("heal-run");
-        std::fs::write(&env.exe, "#!/bin/sh\necho \"fixed: $1 $2\"\n").unwrap();
+        std::fs::write(&env.exe, "#!/bin/sh\necho \"ran: $*\"\n").unwrap();
         swap::make_executable(&env.exe).unwrap();
         let mut done = Outcome {
             installed: Some("0.27.0-rc.1".into()),
@@ -459,14 +464,21 @@ mod tests {
         )
         .unwrap();
         let failed = heal_after_swap(&env.exe, "1.0.0").unwrap_err();
+        std::fs::write(
+            &env.exe,
+            "#!/bin/sh\n[ \"$1\" = migrate ] && exit 2\necho \"ran: $*\"\n",
+        )
+        .unwrap();
+        let older = heal_after_swap(&env.exe, "0.27.0").unwrap();
 
         // Assert
-        assert_eq!(done.out, vec!["doctor --fix: fixed: doctor --fix"]);
+        assert_eq!(done.out, vec!["migrate: ran: migrate"]);
+        assert_eq!(older.as_deref(), Some("ran: doctor --fix\n"));
         assert!(done.warnings.is_empty());
         assert!(untouched.out.is_empty() && untouched.warnings.is_empty());
         assert!(failed.contains(": failed: state: locked;"), "{failed}");
         assert!(
-            failed.contains("run `playbook doctor --fix` by hand"),
+            failed.contains("run `playbook migrate` by hand"),
             "{failed}"
         );
     }

@@ -88,7 +88,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `init`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `shell-init`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -482,7 +482,7 @@ The full health check is the `/playbook:doctor` command inside Claude Code. Thes
 
 Example: `playbook doctor pending-migrations`
 
-`playbook doctor --fix` repairs playbook's own files after an upgrade and prints the command for each change that needs you. It never writes Claude Code settings.
+`playbook doctor --fix` repairs playbook's own files after an upgrade and prints the command for each change that needs you, the same as `playbook migrate`. It never writes Claude Code settings.
 
 - `--fix`: Run the safe migrations for playbook's own files, then list what needs you
 
@@ -912,6 +912,20 @@ Example: `playbook memory import-claude --dry-run`
 Rebuild the memory graph from every fact on disk
 
 Memory is rebuilt on its own when a fact is saved, so you only need this after editing fact files by hand. The graph is written to `~/.config/playbook/data/memory.db`; the fact files stay the source of truth, so the database is safe to delete.
+
+### `playbook migrate`
+
+Bring playbook's own files up to date with this binary
+
+Runs the migrations for the gap between the version the upgrade record names and this binary. Migrations that write only playbook's own files run here; a change to Claude Code settings or a shell file prints the `playbook init` command that applies it, and a report prints its own fix. It never writes Claude Code settings. `update`, the install script and `doctor --fix` run the same step.
+
+Exit codes: 0 when it finished or had nothing to do, 1 when a migration failed, another playbook process held the lock, or the record could not be written.
+
+Example: `playbook migrate --status`
+
+- `--status`: List each migration with its scope and state, and the recorded and running versions, writing nothing
+- `--dry-run`: Show what a run would change, writing nothing
+- `--json`: Print JSON for tools
 
 ### `playbook mode`
 

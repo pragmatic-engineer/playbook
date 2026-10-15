@@ -503,6 +503,20 @@ else
     install_release_binary
 fi
 
+# --- playbook migrate --------------------------------------------------------
+
+# Brings playbook's own files up to the installed version (ADR 0034). It never
+# writes Claude Code's settings; items that need `playbook init` are only
+# printed. It runs with a terminal or --yes, and is skipped on a binary too old
+# to have the command. A failure here does not stop the install: the binary
+# retries on its next run.
+if { [ "$ASSUME_YES" -eq 1 ] || have_tty; } \
+    && "$PLAYBOOK_BIN_DIR/playbook" migrate --help >/dev/null 2>&1; then
+    log "Running playbook migrate"
+    "$PLAYBOOK_BIN_DIR/playbook" migrate || \
+        warn "playbook migrate did not finish; run \`playbook migrate\` to retry"
+fi
+
 # --- playbook init -----------------------------------------------------------
 
 # Everything above changed nothing outside the binary folder and the shell
