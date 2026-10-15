@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook update`: fetch a release binary, verify it (SHA256SUMS, then the
-//! build attestation), swap it in with a backup, then check PATH and the
-//! Claude Code plugin. Install.sh and this share one policy; see `verify`.
+//! build attestation), swap it in with a backup, then check PATH.
+//! Install.sh and this share one policy; see `verify`.
 
 pub mod download;
 pub mod pathcheck;
@@ -220,8 +220,6 @@ pub fn run(
     }
     o.warnings
         .extend(pathcheck::shadow_warning(&env.path_var, &env.exe));
-    o.warnings
-        .extend(pathcheck::plugin_hint(&env.home, &version));
     Ok(o)
 }
 
@@ -493,7 +491,7 @@ mod tests {
     }
 
     #[test]
-    fn a_shadowing_binary_and_a_stale_plugin_are_warned_about() {
+    fn a_shadowing_binary_is_warned_about_and_the_plugin_version_is_not_compared() {
         let mut env = env_in("up-shadow");
         let other = scratch_dir("up-shadow-first");
         std::fs::create_dir_all(&other).unwrap();
@@ -523,10 +521,15 @@ mod tests {
             "{:?}",
             out.warnings
         );
-        assert!(out
-            .warnings
-            .iter()
-            .any(|w| w.contains("claude plugin update playbook@pragmatic-engineer")));
+        // The plugin has its own version line, so a plugin that differs from
+        // the binary version is not a problem and gets no warning.
+        assert!(
+            !out.warnings
+                .iter()
+                .any(|w| w.contains("claude plugin update")),
+            "{:?}",
+            out.warnings
+        );
     }
 
     #[test]
