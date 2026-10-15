@@ -1,6 +1,6 @@
 ---
 name: engineering-standards-rust
-description: Rust rules for code and reviews, covering ownership, error handling, types, API design and Clippy lints. Use when writing or reviewing Rust, or a diff that touches .rs files.
+description: Rust rules for code and reviews, covering ownership, errors, types, API design, async, unsafe, testing and Clippy lints. Use when writing or reviewing Rust, or a diff that touches .rs files.
 ---
 
 # Engineering Standards: Rust
@@ -56,6 +56,61 @@ Load `references/api-design.md` when you add or change a `pub` item, a crate fea
 
 Load `references/style-and-naming.md` when you name things, write imports or `match` blocks, or review a diff for readability.
 
+### Async and concurrency
+
+- Do not block an async runtime thread. Move blocking work to `spawn_blocking`, `rayon` or a dedicated thread.
+- Do not hold a `std` lock guard or a `RefCell` borrow across `.await`. Use bounded channels, track every spawned task, and put a timeout on each remote call.
+
+Load `references/async-and-concurrency.md` when you write `async` code, spawn a task or thread, or add a lock, channel or atomic.
+
+### Iterators and collections
+
+- Prefer iterator adapters to index loops, and do not `collect` only to loop again.
+- Use the entry API for insert-or-update, and `Vec` and `HashMap` unless the access pattern asks for another type.
+
+Load `references/iterators-and-collections.md` when you write a loop, an iterator chain or a `collect`, or pick a collection type.
+
+### Performance
+
+- Profile a release build before you optimize, and benchmark with `criterion` or `divan`.
+- On a hot path, size collections up front, reuse buffers and avoid clones.
+
+Load `references/performance.md` when a change targets speed or memory, touches a hot path, or edits a build profile.
+
+### Unsafe and FFI
+
+- Write `unsafe` only when safe Rust cannot express the code, behind a safe API. Each `unsafe` block has a `// SAFETY:` comment and each `pub unsafe fn` a `# Safety` section.
+- Run tests under Miri for crates with unsafe code. Do not let a panic cross an `extern "C"` function.
+
+Load `references/unsafe-and-ffi.md` when a diff adds or changes `unsafe`, `extern`, raw pointers or `#[repr(C)]`.
+
+### Security and input
+
+- Parse untrusted input into typed values at the boundary, cap its size, and do not panic on it.
+- Pass process arguments one by one, bind SQL parameters, and keep secrets out of `Debug` and logs.
+
+Load `references/security-and-input.md` when code reads input from a network, a file or a user, runs a process, builds SQL, or handles a secret.
+
+### Testing
+
+- Unit tests sit in a `#[cfg(test)]` module, integration tests in `tests/`, and public items have doc tests.
+- Tests share no state and do not sleep. Tests may `unwrap`.
+
+Load `references/testing.md` when you write or review a test, or reproduce a bug as a failing test.
+
+### Tooling and CI
+
+- CI runs `cargo fmt --check` and Clippy on all targets with warnings denied. Lint levels live in `[workspace.lints]`.
+- Check dependencies with `cargo deny` or `cargo audit`, keep features additive, and test the MSRV.
+
+Load `references/tooling-and-ci.md` when you change `Cargo.toml` lints, CI, the toolchain, features or dependencies. It ends with the setup of pragmatic-engineer/playbook, this plugin's source, as a worked example.
+
+### Project structure
+
+- One workspace for several crates, with shared versions in `[workspace.dependencies]`. Keep `main.rs` thin and items private by default.
+
+Load `references/project-structure.md` when you add a crate or module, change visibility, or move code between crates.
+
 ### Antipatterns
 
 Load `references/antipatterns.md` when you review a Rust diff. It is a checklist of the most common smells, each with a fix, and a check where one exists.
@@ -77,3 +132,13 @@ The source list started from [mre/idiomatic-rust](https://github.com/mre/idiomat
 - [Elegant Library APIs in Rust](https://deterministic.space/elegant-apis-in-rust.html) by Pascal Hertleif
 - [When should I use String vs &str?](https://steveklabnik.com/writing/when-should-i-use-string-vs-str/) by Steve Klabnik
 - corrode.dev articles by Matthias Endler: [Be Simple](https://corrode.dev/blog/simple/), [Defensive Programming](https://corrode.dev/blog/defensive-programming/), [Pitfalls of Safe Rust](https://corrode.dev/blog/pitfalls-of-safe-rust/)
+- [Tokio tutorial](https://tokio.rs/tokio/tutorial) and API docs (MIT)
+- [Async: What is blocking?](https://ryhl.io/blog/async-what-is-blocking/) and [Actors with Tokio](https://ryhl.io/blog/actors-with-tokio/) by Alice Ryhl
+- [Cancelling async Rust](https://sunshowers.io/posts/cancelling-async-rust/) by Rain
+- [Rust Atomics and Locks](https://marabos.nl/atomics/) by Mara Bos
+- [The Rust Performance Book](https://nnethercote.github.io/perf-book/) by Nicholas Nethercote and contributors (MIT or Apache-2.0)
+- [The Rustonomicon](https://doc.rust-lang.org/nomicon/), the [Rust Reference](https://doc.rust-lang.org/reference/) and the [Miri README](https://github.com/rust-lang/miri)
+- [The Cargo Book](https://doc.rust-lang.org/cargo/), the [rustdoc book](https://doc.rust-lang.org/rustdoc/) and the [Clippy book](https://doc.rust-lang.org/clippy/)
+- Tool docs: [cargo-nextest](https://nexte.st/), [cargo-deny](https://embarkstudios.github.io/cargo-deny/), [insta](https://insta.rs/), [proptest](https://proptest-rs.github.io/proptest/) and [Command Line Applications in Rust](https://rust-cli.github.io/book/)
+- [Effective Rust](https://effective-rust.com/) by David Drysdale (CC BY-NC-ND 4.0, ideas only)
+- [projectrules.ai Rust rules](https://www.projectrules.ai/rules/rust), a secondary source. A few security ideas were kept and rewritten.

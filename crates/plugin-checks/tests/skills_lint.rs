@@ -332,3 +332,20 @@ fn intent_ids_and_reference_paths_in_the_prose_resolve() {
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
+
+/// The Rust standards index loads references only through its load-when
+/// lines, so a reference it does not name is never read.
+#[test]
+fn rust_standards_names_every_reference() {
+    let skill = read_skill("engineering-standards-rust/SKILL.md");
+    let named = reference_pointers(&skill);
+    let refs = skills_dir().join("engineering-standards-rust/references");
+    for entry in fs::read_dir(refs).unwrap().filter_map(Result::ok) {
+        let path = entry.path();
+        let name = path.file_stem().unwrap().to_string_lossy().to_string();
+        assert!(
+            named.contains(&name),
+            "engineering-standards-rust/SKILL.md does not name references/{name}.md"
+        );
+    }
+}

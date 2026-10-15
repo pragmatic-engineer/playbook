@@ -98,5 +98,5 @@ How to return and wrap errors, and when a panic is the right call. A lint marked
 16. **Do not drop an error in silence.** `let _ = ...`, `.ok()` or `.unwrap_or_default()` on a `Result` needs a comment that says why the error does not matter.
     Check: `clippy::let_underscore_must_use` (restriction) for `let _ =`, `clippy::unused_result_ok` (restriction) for `.ok()`, and review for `.unwrap_or_default()`. rustc `unused_must_use` catches only a bare call whose result is ignored.
 
-17. **`main` returns `Result`.** Let `?` reach `main`, or map the error to an `ExitCode`, and the user sees the message and its causes. A network service is different: it logs the full chain on the server and sends the client a short message, because the chain holds paths and internal details.
+17. **`main` returns `Result`.** Let `?` reach `main`, or map the error to an `ExitCode`, and the user sees the message and its causes. A network service sends the client a short message instead (security-and-input, rule 8).
     The `# Errors` and `# Panics` doc sections are in the API design reference, rule 19.
