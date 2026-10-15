@@ -44,7 +44,7 @@ fn stub(trust: Trust, record: &std::path::Path) -> String {
         ),
     };
     format!(
-        "case \"${{1:-}}\" in\n  --version) printf 'playbook 0.16.0\\n' ;;\n  init)\n    mkdir -p \"$CLAUDE_HOME\"\n    printf '{{}}' > \"$CLAUDE_HOME/settings.json\"\n    if [[ \"$*\" == *--help* ]]; then\n      printf -- '--aliases --system-prompt\\n'\n    fi\n    ;;\n  trust)\n        {trust_arm}\n    ;;\nesac\nexit 0\n"
+        "case \"${{1:-}}\" in\n  --version) printf 'playbook 0.16.0\\n' ;;\n  migrate)\n    if [[ \"$*\" == *--help* ]]; then exit \"${{MIGRATE_HELP_CODE:-0}}\"; fi\n    printf 'migrate\\n' >> \"$HOME/migrate.calls\"\n    exit \"${{MIGRATE_CODE:-0}}\"\n    ;;\n  init)\n    mkdir -p \"$CLAUDE_HOME\"\n    printf '{{}}' > \"$CLAUDE_HOME/settings.json\"\n    if [[ \"$*\" == *--help* ]]; then\n      printf -- '--aliases --system-prompt\\n'\n    fi\n    ;;\n  trust)\n        {trust_arm}\n    ;;\nesac\nexit 0\n"
     )
 }
 
@@ -56,6 +56,16 @@ fn run(tag: &str, trust: Trust, claude_json: Option<&str>) -> Case {
 
 /// Like `run`, with `~/.claude.json` content built from the home path.
 fn run_seeded(tag: &str, trust: Trust, seed: impl Fn(&std::path::Path) -> Option<String>) -> Case {
+    run_full(tag, trust, seed, &[])
+}
+
+/// Like `run_seeded`, with extra environment for the stub.
+fn run_full(
+    tag: &str,
+    trust: Trust,
+    seed: impl Fn(&std::path::Path) -> Option<String>,
+    envs: &[(&str, &str)],
+) -> Case {
     let work = Work::new(tag);
     let home = work.dir("home");
     let bindir = work.dir("bin");
@@ -104,6 +114,7 @@ fn run_seeded(tag: &str, trust: Trust, seed: impl Fn(&std::path::Path) -> Option
         .env("CLAUDE_HOME", home.join(".claude"))
         .env("HOME", &home)
         .env("PATH", format!("{}:{}", bindir.display(), tools.display()))
+        .envs(envs.iter().copied())
         .output()
         .expect("bash spawns");
     let log = format!("{}{}", stdout(&out), stderr(&out));
@@ -133,11 +144,51 @@ fn project_field(c: &Case, project: &str, field: &str) -> Value {
     v["projects"][project][field].clone()
 }
 
+fn migrate_calls(c: &Case) -> String {
+    fs::read_to_string(c.home.join("migrate.calls")).unwrap_or_default()
+}
+
+#[test]
+fn migrate_is_skipped_on_an_old_binary_and_a_failure_only_warns() {
+    // Act
+    let old = run_full(
+        "migrate-old",
+        Trust::Ok,
+        |_| None,
+        &[("MIGRATE_HELP_CODE", "2")],
+    );
+    let failing = run_full(
+        "migrate-fail",
+        Trust::Ok,
+        |_| None,
+        &[("MIGRATE_CODE", "1")],
+    );
+
+    // Assert
+    assert_eq!(old.rc, 0, "{}", old.log);
+    assert!(!old.log.contains("Running playbook migrate"), "{}", old.log);
+    assert_eq!(migrate_calls(&old), "");
+    assert_eq!(failing.rc, 0, "{}", failing.log);
+    assert!(
+        failing.log.contains("playbook migrate did not finish"),
+        "{}",
+        failing.log
+    );
+    assert!(
+        failing.log.contains("Running playbook init"),
+        "{}",
+        failing.log
+    );
+}
+
 #[test]
 fn no_claude_json_is_a_clean_noop() {
     let c = run("trust-none", Trust::Ok, None);
     assert_eq!(c.rc, 0, "{}", c.log);
-    assert!(c.log.contains("Running playbook init"), "{}", c.log);
+    let migrate = c.log.find("Running playbook migrate");
+    assert!(migrate < c.log.find("Running playbook init"), "{}", c.log);
+    assert!(migrate.is_some(), "{}", c.log);
+    assert_eq!(migrate_calls(&c), "migrate\n");
     assert!(!c.home.join(".claude.json").exists(), "file was created");
     assert!(fs::read_to_string(&c.record).unwrap().is_empty());
     let _ = &c.work;

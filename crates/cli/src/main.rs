@@ -2031,15 +2031,22 @@ fn main() {
         Command::Doctor {
             fix: true,
             sub: None,
+        } => std::process::exit(playbook::migrate_cli::run(
+            &common::home_dir(),
+            playbook::migrate_cli::Mode::Run,
+            false,
+        )),
+        Command::Migrate {
+            status,
+            dry_run,
+            json,
         } => {
-            let ctx = init::migrate::Ctx::for_home(&common::home_dir());
-            let out = playbook::heal::run(
-                &ctx,
-                playbook::heal::Trigger::Fix,
-                common::time::now_epoch_secs(),
-            );
-            print!("{}", playbook::heal::render_fix(&out));
-            std::process::exit(out.exit_code());
+            let mode = match (status, dry_run) {
+                (true, _) => playbook::migrate_cli::Mode::Status,
+                (_, true) => playbook::migrate_cli::Mode::DryRun,
+                _ => playbook::migrate_cli::Mode::Run,
+            };
+            std::process::exit(playbook::migrate_cli::run(&common::home_dir(), mode, json));
         }
         Command::Doctor {
             fix: false,
