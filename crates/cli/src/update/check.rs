@@ -125,13 +125,13 @@ pub struct Held {
     pub until: u64,
 }
 
-/// Whether a `<version>@<unix seconds>` stamp names `version` and is less
-/// than a day old at `now`.
 /// The `<version>@<unix seconds>` stamp `notified` and `tried` hold.
 pub fn stamp(version: &str, now: u64) -> String {
     format!("{version}@{now}")
 }
 
+/// Whether a `<version>@<unix seconds>` stamp names `version` and is less
+/// than a day old at `now`.
 fn stamped_recently(stamp: Option<&str>, version: &str, now: u64) -> bool {
     stamp
         .and_then(|n| n.rsplit_once('@'))
