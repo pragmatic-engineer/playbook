@@ -259,6 +259,78 @@ pub fn render(frame: &mut Frame, app: &App) {
     if let Some(scroll) = app.help {
         render_help(frame, area, scroll, &pal);
     }
+    if let Some(editor) = &app.editor {
+        render_editor(frame, area, editor, &pal);
+    }
+}
+
+/// The layout editor window, centered over the panels.
+fn render_editor(frame: &mut Frame, area: Rect, ed: &super::editor::Editor, pal: &Palette) {
+    let width = area.width.saturating_sub(2).min(78);
+    let height = 14u16.min(area.height.saturating_sub(2));
+    let rect = Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    );
+    let accent = Style::default()
+        .fg(pal.color(pal.hi))
+        .add_modifier(Modifier::BOLD);
+    let plain = Style::default().fg(pal.color(pal.fg));
+    let mut lines: Vec<Line> = Vec::new();
+    let mut tabs = vec![Span::raw(" ")];
+    for (i, tab) in ed.layout.tabs.iter().enumerate() {
+        let shown = format!(" {} ", tab.name);
+        tabs.push(if i == ed.tab {
+            Span::styled(shown, accent.add_modifier(Modifier::UNDERLINED))
+        } else {
+            Span::styled(shown, plain)
+        });
+    }
+    lines.push(Line::from(tabs));
+    lines.push(match &ed.rename {
+        Some(name) => Line::styled(
+            format!(" New name: {name}_   enter apply   esc cancel"),
+            accent,
+        ),
+        None => Line::raw(""),
+    });
+    for (i, id) in super::layout::ALL.iter().enumerate() {
+        let mark = match ed.position(*id) {
+            Some(at) => format!("[{}]", at + 1),
+            None => "[ ]".to_string(),
+        };
+        let pointer = if i == ed.row { ">" } else { " " };
+        let text = format!(" {pointer} {mark} {:<10} {}", id.word(), id.describe());
+        lines.push(if i == ed.row {
+            Line::styled(text, accent)
+        } else {
+            Line::styled(text, plain)
+        });
+    }
+    lines.push(match &ed.message {
+        Some(m) => Line::styled(format!(" {m}"), Style::default().fg(pal.color(pal.error))),
+        None => Line::raw(""),
+    });
+    lines.push(Line::styled(
+        " Left/Right tab   j/k line   space add or remove   J/K move panel",
+        plain,
+    ));
+    lines.push(Line::styled(
+        " < > move tab   n new   x delete   r rename   w save   R reset   esc cancel",
+        plain,
+    ));
+    let edge = Style::default().fg(pal.color(pal.hi));
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(edge)
+        .title(Line::styled(
+            "\u{2524} Layout: tabs and panels \u{251c}",
+            edge,
+        ));
+    frame.render_widget(ratatui::widgets::Clear, rect);
+    frame.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 /// Height of the help window on a screen `rows` tall: all its lines, or what
@@ -1511,5 +1583,73 @@ mod tests {
         app.key(press(KeyCode::Right));
 
         assert_eq!(app.cursor, None);
+    }
+
+    #[test]
+    fn e_opens_the_layout_editor_and_escape_closes_it_without_changes() {
+        let mut app = tabbed_app();
+
+        app.key(press(KeyCode::Char('e')));
+        let open = app.editor.is_some();
+        app.key(press(KeyCode::Char('x')));
+        app.key(press(KeyCode::Esc));
+
+        assert!(open);
+        assert!(app.editor.is_none());
+        assert_eq!(app.layout, Layout::default());
+    }
+
+    #[test]
+    fn saving_in_the_editor_applies_the_layout_and_asks_to_store_it() {
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+        app.key(press(KeyCode::Char('x')));
+
+        let effect = app.key(press(KeyCode::Char('w')));
+
+        assert_eq!(
+            effect,
+            crate::tui::app::Effect::SaveLayout(
+                "Numbers=models,breakdown,budget;Sessions=live,sessions".into()
+            )
+        );
+        assert_eq!(app.layout.tabs.len(), 2);
+        assert!(app.tab < 2);
+        assert!(app.editor.is_none());
+    }
+
+    #[test]
+    fn reset_in_the_editor_restores_the_default_tabs_and_clears_the_store() {
+        let mut app = app_with(&[event("opus", "alpha", 1.0)]);
+        app.layout = Layout::parse("One=spend").unwrap();
+        app.key(press(KeyCode::Char('e')));
+
+        let effect = app.key(press(KeyCode::Char('R')));
+
+        assert_eq!(effect, crate::tui::app::Effect::SaveLayout(String::new()));
+        assert_eq!(app.layout, Layout::default());
+    }
+
+    #[test]
+    fn the_editor_window_lists_the_panels_and_the_keys() {
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+
+        let text = screen(&app, 100, 30);
+
+        assert!(text.contains("Layout: tabs and panels"), "{text}");
+        assert!(text.contains("[1] spend"), "{text}");
+        assert!(text.contains("[ ] live"), "{text}");
+        assert!(text.contains("w save"), "{text}");
+    }
+
+    #[test]
+    fn ctrl_c_quits_from_the_editor() {
+        let mut app = tabbed_app();
+        app.key(press(KeyCode::Char('e')));
+
+        app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+        assert!(app.quit);
     }
 }

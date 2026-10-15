@@ -9,6 +9,7 @@ pub mod app;
 pub mod budget;
 pub mod chart;
 pub mod data;
+pub mod editor;
 pub mod fmt;
 pub mod icon;
 pub mod keys;
@@ -155,6 +156,15 @@ fn event_loop(
                 Event::Key(key) if key.kind == KeyEventKind::Press => match app.key(key) {
                     Effect::Requery => worker.ask(app.range, &app.filter),
                     Effect::Sessions => sessions.open(),
+                    Effect::SaveLayout(text) => match ui_state::save_layout(&home, &text) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            app.error = Some(format!(
+                                "Layout kept for this run only. To keep it: playbook config set --global usage.ui.layout '{text}'"
+                            ));
+                        }
+                        Err(e) => app.error = Some(e),
+                    },
                     Effect::None => {}
                 },
                 _ => {}

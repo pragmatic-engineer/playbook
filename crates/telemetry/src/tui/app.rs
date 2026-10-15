@@ -157,6 +157,8 @@ pub struct App {
     pub layout: super::layout::Layout,
     /// The selected tab, an index into `layout.tabs`.
     pub tab: usize,
+    /// The layout editor, while it is open.
+    pub editor: Option<super::editor::Editor>,
 }
 
 /// What the loop must do after a key.
@@ -167,6 +169,8 @@ pub enum Effect {
     Requery,
     /// Open the Sessions view.
     Sessions,
+    /// Store the layout text (empty means back to the default).
+    SaveLayout(String),
 }
 
 impl App {
@@ -198,6 +202,7 @@ impl App {
             refresh_every: Duration::from_secs(DEFAULT_REFRESH_SECONDS),
             layout: super::layout::Layout::classic(),
             tab: 0,
+            editor: None,
         }
     }
 
@@ -488,10 +493,49 @@ impl App {
         if self.help.is_some() {
             return self.help_key(key.code, ctrl);
         }
+        if self.editor.is_some() {
+            return self.editor_key(key.code, ctrl);
+        }
         match keys::lookup(key.code, ctrl) {
             Some(binding) => self.run(binding.cmd, key.code),
             None => Effect::None,
         }
+    }
+
+    /// Keys while the layout editor is open. Ctrl-C quits.
+    fn editor_key(&mut self, code: KeyCode, ctrl: bool) -> Effect {
+        if ctrl && code == KeyCode::Char('c') {
+            self.quit = true;
+            return Effect::None;
+        }
+        let Some(editor) = self.editor.as_mut() else {
+            return Effect::None;
+        };
+        match editor.key(code) {
+            super::editor::Outcome::Stay => Effect::None,
+            super::editor::Outcome::Cancel => {
+                self.editor = None;
+                Effect::None
+            }
+            super::editor::Outcome::Save => {
+                let edited = editor.layout.clone();
+                let tab = editor.tab;
+                self.editor = None;
+                self.use_layout(edited, tab);
+                Effect::SaveLayout(self.layout.to_text())
+            }
+            super::editor::Outcome::Reset => {
+                self.editor = None;
+                self.use_layout(super::layout::Layout::default(), 0);
+                Effect::SaveLayout(String::new())
+            }
+        }
+    }
+
+    /// Switches to `layout`, showing tab `tab` of it.
+    fn use_layout(&mut self, layout: super::layout::Layout, tab: usize) {
+        self.layout = layout;
+        self.go_tab(tab as isize);
     }
 
     /// Keys while the help window is open: the arrows scroll it, Ctrl-C quits
@@ -637,6 +681,9 @@ impl App {
                 }
             }
             Cmd::Sessions => return Effect::Sessions,
+            Cmd::EditLayout => {
+                self.editor = Some(super::editor::Editor::new(&self.layout, self.tab));
+            }
             Cmd::Help => self.help = Some(0),
             Cmd::Refresh => return Effect::Requery,
         }
@@ -1357,6 +1404,7 @@ mod tests {
             SortFlip,
             Pick,
             Sessions,
+            EditLayout,
             Help,
             Refresh,
         ] {

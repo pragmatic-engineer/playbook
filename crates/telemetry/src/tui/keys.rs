@@ -40,6 +40,7 @@ pub enum Cmd {
     SortFlip,
     Pick,
     Sessions,
+    EditLayout,
     Help,
     Refresh,
 }
@@ -359,6 +360,16 @@ pub const BINDINGS: &[Binding] = &[
         panels: ALL_PANELS,
         text: "Open the full screen Sessions list",
         hint: hint("p", "sessions", 11, 1),
+    },
+    Binding {
+        cmd: Cmd::EditLayout,
+        keys: &[c('e')],
+        ctrl: false,
+        shown: "e",
+        group: Group::Views,
+        panels: ALL_PANELS,
+        text: "Edit the tabs and the panels on each",
+        hint: None,
     },
     Binding {
         cmd: Cmd::Help,

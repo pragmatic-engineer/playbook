@@ -139,6 +139,17 @@ pub fn save(home: &Path, state: &UiState) {
     let _ = crate::config::save_app(home, KEY, &Value::from(state.to_text()));
 }
 
+/// Stores the layout text, or clears the stored layout and the saved screen
+/// setup when `text` is empty. `Ok(false)` means there is no config store to
+/// write to; the layout then lasts only for this run.
+pub fn save_layout(home: &Path, text: &str) -> Result<bool, String> {
+    let wrote = crate::config::save_app(home, "usage.ui.layout", &Value::from(text))?;
+    if text.is_empty() {
+        crate::config::save_app(home, KEY, &Value::from(""))?;
+    }
+    Ok(wrote)
+}
+
 /// The stored layout text and the layout it gives, with a message when the
 /// stored text is invalid.
 pub fn load_layout(home: &Path) -> (super::layout::Layout, Option<String>) {
@@ -257,5 +268,51 @@ mod tests {
 
         assert_eq!(layout, super::super::layout::Layout::default());
         assert!(warning.is_some_and(|w| w.contains("bogus")));
+    }
+
+    fn store(tag: &str) -> std::path::PathBuf {
+        let home = crate::util::scratch_dir(tag);
+        let data = crate::config::root(&home).join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let conn = rusqlite::Connection::open(playbook_data::config::db_in(&data)).unwrap();
+        conn.execute_batch(playbook_data::config::SCHEMA_SQL)
+            .unwrap();
+        home
+    }
+
+    #[test]
+    fn a_saved_layout_is_read_back_on_the_next_load() {
+        let home = store("ui-save-layout");
+
+        let wrote = save_layout(&home, "Money=budget;Live=live").unwrap();
+        let (layout, warning) = load_layout(&home);
+
+        assert!(wrote);
+        assert!(warning.is_none());
+        assert_eq!(layout.to_text(), "Money=budget;Live=live");
+    }
+
+    #[test]
+    fn resetting_the_layout_clears_the_saved_layout_and_the_saved_state() {
+        let home = store("ui-reset-layout");
+        save_layout(&home, "Money=budget").unwrap();
+        save(&home, &sample());
+
+        save_layout(&home, "").unwrap();
+
+        assert_eq!(
+            load_layout(&home).0,
+            super::super::layout::Layout::default()
+        );
+        assert_eq!(load(&home), UiState::default());
+    }
+
+    #[test]
+    fn saving_a_layout_without_a_config_store_reports_that_nothing_was_written() {
+        let home = crate::util::scratch_dir("ui-save-nostore");
+
+        let wrote = save_layout(&home, "Money=budget").unwrap();
+
+        assert!(!wrote);
     }
 }
