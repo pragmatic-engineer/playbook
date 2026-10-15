@@ -147,7 +147,7 @@ Playbook looks for a newer release on its own, the way Claude Code does. The `up
 
 | `update.mode` | What happens |
 |---|---|
-| `notify` (default) | A command run in a terminal prints one line on stderr when a newer release exists: `playbook X.Y.Z is available (you have A.B.C). Run: playbook update`. Homebrew installs see `brew upgrade playbook`. The line shows at most once in 24 hours for each version. |
+| `notify` (default) | A command run in a terminal prints one line on stderr when a newer release exists: `playbook X.Y.Z is available (you have A.B.C). Run: playbook update`. Homebrew installs see `brew upgrade playbook`. On an install that can update itself, the line also names `playbook config set --global update.mode auto`. The line shows at most once in 24 hours for each version. |
 | `auto` | Playbook installs the release in the background, with the same checks as `playbook update`, and runs the new binary's migrations. The command you ran finishes on the old binary. The next command you run in a terminal prints `playbook updated from A.B.C to X.Y.Z` and any breaking changes. |
 | `off` | No check runs. |
 
@@ -161,8 +161,8 @@ playbook config set --global update.mode auto
 
 How the check works:
 
-- A command reads the last result from `~/.config/playbook/data/config.db`. When that result is older than `update.checkIntervalHours` (24 by default), the command starts a background process that asks the GitHub releases API for the newest `vX.Y.Z` release. No command waits on the network. The request is unauthenticated and sends no information about you. Offline, rate limited or behind a proxy, the check stays silent and runs again after the next interval.
-- The check does not run for hooks, the status line, `shell-init`, `json`, the background `usage warm` and `usage collect` runs, any run with `--json`, or when a CI variable or `PLAYBOOK_HEADLESS` is set. The notice needs a terminal on stderr. An automatic update does not.
+- A command reads the last result from `~/.config/playbook/data/config.db`. When that result is older than `update.checkIntervalHours` (24 by default), the command starts a background process that asks the GitHub releases API for the newest `vX.Y.Z` release. No command waits on the network. The request is unauthenticated, and its only identifying header is the `playbook/<version>` user agent. GitHub sees your IP address, as with any request. In `auto` mode the background process also downloads the release and checks its attestation through `gh`, the same requests `playbook update` makes. Offline, rate limited or behind a proxy, the check stays silent and runs again after the next interval.
+- The check does not run for hooks, the status line, `shell-init`, `version`, `json`, `update`, the background `usage warm` and `usage collect` runs, any run with `--json`, or when a CI variable or `PLAYBOOK_HEADLESS` is set. The notice needs a terminal on stderr. An automatic update does not.
 - `auto` falls back to the notice, with the reason, in these cases: a Homebrew install; a platform `playbook update` does not support, such as Windows; a development or release candidate build; a release less than an hour old, or one whose publish time is unknown; an install directory you cannot write; another update in progress; a release whose breaking changes need a step from you or cannot be read; and a build attestation that cannot be checked, for example when `gh` is missing. A failed automatic update prints one warning with the fix. When an attempt never runs, for example on an offline machine, the notice shows after 15 minutes.
 - `playbook update --check` and `playbook doctor` show the mode, the last check and what it found.
 

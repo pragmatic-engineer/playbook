@@ -161,6 +161,17 @@ impl Cache {
             .unwrap_or_default())
     }
 
+    /// Reads the row through a read-only connection, which creates and
+    /// changes nothing. A missing database or row is the default.
+    pub fn read_only(root: &Path) -> Result<Cache, String> {
+        let rows = crate::state::list_read_only(root, CACHE_KEY).map_err(|e| e.to_string())?;
+        Ok(rows
+            .into_iter()
+            .find(|(key, _)| key == CACHE_KEY)
+            .and_then(|(_, text)| serde_json::from_str(&text).ok())
+            .unwrap_or_default())
+    }
+
     /// Reads, changes and writes the row in one transaction and returns what
     /// `change` returns, so two processes never both claim the same action.
     pub fn update<T>(root: &Path, change: impl FnOnce(&mut Cache) -> T) -> Result<T, String> {
@@ -303,13 +314,18 @@ pub enum Tail<'a> {
     Hint,
 }
 
-/// The one line the notice prints.
-pub fn notice_text(latest: &str, current: &str, homebrew: bool, tail: Tail) -> String {
-    let fix = if homebrew {
+/// The command that updates the install.
+fn update_command(homebrew: bool) -> &'static str {
+    if homebrew {
         "brew upgrade playbook"
     } else {
         "playbook update"
-    };
+    }
+}
+
+/// The one line the notice prints.
+pub fn notice_text(latest: &str, current: &str, homebrew: bool, tail: Tail) -> String {
+    let fix = update_command(homebrew);
     let tail = match tail {
         Tail::Nothing => String::new(),
         Tail::Skipped(reason) => format!(" (auto update skipped: {reason})"),
@@ -454,38 +470,76 @@ impl UpdateMode {
 }
 
 /// One line on the check for `doctor` and `update --check`: the mode, when
-/// the last check ran and what it found, and why auto holds a release back.
-pub fn status_line(settings: Settings, cache: &Cache, now: u64) -> String {
-    let mut line = format!("update.mode is {}", settings.mode.label());
-    if settings.mode == UpdateMode::Off {
-        line.push_str(", so no release check runs");
+/// the last background check started and what it found, and in `auto` mode
+/// why a newer release is held back.
+pub fn status_line(mode: UpdateMode, cache: Result<&Cache, &str>, probe: &Probe) -> String {
+    let mut line = format!("update.mode is {}", mode.label());
+    if mode == UpdateMode::Off {
+        line.push_str(", so no background release check runs");
         return line;
     }
+    let cache = match cache {
+        Ok(cache) => cache,
+        Err(err) => {
+            line.push_str(&format!(
+                "; the release check cache could not be read: {err}"
+            ));
+            return line;
+        }
+    };
     if cache.checked_at == 0 {
-        line.push_str("; no release check has run yet");
+        line.push_str("; no background release check has run yet");
         return line;
     }
     let at = crate::common::time::iso_utc(i64::try_from(cache.checked_at).unwrap_or(0));
-    line.push_str(&format!("; last check {at}"));
+    line.push_str(&format!("; last background check started {at}"));
     if let Some(latest) = &cache.latest {
-        line.push_str(&format!(", latest release {latest}"));
-        if let Some(reason) = cache.held_reason(latest, now) {
-            line.push_str(&format!(", auto update held: {reason}"));
-        }
+        line.push_str(&format!(", latest release found {latest}"));
+    }
+    let held = cache
+        .newer_than(&probe.current)
+        .filter(|_| mode == UpdateMode::Auto)
+        .and_then(|latest| super::auto::hold_reason(&probe.install, cache, latest, probe.now));
+    if let Some(reason) = held {
+        line.push_str(&format!(", auto update held: {reason}"));
     }
     line
 }
 
-/// `status_line` for this machine.
-pub fn status_here() -> String {
-    let home = crate::common::home_dir();
-    let root = crate::common::paths::playbook_root_from(&home);
-    let cache = Cache::read(&root).unwrap_or_default();
-    status_line(
-        Settings::read(&home),
-        &cache,
-        crate::common::time::now_epoch_secs(),
-    )
+/// The release check status of the playbook root under `home`.
+pub struct Status {
+    pub line: String,
+    /// The cached release when it is newer than the running binary.
+    pub newer: Option<String>,
+    /// The command that updates this install.
+    pub fix: &'static str,
+}
+
+/// The status for `home`, read through read-only connections, so it creates
+/// and changes nothing on disk.
+pub fn status_at(home: &Path) -> Status {
+    let root = crate::common::paths::playbook_root_from(home);
+    let mode = Settings::peek_mode(&root);
+    let cache = Cache::read_only(&root);
+    let exe = std::env::current_exe().unwrap_or_default();
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
+    let current = env!("CARGO_PKG_VERSION");
+    let probe = Probe {
+        current: current.to_string(),
+        now: crate::common::time::now_epoch_secs(),
+        stderr_tty: false,
+        install: super::auto::Install::real(&exe, current),
+    };
+    let newer = cache
+        .as_ref()
+        .ok()
+        .and_then(|c| c.newer_than(current))
+        .map(str::to_string);
+    Status {
+        line: status_line(mode, cache.as_ref().map_err(String::as_str), &probe),
+        newer,
+        fix: update_command(probe.install.homebrew),
+    }
 }
 
 /// Starts `<exe> update --refresh-check` detached, in its own process group
@@ -1020,25 +1074,44 @@ mod tests {
         let cache = Cache {
             checked_at: 1_792_024_626,
             latest: Some("0.27.0".into()),
-            held: Some(Held {
-                version: "0.27.0".into(),
-                reason: "the install directory is not writable".into(),
-                until: u64::MAX,
-            }),
+            published_at: Some("2026-10-15T00:37:06Z".into()),
             ..Cache::default()
         };
+        let mut brew = probe(NOW);
+        brew.install.homebrew = true;
         assert_eq!(
-            status_line(settings(UpdateMode::Auto), &cache, NOW),
-            "update.mode is auto; last check 2026-10-15T00:37:06Z, latest release 0.27.0, \
-             auto update held: the install directory is not writable"
+            status_line(UpdateMode::Auto, Ok(&cache), &brew),
+            "update.mode is auto; last background check started 2026-10-15T00:37:06Z, \
+             latest release found 0.27.0, auto update held: Homebrew manages this install"
         );
         assert_eq!(
-            status_line(notify(), &Cache::default(), NOW),
-            "update.mode is notify; no release check has run yet"
+            status_line(UpdateMode::Notify, Ok(&cache), &brew),
+            "update.mode is notify; last background check started 2026-10-15T00:37:06Z, \
+             latest release found 0.27.0"
         );
         assert_eq!(
-            status_line(settings(UpdateMode::Off), &cache, NOW),
-            "update.mode is off, so no release check runs"
+            status_line(UpdateMode::Notify, Ok(&Cache::default()), &probe(NOW)),
+            "update.mode is notify; no background release check has run yet"
+        );
+        assert_eq!(
+            status_line(UpdateMode::Auto, Err("disk I/O error"), &probe(NOW)),
+            "update.mode is auto; the release check cache could not be read: disk I/O error"
+        );
+        assert_eq!(
+            status_line(UpdateMode::Off, Ok(&cache), &probe(NOW)),
+            "update.mode is off, so no background release check runs"
+        );
+    }
+
+    #[test]
+    fn the_read_only_cache_read_creates_nothing() {
+        let root = root("check-read-only");
+        assert_eq!(Cache::read_only(&root), Ok(Cache::default()));
+        assert!(!crate::config::store::db_path(&root).exists());
+        fetched(&root);
+        assert_eq!(
+            Cache::read_only(&root).unwrap().latest.as_deref(),
+            Some("0.27.0")
         );
     }
 }

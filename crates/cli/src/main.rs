@@ -2305,7 +2305,9 @@ fn main() {
                 )?;
                 update::finish_with_heal(&mut outcome, &env.exe);
                 if opts.check {
-                    outcome.out.push(update::check::status_here());
+                    outcome
+                        .out
+                        .push(update::check::status_at(&common::home_dir()).line);
                 }
                 Ok(outcome)
             });
