@@ -58,5 +58,5 @@ Vulnerabilities in this repository's code, including but not limited to:
 This repository is part of the `pragmatic-engineer` repo set and follows a common
 hardening posture: ruleset-managed branch and tag protection, signed
 commits, SHA-pinned third-party actions, and an App-based bot identity
-with narrow per-repo scope. For the cross-repo configuration as code,
-see the [`repo-config`](https://github.com/igorjs/repo-config) repo.
+with narrow per-repo scope. The cross-repo configuration is managed as code
+in a private repository.
