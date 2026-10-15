@@ -39,6 +39,37 @@ impl Home {
         cmd
     }
 
+    /// Runs `init --only telemetry` with a port that is free now. Init would
+    /// pick the shared default 47318 for every test that runs at the same
+    /// moment, and only one collector can hold it, so the others never come
+    /// up. The port is not held, so another process could still take it, but
+    /// that is rare next to the shared default.
+    fn init_telemetry(&self) -> std::process::Output {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let dir = self.0.join(".config/playbook/data");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("collector.json"),
+            format!(r#"{{"pid":0,"port":{port},"token":"test-token"}}"#),
+        )
+        .unwrap();
+        let out = self
+            .cmd()
+            .args(["init", "--only", "telemetry"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            self.state().map(|s| s["port"].clone()),
+            Some(Value::from(port)),
+            "init must keep the port chosen for this test"
+        );
+        out
+    }
+
     fn session_start(&self) {
         let mut child = self
             .cmd()
@@ -100,11 +131,7 @@ impl Drop for Home {
 #[test]
 fn a_session_start_brings_up_the_collector_and_a_second_one_reuses_it() {
     let home = Home::new("start");
-    let init = home
-        .cmd()
-        .args(["init", "--only", "telemetry"])
-        .output()
-        .unwrap();
+    let init = home.init_telemetry();
     assert!(init.status.success());
 
     home.session_start();
@@ -128,11 +155,7 @@ fn a_session_start_without_telemetry_set_up_starts_nothing() {
 #[test]
 fn two_sessions_starting_at_once_bring_up_one_collector() {
     let home = Home::new("race");
-    let init = home
-        .cmd()
-        .args(["init", "--only", "telemetry"])
-        .output()
-        .unwrap();
+    let init = home.init_telemetry();
     assert!(init.status.success());
     let spawn = |home: &Home| {
         home.cmd()
