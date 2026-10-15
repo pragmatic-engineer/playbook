@@ -13,16 +13,21 @@ pub trait Fetcher {
 /// Release assets are a few MB; this bounds a hostile or broken response.
 const MAX_BODY_BYTES: u64 = 256 * 1024 * 1024;
 
+/// The time limit for a release download.
+pub const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// The real fetcher: HTTPS via rustls, no system OpenSSL. `local_http` is for
 /// tests: it allows plain http and ignores proxy environment variables.
+/// `timeout` bounds the whole request.
 pub struct HttpFetcher {
     pub local_http: bool,
+    pub timeout: Duration,
 }
 
 impl Fetcher for HttpFetcher {
     fn get(&self, url: &str) -> Result<Vec<u8>, String> {
         let mut config = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(300)))
+            .timeout_global(Some(self.timeout))
             .https_only(!self.local_http);
         if self.local_http {
             config = config.proxy(None);
@@ -90,9 +95,12 @@ mod tests {
     fn http_fetcher_reads_a_body_from_a_local_server() {
         let (port, handle) =
             serve_once("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello");
-        let body = HttpFetcher { local_http: true }
-            .get(&format!("http://127.0.0.1:{port}/x"))
-            .unwrap();
+        let body = HttpFetcher {
+            local_http: true,
+            timeout: DOWNLOAD_TIMEOUT,
+        }
+        .get(&format!("http://127.0.0.1:{port}/x"))
+        .unwrap();
         handle.join().unwrap();
         assert_eq!(body, b"hello");
     }
@@ -101,18 +109,39 @@ mod tests {
     fn http_fetcher_reports_an_http_error() {
         let (port, handle) =
             serve_once("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-        let err = HttpFetcher { local_http: true }
-            .get(&format!("http://127.0.0.1:{port}/x"))
-            .unwrap_err();
+        let err = HttpFetcher {
+            local_http: true,
+            timeout: DOWNLOAD_TIMEOUT,
+        }
+        .get(&format!("http://127.0.0.1:{port}/x"))
+        .unwrap_err();
         handle.join().unwrap();
         assert!(err.contains("404"), "{err}");
     }
 
     #[test]
+    fn http_fetcher_gives_up_at_its_timeout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let started = std::time::Instant::now();
+        let err = HttpFetcher {
+            local_http: true,
+            timeout: Duration::from_millis(200),
+        }
+        .get(&format!("http://127.0.0.1:{port}/x"))
+        .unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(5), "{err}");
+        drop(listener);
+    }
+
+    #[test]
     fn the_production_fetcher_refuses_plain_http() {
-        let err = HttpFetcher { local_http: false }
-            .get("http://127.0.0.1:9/x")
-            .unwrap_err();
+        let err = HttpFetcher {
+            local_http: false,
+            timeout: DOWNLOAD_TIMEOUT,
+        }
+        .get("http://127.0.0.1:9/x")
+        .unwrap_err();
         assert!(err.to_lowercase().contains("http"), "{err}");
     }
 }
