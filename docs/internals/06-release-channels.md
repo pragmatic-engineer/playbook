@@ -70,7 +70,11 @@ body and `release-notes.json` in the run summary.
 `breaking-changes.json` is still attached for the Homebrew tap, and
 `verify-version` still fails when a commit since the previous tag of the tool
 that touches its paths is marked breaking and that file has no entry for the
-version (ADR 0035). `scripts/check-breaking.sh` holds that check.
+version (ADR 0035). `scripts/check-breaking.sh` holds that check. Run
+`scripts/check-breaking.sh release <component> <version>`, or a dry run of the
+workflow from `main`, before you push a tag. When the check fails on a pushed
+tag, merge the entry, delete the tag, and push a new signed tag on the commit
+that has the entry. A rerun checks out the old commit and fails again.
 
 To rehearse, run the `release` workflow by hand with a `tag` input. A manual run
 is always a dry run: it resolves, verifies and builds, and skips release

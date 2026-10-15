@@ -27,15 +27,25 @@
 # A trailing "(#123)" becomes the pull request number.
 #
 # GITHUB_REPOSITORY names the repository for the links. A shallow clone is
-# deepened, with its tags. Run from anywhere inside the repository.
+# deepened, with its tags. Run from anywhere inside the repository; a
+# relative file argument is read from the directory it was run in.
 set -euo pipefail
 
+CALLER="$PWD"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 REPO="${GITHUB_REPOSITORY:-pragmatic-engineer/playbook}"
 
 fail() { echo "FAIL $*" >&2; exit 1; }
+
+# $1 as an absolute path, read against the directory the script was run in.
+from_caller() {
+  case "$1" in
+    /*) echo "$1" ;;
+    *) echo "$CALLER/$1" ;;
+  esac
+}
 
 # The components. Adding one means a line here, in prefix_of and paths_of,
 # and a tag in release.yml.
@@ -57,11 +67,12 @@ prefix_of() {
 }
 
 # The paths each component's release is built from, one pathspec per line.
-# Shared crates count for every binary that builds them. Cargo.lock counts
-# for none, since every dependency bump rewrites it.
+# Shared crates count for every binary that builds them, and the playbook
+# binary builds crates/telemetry too. Cargo.lock counts for none, since every
+# dependency bump rewrites it.
 paths_of() {
   case "$1" in
-    playbook) printf '%s\n' crates ':(exclude)crates/telemetry' ':(exclude)crates/plugin-checks' \
+    playbook) printf '%s\n' crates ':(exclude)crates/plugin-checks' \
       Cargo.toml install.sh settings.shared.json prompts Brewfile ;;
     telemetry) printf '%s\n' crates/telemetry crates/data crates/common ;;
     plugin) printf '%s\n' plugins/playbook ;;
@@ -112,24 +123,29 @@ json() {
   local p
   while IFS= read -r p; do paths+=("$p"); done < <(paths_of "$component")
 
-  # One record per commit, oldest first: the subject, a unit separator, the
-  # full message, then a record separator.
-  git log --no-merges --reverse --format='%s%x1f%B%x1e' "$range" -- "${paths[@]}" \
+  # The day of the commit the notes are built at, in UTC, so a rerun on the
+  # same tag writes the same bytes.
+  local date
+  date="$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%d HEAD)"
+
+  # One full message per commit, oldest first, each ended by a NUL, which a
+  # commit message cannot hold. The first line is the subject.
+  git log -z --no-merges --reverse --format='%B' "$range" -- "${paths[@]}" \
     | jq -R -s \
       --arg component "$component" \
       --arg version "$version" \
       --arg previous "$prev" \
       --arg prefix "$prefix" \
-      --arg date "$(date -u +%Y-%m-%d)" '
+      --arg date "$date" '
       def clean: gsub("[[:cntrl:]]"; "") | gsub("^\\s+|\\s+$"; "");
       def item:
-        split("\u001f") as [$subject, $body]
-        | ($subject | clean) as $subject
+        . as $body
+        | (split("\n")[0] | clean) as $subject
         | ($subject
-           | capture("^(?<type>[a-z]+)(\\((?<scope>[^)]*)\\))?(?<bang>!)?: *(?<text>.+)$")
+           | capture("^(?<type>[a-z]+)(\\((?<scope>[^)]*)\\))?(?<bang>!)?: (?<text>.+)$")
           ) // {type: "other", scope: null, bang: null, text: $subject}
         | . as $c
-        | ([($body // "") | splits("\n") | capture("^BREAKING[ -]CHANGE: *(?<t>.+)$") | .t | clean]
+        | ([$body | split("\n")[1:][] | capture("^BREAKING[ -]CHANGE: (?<t>.+)$") | .t | clean]
            | map(select(length > 0)) | first) as $footer
         | ($c.text | capture("^(?<t>.*?) *\\(#(?<pr>[0-9]+)\\)$") // {t: $c.text, pr: null}) as $p
         | ($footer != null or $c.bang == "!") as $breaking
@@ -140,16 +156,19 @@ json() {
             pr: (if $p.pr == null then null else ($p.pr | tonumber) end),
             breaking: $breaking
           };
-      def section($name; $title; f): {name: $name, title: $title, items: [.[] | select(f)]};
-      [split("\u001e")[] | ltrimstr("\n") | select(test("\\S")) | item]
+      # The section of an item. A breaking commit shows only in the first.
+      def section_name:
+        if .breaking then "breaking"
+        else {feat: "features", fix: "fixes", perf: "performance"}[.type] // "other" end;
+      [split("\u0000")[] | ltrimstr("\n") | select(test("\\S")) | item] as $items
       | [
-          section("breaking"; "Breaking changes"; .breaking),
-          section("features"; "Features"; (.breaking | not) and .type == "feat"),
-          section("fixes"; "Fixes"; (.breaking | not) and .type == "fix"),
-          section("performance"; "Performance"; (.breaking | not) and .type == "perf"),
-          section("other"; "Other changes";
-            (.breaking | not) and (.type | IN("feat", "fix", "perf") | not))
+          {name: "breaking", title: "Breaking changes"},
+          {name: "features", title: "Features"},
+          {name: "fixes", title: "Fixes"},
+          {name: "performance", title: "Performance"},
+          {name: "other", title: "Other changes"}
         ]
+      | map(. as $s | $s + {items: [$items[] | select(section_name == $s.name)]})
       | {
           format: 1,
           component: $component,
@@ -164,12 +183,14 @@ json() {
 }
 
 markdown() {
-  local file="${1:?usage: release-notes.sh markdown <file>}"
+  local file
+  file="$(from_caller "${1:?usage: release-notes.sh markdown <file>}")"
   [ -f "$file" ] || fail "$file is missing"
   jq -r --arg repo "$REPO" '
-    # Markup characters show as they are, so a subject cannot add a link, an
-    # image, HTML or emphasis to the release page.
-    def esc: gsub("(?<c>[\\\\`*_\\[\\]<>|~&#])"; "\\\(.c)");
+    # Markup characters show as they are, so a subject cannot add link or
+    # image markup, HTML, emphasis or a mention to the release page. GitHub
+    # still links a bare URL.
+    def esc: gsub("(?<c>[\\\\`*_\\[\\]<>|~&#@])"; "\\\(.c)");
     def link: if .pr == null then "" else " ([#\(.pr)](https://github.com/\($repo)/pull/\(.pr)))" end;
     def line($name):
       if $name == "other" then
@@ -191,7 +212,8 @@ markdown() {
 body() {
   local component="${1:?usage: release-notes.sh body <component> <version> <json-out>}"
   local version="${2:?usage: release-notes.sh body <component> <version> <json-out>}"
-  local out="${3:?usage: release-notes.sh body <component> <version> <json-out>}"
+  local out
+  out="$(from_caller "${3:?usage: release-notes.sh body <component> <version> <json-out>}")"
   json "$component" "$version" > "$out"
   case "$component" in
     playbook) cat .github/release-notes-upgrade.md; echo ;;

@@ -1,8 +1,8 @@
 # ADR-0034: One Plugin Root Resolver and Migrations Between Versions
 
-- **Status:** Accepted, amended by ADR 0037
+- **Status:** Accepted. Decisions 13 and 14 are amended by [ADR 0037](0037-release-notes-from-conventional-commits.md), which replaces the ADR 0035 record.
 - **Date created:** 2026-10-15
-- **Date modified:** 2026-10-15
+- **Date modified:** 2026-10-16
 - **Amends:** decision 7 of [ADR 0016](0016-migration-framework.md), which ran the registry only from `playbook init` and rejected running it from `SessionStart`. Decision 3 of [ADR 0031](0031-hooks-in-settings-json.md), which kept every hook entry that is not a bare `playbook hook <name>` command.
 
 ## Context

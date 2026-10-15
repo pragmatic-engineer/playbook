@@ -12,8 +12,10 @@
 # runs on v*, telemetry-v* and code-v* tags, never sees it. The release is
 # created with --latest=false, so the repository's latest release stays on the
 # binary line. When several versions land while one run is still going, GitHub
-# keeps only the newest queued run, so a skipped version is released by hand
-# with gh release create.
+# keeps only the newest queued run, so a skipped version is released by hand:
+# check out the commit that set that version, run
+# `scripts/release-notes.sh body plugin <version> <json-out>` there, and pass
+# its output to gh release create with --target and --notes-file.
 
 name: plugin-release
 

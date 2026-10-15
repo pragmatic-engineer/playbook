@@ -1,8 +1,8 @@
 # ADR-0036: A Release Check and Automatic Updates
 
-- **Status:** Accepted, amended by ADR 0037
+- **Status:** Accepted. Decisions 6 and 7.7 are amended by [ADR 0037](0037-release-notes-from-conventional-commits.md), which reads `release-notes.json` in place of the ADR 0035 record.
 - **Date created:** 2026-10-15
-- **Date modified:** 2026-10-15
+- **Date modified:** 2026-10-16
 - **Extends:** [ADR 0034](0034-self-healing-upgrades.md), whose migrations run after a binary update, and [ADR 0035](0035-breaking-change-notices.md), whose record tells the user about breaking changes.
 
 ## Context

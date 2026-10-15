@@ -125,8 +125,9 @@ fn text_of(out: &Output) -> String {
     )
 }
 
-/// A history with one commit of each kind on playbook paths, one on
-/// telemetry paths and one on the plugin.
+/// A history with one commit of each kind on playbook paths, and commits on
+/// the telemetry crate, a shared crate, the plugin, the plugin checks and
+/// Cargo.lock.
 fn mixed_history() -> Repo {
     let repo = Repo::new();
     repo.change("crates/cli/src/a.rs", "feat(cli): add a flag (#10)");
@@ -147,6 +148,15 @@ fn mixed_history() -> Repo {
         "plugins/playbook/commands/fix.md",
         "fix(plugin): reword the fix command (#17)",
     );
+    repo.change(
+        "crates/common/src/a.rs",
+        "fix(common): share a helper (#18)",
+    );
+    repo.change(
+        "crates/plugin-checks/tests/a.rs",
+        "test: check the plugin (#19)",
+    );
+    repo.change("Cargo.lock", "build(deps): bump a crate (#21)");
     repo
 }
 
@@ -167,7 +177,8 @@ fn commits_land_in_their_section_in_order() {
         repo.query(&notes, "[.sections[] | [.name, [.items[].text]]]"),
         concat!(
             r#"[["breaking",["drop the old flag","the config moved; run playbook init"]],"#,
-            r#"["features",["add a flag"]],["fixes",["repair the parser"]],"#,
+            r#"["features",["add a flag","add a panel"]],"#,
+            r#"["fixes",["repair the parser","share a helper"]],"#,
             r#"["performance",["read the file once"]],"#,
             r#"["other",["explain the flag","Update the readme"]]]"#
         )
@@ -191,11 +202,10 @@ fn commits_land_in_their_section_in_order() {
         ),
         r#"[1,"playbook","0.2.0","v0.2.0","0.1.0","v0.1.0"]"#
     );
-    assert!(repo
-        .query(&notes, ".date")
-        .trim_matches('"')
-        .chars()
-        .all(|c| c.is_ascii_digit() || c == '-'));
+    assert_eq!(
+        repo.query(&notes, r#".date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")"#),
+        "true"
+    );
 }
 
 #[test]
@@ -208,22 +218,129 @@ fn each_component_lists_only_the_commits_on_its_paths() {
     let plugin = repo.notes("plugin", "1.0.1");
     let playbook = repo.notes("playbook", "0.2.0");
 
-    // Assert: a commit before the previous tag shows nowhere, and a commit
-    // shows only for the component whose paths it touches.
+    // Assert: a commit before the previous tag shows nowhere. The telemetry
+    // crate and the shared crates count for both binaries, and the plugin
+    // checks and Cargo.lock count for none.
     assert_eq!(
         repo.query(&telemetry, "[.sections[] | [.name, [.items[].pr]]]"),
-        r#"[["features",[16]]]"#
+        r#"[["features",[16]],["fixes",[18]]]"#
     );
     assert_eq!(
         repo.query(&plugin, "[.sections[] | [.name, [.items[].pr]]]"),
         r#"[["fixes",[17]]]"#
     );
     assert_eq!(
+        repo.query(&playbook, "[.sections[].items[].pr | numbers] | sort"),
+        "[10,11,12,14,15,16,18]"
+    );
+}
+
+#[test]
+fn the_tag_of_the_version_itself_is_not_the_previous_tag() {
+    // Arrange: the release workflow runs on the pushed tag, so the tag of the
+    // version exists at HEAD.
+    let repo = mixed_history();
+    repo.git(&["tag", "v0.2.0"]);
+
+    // Act
+    let notes = repo.notes("playbook", "0.2.0");
+
+    // Assert
+    assert_eq!(
         repo.query(
-            &playbook,
-            "[.sections[].items[].pr] | map(select(. == 1 or . == 16 or . == 17))"
+            &notes,
+            "[.previous_tag, ([.sections[].items[].pr | numbers] | length)]"
         ),
-        "[]"
+        r#"["v0.1.0",7]"#
+    );
+}
+
+#[test]
+fn versions_compare_as_numbers() {
+    // Arrange
+    let repo = Repo::new();
+    repo.git(&["tag", "v0.9.0"]);
+    repo.change("crates/cli/src/a.rs", "fix: one (#40)");
+    repo.git(&["tag", "v0.10.0"]);
+    repo.change("crates/cli/src/b.rs", "fix: two (#41)");
+
+    // Act
+    let notes = repo.notes("playbook", "0.10.1");
+
+    // Assert
+    assert_eq!(
+        repo.query(&notes, "[.previous_tag, [.sections[].items[].pr]]"),
+        r#"["v0.10.0",[41]]"#
+    );
+}
+
+#[test]
+fn merge_commits_are_left_out() {
+    // Arrange
+    let repo = Repo::new();
+    repo.git(&["checkout", "-q", "-b", "topic"]);
+    repo.change("crates/cli/src/a.rs", "feat: on a branch (#50)");
+    repo.git(&["checkout", "-q", "main"]);
+    repo.change("crates/cli/src/b.rs", "fix: on main (#51)");
+    repo.git(&[
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "Merge pull request #52 from topic",
+        "topic",
+    ]);
+
+    // Act
+    let notes = repo.notes("playbook", "0.2.0");
+
+    // Assert
+    assert_eq!(
+        repo.query(&notes, "[.sections[].items[].text]"),
+        r#"["on a branch","on main"]"#
+    );
+}
+
+#[test]
+fn a_footer_moves_a_feature_to_breaking_and_takes_its_text() {
+    // Arrange: the hyphen form of the footer, on a feat commit with a scope.
+    let repo = Repo::new();
+    repo.change(
+        "crates/cli/src/a.rs",
+        "feat(cli): rename the flag (#60)\n\nBody.\n\nBREAKING-CHANGE: use --new; --old is gone\n",
+    );
+    repo.change("crates/cli/src/b.rs", "fix:no space after the colon (#61)");
+
+    // Act
+    let notes = repo.notes("playbook", "0.2.0");
+
+    // Assert: the footer text wins, and a subject without the space after the
+    // colon is not a conventional subject.
+    assert_eq!(
+        repo.query(&notes, "[.sections[] | [.name, .items]]"),
+        concat!(
+            r#"[["breaking",[{"type":"feat","scope":"cli","text":"use --new; --old is gone","pr":60,"breaking":true}]],"#,
+            r#"["other",[{"type":"other","scope":null,"text":"fix:no space after the colon","pr":61,"breaking":false}]]]"#
+        )
+    );
+}
+
+#[test]
+fn control_characters_are_removed_from_the_text() {
+    // Arrange
+    let repo = Repo::new();
+    repo.change(
+        "crates/cli/src/a.rs",
+        "fix: a\ttab and an \u{1b}[31mescape (#70)",
+    );
+
+    // Act
+    let notes = repo.notes("playbook", "0.2.0");
+
+    // Assert
+    assert_eq!(
+        repo.query(&notes, ".sections[0].items[0].text"),
+        r#""atab and an [31mescape""#
     );
 }
 
@@ -283,6 +400,7 @@ fn the_markdown_skips_empty_sections_and_links_each_pull_request() {
     assert_eq!(
         telemetry_md,
         "## Features\n\n- **telemetry**: add a panel ([#16](https://github.com/o/r/pull/16))\n\n\
+         ## Fixes\n\n- **common**: share a helper ([#18](https://github.com/o/r/pull/18))\n\n\
          **Full changelog**: https://github.com/o/r/compare/telemetry-v0.1.0...telemetry-v0.2.0\n"
     );
     let headings: Vec<&str> = playbook_md
@@ -326,8 +444,9 @@ fn markup_in_a_subject_is_escaped_in_the_markdown_and_kept_in_the_json() {
     let repo = Repo::new();
     repo.change(
         "crates/cli/src/a.rs",
-        "fix(cli): keep `code`, *stars*, _under_, <b>tags</b>, [x](y), a|b, ~s~, & and # (#30)",
+        r"fix(cli): keep `code`, *stars*, _under_, <b>tags</b>, [x](y), a|b, ~s~, & and # \ @me (#30)",
     );
+    repo.change("crates/cli/src/b.rs", "docs(<x>): y (#31)");
 
     // Act
     let notes = repo.notes("playbook", "0.2.0");
@@ -336,14 +455,15 @@ fn markup_in_a_subject_is_escaped_in_the_markdown_and_kept_in_the_json() {
     // Assert
     assert_eq!(
         repo.query(&notes, ".sections[0].items[0].text"),
-        r#""keep `code`, *stars*, _under_, <b>tags</b>, [x](y), a|b, ~s~, & and #""#
+        r#""keep `code`, *stars*, _under_, <b>tags</b>, [x](y), a|b, ~s~, & and # \\ @me""#
     );
     assert!(
         md.contains(
-            r"- **cli**: keep \`code\`, \*stars\*, \_under\_, \<b\>tags\</b\>, \[x\](y), a\|b, \~s\~, \& and \# ([#30]"
+            r"- **cli**: keep \`code\`, \*stars\*, \_under\_, \<b\>tags\</b\>, \[x\](y), a\|b, \~s\~, \& and \# \\ \@me ([#30]"
         ),
         "{md}"
     );
+    assert!(md.contains(r"- docs(\<x\>): y ([#31]"), "{md}");
 }
 
 #[test]
