@@ -10,7 +10,6 @@ use super::claude_code::ClaudeCodeSource;
 use super::codex::CodexSource;
 use super::db::{load_tool_events, load_usage_events, open_db};
 use super::ingest::{ingest, ingest_claude, IngestStats};
-use super::limits::LimitPeriod;
 use super::limits_source;
 use super::query::Range;
 use super::summary;
@@ -113,10 +112,8 @@ pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<Stri
         None => summary::render(&usage, &tools),
     };
     if !usage.is_empty() {
-        let (snapshot, budgets) = limit_inputs(paths);
         text.push_str(&limits_source::summary_section(
-            snapshot.as_ref(),
-            &budgets,
+            &limit_sources(paths),
             &usage,
             now,
             super::entry::configured_week_start(),
@@ -125,20 +122,21 @@ pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<Stri
     Ok(text)
 }
 
-/// The stored plan limits and the manual budgets from the config.
-fn limit_inputs(paths: &Paths) -> (Option<limits_source::Snapshot>, Vec<(LimitPeriod, f64)>) {
-    let snapshot = paths.db.parent().and_then(limits_source::load);
-    let budgets = limits_source::manual_budgets(&super::host::home_dir());
-    (snapshot, budgets)
+/// The stored plan limits, the manual budgets from the config and what
+/// Claude Code caches in its config file.
+pub fn limit_sources(paths: &Paths) -> limits_source::Sources {
+    limits_source::Sources::load(
+        paths.db.parent(),
+        &paths.claude_json,
+        &super::host::home_dir(),
+    )
 }
 
 /// The `limits` object of `--json`. `events` must reach back to
 /// `limits_source::events_since`.
 pub fn limits_json(paths: &Paths, events: &[UsageEvent], now: i64) -> serde_json::Value {
-    let (snapshot, budgets) = limit_inputs(paths);
     limits_source::report_json(
-        snapshot.as_ref(),
-        &budgets,
+        &limit_sources(paths),
         events,
         now,
         super::entry::configured_week_start(),

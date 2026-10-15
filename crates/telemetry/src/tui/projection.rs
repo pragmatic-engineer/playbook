@@ -166,10 +166,11 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
         );
     let width = usize::from(area.width.saturating_sub(2));
     let v = &data.limits;
-    let text: Vec<Line> = if v.limits.is_empty() {
+    let dim = Style::default().fg(pal.color(pal.inactive));
+    let mut text: Vec<Line> = if v.limits.is_empty() {
         EMPTY
             .iter()
-            .map(|t| Line::styled(fit(t, width), Style::default().fg(pal.color(pal.inactive))))
+            .map(|t| Line::styled(fit(t, width), dim))
             .collect()
     } else {
         lines(&v.limits, v.recent_cost_24h, data.now)
@@ -177,6 +178,9 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
             .map(|t| Line::styled(fit(&t, width), Style::default().fg(pal.color(pal.fg))))
             .collect()
     };
+    if let Some(note) = v.windows_note {
+        text.push(Line::styled(fit(note, width), dim));
+    }
     frame.render_widget(Paragraph::new(text).block(block), area);
 }
 

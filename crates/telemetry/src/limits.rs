@@ -116,6 +116,9 @@ pub enum Origin {
     Measured,
     /// Set by the user in `usage.budget.*`.
     Manual,
+    /// Read from the usage numbers Claude Code caches in its config file.
+    /// The age of that cache is shown next to it.
+    Cached,
 }
 
 impl Origin {
@@ -123,6 +126,7 @@ impl Origin {
         match self {
             Origin::Measured => "measured",
             Origin::Manual => "manual",
+            Origin::Cached => "cached",
         }
     }
 }
