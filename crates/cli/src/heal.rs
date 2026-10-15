@@ -90,13 +90,11 @@ pub enum Trigger {
     Hook,
     /// `playbook doctor --fix`: waits for the lock, retries at once.
     Fix,
-    /// `playbook init`, after it ran every migration itself. `statusline` and
-    /// `hooks` are false when the user declined them, so their item is dropped.
-    Init {
-        failed: bool,
-        statusline: bool,
-        hooks: bool,
-    },
+    /// `playbook init`, after it ran every migration itself. `statusline` is
+    /// false when the user declined the status line, so its item is dropped.
+    /// The dead hook item stays even when hooks were left off, because those
+    /// entries fail on every event.
+    Init { failed: bool, statusline: bool },
 }
 
 /// Why a heal ran nothing.
@@ -257,16 +255,9 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
             out.warnings.extend(migrate::owned_notes(ctx));
             out
         }
-        Trigger::Init {
-            failed,
-            statusline,
-            hooks,
-        } => {
+        Trigger::Init { failed, statusline } => {
             let mut open = migrate::open_items(ctx, None);
-            open.retain(|i| {
-                (statusline || i.id != migrate::STATUSLINE_MIGRATION)
-                    && (hooks || i.id != migrate::DEAD_HOOKS_MIGRATION)
-            });
+            open.retain(|i| statusline || i.id != migrate::STATUSLINE_MIGRATION);
             let out = Outcome {
                 open,
                 ..Outcome::default()
@@ -559,7 +550,6 @@ mod tests {
         let init = |failed| Trigger::Init {
             failed,
             statusline: true,
-            hooks: true,
         };
         assert!(!run(&ctx(&home), init(true), 1000).recorded);
         assert!(run(&ctx(&home), init(false), 1000).recorded);
@@ -577,7 +567,6 @@ mod tests {
             Trigger::Init {
                 failed: false,
                 statusline: false,
-                hooks: true,
             },
             1000,
         );

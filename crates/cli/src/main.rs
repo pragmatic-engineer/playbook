@@ -2112,6 +2112,7 @@ fn main() {
                     claude_home,
                     self_root,
                     repo: None,
+                    epoch: common::time::now_epoch_secs(),
                 };
                 for line in init::migrate::pending_manual(&ctx) {
                     println!("{line}");

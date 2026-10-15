@@ -248,15 +248,21 @@ pub const MIN_PLUGIN_VERSION: &str = "0.30.1";
 pub const PLUGIN_MAJOR: u64 = 0;
 
 /// One line when the plugin `version` is outside the range this binary
-/// supports, naming the command that fixes it, else `None`.
-pub fn plugin_out_of_range(version: &str) -> Option<String> {
-    let (major, ..) = version_key(version)?;
-    if major > PLUGIN_MAJOR {
+/// supports, naming the command that fixes it, else `None`. `homebrew`
+/// picks the binary upgrade command for a newer major.
+pub fn plugin_out_of_range(version: &str, homebrew: bool) -> Option<String> {
+    let key = version_key(version)?;
+    if key.0 > PLUGIN_MAJOR {
+        let command = if homebrew {
+            "brew upgrade playbook"
+        } else {
+            "playbook update"
+        };
         return Some(format!(
-            "the playbook plugin {version} is newer than this binary knows. Run: brew upgrade playbook (or playbook update)"
+            "the playbook plugin {version} is newer than this binary knows. Run: {command}"
         ));
     }
-    (crate::update::resolve::compare(version, MIN_PLUGIN_VERSION).is_lt()).then(|| {
+    (Some(key) < version_key(MIN_PLUGIN_VERSION)).then(|| {
         format!(
             "the playbook plugin {version} is older than this binary supports ({MIN_PLUGIN_VERSION}). Run: claude plugin update playbook@pragmatic-engineer"
         )
@@ -813,20 +819,22 @@ mod tests {
 
     #[test]
     fn a_plugin_inside_the_supported_range_passes() {
-        assert_eq!(plugin_out_of_range(MIN_PLUGIN_VERSION), None);
-        assert_eq!(plugin_out_of_range("0.99.0"), None);
-        assert_eq!(plugin_out_of_range("not a version"), None);
+        assert_eq!(plugin_out_of_range(MIN_PLUGIN_VERSION, false), None);
+        assert_eq!(plugin_out_of_range("0.99.0", false), None);
+        assert_eq!(plugin_out_of_range("not a version", false), None);
     }
 
     #[test]
     fn an_old_or_newer_major_plugin_names_its_fix() {
-        let old = plugin_out_of_range("0.25.0").unwrap();
+        let old = plugin_out_of_range("0.30.1-rc.1", true).unwrap();
         assert!(
             old.contains("claude plugin update playbook@pragmatic-engineer"),
             "{old}"
         );
-        let newer = plugin_out_of_range("1.0.0").unwrap();
-        assert!(newer.contains("brew upgrade playbook"), "{newer}");
+        let newer = plugin_out_of_range("1.0.0", true).unwrap();
+        assert!(newer.ends_with("Run: brew upgrade playbook"), "{newer}");
+        let newer = plugin_out_of_range("1.0.0", false).unwrap();
+        assert!(newer.ends_with("Run: playbook update"), "{newer}");
     }
 
     #[test]

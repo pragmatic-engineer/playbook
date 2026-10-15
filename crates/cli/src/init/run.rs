@@ -175,6 +175,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         claude_home: paths.claude_home.clone(),
         self_root: skills_root.clone(),
         repo: paths.repo.clone(),
+        epoch,
     };
     let migrated = migrate::run_pending_for(&ctx, paths.statusline, paths.hooks);
     // Record this binary in the version record, so the session hook does not
@@ -184,7 +185,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         crate::heal::Trigger::Init {
             failed: migrated.failed || migrated.lock_busy,
             statusline: paths.statusline,
-            hooks: paths.hooks,
         },
         crate::common::time::now_epoch_secs(),
     );
@@ -775,11 +775,8 @@ fn finish_merge(settings_path: &Path, outcome: &merge::MergeOutcome, epoch: u64)
 
 /// Copy `path` to a timestamped sibling before overwriting it with
 /// `content`, the same safety net `init::wire::wire` gives its own
-/// `settings.json` changes. Duplicated rather than shared: `wire`'s
-/// equivalent helpers are private to that module, and this is the only
-/// other place in the crate that rewrites `settings.json` wholesale, so
-/// promoting them to `pub(crate)` would widen that module's surface for one
-/// caller.
+/// `settings.json` changes. The merge step and the dead hook migration
+/// (`init::dead_hooks`) both write through it, with the run's one epoch.
 ///
 /// Also writes `skipped` beside the backup, as
 /// `settings-merge-skipped.<epoch>.json`, using the SAME epoch as the backup
@@ -808,7 +805,7 @@ fn finish_merge(settings_path: &Path, outcome: &merge::MergeOutcome, epoch: u64)
 ///
 /// A backup already present under `epoch` is kept, so the first write of a
 /// run (or of a second) leaves the pre-change copy and the later ones add none.
-fn backup_then_write(
+pub(crate) fn backup_then_write(
     path: &Path,
     content: &str,
     skipped: &[merge::SkippedEntry],

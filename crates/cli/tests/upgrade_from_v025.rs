@@ -82,10 +82,13 @@ impl V025Home {
     }
 
     fn user_files(&self) -> Vec<Vec<u8>> {
+        let claude = self.home.join(".claude/plugins");
         [
             self.settings(),
             self.home.join(".zshrc"),
             self.home.join("notes.md"),
+            claude.join("installed_plugins.json"),
+            claude.join("cache/pragmatic-engineer/playbook/0.24.0/.orphaned_at"),
         ]
         .iter()
         .map(|p| fs::read(p).unwrap())
@@ -240,6 +243,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
         b"my own notes\n"
     );
     assert_eq!(fs::read(h.settings()).unwrap(), after_init);
+    assert_eq!(h.user_files()[2..], user_files[2..]);
     let settled = h.session_message();
     assert!(!settled.contains("playbook init"), "{settled}");
     assert!(settled.contains("2 item(s) need you"), "{settled}");

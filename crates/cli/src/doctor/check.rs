@@ -538,8 +538,12 @@ fn layer7(env: &Env) -> Vec<Row> {
     dangling
         .into_iter()
         .map(|cmd| {
-            Row::new("7", Level::Fail, format!("hook command points at a missing file: {cmd}"))
-                .hint("this hook does nothing every time it fires; `playbook init` will not remove it, so delete the entry from ~/.claude/settings.json by hand")
+            let hint = if crate::init::dead_hooks::is_dead(&cmd, &env.home, &env.claude_home) {
+                "this hook does nothing every time it fires; run: playbook init --hooks (it removes the entry after a backup)"
+            } else {
+                "this hook does nothing every time it fires; `playbook init` will not remove it, so delete the entry from ~/.claude/settings.json by hand"
+            };
+            Row::new("7", Level::Fail, format!("hook command points at a missing file: {cmd}")).hint(hint)
         })
         .collect()
 }
@@ -846,6 +850,7 @@ fn migration_rows(env: &Env) -> Vec<Row> {
             &env.claude_home,
         ),
         repo: None,
+        epoch: crate::common::time::now_epoch_secs(),
     };
     crate::init::migrate::pending_manual(&ctx)
         .into_iter()
@@ -910,7 +915,8 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
             .hint("delete the entry from ~/.claude/settings.json by hand"),
         );
     }
-    for key in other_playbook_plugins(&env.claude_home) {
+    let cwd = env.repo_root.clone().unwrap_or_else(|| env.home.clone());
+    for key in other_playbook_plugins(&env.claude_home, &cwd) {
         let what = if key == HOOKS_PLUGIN_KEY {
             "the playbook-hooks plugin is still installed, so its hooks run next to the ones in settings.json".to_string()
         } else {

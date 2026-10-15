@@ -76,37 +76,57 @@ pub fn installed_entry_at(claude_home: &Path, key: &str) -> Option<serde_json::V
 }
 
 fn installed_value(claude_home: &Path, key: &str) -> Option<Option<serde_json::Value>> {
-    let path = claude_home.join("plugins/installed_plugins.json");
-    let value: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    let value = read_installed(claude_home)?;
     let find = |v: &serde_json::Value| v.get(key).filter(|e| !e.is_null()).cloned();
     Some(value.get("plugins").and_then(find).or_else(|| find(&value)))
 }
 
 /// The keys in `installed_plugins.json` for the retired `playbook-hooks`
-/// plugin or a `playbook` plugin from another marketplace. Both run next to
-/// the one playbook supports. Empty when the file is missing or malformed.
-pub fn other_playbook_plugins(claude_home: &Path) -> Vec<String> {
-    let path = claude_home.join("plugins/installed_plugins.json");
-    let Some(value) = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-    else {
+/// plugin, or for a `playbook` plugin from another marketplace when this
+/// marketplace's plugin is installed too. Both run next to the one playbook
+/// supports. An install scoped to another project does not count, because
+/// Claude Code does not load it from `cwd`. Empty when the file is missing
+/// or malformed.
+pub fn other_playbook_plugins(claude_home: &Path, cwd: &Path) -> Vec<String> {
+    let Some(value) = read_installed(claude_home) else {
         return Vec::new();
     };
     let map = value.get("plugins").unwrap_or(&value);
+    let active = |key: &str| map.get(key).is_some_and(|v| loaded_here(v, cwd));
+    let ours = active(PLUGIN_KEY);
     let mut keys: Vec<String> = map
         .as_object()
         .into_iter()
-        .flat_map(|m| m.iter())
-        .filter(|(_, v)| !v.is_null())
-        .map(|(k, _)| k.clone())
+        .flat_map(|m| m.keys())
         .filter(|k| {
-            k == HOOKS_PLUGIN_KEY || (k.starts_with("playbook@") && k.as_str() != PLUGIN_KEY)
+            k.as_str() == HOOKS_PLUGIN_KEY
+                || (ours && k.starts_with("playbook@") && k.as_str() != PLUGIN_KEY)
         })
+        .filter(|k| active(k))
+        .cloned()
         .collect();
     keys.sort();
     keys
+}
+
+/// Whether an `installed_plugins.json` entry (a version 2 list or a version
+/// 1 object) has an install Claude Code loads from `cwd`: one without a
+/// `projectPath`, or one whose `projectPath` holds `cwd`.
+fn loaded_here(entry: &serde_json::Value, cwd: &Path) -> bool {
+    let loads = |e: &serde_json::Value| match e.get("projectPath").and_then(|p| p.as_str()) {
+        Some(project) => cwd.starts_with(project),
+        None => true,
+    };
+    match entry {
+        serde_json::Value::Array(list) => list.iter().any(loads),
+        serde_json::Value::Object(_) => loads(entry),
+        _ => false,
+    }
+}
+
+fn read_installed(claude_home: &Path) -> Option<serde_json::Value> {
+    let path = claude_home.join("plugins/installed_plugins.json");
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
 /// Whether Claude Code lists `key` as installed, or `None` when
@@ -225,16 +245,21 @@ mod tests {
     fn other_playbook_plugins_lists_the_hooks_plugin_and_other_marketplaces() {
         let home = home_with(None);
         let claude_home = home.join(".claude");
-        assert!(other_playbook_plugins(&claude_home).is_empty());
+        let cwd = home.join("repo");
+        assert!(other_playbook_plugins(&claude_home, &cwd).is_empty());
         std::fs::create_dir_all(claude_home.join("plugins")).unwrap();
-        std::fs::write(
-            claude_home.join("plugins/installed_plugins.json"),
-            r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{}],"playbook-hooks@pragmatic-engineer":[{}],"playbook@fork":[{}],"other@x":[{}]}}"#,
-        )
-        .unwrap();
+        let write = |text: &str| {
+            std::fs::write(claude_home.join("plugins/installed_plugins.json"), text).unwrap()
+        };
+        write(
+            r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{}],"playbook-hooks@pragmatic-engineer":[{}],"playbook@fork":[{"projectPath":"/elsewhere"},{}],"playbook@team":[{"projectPath":"/elsewhere"}],"other@x":[{}]}}"#,
+        );
         assert_eq!(
-            other_playbook_plugins(&claude_home),
+            other_playbook_plugins(&claude_home, &cwd),
             vec!["playbook-hooks@pragmatic-engineer", "playbook@fork"]
         );
+        // A fork used alone is the user's playbook, not a second one.
+        write(r#"{"version":2,"plugins":{"playbook@fork":[{}]}}"#);
+        assert!(other_playbook_plugins(&claude_home, &cwd).is_empty());
     }
 }

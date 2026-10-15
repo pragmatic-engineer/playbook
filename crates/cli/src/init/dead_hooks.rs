@@ -12,10 +12,18 @@ use std::path::{Component, Path, PathBuf};
 
 const INTERPRETERS: [&str; 3] = ["bash", "sh", "python3"];
 
+/// Characters that make a command more than one program run, so a missing
+/// first script does not make the whole entry dead.
+const SHELL_OPERATORS: [char; 6] = [';', '&', '|', '<', '>', '`'];
+
 /// The script `command` runs, when it is a path under a Claude `hooks`
 /// folder, optionally after `bash`, `sh` or `python3`. `None` for any other
-/// command, including a quoted path that holds a space.
+/// command, including a quoted path that holds a space and a command with a
+/// shell operator or `$(`.
 fn hook_script(command: &str, home: &Path, claude_home: &Path) -> Option<PathBuf> {
+    if command.contains(SHELL_OPERATORS) || command.contains("$(") {
+        return None;
+    }
     let mut tokens = command.split_whitespace();
     let mut path = tokens.next()?;
     if INTERPRETERS.contains(&path) {
@@ -50,7 +58,8 @@ fn unquote(token: &str) -> Option<&str> {
     Some(token)
 }
 
-fn is_dead(command: &str, home: &Path, claude_home: &Path) -> bool {
+/// Whether `command` runs a script under a Claude `hooks` folder that is gone.
+pub fn is_dead(command: &str, home: &Path, claude_home: &Path) -> bool {
     hook_script(command, home, claude_home).is_some_and(|script| !script.exists())
 }
 
@@ -94,9 +103,10 @@ pub fn pending(settings_path: &Path, home: &Path, claude_home: &Path) -> Option<
     })
 }
 
-/// Removes the dead entries from `settings_path` after a backup, and drops a
-/// matcher group or event that this leaves empty. Returns the removed
-/// commands. A missing or invalid file is left alone.
+/// Removes the dead entries from `settings_path` after a backup under
+/// `epoch`, and drops a matcher group or event that this leaves empty. A
+/// group or event that was empty before stays. Returns the removed commands.
+/// A missing or invalid file is left alone.
 pub fn remove(
     settings_path: &Path,
     home: &Path,
@@ -110,27 +120,40 @@ pub fn remove(
     if dead.is_empty() {
         return Ok(dead);
     }
+    let is_dead_entry = |e: &Value| {
+        e.get("command")
+            .and_then(Value::as_str)
+            .is_some_and(|c| dead.iter().any(|d| d == c))
+    };
     if let Some(events) = settings.get_mut("hooks").and_then(Value::as_object_mut) {
-        for groups in events.values_mut().filter_map(Value::as_array_mut) {
-            for group in groups.iter_mut() {
-                if let Some(entries) = group.get_mut("hooks").and_then(Value::as_array_mut) {
-                    entries.retain(|e| {
-                        e.get("command")
-                            .and_then(Value::as_str)
-                            .is_none_or(|c| !dead.iter().any(|d| d == c))
-                    });
-                }
-            }
-            groups.retain(|g| {
-                g.get("hooks")
-                    .and_then(Value::as_array)
-                    .is_none_or(|e| !e.is_empty())
+        let mut emptied_events = Vec::new();
+        for (event, groups) in events.iter_mut() {
+            let Some(groups) = groups.as_array_mut() else {
+                continue;
+            };
+            let before = groups.len();
+            groups.retain_mut(|group| {
+                let Some(entries) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
+                    return true;
+                };
+                let had = entries.len();
+                entries.retain(|e| !is_dead_entry(e));
+                entries.len() == had || !entries.is_empty()
             });
+            if groups.is_empty() && before > 0 {
+                emptied_events.push(event.clone());
+            }
         }
-        events.retain(|_, groups| groups.as_array().is_none_or(|g| !g.is_empty()));
+        let emptied = !emptied_events.is_empty();
+        for event in emptied_events {
+            events.remove(&event);
+        }
+        if emptied && events.is_empty() {
+            settings.as_object_mut().map(|root| root.remove("hooks"));
+        }
     }
     let rendered = format!("{settings:#}\n");
-    crate::init::wire::backup_then_write(settings_path, &rendered, epoch)?;
+    crate::init::run::backup_then_write(settings_path, &rendered, &[], epoch)?;
     Ok(dead)
 }
 
@@ -156,6 +179,7 @@ mod tests {
             "~/.claude/hooks/gone.sh",
             "bash ~/.claude/hooks/gone.sh",
             "sh $HOME/.claude/hooks/gone.sh --flag",
+            "~/.claude/hooks/gone.sh 2",
             "python3 \"${HOME}/.claude/hooks/gone.py\"",
             abs.as_str(),
         ] {
@@ -175,6 +199,10 @@ mod tests {
             "bash \"~/.claude/hooks/my script.sh\"",
             "bash ~/.claude/hooks/../gone.sh",
             "bash ~/.claude/hooks/",
+            "~/.claude/hooks/mine.sh; true",
+            "bash ~/.claude/hooks/gone.sh || ~/bin/fallback.sh",
+            "bash ~/.claude/hooks/gone.sh|jq .",
+            "bash $(echo ~/.claude/hooks/gone.sh)",
         ] {
             assert!(!is_dead(cmd, &home, &ch), "{cmd}");
         }
@@ -189,6 +217,7 @@ mod tests {
         let original = json!({
             "model": "x",
             "hooks": {
+                "Notification": [],
                 "PreToolUse": [
                     {"matcher": "Bash", "hooks": [
                         {"type": "command", "command": "bash ~/.claude/hooks/gone.sh"},
@@ -217,7 +246,7 @@ mod tests {
             after,
             json!({
                 "model": "x",
-                "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+                "hooks": {"Notification": [], "PreToolUse": [{"matcher": "Bash", "hooks": [
                     {"type": "command", "command": "bash ~/.claude/hooks/mine.sh"}
                 ]}]}
             })
