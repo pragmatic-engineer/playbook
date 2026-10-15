@@ -10,13 +10,13 @@ How to raise, catch, chain and log errors. A Ruff rule named here needs its grou
 
 ## Catching
 
-1. **No bare `except:`.** It also catches `KeyboardInterrupt` and `SystemExit`, so Ctrl+C and `sys.exit` stop working.
+1. **No bare `except:`.** It also catches `KeyboardInterrupt` and `SystemExit`. Ctrl+C and `sys.exit` then stop working.
    Check: `E722`.
 
 2. **Catch the narrowest exception the code can handle, at the level that can act on it.** Low-level code raises. The edges (a request handler, a worker loop, `main`) catch, log and report. `except Exception` belongs only at such an edge.
    Check: `BLE001`.
 
-3. **Do not pass on an exception in silence.** Handle it, log it, or let it rise. When you mean to ignore one named exception, write `contextlib.suppress(FileNotFoundError)` so the intent is visible.
+3. **The base rule on swallowed errors applies.** To ignore one named exception on purpose, write `contextlib.suppress(FileNotFoundError)` so the intent is visible.
 
    ```python
    import contextlib
@@ -24,15 +24,15 @@ How to raise, catch, chain and log errors. A Ruff rule named here needs its grou
 
    # wrong
    try:
-       Path("/tmp/missing.lock").unlink()
+       Path("build/app.lock").unlink()
    except Exception:
        pass
    # right
    with contextlib.suppress(FileNotFoundError):
-       Path("/tmp/missing.lock").unlink()
+       Path("build/app.lock").unlink()
    ```
 
-   Check: `S110` for `try`, `except`, `pass`, `S112` for `try`, `except`, `continue`, `SIM105` for the `suppress` form.
+   Check: `S110` for `try`, `except`, `pass`, `S112` for `try`, `except`, `continue`, `SIM105` for the `suppress` form. `SIM105` keeps the exception type you caught: narrow it to the named exception before you apply its fix.
 
 4. **Keep the `try` block to the one call that can fail.** Move the code that runs on success into `else`.
    Why: a wide `try` catches the same exception from a line you did not mean to guard and hides the bug.
@@ -97,11 +97,11 @@ How to raise, catch, chain and log errors. A Ruff rule named here needs its grou
 ## Logging
 
 12. **Each module gets its own logger.** `logger = logging.getLogger(__name__)` at module level. Do not log through the root logger (`logging.info(...)`).
-    Check: `LOG015` for root logger calls, `LOG002` for a `getLogger` argument other than `__name__`.
+    Check: `LOG015` for root logger calls, `LOG002` for `getLogger(__file__)`. Review any other argument.
 
 13. **Pass log values as `%` arguments.** `logger.info("charged order %s", order_id)`. Do not pre-format with an f-string.
     Why: logging formats the string only when a handler emits it, and the constant template groups the same event in log search.
-    Sources disagree here. Some teams accept f-strings in logs for readability. This skill keeps `%` arguments, because the logging HOWTO and structured log tools rely on the template.
+    This skill keeps `%` arguments over f-strings, because the logging HOWTO and structured log tools rely on the template.
     Check: `G004` for f-strings, `G001` for `.format`, `G003` for `+`.
 
 14. **Log a caught exception with `logger.exception(...)`** inside the `except` block. It adds the traceback.

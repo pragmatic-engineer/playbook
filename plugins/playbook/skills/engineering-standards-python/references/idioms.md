@@ -32,7 +32,7 @@ Loops, comprehensions, resources, strings and paths, written the way Python expe
    Why: a short comprehension states the result in one place. A long one is harder to read than the loop.
    Check: `PERF401` and `PERF403` find loops that should be comprehensions. The `C4` rules (`C400` to `C420`) find comprehensions and calls that do extra work.
 
-4. **Use a generator expression when the result is consumed once,** for example by `sum`, `any`, `all`, `max` or `"".join`. Do not build a list first.
+4. **Use a generator expression when the result is consumed once,** for example by `sum`, `any`, `all` or `max`. Do not build a list first. `str.join` is the exception: it builds a list from its argument anyway, and a list comprehension is faster there.
 
    ```python
    orders = [120, 80, 45]
@@ -43,7 +43,7 @@ Loops, comprehensions, resources, strings and paths, written the way Python expe
    assert total == 245
    ```
 
-   Check: `C419`.
+   Check: `C419` covers `any` and `all`, and `sum`, `min` and `max` only in preview.
 
 5. **Reach for the built-ins and `itertools` before a hand loop.** `any`, `all`, `sum`, `min`, `max`, `sorted(key=...)`, `itertools.chain`, `itertools.pairwise`, `itertools.batched` (3.12+), `collections.Counter` and `defaultdict`.
    Check: `SIM110` for a loop that `any` or `all` replaces, `RUF007` for `zip(xs, xs[1:])`.
@@ -59,11 +59,11 @@ Loops, comprehensions, resources, strings and paths, written the way Python expe
 
 ## Resources and paths
 
-9. **Open every resource in a `with` block:** files, locks, sockets, database connections, temporary folders. Put two resources in one `with` statement.
+9. **Open every resource in a `with` block:** files, locks, sockets, database connections, temporary folders. When two resources open at the same point, put both in one `with` statement.
 
    ```python
-   from pathlib import Path
    import tempfile
+   from pathlib import Path
 
    with tempfile.TemporaryDirectory() as tmp:
        target = Path(tmp) / "out.txt"
@@ -75,8 +75,7 @@ Loops, comprehensions, resources, strings and paths, written the way Python expe
    Why: the resource closes when the block ends, also when an exception is raised.
    Check: `SIM115` for `open` outside a `with`, `SIM117` for nested `with` blocks.
 
-10. **Write your own context manager with `contextlib.contextmanager`** for paired setup and cleanup. Put the cleanup in a `finally` around the `yield`. Use `contextlib.ExitStack` for a number of resources known only at run time, and `contextlib.suppress` to ignore one named exception.
-    Check: `SIM105` suggests `suppress` for a `try`, `except`, `pass` block.
+10. **Write your own context manager with `contextlib.contextmanager`** for paired setup and cleanup. Put the cleanup in a `finally` around the `yield`. Use `contextlib.ExitStack` for a number of resources known only at run time. To ignore one named exception, see error-handling, rule 3.
 
 11. **Use `pathlib.Path` for file system paths.** Join with `/`, read with `read_text`, list with `iterdir` or `glob`.
     Why: one object type with methods for every path task, and no string joining bugs across platforms.
@@ -92,10 +91,10 @@ Loops, comprehensions, resources, strings and paths, written the way Python expe
     Check: `UP031` for `%` formatting, `UP032` for `.format`.
 
 14. **Use timezone-aware datetimes.** `datetime.now(UTC)` (3.11+, or `timezone.utc`) and `zoneinfo.ZoneInfo` for local zones. Store and log UTC.
-    Why: a naive datetime has no zone, and comparing one with an aware datetime raises `TypeError`.
+    Why: a naive datetime has no zone. Ordering or subtracting it against an aware datetime raises `TypeError`, and `==` between the two is `False`.
     Check: the `DTZ` rules, for example `DTZ005` for `datetime.now()` with no zone.
 
-15. **Ask forgiveness for one narrow operation (EAFP).** Wrap only the call that can fail and catch only the exception it raises.
+15. **Ask forgiveness for one narrow operation (EAFP).** Error-handling rules 2 and 4 say how narrow the `try` and the `except` are.
 
     ```python
     config = {"port": "8080"}

@@ -22,7 +22,7 @@ Function signatures, defaults, classes, properties, special methods and module s
 
    # right
    def add_tag(tag: str, tags: list[str] | None = None) -> list[str]:
-       tags = [] if tags is None else tags
+       tags = [] if tags is None else list(tags)
        tags.append(tag)
        return tags
 
@@ -46,7 +46,7 @@ Function signatures, defaults, classes, properties, special methods and module s
 4. **Return a value, do not mutate an argument.** When a function must change its input, say so in the name (`sort_in_place`) and return `None`.
    Why: a caller who passes a list does not expect it to change.
 
-5. **Handle bad input and trivial cases first, and return or raise early.** The main path then runs at one level of indentation.
+5. **Handle bad input and trivial cases first, and return or raise early.** The main path then runs at one level of indentation. Check input with `if` and `raise`. `python -O` removes every `assert`.
    Check: `RET505` for an `else` after a `return`, `PLR5501` for `else` then `if`.
 
 6. **Return one type.** Do not return a value on one path and `None` by accident on another. When `None` means "not found", annotate `X | None` and return it explicitly.
@@ -65,7 +65,7 @@ Function signatures, defaults, classes, properties, special methods and module s
 10. **A class holds state and the behavior that uses it.** A class with only static methods is a module. A class with one method and no state is a function.
    Why: extra classes add a layer the reader must step through.
 
-11. **Prefer composition over inheritance.** Hold a collaborator as an attribute and call it. Inherit only for a real is-a relation where the subclass works in every place the base works, and keep the tree shallow.
+11. **Composition over inheritance follows the base rule in engineering-standards.** In Python, hold the collaborator as an attribute set in `__init__` and call it. A mixin is inheritance too: keep it to one small, stateless behavior.
     Why: a deep tree spreads one behavior across files, and a change in the base breaks subclasses you cannot see.
 
 12. **Set every instance attribute in `__init__`.** Do not add attributes later from other methods.
@@ -82,7 +82,7 @@ Function signatures, defaults, classes, properties, special methods and module s
 16. **Define `__eq__` and `__hash__` together.** A class that defines `__eq__` alone becomes unhashable. Hash only fields that do not change.
     Check: `PLW1641`.
 
-17. **Do not put `functools.cache` or `lru_cache` on a method.** The cache holds `self` and keeps every instance alive. Cache a module-level function, or use `functools.cached_property` for a per-instance value.
+17. **Do not put `functools.cache` or `lru_cache` on a method.** The cache holds a reference to `self`: `cache` keeps every instance alive, and `lru_cache` keeps up to `maxsize` of them. Cache a module-level function, or use `functools.cached_property` for a per-instance value. `cached_property` needs an instance `__dict__`, so it fails on a `slots=True` dataclass. Compute the value in `__post_init__` there.
     Check: `B019`.
 
 18. **Avoid module-level mutable state and `global`.** Pass state in, or hold it on an object the caller owns.

@@ -34,7 +34,7 @@ Layout, names, imports, docstrings and comments. The project's existing style wi
    Sources disagree here. PEP 8 allows explicit relative imports, Google bans all of them. This skill bans only parent-relative imports, because they break when a module moves and hide where a name lives.
    Check: `TID252` with `lint.flake8-tidy-imports.ban-relative-imports = "parents"`.
 
-10. **No `from module import *`** outside a package `__init__.py` that re-exports an internal module.
+10. **No `from module import *`** outside a package `__init__.py` that re-exports an internal module. Allow that case with `lint.per-file-ignores = { "__init__.py" = ["F403"] }`.
    Why: the reader and the linter can no longer tell where a name came from.
    Check: `F403`, `F405`.
 

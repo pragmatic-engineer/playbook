@@ -1,6 +1,6 @@
 ---
 name: engineering-standards-python
-description: Python rules for code and reviews, covering style, idioms, types, data models, errors, classes and the Ruff rules that check them. Use when writing or reviewing Python, or a diff that touches .py files.
+description: Python rules for code and reviews, covering style, idioms, types, data models, errors, classes and the Ruff rules that check them. Use when writing or reviewing Python, or a diff that touches .py or .pyi files.
 ---
 
 # Engineering Standards: Python
@@ -33,21 +33,21 @@ Load `references/style-and-naming.md` when you name things, write imports, docst
 - Open every resource in a `with` block. Use `pathlib` for paths.
 - Ask forgiveness for one narrow operation, and check first when the check is cheap and race free.
 
-Load `references/idioms.md` when you write a loop, a comprehension, a `with` block, string formatting or path handling.
+Load `references/idioms.md` when you write a loop, a comprehension, a `with` block, string formatting, path or datetime handling, a `match` or long `if` chain, a script entry point, or choose between `try` and a check first.
 
 ### Data modeling
 
 - Model a record with a `dataclass` (frozen when you can), a closed set of values with an `Enum`, and an interface with a `Protocol`.
 - Validate untrusted data at the boundary with Pydantic (or the project's validator), and pass plain typed objects inside.
 
-Load `references/data-modeling.md` when you add a class that holds data, an enum, a protocol, or code that parses input into objects.
+Load `references/data-modeling.md` when you add a class that holds data, an enum, a protocol, a `TypedDict`, or code that parses input into objects.
 
 ### Types and typing
 
 - Annotate every public function. Run mypy or pyright in strict mode in CI.
 - No `Any` across a boundary, `X | None` over `Optional[X]`, and a runtime check over `cast`.
 
-Load `references/types-and-typing.md` when you add or change annotations, a generic, a `TypedDict`, a `cast`, a `# type: ignore`, or the type checker config.
+Load `references/types-and-typing.md` when you add or change annotations, a generic, a `cast`, a `# type: ignore`, or the type checker config.
 
 ### Error handling
 
@@ -60,7 +60,7 @@ Load `references/error-handling.md` when you write `try`, `except`, `raise`, a c
 ### Functions and classes
 
 - Small functions with one job. No mutable default arguments. Keyword-only parameters after the first one or two.
-- Prefer composition over inheritance. A class has state and behavior. A module of functions replaces a class with only static methods.
+- A class has state and behavior, and holds collaborators as attributes. A module of functions replaces a class with only static methods.
 
 Load `references/functions-and-classes.md` when you add a function, a class, a property, a dunder method or a decorator.
 
@@ -70,13 +70,14 @@ Load `references/antipatterns.md` when you review a Python diff. It is a checkli
 
 ## Sources
 
-The rule list started from the [Real Python best practices reference](https://realpython.com/ref/best-practices/) and the pages it links. Real Python content is copyrighted, so the rules here are ideas restated in our own words. No text or code is copied from any source below, and every snippet is our own.
+The rule list started from the [Real Python best practices reference](https://realpython.com/ref/best-practices/) and the pages it links. Real Python content is copyrighted. The rules here are ideas restated in our own words. No text or code is copied from any source below, and every snippet is our own.
 
 - Real Python entries used: [classes](https://realpython.com/ref/best-practices/classes/), [coding style](https://realpython.com/ref/best-practices/coding-style/), [code formatting](https://realpython.com/ref/best-practices/code-formatting/), [comments](https://realpython.com/ref/best-practices/comments/), [comprehensions](https://realpython.com/ref/best-practices/comprehensions/), [conditionals](https://realpython.com/ref/best-practices/conditionals/), [constants](https://realpython.com/ref/best-practices/constants/), [docstrings](https://realpython.com/ref/best-practices/docstrings/), [exception handling](https://realpython.com/ref/best-practices/exception-handling/), [public API surface](https://realpython.com/ref/best-practices/public-api-surface/), [Pythonic code](https://realpython.com/ref/best-practices/pythonic-code/), [type checking](https://realpython.com/ref/best-practices/type-checking/), [variables](https://realpython.com/ref/best-practices/variables/), and the tutorial on [LBYL and EAFP](https://realpython.com/python-lbyl-vs-eafp/)
 - [PEP 8](https://peps.python.org/pep-0008/), [PEP 20](https://peps.python.org/pep-0020/), [PEP 257](https://peps.python.org/pep-0257/) and [PEP 484](https://peps.python.org/pep-0484/) (public domain)
 - [The Python documentation](https://docs.python.org/3/) (PSF License): the data model, `typing`, `dataclasses`, `enum`, and the logging HOWTO and cookbook
 - [Typing best practices](https://typing.python.org/en/latest/reference/best_practices.html) from the Python typing project
 - [mypy](https://mypy.readthedocs.io/) and [pyright](https://microsoft.github.io/pyright/) docs (MIT)
+- [Pydantic](https://docs.pydantic.dev/) docs (MIT)
 - [Ruff rules](https://docs.astral.sh/ruff/rules/) (MIT). Rule codes and preview status were checked against Ruff 0.16.10 with `ruff rule --all`.
 - [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html) (CC BY 3.0)
 - [The Hitchhiker's Guide to Python](https://docs.python-guide.org/) (CC BY-NC-SA 3.0, ideas only)
