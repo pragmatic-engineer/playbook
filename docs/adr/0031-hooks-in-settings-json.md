@@ -1,8 +1,8 @@
 # ADR-0031: Put the Hooks in settings.json
 
-- **Status:** Accepted
+- **Status:** Accepted. Decision 3 is amended by [ADR 0034](0034-self-healing-upgrades.md): `init` removes an entry whose script under `~/.claude/hooks/` no longer exists
 - **Date created:** 2026-10-14
-- **Date modified:** 2026-10-14
+- **Date modified:** 2026-10-15
 - **Supersedes:** decisions 2 and 3 of [ADR 0030](0030-skills-and-commands-in-their-own-repo.md), the parts about the `playbook-hooks` plugin
 
 ## Context
