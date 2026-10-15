@@ -504,9 +504,31 @@ fn content_hash(bytes: &[u8]) -> String {
 /// it has always had, now read from the `state` table. `None` when the store
 /// cannot be read, so a write never wipes a record it failed to load.
 fn load_state(home: &Path) -> Option<Vec<String>> {
+    if let Some(lines) = SNAPSHOT.with(|s| s.borrow().clone()) {
+        return Some(lines);
+    }
     let root = playbook_root_from(home);
     let applied = crate::state::list(&root, crate::state::MIGRATIONS_APPLIED).ok()?;
     let shipped = crate::state::list(&root, crate::state::MIGRATIONS_SHIPPED).ok()?;
+    Some(record_lines(applied, shipped))
+}
+
+thread_local! {
+    /// The record `plan` read once without writing. While it is set, every
+    /// read of the record on this thread returns it and opens no store.
+    static SNAPSHOT: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The record read through read-only connections, which create, import and
+/// change nothing. `None` when the store cannot be read.
+fn load_state_read_only(home: &Path) -> Option<Vec<String>> {
+    let root = playbook_root_from(home);
+    let applied = crate::state::list_read_only(&root, crate::state::MIGRATIONS_APPLIED).ok()?;
+    let shipped = crate::state::list_read_only(&root, crate::state::MIGRATIONS_SHIPPED).ok()?;
+    Some(record_lines(applied, shipped))
+}
+
+fn record_lines(applied: Vec<(String, String)>, shipped: Vec<(String, String)>) -> Vec<String> {
     let mut lines: Vec<String> = applied
         .into_iter()
         .map(|(k, _)| format!("applied {}", &k[crate::state::MIGRATIONS_APPLIED.len()..]))
@@ -517,7 +539,7 @@ fn load_state(home: &Path) -> Option<Vec<String>> {
             &k[crate::state::MIGRATIONS_SHIPPED.len()..]
         )
     }));
-    Some(lines)
+    lines
 }
 
 fn read_state(home: &Path) -> Vec<String> {
@@ -666,10 +688,7 @@ pub fn open_items(ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
 /// Runs the `Owned` migrations that write, under the migration lock, taken
 /// with `retries` tries 100 ms apart. A `Consent` migration never runs here.
 pub fn run_owned(ctx: &Ctx, retries: u32) -> Report {
-    let owned: Vec<Migration> = registry()
-        .into_iter()
-        .filter(|m| matches!(m.scope, Scope::Owned) && !matches!(m.kind, Kind::Manual))
-        .collect();
+    let owned: Vec<Migration> = registry().into_iter().filter(heal_runs).collect();
     let mut report = Report::default();
     let locked = with_lock_retry(&ctx.home, retries, || {
         run_idempotent(&owned, ctx, &mut report);
@@ -677,6 +696,11 @@ pub fn run_owned(ctx: &Ctx, retries: u32) -> Report {
     });
     report.lock_busy = !locked;
     report
+}
+
+/// Whether a heal runs `m`: an `Owned` migration that writes.
+fn heal_runs(m: &Migration) -> bool {
+    matches!(m.scope, Scope::Owned) && !matches!(m.kind, Kind::Manual)
 }
 
 /// The notes of the `Manual` migrations scoped `Owned`: files playbook placed
@@ -689,6 +713,122 @@ pub fn owned_notes(ctx: &Ctx) -> Vec<String> {
         .filter_map(|m| match (m.run)(ctx) {
             Outcome::Warn(msg) => Some(format!("{}: {msg}", m.id)),
             _ => None,
+        })
+        .collect()
+}
+
+/// Where a migration stands, read without writing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum State {
+    /// An `Auto` migration in the applied record.
+    Applied,
+    /// An `Auto` migration not in the applied record yet.
+    Pending,
+    /// An `Idempotent` `Owned` migration, which runs on every heal.
+    EveryRun,
+    /// A check that found nothing to do.
+    Clear,
+    /// A check that found something for the user, with the command that
+    /// applies it when it is a `Consent` change.
+    Open {
+        message: String,
+        command: Option<&'static str>,
+    },
+    /// Not checked, because the check reads the record and old state files
+    /// are still waiting to be imported into it.
+    Unknown,
+}
+
+impl State {
+    /// The stable token for JSON output.
+    pub fn code(&self) -> &'static str {
+        match self {
+            State::Applied => "applied",
+            State::Pending => "pending",
+            State::EveryRun => "every_run",
+            State::Clear => "clear",
+            State::Open { .. } => "open",
+            State::Unknown => "unknown",
+        }
+    }
+}
+
+/// One registry entry and where it stands.
+pub struct Planned {
+    pub id: &'static str,
+    pub kind: &'static str,
+    pub scope: &'static str,
+    pub state: State,
+    /// Whether a heal would start it now, unless the record is newer.
+    pub runs: bool,
+}
+
+/// Checks that read the record, which `plan` skips while old state files
+/// wait to be imported, because the record is not complete yet.
+const READS_STATE: [&str; 4] = [
+    "0003-system-prompt-edited",
+    "0004-skills-edited",
+    "0005-statusline-edited",
+    STATUSLINE_MIGRATION,
+];
+
+/// Where every migration stands, writing nothing: the record is read once
+/// through read-only connections, and every check sees that copy. While old
+/// state files wait to be imported, the checks that read the record are
+/// skipped. `None` when the record cannot be read.
+pub fn plan(ctx: &Ctx) -> Option<Vec<Planned>> {
+    let root = playbook_root_from(&ctx.home);
+    let state_ready = crate::state::pending_legacy(&root) == 0;
+    let lines = load_state_read_only(&ctx.home)?;
+    let applied_ids = applied(&lines);
+    SNAPSHOT.with(|s| *s.borrow_mut() = Some(lines));
+    let plan = std::panic::catch_unwind(|| planned(ctx, state_ready, &applied_ids));
+    SNAPSHOT.with(|s| *s.borrow_mut() = None);
+    plan.ok()
+}
+
+fn planned(ctx: &Ctx, state_ready: bool, applied_ids: &[String]) -> Vec<Planned> {
+    registry()
+        .iter()
+        .map(|m| {
+            let needs_state = matches!(m.kind, Kind::Auto) || READS_STATE.contains(&m.id);
+            let state = if needs_state && !state_ready {
+                State::Unknown
+            } else {
+                match (&m.kind, m.scope) {
+                    (_, Scope::Consent { check, command }) => {
+                        check(ctx).map_or(State::Clear, |message| State::Open {
+                            message,
+                            command: Some(command),
+                        })
+                    }
+                    (Kind::Manual, _) => match (m.run)(ctx) {
+                        Outcome::Warn(message) => State::Open {
+                            message,
+                            command: None,
+                        },
+                        _ => State::Clear,
+                    },
+                    (Kind::Auto, _) if applied_ids.iter().any(|d| d == m.id) => State::Applied,
+                    (Kind::Auto, _) => State::Pending,
+                    (Kind::Idempotent, _) => State::EveryRun,
+                }
+            };
+            Planned {
+                runs: heal_runs(m) && state != State::Applied,
+                id: m.id,
+                kind: match m.kind {
+                    Kind::Auto => "auto",
+                    Kind::Idempotent => "idempotent",
+                    Kind::Manual => "manual",
+                },
+                scope: match m.scope {
+                    Scope::Owned => "owned",
+                    Scope::Consent { .. } => "consent",
+                    Scope::Report => "report",
+                },
+                state,
+            }
         })
         .collect()
 }
