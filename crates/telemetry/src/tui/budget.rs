@@ -31,7 +31,7 @@ fn fg(pal: &Palette, ink: Ink) -> Style {
 }
 
 /// `10-12 09:30` for a second, in the chosen time zone.
-fn stamp(at: i64) -> String {
+pub(super) fn stamp(at: i64) -> String {
     let date = date_key(day_of(at));
     format!("{} {}", &date[5..], &clock(at)[..5])
 }
@@ -51,7 +51,7 @@ fn rate(unit: Unit, n: Option<f64>) -> String {
     }
 }
 
-fn name(l: &Limit) -> &'static str {
+pub(super) fn name(l: &Limit) -> &'static str {
     match (l.period, l.unit) {
         (LimitPeriod::FiveHour, _) => "5 hour window",
         (LimitPeriod::SevenDay, _) => "weekly window",

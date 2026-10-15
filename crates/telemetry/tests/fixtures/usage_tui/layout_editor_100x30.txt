@@ -5,17 +5,17 @@
 │messages          26                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  F1 Charts  F2 Numbers  F3 Sessions
-╭─┤¹Spend per day, USD├─┤v view: total├────────────────────────────────────────────────────────────╮
-│total $20.╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮          │
-│Thu 2026-0│  Charts  Numbers  Sessions                                                 │          │
-│ $8┤┄┄┄┄┄┄│                                                                            │┄┄┄┄┄┄┄┄┄┄│
-│   │      │ > [1] spend      cost per day as a chart or a daily table                  │          │
-│ $4┤┄┄┄┄┄┄│   [2] tokens     tokens per day as a chart                                 │┄┄┄┄┄┄┄┄┄┄│
-│   │      │   [ ] models     cost and tokens per model                                 │▁▁        │
-│ $0┤▁▁ ▇▇ │   [ ] breakdown  projects, agents, skills, tools or health (v switches)    │██    ▆▆▆ │
-│    We Th │   [ ] live       sessions with a message in the last 15 minutes            │Tu We Th  │
-│    5  6  │   [ ] sessions   every session of the period, grouped by day               │1  2  3   │
-╰──────────│   [ ] budget     limits and how fast you are using them                    │■■■ high├─╯
+╭─┤¹Spend p╭┤ Layout: tabs and panels ├─────────────────────────────────────────────────╮──────────╮
+│total $20.│  Charts  Numbers  Sessions                                                 │          │
+│Thu 2026-0│                                                                            │          │
+│ $8┤┄┄┄┄┄┄│ > [1] spend      cost per day as a chart or a daily table                  │┄┄┄┄┄┄┄┄┄┄│
+│   │      │   [2] tokens     tokens per day as a chart                                 │          │
+│ $4┤┄┄┄┄┄┄│   [ ] models     cost and tokens per model                                 │┄┄┄┄┄┄┄┄┄┄│
+│   │      │   [ ] breakdown  projects, agents, skills, tools or health (v switches)    │▁▁        │
+│ $0┤▁▁ ▇▇ │   [ ] live       sessions with a message in the last 15 minutes            │██    ▆▆▆ │
+│    We Th │   [ ] sessions   every session of the period, grouped by day               │Tu We Th  │
+│    5  6  │   [ ] budget     limits and how fast you are using them                    │1  2  3   │
+╰──────────│   [ ] projection when each limit is reached at the current pace            │■■■ high├─╯
 ╭─┤²Tokens │                                                                            │──────────╮
 │total 618.│ Left/Right tab   j/k line   space add or remove   J/K move panel           │          │
 │Thu 2026-0│ < > move tab   n new   x delete   r rename   w save   R reset   esc cancel │          │

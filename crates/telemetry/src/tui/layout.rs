@@ -3,7 +3,7 @@
 
 //! The tab layout of pbtop: which tabs exist and which panels each one shows.
 //! The layout is a plain text line in the `usage.ui.layout` config key, for
-//! example `Charts=spend,tokens;Numbers=models,breakdown,budget`. Anything
+//! example `Charts=spend,tokens;Numbers=models,breakdown,budget,projection`. Anything
 //! that does not parse falls back to the default layout, so a bad value never
 //! stops pbtop from starting.
 
@@ -17,10 +17,11 @@ pub enum PanelId {
     Live,
     Sessions,
     Budget,
+    Projection,
 }
 
 /// Every panel, in the order the layout editor lists them.
-pub const ALL: [PanelId; 7] = [
+pub const ALL: [PanelId; 8] = [
     PanelId::Spend,
     PanelId::Tokens,
     PanelId::Models,
@@ -28,6 +29,7 @@ pub const ALL: [PanelId; 7] = [
     PanelId::Live,
     PanelId::Sessions,
     PanelId::Budget,
+    PanelId::Projection,
 ];
 
 impl PanelId {
@@ -41,6 +43,7 @@ impl PanelId {
             PanelId::Live => "live",
             PanelId::Sessions => "sessions",
             PanelId::Budget => "budget",
+            PanelId::Projection => "projection",
         }
     }
 
@@ -54,6 +57,7 @@ impl PanelId {
             PanelId::Live => "sessions with a message in the last 15 minutes",
             PanelId::Sessions => "every session of the period, grouped by day",
             PanelId::Budget => "limits and how fast you are using them",
+            PanelId::Projection => "when each limit is reached at the current pace",
         }
     }
 
@@ -67,7 +71,7 @@ impl PanelId {
             PanelId::Breakdown => Some(Panel::Projects),
             PanelId::Live => Some(Panel::Live),
             PanelId::Sessions => Some(Panel::Sessions),
-            PanelId::Budget => None,
+            PanelId::Budget | PanelId::Projection => None,
         }
     }
 
@@ -105,7 +109,12 @@ impl Default for Layout {
                 tab("Charts", &[PanelId::Spend, PanelId::Tokens]),
                 tab(
                     "Numbers",
-                    &[PanelId::Models, PanelId::Breakdown, PanelId::Budget],
+                    &[
+                        PanelId::Models,
+                        PanelId::Breakdown,
+                        PanelId::Budget,
+                        PanelId::Projection,
+                    ],
                 ),
                 tab("Sessions", &[PanelId::Live, PanelId::Sessions]),
             ],
@@ -114,12 +123,17 @@ impl Default for Layout {
 }
 
 impl Layout {
-    /// One tab with every panel: the single screen pbtop had before tabs.
+    /// One tab with the panels of the single screen pbtop had before tabs, which
+    /// is every panel except Projection.
     pub fn classic() -> Layout {
         Layout {
             tabs: vec![Tab {
                 name: "All".to_string(),
-                panels: ALL.to_vec(),
+                panels: ALL
+                    .iter()
+                    .copied()
+                    .filter(|p| *p != PanelId::Projection)
+                    .collect(),
             }],
         }
     }

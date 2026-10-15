@@ -115,6 +115,8 @@ pub struct LimitsView {
     pub period: Period,
     pub burn: Burn,
     pub previous: Burn,
+    /// Spend of the last 24 hours, all projects, for the recent pace.
+    pub recent_cost_24h: f64,
 }
 
 impl Default for LimitsView {
@@ -125,6 +127,7 @@ impl Default for LimitsView {
             period: Period::Week(WeekStart::default()),
             burn: Burn::new(0.0, 0),
             previous: Burn::new(0.0, 0),
+            recent_cost_24h: 0.0,
         }
     }
 }
@@ -159,6 +162,14 @@ impl LimitsView {
             period,
             burn,
             previous,
+            recent_cost_24h: events
+                .iter()
+                .filter(|e| {
+                    e.timestamp > now - super::projection::RECENT_SECONDS && e.timestamp <= now
+                })
+                .map(|e| e.cost_usd)
+                .sum::<f64>()
+                + 0.0,
         }
     }
 }
@@ -418,6 +429,20 @@ mod tests {
             assert!(matches(&e, hit), "{hit}");
         }
         assert!(!matches(&e, "sonnet"));
+    }
+
+    #[test]
+    fn the_recent_cost_counts_the_last_24_hours_and_stops_at_now() {
+        let events = vec![
+            event(NOW - 86_400, "opus", "a", 1.0),
+            event(NOW - 86_399, "opus", "a", 2.0),
+            event(NOW, "opus", "a", 4.0),
+            event(NOW + 1, "opus", "a", 8.0),
+        ];
+
+        let view = LimitsView::build(None, &[], &events, NOW, WeekStart::default(), Range::Today);
+
+        assert_eq!(view.recent_cost_24h, 6.0);
     }
 
     #[test]

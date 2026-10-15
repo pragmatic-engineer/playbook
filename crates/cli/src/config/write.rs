@@ -101,7 +101,7 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
             return Err(ConfigError::OutOfRange {
                 key: key.to_string(),
                 value: value.to_string(),
-                constraint: "tabs like Charts=spend,tokens;Numbers=models (1 to 9 tabs; panels: spend, tokens, models, breakdown, live, sessions, budget; a name is 1 to 16 characters)",
+                constraint: "tabs like Charts=spend,tokens;Numbers=models (1 to 9 tabs; panels: spend, tokens, models, breakdown, live, sessions, budget, projection; a name is 1 to 16 characters)",
             });
         }
     }

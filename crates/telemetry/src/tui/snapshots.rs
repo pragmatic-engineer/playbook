@@ -936,3 +936,23 @@ fn the_layout_editor_window_at_100x30() {
 
     check("layout_editor_100x30", &draw(&a, 100, 30));
 }
+
+#[test]
+fn the_projection_panel_shows_both_paces_for_a_budget_and_the_window_average() {
+    let mut a = with_limits(
+        tabbed(1),
+        Some(&plan_snapshot()),
+        &[(LimitPeriod::Monthly, 100.0)],
+        Range::LastDays(30),
+    );
+    a.layout = crate::tui::layout::Layout::default();
+    a.go_tab(1);
+
+    let text = draw(&a, 140, 40);
+
+    assert!(text.contains("Projection"), "{text}");
+    assert!(text.contains("Monthly budget"), "{text}");
+    assert!(text.contains("last 24h"), "{text}");
+    assert!(text.contains("window average"), "{text}");
+    check("projection_140x40", &text);
+}
