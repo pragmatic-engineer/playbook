@@ -10,7 +10,7 @@ use crate::common::paths::playbook_root_from;
 use crate::init::run::{StepReport, StepStatus};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const LOCK_DIR: &str = "migrations.lock";
 const SYSTEM_PROMPT_KEY: &str = "system-prompt";
@@ -107,6 +107,8 @@ pub struct Report {
     pub failed: bool,
     /// Another process held the migration lock, so the locked part did not run.
     pub lock_busy: bool,
+    /// The deadline passed, so the later migrations did not start.
+    pub timed_out: bool,
 }
 
 /// Shipped migrations in apply order. Append only; never reorder or reuse an id.
@@ -687,12 +689,13 @@ pub fn open_items(ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
 
 /// Runs the `Owned` migrations that write, under the migration lock, taken
 /// with `retries` tries 100 ms apart. A `Consent` migration never runs here.
-pub fn run_owned(ctx: &Ctx, retries: u32) -> Report {
+/// No migration starts after `deadline`; the report then says it timed out.
+pub fn run_owned(ctx: &Ctx, retries: u32, deadline: Option<Instant>) -> Report {
     let owned: Vec<Migration> = registry().into_iter().filter(heal_runs).collect();
     let mut report = Report::default();
     let locked = with_lock_retry(&ctx.home, retries, || {
-        run_idempotent(&owned, ctx, &mut report);
-        run_auto(&owned, ctx, &mut report);
+        run_idempotent(&owned, ctx, &mut report, deadline);
+        run_auto(&owned, ctx, &mut report, deadline);
     });
     report.lock_busy = !locked;
     report
@@ -925,14 +928,14 @@ fn run_with_retries(migrations: &[Migration], ctx: &Ctx, retries: u32) -> Report
             report.warnings.push(format!("{}: {msg}", m.id));
         }
     }
-    run_idempotent(migrations, ctx, &mut report);
+    run_idempotent(migrations, ctx, &mut report, None);
     let done = applied(&read_state(&ctx.home));
     let pending = |m: &&Migration| matches!(m.kind, Kind::Auto) && !done.iter().any(|d| d == m.id);
     if !migrations.iter().any(|m| pending(&m)) {
         return report;
     }
     let locked = with_lock_retry(&ctx.home, retries, || {
-        run_auto(migrations, ctx, &mut report)
+        run_auto(migrations, ctx, &mut report, None)
     });
     if !locked {
         report.lock_busy = true;
@@ -951,13 +954,27 @@ fn applied(lines: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Whether `deadline` has passed, which marks `report` as timed out.
+fn out_of_time(deadline: Option<Instant>, report: &mut Report) -> bool {
+    report.timed_out |= deadline.is_some_and(|d| Instant::now() >= d);
+    report.timed_out
+}
+
 /// Runs every `Idempotent` migration in `migrations`. A failure is reported
 /// and the rest still run.
-fn run_idempotent(migrations: &[Migration], ctx: &Ctx, report: &mut Report) {
+fn run_idempotent(
+    migrations: &[Migration],
+    ctx: &Ctx,
+    report: &mut Report,
+    deadline: Option<Instant>,
+) {
     for m in migrations
         .iter()
         .filter(|m| matches!(m.kind, Kind::Idempotent))
     {
+        if out_of_time(deadline, report) {
+            return;
+        }
         match (m.run)(ctx) {
             Outcome::Failed(step) => {
                 report.failed = true;
@@ -972,8 +989,11 @@ fn run_idempotent(migrations: &[Migration], ctx: &Ctx, report: &mut Report) {
 
 /// Runs each `Auto` migration not yet applied, in order, and records it. The
 /// caller holds the migration lock. A failure stops the later ones.
-fn run_auto(migrations: &[Migration], ctx: &Ctx, report: &mut Report) {
+fn run_auto(migrations: &[Migration], ctx: &Ctx, report: &mut Report, deadline: Option<Instant>) {
     for m in migrations.iter().filter(|m| matches!(m.kind, Kind::Auto)) {
+        if out_of_time(deadline, report) {
+            return;
+        }
         let Some(mut lines) = load_state(&ctx.home) else {
             report.failed = true;
             report
@@ -1352,7 +1372,7 @@ mod tests {
         let before = outside(&h);
 
         // Act
-        let run = run_owned(&ctx(&h), 0);
+        let run = run_owned(&ctx(&h), 0, None);
         let notes = owned_notes(&ctx(&h));
         let open = open_items(&ctx(&h), None);
 

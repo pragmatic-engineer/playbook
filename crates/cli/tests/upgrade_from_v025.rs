@@ -196,7 +196,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     for message in [&first, &second] {
         for part in [
             "3 change(s) to your settings or shell files need `playbook init` and `playbook init --hooks` and `playbook init --statusline`",
-            "2 item(s) need you: run `playbook doctor --fix`",
+            "2 item(s) need you: run `playbook migrate`",
         ] {
             assert!(message.contains(part), "{message}");
         }
@@ -347,14 +347,11 @@ fn migrate_on_a_v025_home_previews_runs_once_and_leaves_user_files_alone() {
 
 #[test]
 fn migrate_previews_write_nothing_in_a_half_set_up_home_and_fail_on_a_bad_store() {
-    // Arrange: a store made by `config set` alone, next to an old state file.
+    // Arrange: a store made by the config store alone, next to an old state
+    // file.
     let h = V025Home::new("migrate-half");
-    let set = h.playbook(
-        &["config", "set", "--global", "autoReview.enabled", "true"],
-        "",
-    );
-    assert_eq!(set.status.code(), Some(0), "{}", stdout(&set));
     let root = playbook::common::paths::playbook_root_from(&h.home);
+    drop(playbook::config::store::open(&root).unwrap());
     write(
         &root.join("migrations.state"),
         "applied 0001-memory-store-move\n",
@@ -401,4 +398,101 @@ fn migrate_previews_write_nothing_in_a_half_set_up_home_and_fail_on_a_bad_store(
     // Assert
     assert_eq!(bad.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&bad.stderr).contains("could not be read"));
+}
+
+/// Whether the record in `home` names this binary.
+fn recorded_here(home: &Path) -> bool {
+    let root = playbook::common::paths::playbook_root_from(home);
+    playbook::heal::Record::read_only(&root)
+        .is_ok_and(|r| r.binary.as_deref() == Some(env!("CARGO_PKG_VERSION")))
+}
+
+#[test]
+fn the_first_run_step_heals_once_before_any_command_and_keeps_stdout_clean() {
+    // Each class: the command, its stdin, and whether it heals first. Hooks
+    // and the status line defer to the session-init hook.
+    let classes: [(&str, &[&str], &str, bool); 5] = [
+        ("plain", &["mode", "status"], "", true),
+        ("json", &["mode", "status", "--json"], "", true),
+        ("hook", &["hook", "search-counter"], "{}", false),
+        ("statusline", &["statusline"], "{}", false),
+        (
+            "session-init",
+            &["hook", "session-init"],
+            r#"{"source":"startup"}"#,
+            true,
+        ),
+    ];
+    for (class, args, stdin, heals) in classes {
+        // Arrange
+        let h = V025Home::new(&format!("start-{class}"));
+        let config_hash =
+            playbook::common::paths::playbook_root_from(&h.home).join("hooks/lib/config-hash.sh");
+        let user_files = h.user_files();
+
+        // Act
+        let first = h.playbook(args, stdin);
+        let second = h.playbook(args, stdin);
+
+        // Assert: it heals exactly once, says so on stderr only, and leaves
+        // stdout and the user's files alone.
+        assert_eq!(first.status.code(), second.status.code(), "{class}");
+        assert_eq!(config_hash.exists(), !heals, "{class}");
+        assert_eq!(recorded_here(&h.home), heals, "{class}");
+        assert_eq!(h.user_files(), user_files, "{class}");
+        let notice = String::from_utf8_lossy(&first.stderr);
+        let again = String::from_utf8_lossy(&second.stderr);
+        assert!(!again.contains("of its own files"), "{class}: {again}");
+        if class == "session-init" {
+            continue;
+        }
+        assert_eq!(stdout(&first), stdout(&second), "{class}");
+        assert!(!stdout(&first).contains("of its own files"), "{class}");
+        assert_eq!(
+            notice.contains("updated 1 of its own files after the upgrade"),
+            heals,
+            "{class}: {notice}"
+        );
+        assert_eq!(
+            notice.contains("need `playbook init` and `playbook init --hooks`"),
+            heals,
+            "{class}: {notice}"
+        );
+    }
+}
+
+#[test]
+fn the_first_run_step_skips_homeless_commands_and_does_nothing_after_a_downgrade() {
+    // Arrange
+    let h = V025Home::new("start-edge");
+    let before = tree(&h.home);
+
+    // Act: commands that run without a home never heal.
+    let version = h.playbook(&["version"], "");
+    let json = h.playbook(&["json", "valid-json"], "{}");
+
+    // Assert
+    assert_eq!(version.status.code(), Some(0));
+    assert_eq!(json.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&json.stderr), "");
+    assert_eq!(tree(&h.home), before);
+
+    // Arrange: a newer playbook ran here.
+    let root = playbook::common::paths::playbook_root_from(&h.home);
+    playbook::heal::Record {
+        binary: Some("999.0.0".into()),
+        schema: 999,
+        ..Default::default()
+    }
+    .write(&root)
+    .unwrap();
+    let downgraded = tree(&h.home);
+
+    // Act
+    let out = h.playbook(&["mode", "status"], "");
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "");
+    assert_eq!(tree(&h.home), downgraded);
 }

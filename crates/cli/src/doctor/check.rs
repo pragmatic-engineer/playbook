@@ -431,7 +431,7 @@ fn version_row(env: &Env, bin: &Path, bin_ver: &str) -> Row {
 /// connection, so the check changes nothing on disk.
 fn heal_row(env: &Env, bin_ver: &str) -> Row {
     let root = crate::common::paths::playbook_root_from(&env.home);
-    let fix = "run: playbook doctor --fix";
+    let fix = "run: playbook migrate";
     let record = match crate::heal::Record::read_only(&root) {
         Ok(record) => record,
         Err(err) => {

@@ -774,6 +774,12 @@ fn check(c: &Case) -> Vec<String> {
     for (rel, text) in &c.files {
         fs::write(env.root.join(rel), text).expect("fixture file");
     }
+    // A real home has the upgrade record from install, so the first-run step
+    // (ADR 0034 decision 13) has nothing to do during the case.
+    let seed = env.run(&["migrate".to_string()], "");
+    if seed.code != 0 {
+        bad.push(format!("setup migrate failed: {seed:?}"));
+    }
     for pre in &c.pre {
         let r = env.run(pre, "");
         if r.code != 0 {

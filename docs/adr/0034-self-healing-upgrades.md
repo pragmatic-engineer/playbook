@@ -40,7 +40,7 @@ A user's skill failed with "could not find the plugin root folder". The binary p
    | 0008, 0009, 0010 | Idempotent | Owned |
 
    One test runs every `Owned` and `Manual` migration against a scratch home and checks that no file outside `~/.config/playbook` changed.
-7. **Four triggers run the same code.**
+7. **Four triggers run the same code.** Decision 13 adds a fifth, the first-run step.
    1. `playbook init` runs every migration, as it does today, with the consent `init` already asks for.
    2. `playbook update` runs `<new binary> migrate` after the swap, so the new binary runs its own migrations (decision 12). A new binary without `migrate` exits 2, and the update runs its `doctor --fix` instead. The step is skipped when the new version is older than the first release with `--fix`, and a failure is a warning, not an update failure.
    3. The `session-init` hook reads the version record. When the running binary's version and schema match it and `versions/pending` is empty, it does nothing more. When `versions/pending` is not empty, it reruns only those checks. When the binary is newer, it runs the `Owned` migrations under the migration lock, without waiting for it, then the `Consent` and `Report` checks. It adds one line to the session message naming what changed and the command to run. It asks no question, writes no Claude settings and does not fail the hook. When the record is newer than the running binary, a downgrade, the hook runs nothing and leaves the record alone.
@@ -62,7 +62,16 @@ A user's skill failed with "could not find the plugin root folder". The binary p
     - It exits 0 when it finished or had nothing to do, and 1 when a migration failed, the lock was busy or the record was not written. `--status` and `--dry-run` exit 0 unless the record cannot be read.
     - `Consent` and `Report` items print their command and are not applied.
 
-    Each channel runs it after it installs a binary. `playbook update` runs the new binary's `migrate` and warns when it takes over 120 seconds. The install script runs it when it has a terminal or `--yes`, and skips it with `--no-init` or on a binary that has no `migrate`. Neither writes Claude settings. The Homebrew formula has no `post_install` step, because the session hook heals on the next session after `brew upgrade`.
+    Each channel runs it after it installs a binary. `playbook update` runs the new binary's `migrate` and warns when it takes over 120 seconds. The install script runs it when it has a terminal or `--yes`, and skips it with `--no-init` or on a binary that has no `migrate`. Neither writes Claude settings. The Homebrew formula has no `post_install` step, because the first-run step in decision 13 heals on the first command after `brew upgrade`.
+13. **The first run of a new binary heals, whatever the command.** One step in `main()`, after the arguments parse and before the command runs, reads the version record. When it names an older binary, the step runs the `Owned` migrations once with the code `migrate` runs, then the command goes on.
+    - It asks no question, writes no Claude settings and does not fail the command: a panic or an unreadable store is ignored.
+    - It does not wait for the migration lock. A busy lock skips the step, and the next command tries again.
+    - It starts no migration after 2 seconds. It then leaves the record unchanged, so the next command goes on from there.
+    - It prints one short notice on stderr: what changed, and the command for each item that needs the user. Standard output stays the command's own, so `--json` output is unchanged. The notice shows once per version change, because a clean run records the new binary.
+    - It does nothing after a downgrade, on a home with no playbook folder yet, or when the record already names the running binary. That last check is one read of the record through a read-only connection.
+
+    Hot paths skip the step. Hooks fire on every tool call, and the status line redraws every few hundred milliseconds, so `playbook hook` and `playbook statusline` return through the fast path before the arguments parse. `shell-init` runs on every new shell, and the hidden `json` helpers run inside hook scripts, so they skip it too. On that side, the `session-init` hook is the trigger, once per session (decision 7, trigger 3). Commands that run their own heal (`migrate`, `doctor --fix`, `init`), replace the binary (`update`) or remove playbook (`uninstall`) skip it. So do `doctor` and `state`, which show the home as it is; the doctor row names `playbook migrate` when a heal is due.
+14. **Every release is backward compatible or migrates.** A change to playbook's config, its data files, the entries it writes into Claude Code settings, or the contract between the binary and the plugin has to keep working for a user who upgrades. When it cannot, it ships a registry entry that the first-run step runs. A change that needs the user, or one no migration can cover, is listed in `breaking-changes.json`, which ADR 0035 turns into the notice every update channel shows.
 
 ## Alternatives considered
 
@@ -75,7 +84,8 @@ A user's skill failed with "could not find the plugin root folder". The binary p
 
 ## Consequences
 
-- A binary upgrade through `playbook update` or the install script heals the playbook files right after the install. One through Homebrew or a copied file heals them on the next session start. None of them needs a run of `init`.
+- A binary upgrade through `playbook update` or the install script heals the playbook files right after the install. One through Homebrew or a copied file heals them on the first command or session start after it. None of them needs a run of `init`.
+- The first command after an upgrade can take up to about 2 seconds longer. Every later command pays one read of the record.
 - A binary released before this change cannot heal itself or read `minBinaryVersion`. For those, the only fix is an upgrade, and the plugin's own text has to tell the user, because the old binary runs the hooks.
 - Settings problems still need the user. The hook repeats the command each session until the item is fixed.
 - A dev checkout no longer wins over an installed plugin through `CLAUDE_PLUGIN_ROOT`. It needs `PLAYBOOK_PLUGIN_DIR`.
