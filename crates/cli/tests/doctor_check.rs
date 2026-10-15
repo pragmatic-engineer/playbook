@@ -443,12 +443,28 @@ fn l5_no_status_line_is_info() {
 // Layer 6
 
 fn manifest(root: &Path, version: &str) {
+    manifest_with(root, version, "");
+}
+
+/// A plugin folder the resolver accepts, with `extra` JSON fields in its manifest.
+fn manifest_with(root: &Path, version: &str, extra: &str) {
     fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+    fs::create_dir_all(root.join("skills")).unwrap();
     fs::write(
         root.join(".claude-plugin/plugin.json"),
-        format!(r#"{{"name":"playbook","version":"{version}"}}"#),
+        format!(r#"{{"name":"playbook","version":"{version}"{extra}}}"#),
     )
     .unwrap();
+}
+
+/// The layer 6 version row, which comes first when a binary is found.
+fn version_row(rows: &[Value]) -> String {
+    text(&layer(rows, "6")[..1])
+}
+
+/// The layer 6 upgrade record row, which comes second when a binary is found.
+fn record_row(rows: &[Value]) -> String {
+    text(&layer(rows, "6")[1..2])
 }
 
 #[test]
@@ -459,26 +475,42 @@ fn l6_no_binary_on_path_fails() {
 }
 
 #[test]
-fn l6_binary_and_plugin_that_agree_pass() {
+fn l6_a_plugin_inside_the_supported_range_passes_even_when_versions_differ() {
     let b = Box::new("l6k");
     let bin = b.stub("bin1", "0.19.0", true);
     let root = b.root.join("plugin");
-    manifest(&root, "0.19.0");
+    manifest(&root, "0.31.1");
     let rows = b.run(&[&bin], "/bin/zsh", Some(&root));
-    let l6 = layer(&rows, "6");
-    assert_eq!(l6.len(), 1, "{}", text(&l6));
-    assert!(text(&l6).starts_with("PASS"), "{}", text(&l6));
+    let t = version_row(&rows);
+    assert!(t.starts_with("PASS") && t.contains("0.31.1"), "{t}");
 }
 
 #[test]
-fn l6_a_version_skew_is_info_naming_both() {
+fn l6_a_plugin_older_than_the_supported_range_warns_with_the_update_command() {
     let b = Box::new("l6s");
     let bin = b.stub("bin1", "0.19.0", true);
     let root = b.root.join("plugin");
-    manifest(&root, "0.18.0");
-    let t = text(&layer(&b.run(&[&bin], "/bin/zsh", Some(&root)), "6"));
+    manifest(&root, "0.25.0");
+    let t = version_row(&b.run(&[&bin], "/bin/zsh", Some(&root)));
     assert!(
-        t.starts_with("INFO") && t.contains("0.19.0") && t.contains("0.18.0"),
+        t.starts_with("WARN") && t.contains("claude plugin update playbook@pragmatic-engineer"),
+        "{t}"
+    );
+}
+
+#[test]
+fn l6_a_binary_older_than_the_plugin_needs_warns_with_the_upgrade_command() {
+    let b = Box::new("l6o");
+    let bin = b.stub("bin1", "0.19.0", true);
+    let root = b.root.join("plugin");
+    manifest_with(
+        &root,
+        "0.31.1",
+        r#","metadata":{"minBinaryVersion":"0.26.0"}"#,
+    );
+    let t = version_row(&b.run(&[&bin], "/bin/zsh", Some(&root)));
+    assert!(
+        t.starts_with("WARN") && t.contains("older than this plugin needs (0.26.0)"),
         "{t}"
     );
 }
@@ -487,7 +519,7 @@ fn l6_a_version_skew_is_info_naming_both() {
 fn l6_no_manifest_is_info_not_fail() {
     let b = Box::new("l6n");
     let bin = b.stub("bin1", "0.19.0", true);
-    let t = text(&layer(&b.run(&[&bin], "/bin/zsh", None), "6"));
+    let t = version_row(&b.run(&[&bin], "/bin/zsh", None));
     assert!(
         t.starts_with("INFO") && t.contains("no plugin manifest"),
         "{t}"
@@ -495,18 +527,69 @@ fn l6_no_manifest_is_info_not_fail() {
 }
 
 #[test]
-fn l6_the_newest_cached_manifest_is_the_baseline() {
+fn l6_the_newest_cached_plugin_is_the_baseline() {
     let b = Box::new("l6c");
     let bin = b.stub("bin1", "0.19.0", true);
-    for v in ["0.9.0", "0.19.0"] {
+    for v in ["0.9.0", "0.31.1"] {
         manifest(
-            &b.home()
-                .join(format!(".claude/plugins/cache/m/playbook/{v}")),
+            &b.home().join(format!(
+                ".claude/plugins/cache/pragmatic-engineer/playbook/{v}"
+            )),
             v,
         );
     }
-    let t = text(&layer(&b.run(&[&bin], "/bin/zsh", None), "6"));
-    assert!(t.starts_with("PASS"), "{t}");
+    let t = version_row(&b.run(&[&bin], "/bin/zsh", None));
+    assert!(t.starts_with("PASS") && t.contains("0.31.1"), "{t}");
+}
+
+#[test]
+fn l6_the_upgrade_record_row_follows_the_record_of_the_binary_on_path() {
+    let b = Box::new("l6r");
+    let bin = b.stub("bin1", "0.19.0", true);
+    let root = playbook::common::paths::playbook_root_from(&b.home());
+    let set = |pairs: &[(&str, &str)]| {
+        playbook::state::transaction(&root, |tx| {
+            for (k, v) in pairs {
+                tx.set(k, v)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    };
+    let row = || record_row(&b.run(&[&bin], "/bin/zsh", None));
+
+    let t = row();
+    assert!(
+        t.starts_with("INFO") && t.contains("no upgrade record yet"),
+        "{t}"
+    );
+    set(&[("versions/binary", "0.19.0")]);
+    let t = row();
+    assert!(t.starts_with("PASS") && t.contains("binary 0.19.0"), "{t}");
+    set(&[("versions/binary", "0.18.0")]);
+    let t = row();
+    assert!(
+        t.starts_with("INFO") && t.contains("next session start updates it"),
+        "{t}"
+    );
+    set(&[("versions/binary", "0.20.0")]);
+    let t = row();
+    assert!(
+        t.starts_with("INFO") && t.contains("nothing runs after a downgrade"),
+        "{t}"
+    );
+    set(&[("versions/pending", "0011-dead-hook-scripts")]);
+    let t = row();
+    assert!(
+        t.starts_with("WARN") && t.contains("1 upgrade item(s) need you: 0011-dead-hook-scripts"),
+        "{t}"
+    );
+    set(&[("versions/failed-at", "1000")]);
+    let t = row();
+    assert!(
+        t.starts_with("WARN") && t.contains("last upgrade heal failed"),
+        "{t}"
+    );
 }
 
 #[test]

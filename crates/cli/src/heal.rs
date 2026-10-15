@@ -33,14 +33,26 @@ pub struct Record {
 
 impl Record {
     pub fn read(root: &Path) -> Result<Record, crate::state::StateError> {
-        let rows = crate::state::list(root, "versions/")?;
+        Ok(Record::from_rows(&crate::state::list(root, "versions/")?))
+    }
+
+    /// The record read without changing anything on disk, for `doctor` and
+    /// the dry runs. A missing database reads as an empty record.
+    pub fn read_only(root: &Path) -> Result<Record, crate::state::StateError> {
+        Ok(Record::from_rows(&crate::state::list_read_only(
+            root,
+            "versions/",
+        )?))
+    }
+
+    fn from_rows(rows: &[(String, String)]) -> Record {
         let get = |key: &str| {
             rows.iter()
                 .find(|(k, _)| k == key)
                 .map(|(_, v)| v.clone())
                 .filter(|v| !v.is_empty())
         };
-        Ok(Record {
+        Record {
             binary: get(BINARY_KEY),
             schema: get(SCHEMA_KEY).and_then(|v| v.parse().ok()).unwrap_or(0),
             plugin: get(PLUGIN_KEY),
@@ -48,7 +60,7 @@ impl Record {
                 .map(|v| v.split(',').map(str::to_string).collect())
                 .unwrap_or_default(),
             failed_at: get(FAILED_AT_KEY).and_then(|v| v.parse().ok()),
-        })
+        }
     }
 
     fn write(&self, root: &Path) -> Result<(), crate::state::StateError> {

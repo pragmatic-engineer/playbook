@@ -276,6 +276,30 @@ pub fn pending_legacy(root: &Path) -> usize {
     legacy_files(root).len()
 }
 
+/// Rows under `prefix` read through a read-only connection, which runs no
+/// schema step and no legacy import, so reading changes nothing on disk.
+/// Empty when the database or its `state` table does not exist yet.
+pub fn list_read_only(root: &Path, prefix: &str) -> Result<Vec<(String, String)>, StateError> {
+    let path = store::db_path(root);
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let conn =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(err)?;
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'state')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    if !exists {
+        return Ok(Vec::new());
+    }
+    Tx { conn: &conn }.list(prefix)
+}
+
 fn flagged_on_disk(root: &Path) -> bool {
     store::db_path(root).exists()
         && rusqlite::Connection::open_with_flags(
@@ -393,6 +417,23 @@ mod tests {
         assert_eq!(
             sweep_key(Path::new("/Users/me/my repo")),
             "worktree-sweep/_Users_me_my_repo"
+        );
+    }
+
+    #[test]
+    fn a_read_only_listing_creates_and_imports_nothing() {
+        let r = root("read-only");
+        fs::create_dir_all(&r).unwrap();
+        fs::write(r.join("migrations.state"), "applied 0001-x\n").unwrap();
+
+        assert!(list_read_only(&r, "").unwrap().is_empty());
+        assert!(!store::db_path(&r).exists());
+        assert!(r.join("migrations.state").is_file());
+
+        transaction(&r, |tx| tx.set("versions/binary", "0.27.0")).unwrap();
+        assert_eq!(
+            list_read_only(&r, "versions/").unwrap(),
+            vec![("versions/binary".to_string(), "0.27.0".to_string())]
         );
     }
 }
