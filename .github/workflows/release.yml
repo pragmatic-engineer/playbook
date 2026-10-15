@@ -14,9 +14,10 @@
 # attests their build provenance. Every release also gets breaking-changes.json
 # as an asset, and its body starts with the release's breaking changes from
 # that file (ADR 0035). verify-version fails when a commit since the previous
-# tag of the tool is marked breaking and the file has no entry for the version. Releases for telemetry-v and code-v tags are
-# created with `--latest=false`, so GitHub's "latest release" stays on the
-# playbook `vX.Y.Z` line that install.sh reads.
+# tag of the tool is marked breaking and the file has no entry for the
+# version. Releases for telemetry-v and code-v tags are created with
+# `--latest=false`, so GitHub's "latest release" stays on the playbook
+# `vX.Y.Z` line that install.sh reads.
 #
 # Dry run: `workflow_dispatch` with a `tag` input and `dry_run` left on runs
 # resolve, verify-version and the five builds, and skips release creation,
