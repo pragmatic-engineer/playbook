@@ -327,8 +327,9 @@ installed_version() {
 # show_breaking_changes OLD: prints, to stderr, the breaking changes the new
 # binary lists since OLD (ADR 0035). A binary without `playbook breaking`, or
 # any other answer than the block, prints nothing. After it prints, it sets
-# PLAYBOOK_BREAKING_SHOWN=1 for the `migrate` and `init` this script runs
-# next, so they record the notice without printing it again.
+# BREAKING_SHOWN to OLD. The `migrate` and `init` this script runs next get it
+# as PLAYBOOK_BREAKING_SHOWN, so they record the notice without printing it
+# again (ADR 0035 decision 4.5). It is not exported.
 show_breaking_changes() {
     local old="$1" text
     [ -n "$old" ] || return 0
@@ -336,7 +337,7 @@ show_breaking_changes() {
     case "$text" in
         "Breaking changes in this upgrade:"*)
             printf '%s\n' "$text" >&2
-            export PLAYBOOK_BREAKING_SHOWN=1
+            BREAKING_SHOWN="$old"
             ;;
     esac
 }
@@ -526,6 +527,11 @@ ensure_bin_dir_on_path() {
 # ctrl-c during the network path.
 STAGE=""
 PREVIOUS_VERSION=""
+BREAKING_SHOWN=""
+# A value inherited from a shell that an older version of this script
+# exported it into would reach the probes and the login shell started at the
+# end, so it is dropped here.
+unset PLAYBOOK_BREAKING_SHOWN
 _cleanup_staging() {
     [ -n "$STAGE" ] && rm -rf "$STAGE"
     return 0
@@ -552,7 +558,7 @@ fi
 if [ "$NO_INIT" -eq 0 ] && { [ "$ASSUME_YES" -eq 1 ] || have_tty; } \
     && "$PLAYBOOK_BIN_DIR/playbook" migrate --help >/dev/null 2>&1; then
     log "Running playbook migrate"
-    "$PLAYBOOK_BIN_DIR/playbook" migrate || \
+    PLAYBOOK_BREAKING_SHOWN="$BREAKING_SHOWN" "$PLAYBOOK_BIN_DIR/playbook" migrate || \
         warn "playbook migrate did not finish; run \`playbook migrate\` to retry"
 fi
 
@@ -626,7 +632,7 @@ if [ "$NO_INIT" -eq 0 ] && consent "Run playbook init now? It adds playbook's ho
     # PLAYBOOK_BIN_DIR, and this runs before the rc-file PATH line takes
     # effect. `init` prints one line per step, so its output is not redirected.
     # shellcheck disable=SC2086
-    "$PLAYBOOK_BIN_DIR/playbook" init $_INIT_ARGS || \
+    PLAYBOOK_BREAKING_SHOWN="$BREAKING_SHOWN" "$PLAYBOOK_BIN_DIR/playbook" init $_INIT_ARGS || \
         die "playbook init failed; see the step report above"
     INIT_RAN=1
 

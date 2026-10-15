@@ -218,6 +218,13 @@ pub fn command(since: Option<&str>, json: bool) -> Result<String, String> {
     })
 }
 
+/// The environment variable a caller that already printed the breaking
+/// changes block sets on the step it runs next (ADR 0035 decision 4.3). Its
+/// value is the version the printed block started from, so the step prints
+/// only the entries at or below it and records the notice. Empty means
+/// nothing was shown.
+pub const SHOWN_ENV: &str = "PLAYBOOK_BREAKING_SHOWN";
+
 /// The playbook entries an upgrade from `from` to `to` crosses, from the
 /// embedded record.
 pub fn entries_between(from: &str, to: &str) -> Vec<Entry> {
