@@ -72,20 +72,22 @@ fn name(l: &Limit) -> &'static str {
 }
 
 /// One clause: the pace, and what it leads to.
-fn clause(label: &str, pace: Option<f64>, unit: Unit, o: Outcome, end: i64) -> String {
+fn clause(label: &str, pace: Option<f64>, unit: Unit, o: Outcome) -> String {
     let rate = |n: f64| match unit {
         Unit::Dollars => format!("{}/day", money(n)),
         Unit::Percent => format!("{n:.1}%/day"),
     };
-    let pace_text = pace.map_or_else(|| "no pace yet".to_string(), rate);
+    if o == Outcome::Reached {
+        return format!("{label}: limit reached");
+    }
+    let Some(pace) = pace else {
+        return format!("{label}: no pace yet");
+    };
+    let pace_text = rate(pace);
     match o {
-        Outcome::Reached => format!("{label}: limit reached"),
-        Outcome::Idle => format!("{label} {pace_text}: nothing used, no hit"),
+        Outcome::Reached | Outcome::Idle => format!("{label} {pace_text}: no hit"),
         Outcome::At(at) => format!("{label} {pace_text}: hit {}", when(at)),
-        Outcome::Safe => format!(
-            "{label} {pace_text}: no hit before the reset at {}",
-            when(end)
-        ),
+        Outcome::Safe => format!("{label} {pace_text}: won't hit before it resets"),
     }
 }
 
@@ -111,7 +113,6 @@ pub fn line(l: &Limit, recent_cost: f64, now: i64) -> String {
         avg,
         l.unit,
         avg.map_or(Outcome::Idle, |p| outcome(remaining, p, now, l.end)),
-        l.end,
     );
     if l.unit == Unit::Percent {
         return format!("{head} {avg_clause}.");
@@ -125,7 +126,6 @@ pub fn line(l: &Limit, recent_cost: f64, now: i64) -> String {
         recent,
         l.unit,
         recent.map_or(Outcome::Idle, |p| outcome(remaining, p, now, l.end)),
-        l.end,
     );
     format!("{head} {recent_clause}. {avg_clause}.")
 }
@@ -209,7 +209,7 @@ mod tests {
 
         assert!(text.contains("last 24h $100.00/day: hit "), "{text}");
         assert!(
-            text.contains("period average $20.00/day: no hit before the reset at"),
+            text.contains("period average $20.00/day: won't hit before it resets"),
             "{text}"
         );
     }
@@ -230,7 +230,7 @@ mod tests {
 
         let text = line(&l, 0.0, NOW);
 
-        assert!(text.contains("last 24h $0.00/day: nothing used"), "{text}");
+        assert!(text.contains("last 24h $0.00/day: no hit"), "{text}");
     }
 
     #[test]
@@ -239,7 +239,7 @@ mod tests {
 
         let text = line(&l, 5.0, NOW);
 
-        assert!(text.contains("last 24h no pace yet"), "{text}");
+        assert!(text.contains("last 24h: no pace yet"), "{text}");
     }
 
     #[test]

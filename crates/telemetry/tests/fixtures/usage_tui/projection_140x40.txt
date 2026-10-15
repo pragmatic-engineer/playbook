@@ -26,8 +26,8 @@
 ╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────────╯
 ╭─┤Projection├──────────────────────────────────────────────────────────────────────────────────────────────────┤at the current pace, UTC├─╮
 │5 hour window, 50% used. window average 600.0%/day: hit 09-03 03:46.                                                                      │
-│Weekly window, 30% used. window average 10.0%/day: no hit before the reset at 09-07 01:46.                                                │
-│Monthly budget, $3.05 of $100.00. last 24h $1.25/day: no hit before the reset at 10-01 00:00. period average $1.47/day: no hit before the~│
+│Weekly window, 30% used. window average 10.0%/day: won't hit before it resets.                                                            │
+│Monthly budget, $3.05 of $100.00. last 24h $1.25/day: won't hit before it resets. period average $1.47/day: won't hit before it resets.   │
 │                                                                                                                                          │
 │                                                                                                                                          │
 │                                                                                                                                          │
