@@ -4,9 +4,8 @@ Release notes for the playbook plugin in `plugins/playbook`. The binary has its 
 
 ## playbook 0.31.3
 
-- The doctor command text matches the binary again: the upgrade record row hints `run: playbook migrate`, and the next playbook command or session start writes or updates the record.
-- It describes `playbook migrate` with `--status`, `--dry-run` and `--json`, and says `playbook doctor --fix` runs the same step.
-- It says that `playbook update` and the install script run `playbook migrate` after an upgrade and print the breaking changes the release lists, and that `brew upgrade` shows them in the caveats.
+- The doctor command text matches the binary again: the upgrade record row hints `run: playbook migrate`, and the next session start or `playbook migrate` brings the record up to date.
+- A short note after layer 6 says what to run after an upgrade: `playbook migrate`, or `playbook doctor --fix`, which runs the same step. It also says where each update channel shows breaking changes.
 
 ## playbook 0.31.2
 
