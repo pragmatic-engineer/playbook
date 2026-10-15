@@ -14,7 +14,7 @@
 //!   use fails fast. Nothing outside the root is written.
 //! * Every row runs twice, and the second run must behave the same.
 //!
-//! Not covered: the interactive `init` wizard (it needs a pty and no pty crate
+//! Not covered: the interactive `setup` wizard (it needs a pty and no pty crate
 //! is a dependency; the non-interactive path is covered) and `usage collect`,
 //! which runs a server until it is stopped.
 
@@ -482,16 +482,19 @@ fn json_cases() -> Vec<Case> {
 fn table() -> Vec<Case> {
     let mut t = vec![
         // setup and lifecycle
-        case("init", &["init", "--dry-run"]).out("nothing is changed"),
-        case("init", &["init", "--yes"]).out("Applying").writes(),
-        case("init", &["init", "--explain"]).plain(),
-        case("init", &["init", "--only", "telemetry"])
+        case("setup", &["setup", "--dry-run"]).out("nothing is changed"),
+        case("setup", &["setup", "--yes"]).out("Applying").writes(),
+        case("setup", &["setup", "--explain"]).plain(),
+        case("setup", &["setup", "--only", "telemetry"])
             .out("changes only the parts you named")
             .writes(),
+        // the deprecated name runs the same code
+        case("init", &["init", "--dry-run"]).out("nothing is changed"),
+        case("init", &["init", "--yes"]).out("Applying").writes(),
         case("hooks list", &["hooks", "list"]).out("Safety guards").plain(),
         case("uninstall", &["uninstall"]).code(1).err("nothing was changed"),
-        case("uninstall", &["uninstall", "--dry-run"]).pre(&["init", "--yes"]),
-        case("uninstall", &["uninstall", "--yes"]).pre(&["init", "--yes"]).writes(),
+        case("uninstall", &["uninstall", "--dry-run"]).pre(&["setup", "--yes"]),
+        case("uninstall", &["uninstall", "--yes"]).pre(&["setup", "--yes"]).writes(),
         case("shell-init", &["shell-init"]).out("_playbook_cc").plain(),
         case("update", &["update", "--check"]).code(1).err("could not read the release list"),
         case("effort", &["effort"]).writes(),

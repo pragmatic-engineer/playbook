@@ -87,6 +87,12 @@ fn main() {
             std::process::exit(1);
         }
     }
+    if let Some(line) = cli
+        .command
+        .deprecation_notice(std::io::stderr().is_terminal())
+    {
+        eprintln!("{line}");
+    }
     // The first-run step (ADR 0034 decision 13): heal once after an upgrade,
     // before most commands. Hot paths returned above or skip it.
     playbook::heal::on_start(&cli.command);
@@ -389,7 +395,7 @@ fn main() {
         }
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
-        Command::Init { flags } if flags.explain.is_some() => {
+        Command::Setup { flags } | Command::Init { flags } if flags.explain.is_some() => {
             let which = flags.explain.as_ref().and_then(|w| w.as_deref());
             let named = init::choices::only_parts(&flags);
             let texts: Vec<Result<String, String>> = match (which, named.is_empty()) {
@@ -409,7 +415,7 @@ fn main() {
                 }
             }
         }
-        Command::Init { flags } => {
+        Command::Setup { flags } | Command::Init { flags } => {
             let security_config = config::resolve("security.defaults", &common::home_dir(), None)
                 .map(|(value, _)| value.as_bool().unwrap_or(false))
                 .unwrap_or(false);

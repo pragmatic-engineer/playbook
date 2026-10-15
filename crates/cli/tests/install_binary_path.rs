@@ -236,6 +236,51 @@ exit 0
 }
 
 #[test]
+fn a_binary_with_setup_runs_setup_and_never_init() {
+    let work = Work::new("bp-setup");
+    let dir = work.dir("setup-bin");
+    let argv = work.path("setup-argv.txt");
+    let init_calls = work.path("init-calls.txt");
+    write_exec(
+        &dir.join("playbook"),
+        &format!(
+            r#"case "${{1:-}}" in
+  --version) printf 'playbook 9.9.9\n' ;;
+  setup)
+    shift
+    if [ "${{1:-}}" = "--help" ]; then
+      printf 'Usage: playbook setup [OPTIONS]\n  --aliases\n  --system-prompt\n  --yes\n'
+      exit 0
+    fi
+    printf '%s\n' "$@" > "{argv}"
+    home="${{CLAUDE_HOME:-$HOME/.claude}}"
+    mkdir -p "$home"
+    printf '{{}}\n' > "$home/settings.json"
+    ;;
+  init) printf 'init\n' >> "{init}" ;;
+esac
+exit 0
+"#,
+            argv = argv.display(),
+            init = init_calls.display()
+        ),
+    );
+    let (rc, home, log) = local_install(&work, &dir, &["--yes", "--aliases"], "setup");
+    assert_eq!(rc, 0, "{log}");
+    assert!(log.contains("Running playbook setup"), "{log}");
+    assert!(home.join(".claude/settings.json").exists(), "{log}");
+    let got = fs::read_to_string(&argv).unwrap_or_default();
+    assert!(
+        got.contains("--aliases") && got.contains("--yes"),
+        "setup received: '{got}'"
+    );
+    assert!(
+        !init_calls.exists(),
+        "install.sh ran the old init name: {log}"
+    );
+}
+
+#[test]
 fn aliases_and_system_prompt_flags_are_forwarded_to_init() {
     let work = Work::new("bp-forward");
     let (stub, argv) = recording_stub(&work);

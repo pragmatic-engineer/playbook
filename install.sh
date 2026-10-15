@@ -10,7 +10,7 @@
 # Claude Code plugin that works without this binary, and this script never
 # installs or removes a plugin.
 #
-# At the end it offers to run `playbook init`, which adds playbook's hook
+# At the end it offers to run `playbook setup`, which adds playbook's hook
 # entries to ~/.claude/settings.json, the status line, the shell
 # integration and the Claude Code telemetry variables that point at a collector
 # on this machine. It asks first, and with no terminal and no --yes it only prints
@@ -31,7 +31,7 @@ RELEASE_REPO="pragmatic-engineer/playbook"
 # the statusline script); mirrors playbook_root_from() in
 # crates/common/src/paths.rs. Not overridable by env var: nothing downstream
 # of this script reads such an override. The Claude Code folder is fixed too,
-# because `playbook init` always uses ~/.claude.
+# because `playbook setup` always uses ~/.claude.
 SKILLS_INSTALL_CMD="claude plugin marketplace add pragmatic-engineer/marketplace"
 SKILLS_INSTALL_CMD="$SKILLS_INSTALL_CMD && claude plugin install playbook@pragmatic-engineer"
 PLAYBOOK_CONFIG_DIR="$HOME/.config/playbook"
@@ -133,7 +133,7 @@ What it does:
     when gh can), runs a smoke test, installs it and puts its folder on PATH;
   - when it replaces an older binary, prints the breaking changes since that
     version;
-  - then asks whether to run `playbook init`, which adds playbook's hook entries to
+  - then asks whether to run `playbook setup`, which adds playbook's hook entries to
     ~/.claude/settings.json (your own entries stay), the status line and the shell
     integration. With no terminal and no --yes it only prints the command.
 
@@ -148,12 +148,12 @@ Env:
   PLAYBOOK_REQUIRE_ATTESTATION=1 abort unless the build attestation verifies
 
 Flags:
-  --yes              say yes to every question, including running `playbook init`
-  --aliases          add the `playbook` shell wrapper (init --aliases) without asking
-  --system-prompt    install the custom system prompt (init --system-prompt) without asking
-  --binary-only      still offers `playbook init`, but skips the wrapper and system
+  --yes              say yes to every question, including running `playbook setup`
+  --aliases          add the `playbook` shell wrapper (setup --aliases) without asking
+  --system-prompt    install the custom system prompt (setup --system-prompt) without asking
+  --binary-only      still offers `playbook setup`, but skips the wrapper and system
                      prompt questions
-  --no-init          install the binary only: never ask about `playbook init`
+  --no-init          install the binary only: never ask about `playbook setup`
   --ref <tag>        same as PLAYBOOK_REF
   -h, --help         show this help
 
@@ -476,7 +476,7 @@ install_pb_alias() {
 }
 
 # Puts $PLAYBOOK_BIN_DIR on PATH for future shells, mirroring the `path` step of
-# `playbook init` (src/init/path.rs) so the two never double up: same files,
+# `playbook setup` (src/init/path.rs) so the two never double up: same files,
 # same `# playbook binary` marker, same "directory already named" guard. zsh
 # gets ~/.zshenv (hooks run in non-interactive shells, which skip ~/.zshrc),
 # bash gets ~/.bashrc plus its login file, fish gets a conf.d file, any other
@@ -551,7 +551,7 @@ fi
 # --- playbook migrate --------------------------------------------------------
 
 # Brings playbook's own files up to the installed version (ADR 0034). It never
-# writes Claude Code's settings; items that need `playbook init` are only
+# writes Claude Code's settings; items that need `playbook setup` are only
 # printed. It runs with a terminal or --yes, never with --no-init (binary
 # only), and is skipped on a binary too old to have the command. A failure
 # here does not stop the install: the binary retries on its next run.
@@ -562,16 +562,24 @@ if [ "$NO_INIT" -eq 0 ] && { [ "$ASSUME_YES" -eq 1 ] || have_tty; } \
         warn "playbook migrate did not finish; run \`playbook migrate\` to retry"
 fi
 
-# --- playbook init -----------------------------------------------------------
+# --- playbook setup ----------------------------------------------------------
+
+# Releases before the rename only know `playbook init`, the old name of
+# `playbook setup` (ADR-0040). Ask the installed binary which one it has:
+# its help names the command, and an older binary prints an error.
+case "$("$PLAYBOOK_BIN_DIR/playbook" setup --help 2>/dev/null || true)" in
+    *"playbook setup"*) SETUP_CMD=setup ;;
+    *) SETUP_CMD=init ;;
+esac
 
 # Everything above changed nothing outside the binary folder, the shell
 # start-up files that put it on PATH, and playbook's own files under
-# ~/.config/playbook. `playbook init` changes Claude Code's own
+# ~/.config/playbook. `playbook setup` changes Claude Code's own
 # settings, so it runs only after a yes: --yes, or an answer typed at the
 # prompt. With no terminal and no --yes it is skipped and the command is
 # printed.
 INIT_RAN=0
-if [ "$NO_INIT" -eq 0 ] && consent "Run playbook init now? It adds playbook's hook entries to ~/.claude/settings.json (your own entries stay), the status line, the shell integration and Claude Code telemetry to a collector on this machine (change it later with playbook init --only telemetry or undo it with playbook uninstall)."; then
+if [ "$NO_INIT" -eq 0 ] && consent "Run playbook $SETUP_CMD now? It adds playbook's hook entries to ~/.claude/settings.json (your own entries stay), the status line, the shell integration and Claude Code telemetry to a collector on this machine (change it later with playbook $SETUP_CMD --only telemetry or undo it with playbook uninstall)."; then
     if [ "$BINARY_ONLY" -eq 0 ] && [ "$OPT_ALIASES" -eq 0 ]; then
         if ask "Add the playbook shell wrapper, so playbook cc can leave you in a new worktree? Bash and zsh both supported." Y; then
             OPT_ALIASES=1
@@ -599,7 +607,7 @@ if [ "$NO_INIT" -eq 0 ] && consent "Run playbook init now? It adds playbook's ho
     # the binary is still writing; under `set -o pipefail` that SIGPIPE made
     # the probe report "unsupported" at random, so --aliases was sometimes
     # dropped.
-    _init_help="$("$PLAYBOOK_BIN_DIR/playbook" init --help 2>/dev/null || true)"
+    _init_help="$("$PLAYBOOK_BIN_DIR/playbook" "$SETUP_CMD" --help 2>/dev/null || true)"
     _init_supports() {
         case "$_init_help" in
             *"$1"*) return 0 ;;
@@ -623,20 +631,20 @@ if [ "$NO_INIT" -eq 0 ] && consent "Run playbook init now? It adds playbook's ho
             warn "the installed playbook $( "$PLAYBOOK_BIN_DIR/playbook" --version 2>/dev/null | awk '{print $NF}' ) does not support --system-prompt; skipping it. Re-run this installer once a release includes it."
         fi
     fi
-    # The installer has already asked its own questions, so init must not ask again.
+    # The installer has already asked its own questions, so setup must not ask again.
     if _init_supports --yes; then
         _INIT_ARGS="$_INIT_ARGS --yes"
     fi
-    log "Running playbook init"
+    log "Running playbook $SETUP_CMD"
     # Invoked by absolute path: a fresh shell's PATH may not yet include
     # PLAYBOOK_BIN_DIR, and this runs before the rc-file PATH line takes
-    # effect. `init` prints one line per step, so its output is not redirected.
+    # effect. Setup prints one line per step, so its output is not redirected.
     # shellcheck disable=SC2086
-    PLAYBOOK_BREAKING_SHOWN="$BREAKING_SHOWN" "$PLAYBOOK_BIN_DIR/playbook" init $_INIT_ARGS || \
-        die "playbook init failed; see the step report above"
+    PLAYBOOK_BREAKING_SHOWN="$BREAKING_SHOWN" "$PLAYBOOK_BIN_DIR/playbook" "$SETUP_CMD" $_INIT_ARGS || \
+        die "playbook $SETUP_CMD failed; see the step report above"
     INIT_RAN=1
 
-    # Older releases have no trust step in init, so this still runs here.
+    # Older releases have no trust step in setup, so this still runs here.
     trust_playbook_config_dir
 fi
 
@@ -647,7 +655,7 @@ printf '\n'
 printf 'Installed playbook to: %s\n' "$PLAYBOOK_BIN_DIR/playbook"
 printf '\nNext steps:\n'
 if [ "$INIT_RAN" -eq 0 ]; then
-    INIT_CMD="playbook init"
+    INIT_CMD="playbook $SETUP_CMD"
     [ "$OPT_ALIASES" -eq 1 ] && INIT_CMD="$INIT_CMD --aliases"
     [ "$OPT_SYSTEM_PROMPT" -eq 1 ] && INIT_CMD="$INIT_CMD --system-prompt"
     printf '  - Run: %s   (adds the hook entries to ~/.claude/settings.json, asks first)\n' "$INIT_CMD"
