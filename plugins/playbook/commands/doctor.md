@@ -63,10 +63,21 @@ and stop.
    - **Upgrade record row.** Reads the version record in `config.db` read-only
      and compares it with the `playbook` first on PATH. It warns when the last
      heal failed, when upgrade items are pending, or when the record cannot be
-     read, with the hint `run: playbook doctor --fix`. No record yet is INFO
-     (the next session start writes it), an older record is INFO (the next
-     session start updates it), and both carry the same hint. A record newer
-     than the binary (a downgrade) is INFO because nothing runs after a downgrade.
+     read, with the hint `run: playbook migrate`. No record yet is INFO (the
+     next playbook command or session start writes it), an older record is INFO
+     (the next playbook command or session start updates it), and both carry
+     the same hint. A record newer than the binary (a downgrade) is INFO because
+     nothing runs after a downgrade.
+   - **Fixing the upgrade record.** `playbook migrate` runs the migrations that
+     write only playbook's own files and records the binary that ran them. It
+     does not write Claude Code settings: a change there prints the `playbook
+     init` command that applies it. `--status` lists each migration and its
+     state, and `--dry-run` shows what a run would start. Neither writes
+     anything. Add `--json` for JSON. `playbook doctor --fix` runs the same
+     step. After an upgrade, `playbook update` runs it, and so does the install
+     script with a terminal or `--yes`. Both print the breaking changes the
+     release lists. After `brew upgrade`, the caveats list them, and the next
+     playbook command or session start runs the migrations.
    - It also requires the quality gate flags this plugin expects, and warns when an older `playbook` earlier on
      PATH hides a newer one.
 
