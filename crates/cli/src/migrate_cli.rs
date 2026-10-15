@@ -20,8 +20,8 @@ pub enum Mode {
 }
 
 /// Runs `playbook migrate` for `home`, prints the result, and returns the
-/// exit code: 1 when a migration failed, the lock was busy or the record was
-/// not written, else 0.
+/// exit code: 1 when the record could not be read or written, a migration
+/// failed, or the lock was busy, else 0.
 pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
     let ctx = Ctx::for_home(home);
     match mode {
@@ -36,16 +36,10 @@ pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
         }
         Mode::Status | Mode::DryRun => {
             let root = crate::common::paths::playbook_root_from(home);
-            let record = match Record::read_only(&root) {
-                Ok(record) => record,
-                Err(err) => {
-                    eprintln!("playbook migrate: the upgrade record could not be read: {err}");
-                    return 1;
-                }
+            let (Ok(record), Some(plan)) = (Record::read_only(&root), migrate::plan(&ctx)) else {
+                eprintln!("playbook migrate: the upgrade record could not be read");
+                return 1;
             };
-            let ready = crate::config::store::db_path(&root).is_file()
-                && crate::state::pending_legacy(&root) == 0;
-            let plan = migrate::plan(&ctx, ready);
             let text = match (mode, json) {
                 (Mode::Status, true) => format!("{}\n", status_json(&record, &plan)),
                 (Mode::Status, false) => render_status(&record, &plan),
@@ -58,13 +52,9 @@ pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
     }
 }
 
-/// How the record compares with this binary: `Less` when a heal is due.
-fn due(record: &Record) -> Ordering {
-    match &record.binary {
-        None => Ordering::Less,
-        Some(b) => crate::update::resolve::compare(b, env!("CARGO_PKG_VERSION"))
-            .then(record.schema.cmp(&migrate::schema())),
-    }
+/// Whether a newer playbook wrote the record, so a run would do nothing.
+fn downgraded(record: &Record) -> bool {
+    record.compare_with(env!("CARGO_PKG_VERSION"), migrate::schema()) == Ordering::Greater
 }
 
 fn recorded_line(record: &Record) -> String {
@@ -74,27 +64,18 @@ fn recorded_line(record: &Record) -> String {
     }
 }
 
-fn state_text(state: &State, heal_due: bool) -> String {
+fn state_text(state: &State) -> String {
     match state {
         State::Applied => "applied".into(),
         State::Pending => "pending".into(),
-        State::EachHeal if heal_due => "pending".into(),
-        State::EachHeal => "applied".into(),
+        State::EveryRun => "runs on every run".into(),
         State::Clear => "nothing to do".into(),
-        State::Open {
-            message,
-            command: Some(c),
-        } => format!("needs you: {message} (run `{c}`)"),
-        State::Open {
-            message,
-            command: None,
-        } => format!("needs you: {message}"),
-        State::Unknown => "not checked: no state yet".into(),
+        State::Open { message, command } => heal::needs_you(message, *command).trim_end().into(),
+        State::Unknown => "not checked: old state files are not imported yet".into(),
     }
 }
 
 fn render_status(record: &Record, plan: &[Planned]) -> String {
-    let heal_due = due(record) == Ordering::Less;
     let mut text = format!(
         "running: playbook {}, migrations up to {}\n{}\n",
         env!("CARGO_PKG_VERSION"),
@@ -108,67 +89,46 @@ fn render_status(record: &Record, plan: &[Planned]) -> String {
             p.id,
             p.kind,
             p.scope,
-            state_text(&p.state, heal_due)
+            state_text(&p.state)
         ));
     }
     text
 }
 
-/// The `Owned` migrations a heal would run now, in order.
+/// The migrations a run would start now, in order: none after a downgrade.
 fn would_run(record: &Record, plan: &[Planned]) -> Vec<&'static str> {
-    if due(record) != Ordering::Less {
+    if downgraded(record) {
         return Vec::new();
     }
-    plan.iter()
-        .filter(|p| p.scope == "owned" && p.kind != "manual")
-        .map(|p| p.id)
-        .collect()
+    plan.iter().filter(|p| p.runs).map(|p| p.id).collect()
+}
+
+/// The open items of `plan`: `Owned` ones are notes, the rest need the user.
+fn open_items(plan: &[Planned]) -> impl Iterator<Item = (&Planned, &String, Option<&'static str>)> {
+    plan.iter().filter_map(|p| match &p.state {
+        State::Open { message, command } => Some((p, message, *command)),
+        _ => None,
+    })
 }
 
 fn render_dry_run(record: &Record, plan: &[Planned]) -> String {
-    let mut text = String::new();
     let run = would_run(record, plan);
-    match due(record) {
-        Ordering::Greater => text.push_str(
-            "nothing would run: a newer playbook ran here; nothing runs after a downgrade\n",
-        ),
-        Ordering::Equal => text.push_str(&format!(
-            "nothing would run: the record names playbook {}\n",
-            env!("CARGO_PKG_VERSION")
-        )),
-        Ordering::Less => text.push_str(&format!("would run: {}\n", run.join(", "))),
-    }
-    for p in plan {
-        if let State::Open { message, command } = &p.state {
-            match command {
-                Some(c) => text.push_str(&format!("needs you: {message} (run `{c}`)\n")),
-                None if p.scope == "owned" => {
-                    text.push_str(&format!("note: {}: {message}\n", p.id))
-                }
-                None => text.push_str(&format!("needs you: {message}\n")),
-            }
+    let mut text = if downgraded(record) {
+        format!("nothing would run: {}\n", heal::Skip::Downgrade.reason())
+    } else if run.is_empty() {
+        "nothing would run\n".to_string()
+    } else {
+        format!("would run: {}\n", run.join(", "))
+    };
+    for (p, message, command) in open_items(plan) {
+        if p.scope == "owned" {
+            text.push_str(&format!("note: {}: {message}\n", p.id));
+        } else {
+            text.push_str(&heal::needs_you(message, command));
         }
     }
     text.push_str("dry run: nothing was written\n");
     text
-}
-
-fn planned_json(p: &Planned, heal_due: bool) -> Value {
-    let (message, command) = match &p.state {
-        State::Open { message, command } => (Some(message.clone()), *command),
-        _ => (None, None),
-    };
-    json!({
-        "id": p.id,
-        "kind": p.kind,
-        "scope": p.scope,
-        "state": match &p.state {
-            State::Open { .. } => "open".to_string(),
-            other => state_text(other, heal_due),
-        },
-        "message": message,
-        "command": command,
-    })
 }
 
 fn record_json(record: &Record) -> Value {
@@ -182,21 +142,44 @@ fn record_json(record: &Record) -> Value {
 }
 
 fn status_json(record: &Record, plan: &[Planned]) -> Value {
-    let heal_due = due(record) == Ordering::Less;
+    let migrations: Vec<Value> = plan
+        .iter()
+        .map(|p| {
+            let (message, command) = match &p.state {
+                State::Open { message, command } => (Some(message.as_str()), *command),
+                _ => (None, None),
+            };
+            json!({
+                "id": p.id,
+                "kind": p.kind,
+                "scope": p.scope,
+                "state": p.state.code(),
+                "runs": p.runs,
+                "message": message,
+                "command": command,
+            })
+        })
+        .collect();
     json!({
         "running": {"binary": env!("CARGO_PKG_VERSION"), "schema": migrate::schema()},
         "recorded": record_json(record),
-        "migrations": plan.iter().map(|p| planned_json(p, heal_due)).collect::<Vec<_>>(),
+        "migrations": migrations,
     })
 }
 
 fn dry_run_json(record: &Record, plan: &[Planned]) -> Value {
+    let (notes, open): (Vec<_>, Vec<_>) =
+        open_items(plan).partition(|(p, _, _)| p.scope == "owned");
     json!({
         "would_run": would_run(record, plan),
-        "open": plan
+        "skipped": downgraded(record).then(|| heal::Skip::Downgrade.code()),
+        "notes": notes
             .iter()
-            .filter(|p| matches!(p.state, State::Open { .. }))
-            .map(|p| planned_json(p, false))
+            .map(|(p, message, _)| format!("{}: {message}", p.id))
+            .collect::<Vec<_>>(),
+        "open": open
+            .iter()
+            .map(|(p, message, command)| json!({"id": p.id, "message": message, "command": command}))
             .collect::<Vec<_>>(),
         "written": false,
     })
@@ -209,7 +192,8 @@ fn run_json(out: &Outcome) -> Value {
             .collect::<Vec<_>>()
     };
     json!({
-        "skipped": out.skipped.map(heal::Skip::reason),
+        "skipped": out.skipped.map(heal::Skip::code),
+        "reason": out.skipped.map(heal::Skip::reason),
         "changed": steps(&out.changed),
         "failed": steps(&out.failed),
         "notes": out.warnings,
@@ -234,61 +218,92 @@ mod tests {
         }
     }
 
-    fn planned(id: &'static str, kind: &'static str, scope: &'static str, state: State) -> Planned {
+    fn planned(id: &'static str, scope: &'static str, state: State, runs: bool) -> Planned {
         Planned {
             id,
-            kind,
+            kind: "idempotent",
             scope,
             state,
+            runs,
         }
     }
 
-    #[test]
-    fn a_dry_run_names_the_owned_migrations_only_when_a_heal_is_due() {
-        let plan = vec![
-            planned("0001-a", "idempotent", "owned", State::EachHeal),
-            planned("0003-b", "manual", "owned", State::Clear),
+    fn sample() -> Vec<Planned> {
+        vec![
+            planned("0001-a", "owned", State::EveryRun, true),
+            planned("0002-b", "owned", State::Applied, false),
             planned(
                 "0006-c",
-                "idempotent",
                 "consent",
                 State::Open {
                     message: "old command".into(),
                     command: Some("playbook init --statusline"),
                 },
+                false,
             ),
-        ];
+            planned(
+                "0014-d",
+                "owned",
+                State::Open {
+                    message: "old folders".into(),
+                    command: None,
+                },
+                false,
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_dry_run_names_what_a_run_starts_unless_a_newer_playbook_ran() {
+        // Arrange
+        let plan = sample();
+
+        // Act
         let old = render_dry_run(&record(Some("0.25.0"), 1), &plan);
-        assert!(old.starts_with("would run: 0001-a\n"), "{old}");
-        assert!(old.contains("needs you: old command (run `playbook init --statusline`)"));
-        assert!(old.ends_with("dry run: nothing was written\n"));
         let same = render_dry_run(
             &record(Some(env!("CARGO_PKG_VERSION")), migrate::schema()),
             &plan,
         );
-        assert!(
-            same.starts_with("nothing would run: the record names"),
-            "{same}"
-        );
         let newer = render_dry_run(&record(Some("999.0.0"), 999), &plan);
-        assert!(newer.contains("nothing runs after a downgrade"), "{newer}");
+
+        // Assert
+        assert!(old.starts_with("would run: 0001-a\n"), "{old}");
+        assert!(old.contains("needs you: old command (run `playbook init --statusline`)"));
+        assert!(old.contains("note: 0014-d: old folders\n"), "{old}");
+        assert!(old.ends_with("dry run: nothing was written\n"));
+        assert!(same.starts_with("would run: 0001-a\n"), "{same}");
+        assert!(
+            newer.starts_with("nothing would run: a newer playbook"),
+            "{newer}"
+        );
+        let value = dry_run_json(&record(Some("999.0.0"), 999), &plan);
+        assert_eq!(value["would_run"], json!([]));
+        assert_eq!(value["skipped"], "downgrade");
+        assert_eq!(value["notes"], json!(["0014-d: old folders"]));
+        assert_eq!(value["open"][0]["command"], "playbook init --statusline");
     }
 
     #[test]
     fn status_shows_each_migration_with_its_scope_and_state() {
-        let plan = vec![
-            planned("0001-a", "idempotent", "owned", State::EachHeal),
-            planned("0012-b", "manual", "report", State::Unknown),
-        ];
+        // Arrange
+        let plan = sample();
+
+        // Act
         let text = render_status(&record(None, 0), &plan);
+        let value = status_json(&record(None, 0), &plan);
+
+        // Assert
         assert!(text.contains("recorded: nothing yet"), "{text}");
         assert!(
-            text.contains("0001-a  idempotent  owned    pending"),
+            text.contains("0001-a  idempotent  owned    runs on every run"),
             "{text}"
         );
-        assert!(text.contains("not checked: no state yet"), "{text}");
-        let value = status_json(&record(None, 0), &plan);
-        assert_eq!(value["migrations"][0]["state"], "pending");
+        assert!(
+            text.contains("0002-b  idempotent  owned    applied"),
+            "{text}"
+        );
+        assert_eq!(value["migrations"][0]["state"], "every_run");
+        assert_eq!(value["migrations"][2]["state"], "open");
         assert_eq!(value["running"]["binary"], env!("CARGO_PKG_VERSION"));
     }
 }

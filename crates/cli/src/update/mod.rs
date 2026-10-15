@@ -89,21 +89,27 @@ const HEAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// After a swap, runs `<exe> migrate` so the new binary runs its own
 /// migrations (ADR 0034). A release that has `doctor --fix` but not
 /// `migrate` answers with a usage error (exit 2), and gets `doctor --fix`
-/// instead. Best effort: a release older than `FIRST_FIX_VERSION` is
-/// skipped, and any failure is a warning that carries the lines it printed.
-pub fn heal_after_swap(exe: &Path, installed: &str) -> Result<Option<String>, String> {
+/// instead. Returns the command that ran and what it printed. Best effort: a
+/// release older than `FIRST_FIX_VERSION` is skipped, and any failure is a
+/// warning that names the command that ran and carries the lines it printed.
+pub fn heal_after_swap(
+    exe: &Path,
+    installed: &str,
+) -> Result<Option<(&'static str, String)>, String> {
     if resolve::compare(installed, FIRST_FIX_VERSION).is_lt() {
         return Ok(None);
     }
-    let late = || {
+    let late = |name: &str| {
         format!(
-            "the new binary's migrate did not run or took over {} s; run `playbook migrate` by hand",
+            "the new binary's {name} did not run or took over {} s; run `playbook {name}` by hand",
             HEAL_TIMEOUT.as_secs()
         )
     };
-    let mut out = run_heal(exe, &["migrate"]).ok_or_else(late)?;
+    let mut name = "migrate";
+    let mut out = run_heal(exe, &[name]).ok_or_else(|| late(name))?;
     if out.status.code() == Some(2) {
-        out = run_heal(exe, &["doctor", "--fix"]).ok_or_else(late)?;
+        name = "doctor --fix";
+        out = run_heal(exe, &["doctor", "--fix"]).ok_or_else(|| late(name))?;
     }
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     if !out.status.success() {
@@ -113,7 +119,7 @@ pub fn heal_after_swap(exe: &Path, installed: &str) -> Result<Option<String>, St
             .filter(|l| !l.is_empty())
             .collect();
         return Err(format!(
-            "migrate exited with {}{}; run `playbook migrate` by hand",
+            "{name} exited with {}{}; run `playbook {name}` by hand",
             out.status,
             if detail.is_empty() {
                 String::new()
@@ -122,7 +128,7 @@ pub fn heal_after_swap(exe: &Path, installed: &str) -> Result<Option<String>, St
             }
         ));
     }
-    Ok(Some(text))
+    Ok(Some((name, text)))
 }
 
 /// Runs `<exe> <args>` with a deadline. A spawn that fails at once (a fresh
@@ -151,9 +157,9 @@ pub fn finish_with_heal(outcome: &mut Outcome, exe: &Path) {
         return;
     };
     match heal_after_swap(exe, &version) {
-        Ok(Some(text)) => outcome
+        Ok(Some((name, text))) => outcome
             .out
-            .extend(text.lines().map(|l| format!("migrate: {l}"))),
+            .extend(text.lines().map(|l| format!("{name}: {l}"))),
         Ok(None) => {}
         Err(warning) => outcome.warnings.push(warning),
     }
@@ -476,10 +482,21 @@ mod tests {
         )
         .unwrap();
         let older = heal_after_swap(&env.exe, "0.27.0").unwrap();
+        std::fs::write(
+            &env.exe,
+            "#!/bin/sh\n[ \"$1\" = migrate ] && exit 2\necho 'failed: x'\nexit 1\n",
+        )
+        .unwrap();
+        let older_failed = heal_after_swap(&env.exe, "0.27.0").unwrap_err();
 
         // Assert
         assert_eq!(done.out, vec!["migrate: ran: migrate"]);
-        assert_eq!(older.as_deref(), Some("ran: doctor --fix\n"));
+        assert_eq!(older, Some(("doctor --fix", "ran: doctor --fix\n".into())));
+        assert!(
+            older_failed.starts_with("doctor --fix exited with")
+                && older_failed.ends_with("run `playbook doctor --fix` by hand"),
+            "{older_failed}"
+        );
         assert!(done.warnings.is_empty());
         assert!(untouched.out.is_empty() && untouched.warnings.is_empty());
         assert!(failed.contains(": failed: state: locked;"), "{failed}");

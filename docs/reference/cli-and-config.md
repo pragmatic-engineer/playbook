@@ -919,14 +919,14 @@ Memory is rebuilt on its own when a fact is saved, so you only need this after e
 
 Bring playbook's own files up to date with this binary
 
-Runs the migrations for the gap between the version the upgrade record names and this binary. Migrations that write only playbook's own files run here; a change to Claude Code settings or a shell file prints the `playbook init` command that applies it, and a report prints its own fix. It never writes Claude Code settings. `update`, the install script and `doctor --fix` run the same step.
+Runs the migrations that write only playbook's own files, then records this binary as the one that ran them. The ones that run once start only after an upgrade, and the checks that repair a file run every time. Nothing runs after a downgrade. A change to Claude Code settings or a shell file prints the `playbook init` command that applies it, and a report prints its own fix. It never writes Claude Code settings. `update`, the install script and `doctor --fix` run the same step.
 
-Exit codes: 0 when it finished or had nothing to do, 1 when a migration failed, another playbook process held the lock, or the record could not be written.
+Exit codes: 0 when it finished or had nothing to do, 1 when the record could not be read or written, a migration failed, or another playbook process held the lock.
 
 Example: `playbook migrate --status`
 
 - `--status`: List each migration with its scope and state, and the recorded and running versions, writing nothing
-- `--dry-run`: Show what a run would change, writing nothing
+- `--dry-run`: Show the migrations a run would start and what needs you, writing nothing
 - `--json`: Print JSON for tools
 
 ### `playbook mode`

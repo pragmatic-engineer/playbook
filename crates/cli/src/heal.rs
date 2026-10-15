@@ -81,7 +81,9 @@ impl Record {
 
     /// How the record compares with this binary: `Less` when this binary is
     /// newer (or nothing ran yet), `Greater` after a downgrade.
-    fn compare_with(&self, binary: &str, schema: u32) -> Ordering {
+    /// How the record compares with `binary` at `schema`: `Less` when a heal
+    /// is due, `Greater` after a downgrade.
+    pub fn compare_with(&self, binary: &str, schema: u32) -> Ordering {
         let Some(recorded) = &self.binary else {
             return Ordering::Less;
         };
@@ -119,6 +121,16 @@ pub enum Skip {
 }
 
 impl Skip {
+    /// The stable token for JSON output.
+    pub fn code(self) -> &'static str {
+        match self {
+            Skip::StateUnreadable => "state_unreadable",
+            Skip::Downgrade => "downgrade",
+            Skip::WaitingAfterFailure => "waiting_after_failure",
+            Skip::LockBusy => "lock_busy",
+        }
+    }
+
     pub fn reason(self) -> &'static str {
         match self {
             Skip::StateUnreadable => "the state table could not be read",
@@ -225,17 +237,21 @@ pub fn render_fix(out: &Outcome) -> String {
         text.push_str(&format!("note: {warning}\n"));
     }
     for item in &out.open {
-        match item.command {
-            Some(command) => {
-                text.push_str(&format!("needs you: {} (run `{command}`)\n", item.message))
-            }
-            None => text.push_str(&format!("needs you: {}\n", item.message)),
-        }
+        text.push_str(&needs_you(&item.message, item.command));
     }
     if text.is_empty() {
         text.push_str("nothing to fix\n");
     }
     text
+}
+
+/// The report line for an item that needs the user, with the command that
+/// applies it when there is one.
+pub fn needs_you(message: &str, command: Option<&str>) -> String {
+    match command {
+        Some(command) => format!("needs you: {message} (run `{command}`)\n"),
+        None => format!("needs you: {message}\n"),
+    }
 }
 
 /// Runs the heal for `trigger` at `now` (epoch seconds).
