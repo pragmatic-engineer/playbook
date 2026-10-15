@@ -38,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/in
 
 It installs only the `playbook` binary, into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`), after checking its SHA256, its build attestation when `gh` can check it, and a `--version` smoke test. It puts that directory on `PATH`. It does not touch Claude Code's plugins or settings.
 
-Then it asks "Run playbook init now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the launcher and the system prompt (Enter means yes for these two), then runs `playbook init --yes`, which adds the hook entries and the status line to `settings.json`. On no, or with no terminal and no `--yes`, it skips `init` and prints the command to run later, with any `--aliases` or `--system-prompt` you passed. Open a new terminal afterward.
+Then it asks "Run playbook init now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the launcher and the system prompt (Enter means yes for these two), then runs `playbook init --yes`, which adds the hook entries, the status line and the telemetry variables (a collector on this machine) to `settings.json`. On no, or with no terminal and no `--yes`, it skips `init` and prints the command to run later, with any `--aliases` or `--system-prompt` you passed. Open a new terminal afterward.
 
 Pass `--yes` to say yes to every question, including `playbook init`. Flags go after `-s --` when piping:
 
@@ -174,7 +174,7 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 ## Init flags
 
-`playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override` and `--short-name`, each with a `--no-` form. With `--yes` or in a terminal, hooks, status line and `PATH` are on by default. Without a terminal and without `--yes`, hooks and the status line stay off unless their flag is passed. The permissions rules (`--security`), launcher and system prompt are off.
+`playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override` and `--short-name`, each with a `--no-` form. With `--yes` or in a terminal, hooks, status line, `PATH` and telemetry are on by default. Without a terminal and without `--yes`, hooks, the status line and telemetry stay off unless their flag is passed. `--only <part>[,<part>]` runs just the named parts, so `playbook init --only telemetry` turns telemetry on and touches nothing else. A bare `--telemetry` (no `--yes` and no other part flag) means the same. The permissions rules (`--security`), launcher and system prompt are off.
 
 ## Skills without the binary
 
