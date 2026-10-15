@@ -49,16 +49,36 @@ and stop.
    all, is INFO.
 6. **Binary resolves.** `settings.json` runs every ported hook as a bare
    binary hook command, so the binary must be on PATH or all of them silently
-   do nothing. It also compares the binary version with the plugin manifest
-   (a difference is INFO, since a source build can legitimately be ahead),
-   requires the quality gate flags this plugin expects, and warns when an older `playbook` earlier on
-   PATH hides a newer one. Install hint: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`
+   do nothing. Layer 6 prints these rows:
+   - **Version row.** A different binary and plugin version is normal: the row
+     still passes and names both versions. It passes while the plugin is inside
+     the supported range (minimum 0.30.1, up to major 0) and the binary meets
+     the plugin's `minBinaryVersion` from `plugin.json` metadata. Otherwise it
+     warns with one fix command. A binary below `minBinaryVersion` or a plugin
+     on a newer major gets the binary upgrade (`brew upgrade playbook` when the
+     binary path resolves to Homebrew, else `playbook update`). A plugin older
+     than 0.30.1 gets `claude plugin update playbook@pragmatic-engineer`. The
+     plugin is found the same way as `playbook path plugin-root`, with
+     `PLAYBOOK_PLUGIN_DIR` first.
+   - **Upgrade record row.** Reads the version record in `config.db` read-only
+     and compares it with the `playbook` first on PATH. It warns when the last
+     heal failed, when upgrade items are pending, or when the record cannot be
+     read, with the hint `run: playbook doctor --fix`. No record yet is INFO
+     (the next session start writes it), an older record is INFO (the next
+     session start updates it), and both carry the same hint. A record newer
+     than the binary (a downgrade) is INFO because nothing runs after a downgrade.
+   - It also requires the quality gate flags this plugin expects, and warns when an older `playbook` earlier on
+     PATH hides a newer one.
+
+   Install hint: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`
    or `brew install pragmatic-engineer/tap/playbook`, with its directory on PATH.
 7. **No hook command points at a missing file.** A hook that names a path
    which does not exist fails open: it never runs and nothing says so. Bare
    binary hook commands are skipped, as is any path with an
-   unresolved `$VARIABLE`. `playbook init` does not remove a stray entry, so
-   delete it from `~/.claude/settings.json` by hand.
+   unresolved `$VARIABLE`. `playbook init --hooks` removes a dead entry that runs
+   a missing script under `~/.claude/hooks` (it makes a backup first). Live
+   scripts and commands with shell operators stay, so delete any other stray
+   entry from `~/.claude/settings.json` by hand.
 
 Layer numbers stay as they are. Do not renumber them: users and docs refer to
 them.
