@@ -88,7 +88,7 @@ fn main() {
         }
     }
 
-    update::check::on_start(&args);
+    update::check::on_start(&cli.command, &args);
 
     match cli.command {
         Command::Hook { name } => run_hook(name),

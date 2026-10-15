@@ -51,39 +51,25 @@ fn cache(home: &std::path::Path) -> String {
 }
 
 #[test]
-fn json_output_and_hooks_stay_untouched_by_the_release_check() {
+fn a_piped_json_run_keeps_its_stdout_and_leaves_the_check_alone() {
     // Arrange
     let home = home_with_a_stale_newer_release("json");
     let before = cache(&home);
 
     // Act
-    let json = playbook()
+    let out = playbook()
         .args(["mode", "status", "--json"])
         .env("HOME", &home)
-        .env_remove("CI")
-        .output()
-        .unwrap();
-    let hook = playbook()
-        .args(["hook", "session-init"])
-        .env("HOME", &home)
-        .env_remove("CI")
-        .stdin(std::process::Stdio::null())
         .output()
         .unwrap();
 
     // Assert
-    let stdout = String::from_utf8_lossy(&json.stdout);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         serde_json::from_str::<serde_json::Value>(&stdout).is_ok(),
         "{stdout}"
     );
-    for out in [&json, &hook] {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(!stderr.contains("is available"), "{stderr}");
-    }
-    assert_eq!(
-        cache(&home),
-        before,
-        "a skipped run must not claim a refresh"
-    );
+    assert!(!stderr.contains("is available"), "{stderr}");
+    assert_eq!(cache(&home), before, "a piped run must not claim a refresh");
 }

@@ -120,6 +120,21 @@ mod tests {
     }
 
     #[test]
+    fn http_fetcher_gives_up_at_its_timeout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let started = std::time::Instant::now();
+        let err = HttpFetcher {
+            local_http: true,
+            timeout: Duration::from_millis(200),
+        }
+        .get(&format!("http://127.0.0.1:{port}/x"))
+        .unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(5), "{err}");
+        drop(listener);
+    }
+
+    #[test]
     fn the_production_fetcher_refuses_plain_http() {
         let err = HttpFetcher {
             local_http: false,
