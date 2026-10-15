@@ -2,6 +2,18 @@
 
 Read this before writing a commit message or a PR title. Squash merge turns the PR title into the commit message, so a title follows every rule here. The voice, banned-word and dash rules in `SKILL.md` still apply.
 
+## Contents
+
+- Format
+- Types
+- Scope
+- Breaking changes
+- The description
+- When a change fits two types
+- Common mistakes
+- Good and bad
+- Credit
+
 ## Format
 
 ```
@@ -12,10 +24,11 @@ Read this before writing a commit message or a PR title. Squash merge turns the 
 [optional footers]
 ```
 
-- The first line is the header. Keep it under 73 characters in total, prefix included.
+- The first line is the header. Keep it to 72 characters at most, prefix included.
 - A blank line separates the header, the body and the footers.
 - The body explains why, only when the header does not. One or two sentences, or up to 3 short bullets.
-- Footers are `Token: value` lines, such as `Refs: #42` or `BREAKING CHANGE: ...`. The tooling adds `Signed-off-by`, so do not write it.
+- Footers are `Token: value` or `Token #value` lines, such as `Refs: #42`, `Closes #42` or `BREAKING CHANGE: ...`.
+- Never type `Signed-off-by` by hand. Commit with `git commit --signoff` (or the commit tool) and git adds it.
 
 ## Types
 
@@ -35,13 +48,13 @@ Pick the type from what the change does for the user, and from what the files ar
 | `chore` | Upkeep that fits no other type | `chore: remove the unused fixtures` |
 | `revert` | Undo an earlier commit | `revert: undo the retry change in the sync job` |
 
-The binary does not hold a fixed type list. Its commit type check refuses a type that contradicts the staged files: only docs files cannot be `feat`, `fix`, `refactor` or `perf`; only test files cannot be `feat`, `refactor`, `perf` or `docs`; only CI files cannot be `feat` or `docs`; only lock files and manifests cannot be `feat`, `fix`, `refactor` or `docs`. Use the table above and the check stays quiet.
+The binary accepts exactly these 11 lowercase types in a commit message and a PR title, and refuses any other. When a new commit is made, a second check refuses a type that contradicts the staged files: only docs files cannot be `feat`, `fix`, `refactor` or `perf`; only test files cannot be `feat`, `refactor`, `perf` or `docs`; only CI files cannot be `feat` or `docs`; only lock files, or manifests next to a lock file, cannot be `feat`, `fix`, `refactor` or `docs`. That second check does not run on a PR title or an amend, so apply the same rule by hand there.
 
 ## Scope
 
 - Use at most one scope, in parentheses, right after the type.
 - With no ticket, the scope is a lowercase module or area name, such as `auth` or `cache`. Leave it out when no single area fits.
-- When the work belongs to a Jira or Linear ticket, the scope is the ticket key: `feat(PROJ-123): add retry to the sync job`. This MUST hold for every commit and the PR title on a stacked PR set, and the PR tooling refuses a stacked PR without it. Never invent a key.
+- When the work belongs to a Jira or Linear ticket, the scope is the ticket key: `feat(PROJ-123): add retry to the sync job`. This MUST hold for every commit and the PR title on a stacked PR set. The commit and PR tools refuse a stacked commit or PR that lacks a key they found, and nothing checks it without them. Do not invent a key. With none known, use a module name or no scope.
 - A GitHub issue is not a scope. Put it in the body or a footer: `Closes #42` when the change finishes it, `Refs #42` when it only relates.
 
 ## Breaking changes
@@ -64,7 +77,7 @@ These rules come from the binary checks and the writing rules:
 - State the effect of the change, not a list of files.
 - No em dashes or en dashes anywhere in the message.
 - No AI or tool attribution, such as a `Co-Authored-By` for an AI or a "Generated with" line.
-- The whole header is under 73 characters. The PR tooling refuses a longer title.
+- The whole header is 72 characters at most. The PR tooling refuses a longer title.
 
 ## When a change fits two types
 
@@ -79,7 +92,7 @@ The effect a user sees wins.
 ## Common mistakes
 
 - `feat` for a docs, test or CI change. The type check refuses it.
-- `fix` for a dependency bump or a cleanup. Use `build`, `chore` or `refactor`.
+- `fix` for a dependency bump or a cleanup. A bump is `build` or `chore`, a cleanup is `chore` or `refactor`.
 - A vague description such as `update stuff` or `fix things`.
 - Several unrelated changes in one commit. Split them.
 - A ticket-bound change with no ticket scope.
@@ -102,4 +115,4 @@ The effect a user sees wins.
 
 ## Credit
 
-Based on Conventional Commits 1.0.0, https://www.conventionalcommits.org/, used under CC BY 3.0.
+Adapted from Conventional Commits 1.0.0 (https://www.conventionalcommits.org/en/v1.0.0/), licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/). The ticket scope, the two breaking-change markers and the description casing are house rules, not part of the spec.

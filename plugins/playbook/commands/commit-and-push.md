@@ -75,7 +75,7 @@ Analyse the staged diff from Step 1 and draft a commit message:
 **Header (aim for 50 characters, never over 72, no trailing period):**
 
 - Always use conventional commit: `type(scope): short imperative summary`.
-  - Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert`.
+  - Types: `feat`, `fix`, `style`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert`.
   - Pick the type from what the files are, not from the words in the diff. Only documentation files: `docs`. Only tests: `test`. Only CI files: `ci`. Only lock files or manifests next to a lock file (a dependency bump): `build` or `chore`. A refactor changes structure and keeps behavior, so it is `refactor`, not `fix`. The commit-run tool in Step 4 refuses a type that contradicts the files (a docs-only change typed `feat`, a lock-file bump typed `fix`). When it does, fix the first line and run again, and only skip its type check when the type is truly intended. Without the tool, check this yourself before Step 4.
 - When the work belongs to a ticket (a key like `PROJ-123` in the branch name, the plan, or the arguments), the key is the scope: `feat(PROJ-123): add retry to the sync job`. On a stacked branch this is required for every commit. Never invent a key; with none known, use a module name as the scope or no scope.
 
@@ -85,7 +85,7 @@ A correct header: `fix(PROJ-123): stop the sync job dropping a busy run`.
 
 **Optional sections (only if applicable):**
 
-- `BREAKING CHANGE: <what changed> - <migration instructions>`
+- `BREAKING CHANGE: <what changed>. <migration step>.` plus a `!` before the colon in the header
 - `Refs: #<issue>`
 
 **Constraints:**
