@@ -1014,3 +1014,18 @@ fn a_stale_cached_limit_is_labeled_with_its_age() {
 
     assert!(text.contains("[cached, stale 1d 22h ago]"), "{text}");
 }
+
+#[test]
+fn with_no_limit_and_no_windows_both_panels_say_what_is_missing() {
+    let a = with_sources(tabbed(1), &Sources::default(), Range::LastDays(30));
+
+    let text = draw(&a, 140, 40);
+
+    assert!(text.contains("Limit unknown:"), "{text}");
+    assert_eq!(
+        text.matches("5 hour and weekly windows: not available for this plan")
+            .count(),
+        2,
+        "{text}"
+    );
+}

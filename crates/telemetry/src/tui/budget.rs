@@ -146,7 +146,8 @@ fn limit_line(
     pal: &Palette,
     l: &Limit,
     now: i64,
-    (stale, cache_age): (bool, Option<i64>),
+    stale: bool,
+    cache_age: Option<i64>,
     width: usize,
 ) -> Line<'static> {
     let tag = tag(l.origin, stale, cache_age);
@@ -312,7 +313,7 @@ pub fn render(frame: &mut Frame, area: Rect, data: &Data, pal: &Palette) {
         ));
     }
     for l in v.limits.iter().take(MAX_LIMITS) {
-        lines.push(limit_line(pal, l, data.now, (v.stale, v.cache_age), width));
+        lines.push(limit_line(pal, l, data.now, v.stale, v.cache_age, width));
     }
     if let Some(note) = v.windows_note.filter(|_| !v.limits.is_empty()) {
         lines.push(Line::styled(fit(note, width), fg(pal, pal.inactive)));

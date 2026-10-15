@@ -15,11 +15,13 @@
 //! guessed at.
 
 use crate::claude_code::parse_iso8601_utc;
-use crate::limits::LimitPeriod;
+use crate::limits::{LimitPeriod, Unit};
 use crate::limits_source::{self, Window};
 use crate::period::elapsed_text;
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 /// The account fields that describe a plan and carry no identity. Only these
 /// are ever shown with their values, and only behind `--raw`.
@@ -46,6 +48,15 @@ pub enum Plan {
 }
 
 impl Plan {
+    /// A stable name for scripts.
+    pub fn key(self) -> &'static str {
+        match self {
+            Plan::Max5x => "max_5x",
+            Plan::Max20x => "max_20x",
+            Plan::EnterpriseOrUnknown => "enterprise_or_unknown",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Plan::Max5x => "Max 5x",
@@ -205,6 +216,53 @@ pub fn read(path: &Path) -> Account {
     load(path).map_or_else(Account::default, |root| account(&root))
 }
 
+/// What the last read of the config file returned, and which file state it
+/// came from.
+struct Seen {
+    path: PathBuf,
+    modified: Option<SystemTime>,
+    len: u64,
+    account: Account,
+}
+
+static LAST: Mutex<Option<Seen>> = Mutex::new(None);
+
+/// Like [`read`], for the terminal view that reads on every refresh. The file
+/// is parsed again only when its size or modification time changed. A file
+/// that exists but does not parse, as while Claude Code is rewriting it,
+/// keeps the last good answer instead of resetting the plan to unknown.
+pub fn read_cached(path: &Path) -> Account {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return Account::default();
+    };
+    let (modified, len) = (meta.modified().ok(), meta.len());
+    let Ok(mut last) = LAST.lock() else {
+        return read(path);
+    };
+    let same_file = |s: &Seen| s.path == path;
+    if let Some(seen) = last.as_ref().filter(|s| same_file(s)) {
+        if seen.modified == modified && seen.len == len {
+            return seen.account.clone();
+        }
+    }
+    match load(path) {
+        Some(root) => {
+            let account = account(&root);
+            *last = Some(Seen {
+                path: path.to_path_buf(),
+                modified,
+                len,
+                account: account.clone(),
+            });
+            account
+        }
+        None => last
+            .as_ref()
+            .filter(|s| same_file(s))
+            .map_or_else(Account::default, |s| s.account.clone()),
+    }
+}
+
 fn names(v: Option<&Value>) -> Vec<String> {
     v.and_then(Value::as_object)
         .map(|o| o.keys().cloned().collect())
@@ -350,10 +408,6 @@ fn statusline_lines(usage_dir: &Path, now: i64) -> Vec<String> {
     ]
 }
 
-fn money(n: f64) -> String {
-    format!("${n:.2}")
-}
-
 /// What the panels will use, given the sources above.
 fn verdict_lines(s: &limits_source::Sources, now: i64) -> Vec<String> {
     use crate::limits::Origin;
@@ -365,16 +419,20 @@ fn verdict_lines(s: &limits_source::Sources, now: i64) -> Vec<String> {
         (LimitPeriod::SevenDay, "weekly window"),
     ] {
         let from = match limits.iter().find(|l| l.period == period) {
-            Some(l) if l.origin == Origin::Cached => "from the Claude Code cache".to_string(),
-            Some(_) => "from the statusline reading".to_string(),
-            None if s.account.plan.has_windows() => {
-                "no recent reading yet (use `playbook statusline`)".to_string()
-            }
-            None => "not available for this plan".to_string(),
+            Some(l) if l.origin == Origin::Cached => "from the Claude Code cache",
+            Some(_) => "from the statusline reading",
+            None => "not known",
         };
         out.push(format!("  {name}: {from}"));
     }
+    if let Some(note) = limits_source::windows_note(s, &limits) {
+        out.push(format!("  {note}"));
+    }
     out.push(match limits_source::monthly(s, now) {
+        limits_source::Monthly::Measured => {
+            "  monthly limit: from the statusline reading (a manual budget is shown beside it)"
+                .to_string()
+        }
         limits_source::Monthly::Cached {
             limit_usd,
             age,
@@ -382,14 +440,14 @@ fn verdict_lines(s: &limits_source::Sources, now: i64) -> Vec<String> {
             ..
         } => format!(
             "  monthly limit: {} from the Claude Code cache, {} old{}",
-            money(limit_usd),
+            limits_source::amount(Unit::Dollars, limit_usd),
             elapsed_text(age),
             if fresh { "" } else { " (stale)" }
         ),
         limits_source::Monthly::Manual(usd) => {
             format!(
                 "  monthly limit: {} from usage.budget.monthlyUsd",
-                money(usd)
+                limits_source::amount(Unit::Dollars, usd)
             )
         }
         limits_source::Monthly::Unset => {
@@ -441,11 +499,8 @@ pub fn report(
     for (period, usd) in budgets {
         out.push(format!("    {}: ${usd:.2}", period.key()));
     }
-    let sources = limits_source::Sources {
-        snapshot: limits_source::load(usage_dir),
-        budgets: budgets.to_vec(),
-        account: read(claude_json),
-    };
+    let sources =
+        limits_source::Sources::new(Some(usage_dir), claude_json, budgets.to_vec(), false);
     out.push(String::new());
     out.extend(verdict_lines(&sources, now));
     if !raw {
@@ -836,10 +891,7 @@ mod tests {
             text.contains("5 hour window: from the Claude Code cache"),
             "{text}"
         );
-        assert!(
-            text.contains("weekly window: no recent reading yet"),
-            "{text}"
-        );
+        assert!(text.contains("weekly window: not known"), "{text}");
         assert!(
             text.contains("monthly limit: $500.00 from the Claude Code cache, 10m old"),
             "{text}"
@@ -861,10 +913,8 @@ mod tests {
             false,
         );
 
-        assert!(
-            text.contains("5 hour window: not available for this plan"),
-            "{text}"
-        );
+        assert!(text.contains("5 hour window: not known"), "{text}");
+        assert!(text.contains("not available for this plan"), "{text}");
         assert!(
             text.contains("monthly limit: $80.00 from usage.budget.monthlyUsd"),
             "{text}"
@@ -882,5 +932,79 @@ mod tests {
             text.contains("Statusline reading (rate_limits.json): not found"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn a_stale_cache_and_no_budget_say_so_in_the_verdict() {
+        let spend =
+            r#"{"enabled":true,"limit":{"amount_minor":50000,"currency":"USD","exponent":2}}"#;
+        let stale = Home::new(
+            "verdict-stale",
+            &cache_body((NOW - 48 * 3600) * 1000, spend),
+        );
+        let none = Home::new("verdict-none", &cache_body(NOW * 1000, "null"));
+
+        let stale_text = report_of(&stale, NOW, false);
+        let none_text = report_of(&none, NOW, false);
+
+        assert!(
+            stale_text.contains("$500.00 from the Claude Code cache, 2d 0h old (stale)"),
+            "{stale_text}"
+        );
+        assert!(
+            none_text.contains("monthly limit: none (set usage.budget.monthlyUsd)"),
+            "{none_text}"
+        );
+    }
+
+    #[test]
+    fn a_statusline_monthly_limit_is_named_in_the_verdict() {
+        let home = Home::new("verdict-measured", &cache_body(NOW * 1000, "null"));
+        let snap = Snapshot {
+            captured_at: NOW - 60,
+            spend_limit: Some(limits_source::Spend {
+                used_percentage: 10.0,
+                resets_at: NOW + 86_400,
+                used_usd: Some(10.0),
+                limit_usd: Some(100.0),
+                period: Some(LimitPeriod::Monthly),
+            }),
+            ..Snapshot::default()
+        };
+        limits_source::save(&home.0, &snap);
+
+        let text = report_of(&home, NOW, false);
+
+        assert!(
+            text.contains("monthly limit: from the statusline reading"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_file_that_stops_parsing_keeps_the_last_good_answer() {
+        let home = Home::new("cached-read", &cache_body(NOW * 1000, "null"));
+        let first = read_cached(&home.json());
+
+        std::fs::write(home.json(), "{ half a file").unwrap();
+        let during = read_cached(&home.json());
+        std::fs::write(
+            home.json(),
+            r#"{"oauthAccount":{"organizationRateLimitTier":"default_claude_max_20x"}}"#,
+        )
+        .unwrap();
+        let after = read_cached(&home.json());
+
+        assert_eq!(first.plan, Plan::Max5x);
+        assert_eq!(during, first);
+        assert_eq!(after.plan, Plan::Max20x);
+    }
+
+    #[test]
+    fn a_missing_file_reads_as_unknown_through_the_cache_too() {
+        let missing =
+            std::env::temp_dir().join(format!("pb-plan-{}-gone/.claude.json", std::process::id()));
+
+        assert_eq!(read_cached(&missing), Account::default());
     }
 }
