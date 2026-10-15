@@ -548,6 +548,7 @@ fn table() -> Vec<Case> {
         case("usage warm", &["usage", "warm"]).writes(),
         case("usage ingest", &["usage", "ingest"]).code(1).err("was removed").writes(),
         case("usage prune", &["usage", "prune"]).out("removed 0").writes(),
+        case("usage doctor", &["usage", "doctor"]).out("Where pbtop can read limits"),
         case("sessions", &["sessions"]).writes().out("No recent sessions"),
         case("sessions list", &["sessions", "list"]).out("No recent sessions").writes(),
         // network or repo-bound tools, failing fast with a message
