@@ -8,6 +8,7 @@
 pub mod adr;
 pub mod agents;
 pub mod atlassian;
+pub mod breaking;
 pub mod brief;
 pub mod cc;
 pub mod ci;
