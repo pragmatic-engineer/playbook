@@ -47,6 +47,9 @@ pub enum Auto {
     /// Asks only inside an explicit `if mode is ask` branch, so an
     /// unattended run never reaches a question.
     AsksOnlyInAskMode,
+    /// Picks between two other commands and hands the run to one of them.
+    /// In auto mode it takes its own recommendation and passes `--auto` on.
+    PicksAnEngine,
 }
 
 /// One command file and which structural rules apply to it.
@@ -131,6 +134,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "session-start",
         asks: false,
         auto: Auto::Unchanged,
+    },
+    CommandSpec {
+        name: "review",
+        asks: true,
+        auto: Auto::PicksAnEngine,
     },
     CommandSpec {
         name: "fix",

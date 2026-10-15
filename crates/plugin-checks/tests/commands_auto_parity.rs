@@ -587,3 +587,35 @@ fn commands_that_never_ask_carry_no_mode_block() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn review_picks_an_engine_and_takes_its_own_recommendation_in_auto() {
+    // Arrange
+    let file = load("review");
+    let hint = file.frontmatter_value("argument-hint").expect("argument-hint");
+
+    // Act
+    let auto = file.auto_path().expect("an `Auto path` section");
+    let auto_text = file.text_of(&auto);
+    let run = file
+        .step("5")
+        .map(|s| file.text_of(&s))
+        .expect("a `Step 5` section");
+
+    // Assert
+    for flag in ["--quick", "--deep", "--auto", "--self"] {
+        assert!(hint.contains(flag), "argument-hint lacks {flag}: {hint}");
+    }
+    assert!(
+        auto_text.contains("without asking") && auto_text.contains("--auto"),
+        "the auto path must take the recommendation without asking and pass --auto on"
+    );
+    assert!(
+        run.contains("/playbook:quick-review") && run.contains("/playbook:deep-review"),
+        "Step 5 must run one of the two engines"
+    );
+    assert!(
+        file.lines.iter().all(|l| !is_post_call(l)),
+        "review never posts to GitHub itself; the engine does"
+    );
+}

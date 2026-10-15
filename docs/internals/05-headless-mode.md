@@ -103,7 +103,7 @@ These commands read the mode first and take the recommended answer instead of as
 - `/playbook:plan`: answers the convergent phase (Work Units and Segments) on its own. Plain auto stops at the design approval. Only `--auto-design` approves a design.
 - `/playbook:implement` and `/playbook:fix`: pick the recommended delivery options and run to a pull request.
 - `/playbook:commit-and-push` and `/playbook:create-pull-request`: run end to end.
-- `/playbook:quick-review` and `/playbook:deep-review`: run as `--self`, so the review stays local and is never posted.
+- `/playbook:review` takes its own recommendation, then `/playbook:quick-review` or `/playbook:deep-review` runs as `--self`, so the review stays local and is never posted.
 - `/playbook:learn-project`: runs as `--stage`, so candidates go to the staging area and nothing reaches the live memory store.
 - `/playbook:repo-audit`, `/playbook:doctor`, and `/playbook:session-start`: behave the same in either mode.
 

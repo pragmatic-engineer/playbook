@@ -1,6 +1,6 @@
 # Review and PR Flow
 
-Four commands take a ready branch to a merged PR: `/playbook:commit-and-push`, `/playbook:create-pull-request`, `/playbook:quick-review` or `/playbook:deep-review`, and `/playbook:address-pr-comments`.
+Four commands take a ready branch to a merged PR: `/playbook:commit-and-push`, `/playbook:create-pull-request`, `/playbook:review`, and `/playbook:address-pr-comments`.
 
 ## Commit and push
 
@@ -19,6 +19,22 @@ Flags combine (`-Au`). After a rebase or amend it pushes with `--force-with-leas
 ## Create a pull request
 
 `/playbook:create-pull-request` runs pre-flight checks, drafts a conventional-commit title and the team template body, then opens the PR. It opens a draft unless `pr.draft` is `false`.
+
+## Review
+
+`/playbook:review` is the one command to use. It reads the diff, recommends a quick or a deep review, and asks which you want. The recommendation comes first and is marked `(Recommended)`, with the reasons in one line. You always decide.
+
+```bash
+/playbook:review                # the PR for the current branch
+/playbook:review 4265           # PR #4265
+/playbook:review 4265 --deep    # no question, deep review
+/playbook:review --quick --self # no question, local quick review
+playbook review suggest 4265    # the recommendation alone, with its reasons
+```
+
+The recommendation is a fixed rule list, so the same diff gets the same answer. It looks at changed lines, files, the packages touched, risky paths (auth, crypto, secrets, CI, release, hooks, migrations, dependencies, the command surface), a security label, the share of tests, and changes that cannot alter behavior (docs, lock files, renames, tests). `review.suggest.*` config keys move the cuts, see [config keys](04-config-keys.md). When no rule is decisive the answer has low confidence and one cheap Haiku pass gives a second opinion. In auto mode the command takes the recommendation.
+
+`/playbook:quick-review` and `/playbook:deep-review` do the work and stay available as direct entry points. The two sections below describe them.
 
 ## Quick review
 
@@ -139,7 +155,7 @@ A stacked PR whose base is another open PR is not merged before its base. In aut
 ```bash
 /playbook:commit-and-push -A          # commit and push
 /playbook:create-pull-request         # open the PR
-/playbook:quick-review                # self-review; or deep-review for a bigger change
+/playbook:review --self              # self-review; it picks quick or deep
 /playbook:address-pr-comments         # after a reviewer leaves comments
 ```
 
