@@ -168,6 +168,9 @@ pub struct Outcome {
     pub recorded: bool,
     /// Whether the deadline stopped the run before every migration started.
     pub timed_out: bool,
+    /// The breaking changes not shown yet (ADR 0035), already recorded as
+    /// shown. The caller shows them.
+    pub notices: crate::notices::Notices,
     /// Why nothing ran, when nothing did.
     pub skipped: Option<Skip>,
 }
@@ -271,6 +274,8 @@ pub fn needs_you(message: &str, command: Option<&str>) -> String {
 /// Runs the heal for `trigger` at `now` (epoch seconds).
 pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
     let root = crate::common::paths::playbook_root_from(&ctx.home);
+    // Before the store opens for writing, which imports the old files.
+    let older = crate::notices::older_binary_ran(&root);
     let Ok(record) = Record::read(&root) else {
         return Outcome::skipped(Skip::StateUnreadable);
     };
@@ -278,8 +283,32 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
     if order == Ordering::Greater {
         return Outcome::skipped(Skip::Downgrade);
     }
+    // Read before the heal moves the record, and recorded as shown once the
+    // heal returns, whether it succeeded or not.
+    let pending = crate::notices::prepare(
+        &root,
+        &ctx.claude_home,
+        record.binary.as_deref(),
+        record.plugin.as_deref(),
+        older,
+    );
+    let out = heal_for(ctx, trigger, now, &root, &record, order);
+    Outcome {
+        notices: pending.commit(&root),
+        ..out
+    }
+}
+
+fn heal_for(
+    ctx: &Ctx,
+    trigger: Trigger,
+    now: u64,
+    root: &Path,
+    record: &Record,
+    order: Ordering,
+) -> Outcome {
     match trigger {
-        Trigger::Hook if order == Ordering::Equal => recheck_pending(ctx, &root, &record),
+        Trigger::Hook if order == Ordering::Equal => recheck_pending(ctx, root, record),
         Trigger::Start { .. } if order == Ordering::Equal => Outcome::default(),
         Trigger::Hook | Trigger::Start { .. } => {
             let waiting = record
@@ -295,10 +324,10 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
                 Trigger::Start { deadline } => Some(deadline),
                 _ => None,
             };
-            heal_now(ctx, &root, 0, now, deadline)
+            heal_now(ctx, root, 0, now, deadline)
         }
         Trigger::Fix => {
-            let mut out = heal_now(ctx, &root, migrate::LOCK_RETRIES, now, None);
+            let mut out = heal_now(ctx, root, migrate::LOCK_RETRIES, now, None);
             out.warnings.extend(migrate::owned_notes(ctx));
             out
         }
@@ -312,7 +341,7 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
             if failed {
                 out
             } else {
-                record_clean(ctx, &root, out)
+                record_clean(ctx, root, out)
             }
         }
     }
@@ -402,9 +431,23 @@ fn ids(open: &[OpenItem]) -> Vec<String> {
 pub fn session_line(home: &Path) -> Option<String> {
     let ctx = Ctx::for_home(home);
     let now = crate::common::time::now_epoch_secs();
-    std::panic::catch_unwind(|| run(&ctx, Trigger::Hook, now))
-        .ok()?
-        .line()
+    std::panic::catch_unwind(|| {
+        let out = run(&ctx, Trigger::Hook, now);
+        notice(out.line(), &out.notices)
+    })
+    .ok()?
+}
+
+/// `line` and the breaking changes block, in that order, or `None` when
+/// both are empty.
+fn notice(line: Option<String>, notices: &crate::notices::Notices) -> Option<String> {
+    let block = notices.render();
+    let parts: Vec<&str> = line
+        .as_deref()
+        .into_iter()
+        .chain((!block.is_empty()).then_some(block.trim_end()))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("\n"))
 }
 
 /// Whether the first-run step runs before `command`. Hot paths never pay for
@@ -470,13 +513,16 @@ fn start(home: &Path, deadline: Instant) -> Option<String> {
     }
     let out = run(&Ctx::for_home(home), Trigger::Start { deadline }, now);
     if out.skipped.is_some() {
-        return None;
+        return notice(None, &out.notices);
     }
-    let mut lines: Vec<String> = out.line().into_iter().collect();
+    let mut line = out.line();
     if out.timed_out {
-        lines.push(format!("playbook: {TIME_LIMIT_NOTE}"));
+        line = Some(match line {
+            Some(l) => format!("{l}\nplaybook: {TIME_LIMIT_NOTE}"),
+            None => format!("playbook: {TIME_LIMIT_NOTE}"),
+        });
     }
-    (!lines.is_empty()).then(|| lines.join("\n"))
+    notice(line, &out.notices)
 }
 
 #[cfg(test)]
@@ -594,6 +640,35 @@ mod tests {
         for args in [&["mode", "status"][..], &["plans"], &["config", "list"]] {
             assert!(runs_on_start(&parse(args)), "{args:?}");
         }
+    }
+
+    #[test]
+    fn breaking_changes_are_recorded_as_shown_when_the_heal_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        // Arrange: an older record, and a migration that cannot write.
+        let home = scratch_dir("heal-notice-fail");
+        seed(&home, "0.25.0", 1, None);
+        let lib = root(&home).join("hooks/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("config-hash.sh"), "x").unwrap();
+        fs::set_permissions(&lib, fs::Permissions::from_mode(0o555)).unwrap();
+        if fs::write(lib.join("probe"), "").is_ok() {
+            return; // root ignores the mode, so the failure cannot be staged
+        }
+
+        // Act
+        let first = run(&ctx(&home), Trigger::Fix, 1000);
+        let second = run(&ctx(&home), Trigger::Fix, 2000);
+        fs::set_permissions(&lib, fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Assert
+        assert!(!first.failed.is_empty() && !second.failed.is_empty());
+        assert_eq!(
+            first.notices.entries,
+            crate::breaking::entries_between("0.25.0", env!("CARGO_PKG_VERSION"))
+        );
+        assert!(!first.notices.entries.is_empty());
+        assert!(second.notices.entries.is_empty());
     }
 
     #[test]

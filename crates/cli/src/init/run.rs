@@ -180,7 +180,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let migrated = migrate::run_pending_for(&ctx, paths.statusline, paths.hooks);
     // Record this binary in the version record, so the session hook does not
     // run the same migrations again (ADR 0034).
-    crate::heal::run(
+    let healed = crate::heal::run(
         &ctx,
         crate::heal::Trigger::Init {
             failed: migrated.failed || migrated.lock_busy,
@@ -188,6 +188,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         },
         crate::common::time::now_epoch_secs(),
     );
+    // The breaking changes this upgrade crossed (ADR 0035), on stderr.
+    eprint!("{}", healed.notices.render());
 
     let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);
     if step_confirmed(&system_prompt_step) {
