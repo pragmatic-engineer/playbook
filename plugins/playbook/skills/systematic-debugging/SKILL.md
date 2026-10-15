@@ -32,7 +32,7 @@ Finish each phase before the next.
 
 ## Phase 4: Fix the root cause
 
-1. **Write a failing test first**, the simplest reproduction (a one-off script if no framework exists). Follow `playbook:engineering-standards`; for JS/TS also `playbook:engineering-standards-javascript`, for Rust also `playbook:engineering-standards-rust`.
+1. **Write a failing test first**, the simplest reproduction (a one-off script if no framework exists). Follow `playbook:engineering-standards`; for JS/TS also `playbook:engineering-standards-javascript`, for Rust also `playbook:engineering-standards-rust`, for Python also `playbook:engineering-standards-python`.
 2. **Make one fix.** No "while I am here" changes, no bundled refactor.
 3. **Verify:** the new test passes, nothing else broke, the issue is gone.
 4. **Count failed fixes.** Under 3: return to Phase 1 with the new information. **3 or more: stop and question the architecture.** If each fix reveals new shared state or coupling elsewhere, needs massive refactoring, or creates a new symptom, the pattern may be wrong. Ask the user before attempting fix 4.
