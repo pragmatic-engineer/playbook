@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook update`: fetch a release binary, verify it (SHA256SUMS, then the
-//! build attestation), swap it in with a backup, then check PATH and the
-//! Claude Code plugin. Install.sh and this share one policy; see `verify`.
+//! build attestation), swap it in with a backup, then check PATH.
+//! Install.sh and this share one policy; see `verify`.
 
 pub mod download;
 pub mod pathcheck;
@@ -30,7 +30,6 @@ pub struct Options {
 /// Everything the update reads from the machine, so tests can fake it.
 pub struct Env {
     pub exe: PathBuf,
-    pub home: PathBuf,
     pub path_var: OsString,
     pub auto_mode: bool,
     pub strict: bool,
@@ -50,7 +49,6 @@ impl Env {
             .map_err(|e| format!("cannot locate the running binary: {e}"))?;
         Ok(Env {
             exe: std::fs::canonicalize(&exe).unwrap_or(exe),
-            home: crate::common::home_dir(),
             path_var: std::env::var_os("PATH").unwrap_or_default(),
             auto_mode: crate::common::mode::resolve_for_hook().mode
                 == crate::common::mode::Mode::Auto,
@@ -220,8 +218,6 @@ pub fn run(
     }
     o.warnings
         .extend(pathcheck::shadow_warning(&env.path_var, &env.exe));
-    o.warnings
-        .extend(pathcheck::plugin_hint(&env.home, &version));
     Ok(o)
 }
 
@@ -247,7 +243,6 @@ mod tests {
         swap::make_executable(&exe).unwrap();
         Env {
             exe,
-            home: dir.clone(),
             path_var: dir.into_os_string(),
             auto_mode: false,
             strict: false,
@@ -493,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn a_shadowing_binary_and_a_stale_plugin_are_warned_about() {
+    fn a_shadowing_binary_is_warned_about() {
         let mut env = env_in("up-shadow");
         let other = scratch_dir("up-shadow-first");
         std::fs::create_dir_all(&other).unwrap();
@@ -501,12 +496,6 @@ mod tests {
         swap::make_executable(&other.join("playbook")).unwrap();
         let own = env.exe.parent().unwrap().to_path_buf();
         env.path_var = std::env::join_paths([&other, &own]).unwrap();
-        std::fs::create_dir_all(env.home.join(".claude/plugins")).unwrap();
-        std::fs::write(
-            env.home.join(".claude/plugins/installed_plugins.json"),
-            r#"{"plugins":{"playbook@pragmatic-engineer":[{"version":"0.15.0"}]}}"#,
-        )
-        .unwrap();
         let bin = script_bytes("0.17.0");
         let out = run(
             &Options::default(),
@@ -523,10 +512,6 @@ mod tests {
             "{:?}",
             out.warnings
         );
-        assert!(out
-            .warnings
-            .iter()
-            .any(|w| w.contains("claude plugin update playbook@pragmatic-engineer")));
     }
 
     #[test]
