@@ -11,7 +11,7 @@ How `/playbook:plan`, `/playbook:adr` and `/playbook:implement` (Step 4) repeat 
 
 ## Progress
 
-A **blocking finding** is a finding tagged `blocking`, or for `fact-checker` a check marked FAIL. Compare rounds by a stable key per blocking finding: its title lowercased with punctuation removed, plus its anchor (`file:line`, or the WU or step id when there is no file). If a revision only moved the line, compare file and title. The **top finding** is the first blocking one in the report, which lists the highest severity first.
+A **blocking finding** is a finding marked `(blocking)`, or for `fact-checker` a check marked FAIL. Compare rounds by a stable key per blocking finding: its title lowercased with punctuation removed, plus its anchor (`file:line`, or the WU or step id when there is no file). If a revision only moved the line, compare file and title. The **top finding** is the first blocking one in the report, which lists the highest severity first.
 
 Let B(n) be the blocking set of round n. From round 2, round n made **no progress** when either holds:
 

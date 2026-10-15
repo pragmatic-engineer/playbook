@@ -76,7 +76,7 @@ What a whole-stack review does:
 
 Both commands follow the `grounding-review` discipline.
 
-**Labels** are Conventional Comments in plain text: `blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`. Use `blocking` for must-fix before merge and `issue` for a real problem that does not block. Each finding is one or two sentences.
+**Labels** follow [Conventional Comments](https://conventionalcomments.org/) in plain text: `<label> [decorations]: <subject>`, for example `issue (blocking): ...` or `nitpick: ...`. The nine labels and the decorations are in the grounding-review skill, `references/conventional-comments.md`. Anything marked `(blocking)`, plus `issue`, `chore`, `todo` and `typo`, must be fixed before merge. Each finding is one or two sentences.
 
 Every review ends with a **Verification Summary**: each file, whether it was read, which lines were checked, and its findings. Confidence is HIGH (all verified), MEDIUM (1 or 2 unverified) or LOW (more).
 

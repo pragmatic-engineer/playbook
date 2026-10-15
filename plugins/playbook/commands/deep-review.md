@@ -99,7 +99,7 @@ Auto mode does not change posting. Only `--self` or `--no-post` skips the post q
 
 ## Voice rules
 
-Findings are plain: label, `file:line`, evidence, a short failure scenario, and one fix in plain words, with no comment body (same discipline as `/playbook:quick-review`). Step 5 drafts the comments after the sweep, and only when something can be posted. Non-negotiables for every finding: Conventional Comments label in **plain text** and bare (`blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`, never bold; `blocking:` replaces `issue:` specifically for a merge-blocking finding); plain, jargon-free language; findings kept short (one sentence when possible, two at most, the problem then what breaks, a second only when the mechanism is non-obvious); one pragmatic fix, not a menu; no hedging; no meta-justification; no em or en dashes.
+Findings are plain: Conventional Comments label and decorations (read `playbook:grounding-review` reference `references/conventional-comments.md`), `file:line`, evidence, a short failure scenario, and one fix in plain words, with no comment body (same discipline as `/playbook:quick-review`). Step 5 drafts the comments after the sweep, and only when something can be posted. Non-negotiables for every finding: Conventional Comments label in **plain text** and bare (`blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`, never bold; `blocking:` replaces `issue:` specifically for a merge-blocking finding); plain, jargon-free language; findings kept short (one sentence when possible, two at most, the problem then what breaks, a second only when the mechanism is non-obvious); one pragmatic fix, not a menu; no hedging; no meta-justification; no em or en dashes.
 
 ## Step 1: Resolve PR and gather context
 
@@ -199,7 +199,7 @@ For full-lens dispatches, instruct the reviewer to:
 - Return plain findings as a JSON array, one object per finding, with no comment body and no `Post:` block:
 
 ```json
-{"file": "...", "line": N, "side": "RIGHT", "label": "blocking",
+{"file": "...", "line": N, "side": "RIGHT", "label": "issue", "decorations": ["blocking"],
  "category": "security", "confidence": "HIGH", "evidence": "<exact code>", "body": "<short plain finding; the problem then what breaks, 1 sentence when possible, a second only when the mechanism is non-obvious>", "fix": "<one fix, in plain words>"}
 ```
 
@@ -242,7 +242,7 @@ Merge all findings, then (this is where removals happen):
 Run this after Step 4 and before any finding is shown to the user or a pending review is created. You do it yourself, not a reviewer: reviewers are read-only and can be wrong. Check every surviving finding against the code at `HEAD_SHA` (under `$WT` in worktree mode):
 
 1. **True.** Re-read the cited lines. Trace or run the failure scenario where that is cheap. A finding tagged `[unverified]` is either confirmed, dropped, or kept with the `[unverified]` tag stated plainly.
-2. **Label.** The label (`blocking`, `issue`, `suggestion`, `question`, `nitpick`) matches the real impact.
+2. **Label.** The label and decorations match the real impact. Read `playbook:grounding-review` reference `references/conventional-comments.md` for the nine labels.
 3. **Anchor.** The file and line are right. In a stacked or multi-PR review, the finding sits on the PR or branch that owns the code.
 
 Drop findings that do not hold, relabel the mislabelled, and move the misplaced. Read the cited lines plus what the trace needs, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved, and recompute the verdict, confidence and finding order from the swept list (Step 4 set them before the sweep). See the Verification Sweep section of `playbook:grounding-review`.
@@ -266,11 +266,11 @@ Otherwise, **print every finding first (MUST).** Before asking anything, print a
 Then ask **one question at a time**:
 
 - **Q1:** "Post which findings as a pending review?" Offer exactly these six tiers, each a strict superset of the one before, blocking and questions take precedence, suggestions and nitpicks stay optional:
-  - `only blockers` (`blocking` findings only)
-  - `all issues` (`blocking` + `issue`)
-  - `all issues + questions` (`blocking` + `issue` + `question`)
-  - `all except nitpicks` (`blocking` + `issue` + `question` + `suggestion`)
-  - `all findings` (everything, `nitpick` included)
+  - `only blockers` (anything marked `(blocking)`)
+  - `all must-fix` (`(blocking)` + `issue`, `chore`, `todo`, `typo`)
+  - `all must-fix + questions` (the above + `question`)
+  - `all except optional` (the above + `suggestion`)
+  - `all findings` (everything, `nitpick`, `thought` and `polish` included)
   - `none` (stop, nothing posted)
 
   If `none`, stop.

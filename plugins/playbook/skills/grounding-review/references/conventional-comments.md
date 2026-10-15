@@ -12,7 +12,7 @@ The format for code review comments in this plugin. It follows the [Conventional
 
 - label: one label that says what kind of comment it is.
 - subject: the main message, one or two plain sentences.
-- decorations: optional, in parentheses, comma separated. Example: `(non-blocking)` or `(security, non-blocking)`.
+- decorations: optional, in parentheses, comma separated. Example: `(non-blocking)` or `(non-blocking, security)`.
 - discussion: optional. Context, reasoning or next steps, after a blank line.
 
 Write the label in lowercase and plain text, with no bold.
@@ -23,7 +23,7 @@ Write the label in lowercase and plain text, with no bold.
 |---|---|---|---|
 | nitpick | A trivial preference. | non-blocking | `nitpick: Rename tmp to buffer.` |
 | suggestion | Propose an improvement and say what and why it is better. | judge | `suggestion (non-blocking): Cache the lookup, it runs once per row.` |
-| issue | A specific problem, seen by users or behind the scenes. Pair it with a suggestion. | blocking | `issue (blocking): The retry loop has no limit, so a down service is called forever.` |
+| issue | A specific problem, seen by users or behind the scenes. Pair it with a suggestion. | blocking | `issue: The retry loop has no limit, so a down service is called forever.` |
 | todo | A small, necessary change. | blocking | `todo: Add the new field to the export.` |
 | question | A concern you are not sure about. Ask for an answer or a check. | needs an answer | `question: Can the list be empty here?` |
 | thought | An idea that came up while reviewing. | non-blocking | `thought: We could share this helper with the importer later.` |
@@ -39,7 +39,7 @@ When you are unsure a problem exists, use `question` and do not use `issue`.
 |---|---|
 | blocking | Must be fixed before the change is accepted. |
 | non-blocking | Must not stop the change from being accepted. |
-| security, test, perf, data, types, logic | Optional second decoration that names the review lens. |
+| security, test, perf, data, types, logic | Optional second decoration that names the review lens. Any reviewer name from the deep-review tables also works. |
 
 Use `blocking` or `non-blocking` first when you add a lens: `issue (blocking, security): ...`. Add a decoration when the default does not fit. A bare `blocking:` label from older comments reads as `issue (blocking):`. Write the new form only.
 
@@ -51,6 +51,8 @@ Use `blocking` or `non-blocking` first when you add a lens: `issue (blocking, se
 | `nitpick`, `thought`, `polish`, or any label with `(non-blocking)` | Optional. Fix it when it is cheap. |
 | `question` | Answer it. |
 | `suggestion` | Judge it and accept or decline with a reason. |
+
+A `(blocking)` or `(non-blocking)` decoration overrides the label default. If both are present, `(blocking)` wins. A bare `issue:` from an older comment reads as must-fix.
 
 ## Examples
 

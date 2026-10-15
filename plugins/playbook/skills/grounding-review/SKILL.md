@@ -70,9 +70,7 @@ N. <label> [decorations]: <one-line subject naming the consequence>
 
 ## Conventional Comments
 
-Review comments follow [Conventional Comments](https://conventionalcomments.org/): `<label> [decorations]: <subject>`, then an optional blank line and discussion. Read `references/conventional-comments.md` only when you write or read code review comments, and skip it otherwise. It holds the canonical definition, the label table, the decoration table and two full examples. The format is for code review comments only. Do not use it in chat, PR bodies, commit messages or plans.
-
-Finding codes such as F1 stay internal IDs. The posted comment text follows the standard.
+Review comments follow [Conventional Comments](https://conventionalcomments.org/): `<label> [decorations]: <subject>`, then an optional blank line and discussion. Read `references/conventional-comments.md` only when you write or read code review comments, and skip it otherwise. It holds the canonical definition, the label table, the decoration table, the scope rule and two full examples.
 
 ## Evaluation Categories
 

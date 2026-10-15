@@ -69,7 +69,7 @@ When in worktree mode, read and grep all files under `$WT` instead of the local 
 
 Findings are plain: a label, `file:line`, the exact evidence, a short failure scenario, and one fix in plain words. They are not comment bodies yet. Step 4 drafts the comment for each finding after the sweep, and only when something will be posted. The non-negotiable points for every finding:
 
-- **Conventional Comments label on every finding, PLAIN TEXT (no bold), bare.** Start with the bare label: `blocking:`, `issue:`, `suggestion:`, `nitpick:`, `question:`. NEVER wrap in `**...**`. Valid labels: `blocking`, `issue`, `suggestion`, `nitpick`, `question`. `blocking` replaces `issue` for a finding that must be fixed before merge; `issue` is reserved for a real problem that is not merge-blocking. The label itself orders the findings and is what posts, no separate decoration.
+- **Conventional Comments on every finding, PLAIN TEXT (no bold).** Read `playbook:grounding-review` reference `references/conventional-comments.md` now and follow it: `<label> [decorations]: <subject>`, for example `issue (blocking): ...` or `nitpick: ...`. NEVER wrap the label in `**...**`. Never write a bare `blocking:`. The label and decorations order the findings and are what posts.
 - **One sentence by default, two at most: the problem, then what breaks.** State the defect and its failure, then stop. A second sentence only when the mechanism is genuinely non-obvious. A finding that argues a real decision can run a little longer. Avoid jargon; plainest words available. Don't teach the author what they already know or recap the diff.
 - **Pick one pragmatic fix.** No "X, or Y" options. If both work, prefer the smallest diff and recommend that one.
 - **Paraphrase, don't quote, in the sentence itself.** The exact code belongs in the evidence line. Block-quoting the README or source code is almost always longer than restating it in your own words.
@@ -151,7 +151,7 @@ Do not relay the report yet. It goes through Step 3b first.
 Run this before the report is shown to the user and before anything is posted. You do it yourself, not the reviewer: the reviewer is read-only and can be wrong. Check every finding against the code at `HEAD_SHA` (under `$WT` in worktree mode):
 
 1. **True.** Re-read the cited lines. Trace the failure scenario where that is cheap; never run PR code. A finding tagged `[unverified]` is either confirmed, dropped, or kept with the `[unverified]` tag stated plainly.
-2. **Label.** The label (`blocking`, `issue`, `suggestion`, `question`, `nitpick`) matches the real impact.
+2. **Label.** The label and decorations match the real impact.
 3. **Anchor.** The file and line are right. In a stacked or multi-PR review, the finding sits on the PR or branch that owns the code.
 
 Drop findings that do not hold, relabel the mislabelled, and move the misplaced. To keep main context small, read the cited lines plus what the trace needs, never whole files. Then put a `Sweep:` line under the Overview with the counts: kept, dropped, relabelled, moved, and recompute the verdict, confidence and finding order from the swept list. See the Verification Sweep section of `playbook:grounding-review`.
@@ -176,11 +176,11 @@ Relay the swept report with each draft shown under its finding as a `Draft:` blo
 
 **Q1**: "Post which findings as a pending review?" Offer exactly these six tiers, each a strict superset of the one before, blocking and questions take precedence, suggestions and nitpicks stay optional:
 
-- `only blockers` (`blocking` findings only)
-- `all issues` (`blocking` + `issue`)
-- `all issues + questions` (`blocking` + `issue` + `question`)
-- `all except nitpicks` (`blocking` + `issue` + `question` + `suggestion`)
-- `all findings` (everything, `nitpick` included)
+- `only blockers` (anything marked `(blocking)`)
+- `all must-fix` (`(blocking)` + `issue`, `chore`, `todo`, `typo`)
+- `all must-fix + questions` (the above + `question`)
+- `all except optional` (the above + `suggestion`)
+- `all findings` (everything, `nitpick`, `thought` and `polish` included)
 - `none` (stop, nothing posted)
 
 Wait for response. If `none`, stop here.
@@ -193,7 +193,7 @@ Build a JSON payload at `$REVIEW_JSON` (`/tmp/<org>/<repo>/quick-review-<number>
 {
   "commit_id": "<HEAD_SHA>",
   "comments": [
-    {"path": "...", "line": N, "side": "RIGHT", "body": "blocking: ..."},
+    {"path": "...", "line": N, "side": "RIGHT", "body": "issue (blocking): ..."},
     {"path": "...", "start_line": N, "start_side": "RIGHT", "line": M, "side": "RIGHT", "body": "..."}
   ]
 }
@@ -259,4 +259,4 @@ If you catch yourself doing any of these while drafting findings, stop and rewri
 
 - **Self-review submit is COMMENT-only.** Documented limitation of the GitHub API, not a bug to work around.
 - **Once submitted, the review wrapper can't be deleted.** Body can be mutated via `PUT /reviews/{id}` but must remain non-empty for COMMENT/REQUEST_CHANGES state. Prefer leaving in PENDING until the body and findings are settled.
-- **Conventional Comments labels are mandatory even on nits.** They cost a few characters; they buy bot/human triage.
+- **Conventional Comments labels and decorations are mandatory even on nits.** They cost a few characters; they buy bot/human triage.
