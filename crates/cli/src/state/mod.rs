@@ -284,9 +284,7 @@ pub fn list_read_only(root: &Path, prefix: &str) -> Result<Vec<(String, String)>
     if !path.is_file() {
         return Ok(Vec::new());
     }
-    let conn =
-        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(err)?;
+    let conn = open_read_only(&path).map_err(err)?;
     let exists: bool = conn
         .query_row(
             "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'state')",
@@ -300,14 +298,37 @@ pub fn list_read_only(root: &Path, prefix: &str) -> Result<Vec<(String, String)>
     Tx { conn: &conn }.list(prefix)
 }
 
+/// A read-only connection that leaves no file behind. With no `-wal` file
+/// every row is in the main file, so it opens as immutable and SQLite makes
+/// no `-wal` or `-shm` file; with one, a plain read-only open reads it.
+fn open_read_only(path: &Path) -> rusqlite::Result<rusqlite::Connection> {
+    use rusqlite::OpenFlags;
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    if Path::new(&wal).exists() {
+        return rusqlite::Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY);
+    }
+    let encoded: String = path
+        .to_string_lossy()
+        .chars()
+        .map(|c| match c {
+            '%' => "%25".to_string(),
+            '?' => "%3f".to_string(),
+            '#' => "%23".to_string(),
+            c => c.to_string(),
+        })
+        .collect();
+    rusqlite::Connection::open_with_flags(
+        format!("file:{encoded}?immutable=1"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+    )
+}
+
 fn flagged_on_disk(root: &Path) -> bool {
     store::db_path(root).exists()
-        && rusqlite::Connection::open_with_flags(
-            store::db_path(root),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .ok()
-        .is_some_and(|c| flagged(&c).unwrap_or(false))
+        && open_read_only(&store::db_path(root))
+            .ok()
+            .is_some_and(|c| flagged(&c).unwrap_or(false))
 }
 
 /// Dump the whole table as sorted `key<TAB>value` lines, for inspection.
