@@ -61,6 +61,7 @@ pub mod models;
 pub mod plan_cleanup;
 pub mod planning;
 pub mod plans;
+pub mod plugin_root;
 pub mod pr;
 pub mod prose;
 pub mod review;

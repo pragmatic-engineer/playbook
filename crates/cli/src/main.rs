@@ -137,10 +137,7 @@ fn main() {
             let claude_home = home.join(".claude");
             let cwd = std::env::current_dir().unwrap_or_default();
             let claude = effort::claude_cap(&claude_home, &cwd);
-            let root = init::self_root::skills_root_from_env(
-                std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
-                &claude_home,
-            );
+            let root = playbook::plugin_root::find_here();
             match sub {
                 playbook::EffortCommand::List { json } => {
                     println!(
@@ -296,10 +293,7 @@ fn main() {
                 let claude_home = home.join(".claude");
                 let cwd = std::env::current_dir().unwrap_or_default();
                 let claude = effort::claude_cap(&claude_home, &cwd);
-                let root = init::self_root::skills_root_from_env(
-                    std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
-                    &claude_home,
-                );
+                let root = playbook::plugin_root::find_here();
                 let resolved = effort::component::resolve_capped(
                     effort::component::Kind::Command,
                     command.as_deref().unwrap_or_default(),
@@ -542,10 +536,9 @@ fn main() {
             let plugin_root = std::env::var("CLAUDE_PLUGIN_ROOT").ok();
             let self_root = if flags.dry_run {
                 // A dry run must not write the embedded copies.
-                init::self_root::resolve(plugin_root.as_deref(), &claude_home)
-                    .filter(|root| init::self_root::has_seed_files(root))
+                init::self_root::seed_root(plugin_root.as_deref())
             } else {
-                init::self_root::resolve_or_embedded(plugin_root.as_deref(), &claude_home, &home)
+                init::self_root::resolve_or_embedded(plugin_root.as_deref(), &home)
             };
             let shell_kind = std::env::var("SHELL")
                 .ok()
@@ -567,6 +560,7 @@ fn main() {
                 common::paths::RepoScope::Worktree,
             ));
             let paths = InitPaths {
+                plugin_root: playbook::plugin_root::find_here(),
                 repo,
                 self_root,
                 claude_home,
@@ -1153,13 +1147,7 @@ fn main() {
                     commit,
                 } => {
                     let root = plugin_root
-                        .or_else(|| {
-                            let home = common::home_dir();
-                            init::self_root::skills_root_from_env(
-                                std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
-                                &home.join(".claude"),
-                            )
-                        })
+                        .or_else(playbook::plugin_root::find_here)
                         .unwrap_or_default();
                     let dir = std::env::temp_dir()
                         .join(format!("create-pr-step0-{}", std::process::id()));
@@ -2065,10 +2053,7 @@ fn main() {
             DoctorCommand::PendingMigrations => {
                 let home = common::home_dir();
                 let claude_home = home.join(".claude");
-                let self_root = init::self_root::skills_root_from_env(
-                    std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
-                    &claude_home,
-                );
+                let self_root = playbook::plugin_root::find_here();
                 let ctx = init::migrate::Ctx {
                     home,
                     claude_home,

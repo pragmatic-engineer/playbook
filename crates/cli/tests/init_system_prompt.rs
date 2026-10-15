@@ -63,6 +63,7 @@ fn dest_path(home: &Path) -> PathBuf {
 
 fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
     InitPaths {
+        plugin_root: None,
         self_root: Some(self_root()),
         claude_home: claude_home_of(home),
         home: home.to_path_buf(),
