@@ -11,6 +11,7 @@ pub mod review;
 use crate::common::git;
 use crate::common::paths::playbook_root_from;
 use crate::common::repo_slug;
+use crate::common::time::parse_iso8601_utc_epoch;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -432,46 +433,6 @@ fn read_conflict_marker_epoch(worktree_path: &Path) -> Option<i64> {
     let raw = std::fs::read_to_string(worktree_path.join(CONFLICT_MARKER_FILE)).ok()?;
     let timestamp = raw.lines().nth(1)?;
     parse_iso8601_utc_epoch(timestamp.trim())
-}
-
-/// Parses a fixed `YYYY-MM-DDTHH:MM:SSZ` UTC timestamp into Unix seconds,
-/// with no external date crate: this is a shape playbook itself writes, not
-/// arbitrary user input, so the fixed format is a safe assumption here.
-fn parse_iso8601_utc_epoch(s: &str) -> Option<i64> {
-    let s = s.strip_suffix('Z')?;
-    let (date, time) = s.split_once('T')?;
-    let mut date_parts = date.split('-');
-    let year: i64 = date_parts.next()?.parse().ok()?;
-    let month: u32 = date_parts.next()?.parse().ok()?;
-    let day: u32 = date_parts.next()?.parse().ok()?;
-    let mut time_parts = time.split(':');
-    let hour: i64 = time_parts.next()?.parse().ok()?;
-    let minute: i64 = time_parts.next()?.parse().ok()?;
-    let second: i64 = time_parts.next()?.split('.').next()?.parse().ok()?;
-
-    if !(1..=12).contains(&month)
-        || !(1..=31).contains(&day)
-        || !(0..=23).contains(&hour)
-        || !(0..=59).contains(&minute)
-        || !(0..=59).contains(&second)
-    {
-        return None;
-    }
-
-    let days = days_from_civil(year, month, day);
-    Some(days * SECS_PER_DAY + hour * 3600 + minute * 60 + second)
-}
-
-/// Howard Hinnant's `days_from_civil`: days since the Unix epoch for a
-/// proleptic-Gregorian `(year, month, day)`.
-fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
-    let y = if month <= 2 { year - 1 } else { year };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = (i64::from(month) + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + i64::from(day) - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
 }
 
 /// The bare name of the repo's actual default branch, reusing
