@@ -78,6 +78,16 @@ pub const KNOWN_KEYS: &[&str] = &[
     "update.checkIntervalHours",
 ];
 
+/// The per-user settings, which live only in the global tier.
+pub const USER_KEYS: &[&str] = &["update.mode", "update.checkIntervalHours"];
+
+/// Whether `key` is a per-user setting. `config set` writes it to the global
+/// tier without `--global` and refuses `--org`, and `config import` refuses
+/// it outside the global section.
+pub fn is_user_key(key: &str) -> bool {
+    USER_KEYS.contains(&key)
+}
+
 /// The component kinds an `effort.<kind>.<name>` key can name.
 pub const EFFORT_COMPONENT_KINDS: [&str; 3] = ["agents", "commands", "skills"];
 

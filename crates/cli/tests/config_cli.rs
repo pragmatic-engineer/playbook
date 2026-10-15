@@ -153,6 +153,55 @@ fn set_without_flags_writes_repo_tier_and_get_reflects_it() {
 }
 
 #[test]
+fn update_keys_go_to_the_global_tier_without_the_flag_and_refuse_org() {
+    // Arrange
+    let repo = seeded_repo("set-update-key");
+    let home = scratch_dir("set-update-key-home");
+
+    // Act: a piped debug build never starts the background release check,
+    // so neither run reaches the network.
+    let org = run_playbook(
+        &repo,
+        &home,
+        &["config", "set", "update.mode", "off", "--org"],
+    );
+    let plain = run_playbook(&repo, &home, &["config", "set", "update.mode", "auto"]);
+
+    // Assert
+    assert!(plain.status.success(), "stderr: {}", stderr_of(&plain));
+    assert_eq!(
+        stored(&home)["global"]["update.mode"],
+        Value::String("auto".into())
+    );
+    assert!(empty(&home, "repos") && empty(&home, "orgs"));
+    assert!(!org.status.success());
+    assert!(stderr_of(&org).contains("--global"), "{}", stderr_of(&org));
+}
+
+#[test]
+fn a_stale_repo_tier_update_key_is_not_reported_as_the_value() {
+    // Arrange: a repo row an older binary could have written.
+    let repo = seeded_repo("get-update-key");
+    let home = scratch_dir("get-update-key-home");
+    playbook::config::store::put(
+        &home.join(".config").join("playbook"),
+        playbook::config::write::Tier::Repo,
+        Some("test-owner/test-repo"),
+        "update.mode",
+        &Value::String("off".into()),
+    )
+    .unwrap();
+
+    // Act
+    let out = run_playbook(&repo, &home, &["config", "get", "update.mode"]);
+
+    // Assert
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("notify"), "{stdout}");
+    assert!(stdout.contains("(source: default)"), "{stdout}");
+}
+
+#[test]
 fn set_with_global_flag_writes_the_global_tier_file() {
     // Arrange
     let repo = seeded_repo("set-global-tier");

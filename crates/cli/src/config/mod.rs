@@ -77,6 +77,8 @@ pub enum ConfigError {
     /// A tier's directory could not be created or written into: its parent
     /// path exists as a non-directory, or is not writable.
     DirectoryUnwritable(PathBuf),
+    /// `key` is a per-user setting, so only the global tier holds it.
+    GlobalOnly(String),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -103,6 +105,10 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "config key {key} does not accept '{value}', valid values are: {}",
                 allowed.join(", ")
+            ),
+            ConfigError::GlobalOnly(key) => write!(
+                f,
+                "{key} is a per-user setting; set it with --global"
             ),
             ConfigError::InvalidNumber { key, value } => write!(
                 f,
@@ -179,6 +185,13 @@ pub fn resolve(
     // that must not let an unknown key resolve successfully just because
     // some file happens to have it.
     keys::default_value(key).ok_or_else(|| ConfigError::UnknownKey(key.to_string()))?;
+    // A per-user key lives only in the global tier, so a stale repo or org
+    // row never shows as the value the binary uses.
+    let repo_slug = if keys::is_user_key(key) {
+        None
+    } else {
+        repo_slug
+    };
 
     let root = crate::common::paths::playbook_root_from(home);
     let found = store::lookup(&root, key, repo_slug)?;
