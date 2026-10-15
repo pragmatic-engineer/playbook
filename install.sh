@@ -16,8 +16,8 @@
 # on this machine. It asks first, and with no terminal and no --yes it only prints
 # the command, so nothing is wired without a yes.
 #
-# When it replaces an older binary, it prints the breaking changes the new
-# binary lists since the old version (ADR 0035).
+# When it replaces an older binary, it prints a line with the release notes
+# link and the breaking changes of the release (ADR 0037).
 #
 #   curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
 #
@@ -139,8 +139,8 @@ Usage:
 What it does:
   - downloads the release binary, checks its SHA256 (and its build attestation
     when gh can), runs a smoke test, installs it and puts its folder on PATH;
-  - when it replaces an older binary, prints the breaking changes since that
-    version;
+  - when it replaces an older binary, prints the link to the release notes and
+    the breaking changes of the release;
   - then asks whether to run `playbook setup`, which adds playbook's hook entries to
     ~/.claude/settings.json (your own entries stay), the status line and the shell
     integration. With no terminal and no --yes it only prints the command.
@@ -341,22 +341,28 @@ installed_version() {
     printf '%s' "$v"
 }
 
-# show_breaking_changes OLD: prints, to stderr, the breaking changes the new
-# binary lists since OLD (ADR 0035). A binary without `playbook breaking`, or
-# any other answer than the block, prints nothing. After it prints, it sets
-# BREAKING_SHOWN to OLD. The `migrate` and `init` this script runs next get it
-# as PLAYBOOK_BREAKING_SHOWN, so they record the notice without printing it
-# again (ADR 0035 decision 4.5). It is not exported.
-show_breaking_changes() {
-    local old="$1" text
+# show_release_notes OLD NEW: after this script replaced playbook OLD with
+# NEW, prints one line and the release notes on stderr (ADR 0037 decision
+# 5.4). It downloads release-notes.json and checks it against the SHA256SUMS
+# already in STAGE. The new binary prints the breaking changes from that file
+# and records the notes as shown, so its first run does not print them again.
+# When the asset is missing or does not match, or the binary is older than
+# that step, it prints the link alone. It never fails the install.
+show_release_notes() {
+    local old="$1" new="$2" text
     [ -n "$old" ] || return 0
-    text="$("$PLAYBOOK_BIN_DIR/playbook" breaking --since "$old" 2>/dev/null </dev/null)" || return 0
-    case "$text" in
-        "Breaking changes in this upgrade:"*)
-            printf '%s\n' "$text" >&2
-            BREAKING_SHOWN="$old"
-            ;;
-    esac
+    printf 'playbook updated from %s to %s.\n' "$old" "$new" >&2
+    if _fetch "https://github.com/$RELEASE_REPO/releases/download/$RESOLVED_TAG/release-notes.json" \
+            "$STAGE/release-notes.json" 2>/dev/null \
+        && (cd "$STAGE" && grep -E '^[0-9a-f]{64}  release-notes\.json$' SHA256SUMS > release-notes.sha256 \
+            && "${CKSUM_CMD[@]}" release-notes.sha256) >/dev/null 2>&1 \
+        && text="$("$PLAYBOOK_BIN_DIR/playbook" update --print-notes "$STAGE/release-notes.json" \
+            --from "$old" 2>/dev/null </dev/null)" \
+        && [ -n "$text" ]; then
+        printf '%s\n' "$text" >&2
+        return 0
+    fi
+    printf 'Release notes: https://github.com/%s/releases/tag/%s\n' "$RELEASE_REPO" "$RESOLVED_TAG" >&2
 }
 
 # Checks the GitHub build attestation for a downloaded asset. Needs a gh that
@@ -481,7 +487,7 @@ install_release_binary() {
     place_binary "$STAGE/playbook" playbook
     log "Installed playbook $version to $PLAYBOOK_BIN_DIR/playbook"
     if [ "$PREVIOUS_VERSION" != "$version" ]; then
-        show_breaking_changes "$PREVIOUS_VERSION"
+        show_release_notes "$PREVIOUS_VERSION" "$version"
     fi
     install_pb_alias
 
@@ -620,11 +626,6 @@ ensure_bin_dir_on_path() {
 # ctrl-c during the network path.
 STAGE=""
 PREVIOUS_VERSION=""
-BREAKING_SHOWN=""
-# A value inherited from a shell that an older version of this script
-# exported it into would reach the probes and the login shell started at the
-# end, so it is dropped here.
-unset PLAYBOOK_BREAKING_SHOWN
 _cleanup_staging() {
     [ -n "$STAGE" ] && rm -rf "$STAGE"
     return 0
@@ -659,7 +660,7 @@ fi
 if [ "$NO_INIT" -eq 0 ] && { [ "$ASSUME_YES" -eq 1 ] || have_tty; } \
     && "$PLAYBOOK_BIN_DIR/playbook" migrate --help >/dev/null 2>&1; then
     log "Running playbook migrate"
-    PLAYBOOK_BREAKING_SHOWN="$BREAKING_SHOWN" "$PLAYBOOK_BIN_DIR/playbook" migrate || \
+    "$PLAYBOOK_BIN_DIR/playbook" migrate || \
         warn "playbook migrate did not finish; run \`playbook migrate\` to retry"
 fi
 
@@ -741,7 +742,7 @@ if [ "$NO_INIT" -eq 0 ] && consent "Run playbook $SETUP_CMD now? It adds playboo
     # PLAYBOOK_BIN_DIR, and this runs before the rc-file PATH line takes
     # effect. Setup prints one line per step, so its output is not redirected.
     # shellcheck disable=SC2086
-    PLAYBOOK_BREAKING_SHOWN="$BREAKING_SHOWN" "$PLAYBOOK_BIN_DIR/playbook" "$SETUP_CMD" $_INIT_ARGS || \
+    "$PLAYBOOK_BIN_DIR/playbook" "$SETUP_CMD" $_INIT_ARGS || \
         die "playbook $SETUP_CMD failed; see the step report above"
     INIT_RAN=1
 

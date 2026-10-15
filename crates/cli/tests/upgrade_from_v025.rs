@@ -542,6 +542,7 @@ fn the_release_notes_line_shows_once_in_the_session_and_on_stderr() {
     let line = notes_line();
     let session = ran_before("notice-hook");
     let migrate = ran_before("notice-migrate");
+    let shown = ran_before("notice-shown");
     let start = ran_before("notice-start");
 
     // Act
@@ -549,18 +550,28 @@ fn the_release_notes_line_shows_once_in_the_session_and_on_stderr() {
     let second = session.session_message();
     let run = migrate.playbook(&["migrate"], "");
     let again = migrate.playbook(&["migrate"], "");
+    let printed = shown.playbook(&["update", "--print-notes", "missing.json"], "");
+    let after = shown.playbook(&["migrate"], "");
     let first_run = start.playbook(&["mode", "status"], "");
     let later = start.playbook(&["mode", "status"], "");
 
-    // Assert: shown once per channel, and never on stdout.
+    // Assert: shown once per channel, never on stdout, and not again after
+    // the install script printed the notes.
     assert!(first.contains(&line), "{first}");
     assert!(!second.contains("playbook updated"), "{second}");
     assert!(String::from_utf8_lossy(&run.stderr).contains(&line));
     assert!(!stdout(&run).contains("playbook updated"));
     assert!(!String::from_utf8_lossy(&again.stderr).contains("playbook updated"));
+    assert!(
+        stdout(&printed).starts_with("Full notes: https://"),
+        "{}",
+        stdout(&printed)
+    );
     assert!(String::from_utf8_lossy(&first_run.stderr).contains(&line));
     assert_eq!(stdout(&first_run), stdout(&later));
-    assert!(!String::from_utf8_lossy(&later.stderr).contains("playbook updated"));
+    for out in [&after, &later] {
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("playbook updated"));
+    }
 }
 
 #[test]

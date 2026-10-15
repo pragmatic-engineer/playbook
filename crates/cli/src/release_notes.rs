@@ -3,8 +3,9 @@
 
 //! Release notes (ADR 0037). Every release carries `release-notes.json`,
 //! built from the Conventional Commits by `scripts/release-notes.sh` and
-//! listed in its SHA256SUMS. `playbook update` and the automatic update read
-//! it to show or hold for the breaking changes of a release.
+//! listed in its SHA256SUMS. `playbook update`, the automatic update and the
+//! install script read it to show the breaking changes of a release. The
+//! first run after an upgrade shows only a link, since it stays offline.
 
 use crate::update::download::Fetcher;
 use crate::update::resolve::compare;
@@ -198,6 +199,19 @@ pub fn fetch(
         return Err(format!("{ASSET} is for {}, not {version}", notes.version));
     }
     Ok(Some(notes))
+}
+
+/// `playbook update --print-notes <file>`, which the install script runs on
+/// the binary it just installed: prints the notes of this binary's release
+/// from a file the script checked, and records them as shown so the first
+/// run step does not print its line too. A file that cannot be read prints
+/// only the link. Never fails.
+pub fn print_notes(file: &std::path::Path, from: Option<&str>) -> String {
+    let running = env!("CARGO_PKG_VERSION");
+    let notes = std::fs::read(file).ok().and_then(|b| parse(&b).ok());
+    let notes = notes.filter(|n| n.version == running);
+    crate::notices::record(&crate::common::paths::playbook_root(), running);
+    render(notes.as_ref(), from.unwrap_or(running), running)
 }
 
 #[cfg(test)]
