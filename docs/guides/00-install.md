@@ -38,6 +38,8 @@ curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/in
 
 It installs only the `playbook` binary, into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`), after checking its SHA256, its build attestation when `gh` can check it, and a `--version` smoke test. It puts that directory on `PATH`. It does not touch Claude Code's plugins or settings.
 
+When it replaces an older binary, it prints the breaking changes between the two versions, with the step to take for each.
+
 Then it asks "Run playbook init now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the launcher and the system prompt (Enter means yes for these two), then runs `playbook init --yes`, which adds the hook entries, the status line and the telemetry variables (a collector on this machine) to `settings.json`. On no, or with no terminal and no `--yes`, it skips `init` and prints the command to run later, with any `--aliases` or `--system-prompt` you passed. Open a new terminal afterward.
 
 Pass `--yes` to say yes to every question, including `playbook init`. Flags go after `-s --` when piping:
