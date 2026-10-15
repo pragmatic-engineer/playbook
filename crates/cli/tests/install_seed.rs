@@ -27,6 +27,8 @@ fn install(work: &Work, preseed: Option<&str>) -> (PathBuf, String) {
         .arg("--yes")
         .env_remove("SHELL")
         .env_remove("CLAUDE_PLUGIN_ROOT")
+        .env_remove("CLAUDE_CODE_ENABLE_TELEMETRY")
+        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
         .env("PLAYBOOK_SKIP_DOWNLOAD", "1")
         .env("PLAYBOOK_BIN_DIR", &bin)
         .env("CLAUDE_HOME", home.join(".claude"))
@@ -86,7 +88,15 @@ fn a_fresh_install_seeds_settings_and_wires_the_ported_hooks() {
     }
     // The security defaults are opt-in: a default install leaves them out.
     assert!(settings.get("permissions").is_none(), "{settings}");
-    assert!(settings.get("env").is_none(), "{settings}");
+    // The installer's init --yes also turns telemetry on, and writes nothing
+    // else into env.
+    let env = settings["env"].as_object().expect("telemetry env block");
+    assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+    assert!(
+        env.keys()
+            .all(|k| k == "CLAUDE_CODE_ENABLE_TELEMETRY" || k.starts_with("OTEL_")),
+        "{settings}"
+    );
     assert!(
         ported_hooks(&settings) >= 18,
         "got {}",

@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 /// A variable that means the user configured telemetry themselves.
-fn is_telemetry_var(name: &str) -> bool {
+pub fn is_telemetry_var(name: &str) -> bool {
     name == "CLAUDE_CODE_ENABLE_TELEMETRY" || name.starts_with("OTEL_")
 }
 
@@ -31,6 +31,9 @@ fn settings_files(home: &Path, cwd: &Path) -> Vec<PathBuf> {
         "/Library/Application Support/ClaudeCode/managed-settings.json",
     ));
     files.push(PathBuf::from("/etc/claude-code/managed-settings.json"));
+    // Run from the home folder, the project file is the user file: list it once.
+    let mut seen = std::collections::BTreeSet::new();
+    files.retain(|f| seen.insert(same_file_key(f)));
     files
 }
 
@@ -145,12 +148,17 @@ pub fn merged_vars(
     collect_vars(process.into_iter(), &settings_files(home, cwd)).ok()
 }
 
+/// A key that is the same for two spellings of one file (a symlinked home).
+fn same_file_key(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// Whether any settings file other than `except` names a telemetry variable
 /// (an unreadable file counts as naming one).
 pub fn files_configured_except(home: &Path, cwd: &Path, except: &Path) -> bool {
     let files: Vec<PathBuf> = settings_files(home, cwd)
         .into_iter()
-        .filter(|f| f != except)
+        .filter(|f| same_file_key(f) != same_file_key(except))
         .collect();
     configured_in_files(&files)
 }

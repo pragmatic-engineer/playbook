@@ -46,6 +46,8 @@ fn paths(home: &Path, root: &Path, repo: Option<(PathBuf, PathBuf)>) -> InitPath
         security: false,
         telemetry: false,
         claude_override: false,
+        telemetry_replace_off: false,
+        only: false,
         short_name: false,
         path_setup: None,
         repo,

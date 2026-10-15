@@ -44,7 +44,13 @@ impl Sandbox {
     }
 
     fn init(&self) {
-        let out = self.run(&["init", "--yes", "--aliases", "--system-prompt"]);
+        let out = self.run(&[
+            "init",
+            "--yes",
+            "--no-telemetry",
+            "--aliases",
+            "--system-prompt",
+        ]);
         assert!(out.status.success(), "init failed: {}", text(&out));
         // Init no longer places statusline.sh. Seed the copy an older install
         // left, recorded the way that install recorded it.

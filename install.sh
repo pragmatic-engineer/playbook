@@ -10,8 +10,9 @@
 # installs or removes a plugin.
 #
 # At the end it offers to run `playbook init`, which adds playbook's hook
-# entries to ~/.claude/settings.json, the status line and the shell
-# integration. It asks first, and with no terminal and no --yes it only prints
+# entries to ~/.claude/settings.json, the status line, the shell
+# integration and the Claude Code telemetry variables that point at a collector
+# on this machine. It asks first, and with no terminal and no --yes it only prints
 # the command, so nothing is wired without a yes.
 #
 #   curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
@@ -510,7 +511,7 @@ fi
 # prompt. With no terminal and no --yes it is skipped and the command is
 # printed.
 INIT_RAN=0
-if [ "$NO_INIT" -eq 0 ] && consent "Run playbook init now? It adds playbook's hook entries to ~/.claude/settings.json (your own entries stay), the status line and the shell integration."; then
+if [ "$NO_INIT" -eq 0 ] && consent "Run playbook init now? It adds playbook's hook entries to ~/.claude/settings.json (your own entries stay), the status line, the shell integration and Claude Code telemetry to a collector on this machine (change it later with playbook init --only telemetry or undo it with playbook uninstall)."; then
     if [ "$BINARY_ONLY" -eq 0 ] && [ "$OPT_ALIASES" -eq 0 ]; then
         if ask "Add the playbook shell wrapper, so playbook cc can leave you in a new worktree? Bash and zsh both supported." Y; then
             OPT_ALIASES=1

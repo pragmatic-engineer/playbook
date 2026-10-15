@@ -35,7 +35,7 @@ impl Sandbox {
     /// Runs `init --yes`: without a terminal, a run with no --yes leaves the
     /// Claude Code settings alone.
     fn init(&self, shell: &str, flags: &[&str]) -> Output {
-        let mut all = vec!["--yes"];
+        let mut all = vec!["--yes", "--no-telemetry"];
         all.extend_from_slice(flags);
         self.init_raw(shell, &all)
     }

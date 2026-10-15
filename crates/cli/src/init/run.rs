@@ -53,6 +53,13 @@ pub struct InitPaths {
     /// Whether to write the OpenTelemetry variables for the local collector
     /// into the `env` block of settings.json (never over an existing setup).
     pub telemetry: bool,
+    /// Whether a lone `CLAUDE_CODE_ENABLE_TELEMETRY` off switch the user set
+    /// may be replaced. True only for an answer to the question or an explicit
+    /// `--telemetry`; `--yes` alone leaves a value the user set.
+    pub telemetry_replace_off: bool,
+    /// An `--only` run: only the parts that are on run, and the migrations,
+    /// the trust entry and the old launcher notes are skipped.
+    pub only: bool,
     /// Whether the user consented to the `claude` shell function: writes
     /// `launcher.claudeOverride` to playbook's own config, never to Claude Code.
     pub claude_override: bool,
@@ -153,6 +160,9 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let self_root = paths.self_root.as_deref();
     // One stamp for every backup of this run, so a second boundary cannot split them.
     let epoch = crate::common::time::now_epoch_secs();
+    if paths.only {
+        return run_only(paths, epoch);
+    }
 
     // The skills live in the `playbook` plugin, not in the root the seed files
     // come from, so the skill-edit tracking looks for them separately.
@@ -206,6 +216,48 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     InitOutcome {
         steps,
         warnings: migrated.warnings,
+    }
+}
+
+/// An `--only` run: just the parts that are on, nothing else.
+fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
+    let mut steps = Vec::new();
+    if paths.system_prompt {
+        let step = place_system_prompt_step(paths.self_root.as_deref(), &paths.home, true);
+        if step_confirmed(&step) {
+            migrate::record_system_prompt(&paths.home);
+        }
+        steps.push(step);
+    }
+    if paths.hooks || paths.statusline || paths.security {
+        let (settings_step, hooks_step) = settings_and_hooks_steps(paths, epoch);
+        steps.push(settings_step);
+        if paths.hooks {
+            steps.push(hooks_step);
+        }
+    }
+    if paths.telemetry {
+        steps.push(telemetry_step(paths, epoch));
+    }
+    if paths.claude_override {
+        steps.push(claude_override_step(&paths.home, true));
+    }
+    if paths.short_name {
+        steps.push(short_name_step(
+            &paths.home,
+            true,
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+    }
+    if paths.path_setup.is_some() {
+        steps.push(path_step(&paths.home, paths.path_setup.as_ref()));
+    }
+    if paths.aliases {
+        steps.push(rewire_rc_file_step(&paths.home, paths.shell_kind, true));
+    }
+    InitOutcome {
+        steps,
+        warnings: Vec::new(),
     }
 }
 
@@ -322,7 +374,8 @@ pub(crate) fn telemetry_step(paths: &InitPaths, epoch: u64) -> StepReport {
         &paths.claude_home,
         &cwd,
         epoch,
-        crate::cc::telemetry::process_configured(),
+        super::telemetry::process_configured_beyond_settings(&paths.claude_home),
+        paths.telemetry_replace_off,
     )
 }
 
