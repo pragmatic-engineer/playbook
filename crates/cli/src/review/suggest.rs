@@ -814,6 +814,23 @@ mod tests {
     }
 
     #[test]
+    fn the_by_hand_reference_lists_every_lock_manifest_and_cut() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/playbook/skills/grounding-review/references/review-routing.md");
+        let text = std::fs::read_to_string(path).unwrap();
+        for name in LOCKS.iter().chain(MANIFESTS) {
+            assert!(text.contains(&format!("`{name}`")), "review-routing.md lacks `{name}`");
+        }
+        let d = Cfg::DEFAULT;
+        for (key, n) in [("deepLines", d.deep_lines), ("quickLines", d.quick_lines), ("deepFiles", d.deep_files), ("packageSpan", d.package_span), ("untestedLines", d.untested_lines)] {
+            let row = text.lines().find(|l| l.contains(&format!("`review.suggest.{key}`"))).unwrap_or_else(|| panic!("no row for {key}"));
+            assert!(row.contains(&n.to_string()), "{key}: `{row}` lacks the default {n}");
+        }
+        for word in ["authentication", "oauth", "jwt", "rbac", "acl", "bun.lockb", "CODEOWNERS", "command.rs"] {
+            assert!(text.contains(word), "review-routing.md lacks {word}");
+        }
+    }
+
+    #[test]
     fn gh_output_becomes_facts_and_a_missing_field_is_an_error() {
         let files = "{\"path\":\"a.rs\",\"added\":3,\"removed\":1,\"renamed\":false}\n\n{\"path\":\"b.rs\",\"added\":0,\"removed\":0,\"renamed\":true}\n";
         let meta = r#"{"labels":[{"name":"security"}],"author":{"login":"ann"}}"#;

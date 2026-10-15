@@ -8,7 +8,6 @@ Release notes for the playbook plugin in `plugins/playbook`. The binary has its 
 - The recommendation comes from a fixed rule list: size, files, packages touched, risky paths (auth, crypto, secrets, CI, release, hooks, migrations, dependencies, the command surface), a security label, the test ratio, and changes that cannot alter behavior (docs, lock files, renames, tests). With the playbook binary it is `playbook review suggest`. Without it the same rules are in `skills/grounding-review/references/review-routing.md`.
 - When no rule is decisive, one cheap `review-triage` pass gives a second opinion.
 - `/playbook:quick-review` and `/playbook:deep-review` are unchanged and stay as direct entry points.
-- Merging this change tags and releases the plugin through plugin-release.yml.
 
 ## playbook 0.30.1
 

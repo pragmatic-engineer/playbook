@@ -31,9 +31,9 @@ and ADR 0021, 0022 and 0023).
 | command | `implement` | `sonnet` | `medium` | Executes an approved plan and delegates edits. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `learn-project` | `opus` | `medium` | Builds durable memory from a whole repo. Mistakes persist. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `plan` | `opus` | `medium` | Design work. A weak plan is expensive. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
-| command | `review` | `sonnet` | `low` | Recommends a quick or a deep review from the diff, asks, then hands the run to that review. It reads and routes, and the review it runs does the work. |
 | command | `quick-review` | `sonnet` | `medium` | One pass over a diff. Its reviewer runs on Opus at medium, the reviewer's own effort. |
 | command | `repo-audit` | - | - | Forks into the auditor agent, which sets the model and effort. |
+| command | `review` | `sonnet` | `low` | Recommends a quick or a deep review from the diff, asks, then hands the run to that review. It reads and routes, and the review it runs does the work. |
 | command | `session-handoff` | `haiku` | `low` | Writes and saves a handoff using binary-supplied rules and facts. |
 | command | `session-start` | `haiku` | `low` | Loads a saved handoff. Mechanical. |
 | command | `setup` | `haiku` | `low` | Runs compiled helpers and asks questions. Mechanical. |

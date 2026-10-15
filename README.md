@@ -60,7 +60,7 @@ The hooks, guards, status line and usage need the binary. Only the skill text wo
 /playbook:plan          turn an idea into a verified plan
 /playbook:implement     build it with subagents and TDD, one commit per work unit
 /playbook:create-pull-request
-/playbook:review          recommends a quick or a deep review, then runs the one you pick
+/playbook:review        recommends a quick or a deep review, then runs the one you pick
 ```
 
 For a small bug, `/playbook:fix` goes from a failing test to one pull request. For a big choice, `/playbook:adr` records the decision. The [guides](docs/guides/01-plan-and-implement.md) walk through each flow.
