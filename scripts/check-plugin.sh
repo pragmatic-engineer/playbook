@@ -9,11 +9,11 @@
 #     manifest. The marketplace serves this directory as it is, so a script, a
 #     binary or a stray config file would ship to every user.
 #
-#   check-plugin.sh version <base-ref>
-#     Fails when the plugin changed against <base-ref> without a version bump,
-#     or when the version has no "## playbook <version>" section at the top of
-#     CHANGELOG.md. Claude Code updates the plugin only when the version
-#     changes, so a content change that keeps the version never reaches users.
+#   check-plugin.sh version
+#     Fails when the plugin version in plugin.json, its
+#     metadata.minBinaryVersion and the workspace version in Cargo.toml are
+#     not the same. The binary and the plugin ship as one release line
+#     (ADR 0038), and scripts/bump-version.sh sets all three.
 #
 # Run from anywhere inside the repository.
 set -euo pipefail
@@ -21,7 +21,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN="plugins/playbook"
 MANIFEST="$PLUGIN/.claude-plugin/plugin.json"
-CHANGELOG="CHANGELOG.md"
 cd "$ROOT"
 
 fail() { echo "FAIL $*"; exit 1; }
@@ -33,11 +32,6 @@ manifest_version() {
 check_semver() {
   printf '%s' "$1" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
     || fail "version '$1' is not MAJOR.MINOR.PATCH"
-}
-
-# True when $1 is strictly greater than $2 (both MAJOR.MINOR.PATCH).
-version_gt() {
-  [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)" = "$1" ]
 }
 
 payload() {
@@ -64,35 +58,22 @@ payload() {
 }
 
 version() {
-  local base="${1:?usage: check-plugin.sh version <base-ref>}"
   [ -f "$MANIFEST" ] || fail "$MANIFEST is missing"
-  local head_v base_v
-  head_v="$(manifest_version < "$MANIFEST")" || fail "$MANIFEST is not valid JSON"
-  check_semver "$head_v"
-
-  # The top changelog section must always match the manifest.
-  local top
-  top="$(sed -n 's/^## playbook \([0-9][0-9.]*\)$/\1/p' "$CHANGELOG" | head -1)"
-  [ -n "$top" ] || fail "$CHANGELOG has no '## playbook <version>' section"
-  [ "$top" = "$head_v" ] || fail "$CHANGELOG starts at playbook $top but $MANIFEST says $head_v"
-
-  if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
-    fail "base ref '$base' is not available; fetch it first"
+  local plugin_v min_v cargo_v
+  plugin_v="$(manifest_version < "$MANIFEST")" || fail "$MANIFEST is not valid JSON"
+  check_semver "$plugin_v"
+  min_v="$(jq -r '.metadata.minBinaryVersion // empty' "$MANIFEST")"
+  cargo_v="$(awk '/^\[workspace.package\]/ { on = 1; next } /^\[/ { on = 0 }
+    on && /^version = / { gsub(/"/, "", $3); print $3; exit }' Cargo.toml)"
+  [ -n "$cargo_v" ] || fail "Cargo.toml has no [workspace.package] version"
+  if [ "$plugin_v" != "$cargo_v" ] || [ "$min_v" != "$cargo_v" ]; then
+    fail "Cargo.toml says $cargo_v, $MANIFEST says version $plugin_v and minBinaryVersion ${min_v:-none}. They must match; run scripts/bump-version.sh <version>."
   fi
-  if git diff --quiet "$base" -- "$PLUGIN"; then
-    echo "PASS the plugin is unchanged against $base, version $head_v"
-    return 0
-  fi
-  if git cat-file -e "$base:$MANIFEST" 2>/dev/null; then
-    base_v="$(git show "$base:$MANIFEST" | manifest_version)" || fail "$MANIFEST at $base is not valid JSON"
-    version_gt "$head_v" "$base_v" \
-      || fail "the plugin changed but its version is $head_v (base has $base_v); bump the version in $MANIFEST"
-  fi
-  echo "PASS the plugin changed and its version is $head_v with a changelog section"
+  echo "PASS the binary and the plugin are both at $cargo_v"
 }
 
 case "${1:-}" in
   payload) payload ;;
-  version) version "${2:-}" ;;
-  *) echo "usage: check-plugin.sh payload | version <base-ref>"; exit 2 ;;
+  version) version ;;
+  *) echo "usage: check-plugin.sh payload | version"; exit 2 ;;
 esac

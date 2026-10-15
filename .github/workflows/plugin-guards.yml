@@ -6,27 +6,28 @@
 #   payload-guard: the directory holds only markdown and the manifest, and
 #   metadata.breakingChanges in plugin.json lists the plugin entries of
 #   breaking-changes.json (ADR 0035 decision 4.6).
-#   version-bump: a plugin change comes with a higher version in plugin.json
-#   and a matching "## playbook <version>" section at the top of CHANGELOG.md.
-#   When the version rises, it also checks for breaking changes (ADR 0035).
-#   A breaking marker in the pull request title or body, or in a plugin commit
-#   since the last plugin tag, needs a plugin entry in breaking-changes.json.
-#   That entry needs a "### Breaking" heading in the changelog section.
-# Both run when the plugin, the changelog, breaking-changes.json or a script
-# changes, and again when the title or body is edited.
+#   version-sync: the plugin version in plugin.json, its minBinaryVersion and
+#   the workspace version in Cargo.toml are the same (ADR 0038). The binary and
+#   the plugin ship as one release line, so a plugin change between releases
+#   needs no bump; the release bumps all three.
+# They run when the plugin, the versions, the changelog or a script changes,
+# and on every push to main.
 
 name: plugin-guards
 
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
+    types: [opened, synchronize, reopened]
     paths:
       - "plugins/**"
+      - "Cargo.toml"
       - "CHANGELOG.md"
       - "breaking-changes.json"
       - "scripts/check-plugin.sh"
       - "scripts/check-breaking.sh"
       - ".github/workflows/plugin-guards.yml"
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions: {}
@@ -62,8 +63,7 @@ jobs:
       - name: Check the breaking changes mirror in plugin.json
         run: scripts/check-breaking.sh mirror
 
-  version-bump:
-    if: github.event_name == 'pull_request'
+  version-sync:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -80,20 +80,5 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Fetch the base commit
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: git fetch --no-tags --depth=1 origin "$BASE_SHA"
-
-      - name: Check the version and the changelog
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: scripts/check-plugin.sh version "$BASE_SHA"
-
-      # Fetches the full history and the tags only when the version rose.
-      - name: A breaking plugin change needs an entry
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: scripts/check-breaking.sh plugin "$BASE_SHA"
+      - name: The binary and the plugin share one version
+        run: scripts/check-plugin.sh version

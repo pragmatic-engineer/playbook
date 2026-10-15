@@ -1,6 +1,6 @@
 # ADR-0037: Release Notes Built from Conventional Commits
 
-- **Status:** Accepted
+- **Status:** Accepted. Decisions 2 and 5.6 are amended by [ADR 0038](0038-one-release-line.md): the plugin ships in the `vX.Y.Z` release, so it has no release page or notes of its own.
 - **Date created:** 2026-10-16
 - **Date modified:** 2026-10-16
 - **Supersedes:** [ADR 0035](0035-breaking-change-notices.md).

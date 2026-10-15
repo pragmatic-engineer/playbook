@@ -4,7 +4,8 @@
 //! The one place that finds the installed `playbook` plugin directory
 //! (ADR 0034). The order is the `installPath` Claude Code recorded, then
 //! `CLAUDE_PLUGIN_ROOT`, then the newest usable cache directory. The binary
-//! version plays no part, because the plugin has its own version line.
+//! version plays no part in finding it. The binary and the plugin share one
+//! version line (ADR 0038), and `plugin_out_of_range` checks it afterward.
 
 use std::path::{Path, PathBuf};
 
@@ -239,34 +240,32 @@ pub fn binary_too_old(root: &Path, binary: &str, homebrew: bool) -> Option<Strin
     ))
 }
 
-/// The oldest plugin this binary supports. Plugins before 0.30.1 read the
-/// commit format through a bare `$CLAUDE_PLUGIN_ROOT`, which Claude Code does
-/// not fill in, so skills failed to find the plugin folder.
-pub const MIN_PLUGIN_VERSION: &str = "0.30.1";
-
-/// The plugin major version this binary knows.
-pub const PLUGIN_MAJOR: u64 = 0;
-
-/// One line when the plugin `version` is outside the range this binary
-/// supports, naming the command that fixes it, else `None`. `homebrew`
-/// picks the binary upgrade command for a newer major.
-pub fn plugin_out_of_range(version: &str, homebrew: bool) -> Option<String> {
-    let key = version_key(version)?;
-    if key.0 > PLUGIN_MAJOR {
-        let command = if homebrew {
-            "brew upgrade playbook"
-        } else {
-            "playbook update"
-        };
-        return Some(format!(
-            "the playbook plugin {version} is newer than this binary knows. Run: {command}"
-        ));
+/// One line when the plugin `version` is not in the minor line of `binary`
+/// (ADR 0038 decision 7), naming the command that fixes it, else `None`.
+/// A plugin and a binary work together when their MAJOR.MINOR match.
+/// `homebrew` picks the binary upgrade command for a newer plugin. A version
+/// that does not parse says nothing.
+pub fn plugin_out_of_range(version: &str, binary: &str, homebrew: bool) -> Option<String> {
+    let plugin = version_key(version).map(|k| (k.0, k.1))?;
+    let line = version_key(binary).map(|k| (k.0, k.1))?;
+    match plugin.cmp(&line) {
+        std::cmp::Ordering::Equal => None,
+        std::cmp::Ordering::Less => Some(format!(
+            "the playbook plugin {version} is older than the {}.{} line of this binary ({binary}). Run: claude plugin update playbook@pragmatic-engineer",
+            line.0, line.1
+        )),
+        std::cmp::Ordering::Greater => {
+            let command = if homebrew {
+                "brew upgrade playbook"
+            } else {
+                "playbook update"
+            };
+            Some(format!(
+                "the playbook plugin {version} is newer than the {}.{} line of this binary ({binary}). Run: {command}",
+                line.0, line.1
+            ))
+        }
     }
-    (Some(key) < version_key(MIN_PLUGIN_VERSION)).then(|| {
-        format!(
-            "the playbook plugin {version} is older than this binary supports ({MIN_PLUGIN_VERSION}). Run: claude plugin update playbook@pragmatic-engineer"
-        )
-    })
 }
 
 /// Version folders in the plugin cache that Claude Code marked orphaned. The
@@ -825,23 +824,37 @@ mod tests {
     }
 
     #[test]
-    fn a_plugin_inside_the_supported_range_passes() {
-        assert_eq!(plugin_out_of_range(MIN_PLUGIN_VERSION, false), None);
-        assert_eq!(plugin_out_of_range("0.99.0", false), None);
-        assert_eq!(plugin_out_of_range("not a version", false), None);
+    fn a_plugin_in_the_minor_line_of_the_binary_passes() {
+        assert_eq!(plugin_out_of_range("0.32.0", "0.32.0", false), None);
+        assert_eq!(plugin_out_of_range("0.32.4", "0.32.1", false), None);
+        assert_eq!(plugin_out_of_range("0.32.0-rc.1", "0.32.3", false), None);
+        assert_eq!(plugin_out_of_range("not a version", "0.32.0", false), None);
+        assert_eq!(plugin_out_of_range("0.32.0", "not a version", false), None);
     }
 
     #[test]
-    fn an_old_or_newer_major_plugin_names_its_fix() {
-        let old = plugin_out_of_range("0.30.1-rc.1", true).unwrap();
-        assert!(
-            old.contains("claude plugin update playbook@pragmatic-engineer"),
-            "{old}"
+    fn a_plugin_from_another_minor_line_names_its_fix() {
+        // Arrange
+        let binary = "0.32.1";
+
+        // Act
+        let old = plugin_out_of_range("0.31.9", binary, true).unwrap();
+        let newer_brew = plugin_out_of_range("0.33.0", binary, true).unwrap();
+        let newer_major = plugin_out_of_range("1.32.1", binary, false).unwrap();
+
+        // Assert
+        assert_eq!(
+            old,
+            "the playbook plugin 0.31.9 is older than the 0.32 line of this binary (0.32.1). Run: claude plugin update playbook@pragmatic-engineer"
         );
-        let newer = plugin_out_of_range("1.0.0", true).unwrap();
-        assert!(newer.ends_with("Run: brew upgrade playbook"), "{newer}");
-        let newer = plugin_out_of_range("1.0.0", false).unwrap();
-        assert!(newer.ends_with("Run: playbook update"), "{newer}");
+        assert_eq!(
+            newer_brew,
+            "the playbook plugin 0.33.0 is newer than the 0.32 line of this binary (0.32.1). Run: brew upgrade playbook"
+        );
+        assert!(
+            newer_major.ends_with("Run: playbook update"),
+            "{newer_major}"
+        );
     }
 
     #[test]

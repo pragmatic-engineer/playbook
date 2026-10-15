@@ -50,14 +50,14 @@ and stop.
 6. **Binary resolves.** `settings.json` runs every ported hook as a bare
    binary hook command, so the binary must be on PATH or all of them silently
    do nothing. Layer 6 prints these rows:
-   - **Version row.** A different binary and plugin version is normal: the row
-     still passes and names both versions. It passes while the plugin is inside
-     the supported range (minimum 0.30.1, up to major 0) and the binary meets
-     the plugin's `minBinaryVersion` from `plugin.json` metadata. Otherwise it
-     warns with one fix command. A binary below `minBinaryVersion` or a plugin
-     on a newer major gets the binary upgrade (`brew upgrade playbook` when the
-     binary path resolves to Homebrew, else `playbook update`). A plugin older
-     than 0.30.1 gets `claude plugin update playbook@pragmatic-engineer`. The
+   - **Version row.** The binary and the plugin share one version line. The
+     row passes while the plugin has the same MAJOR.MINOR as the binary on
+     PATH (a different patch is normal) and the binary meets the plugin's
+     `minBinaryVersion` from `plugin.json` metadata. Otherwise it warns with
+     one fix command. A binary below `minBinaryVersion` or a plugin on a newer
+     minor line gets the binary upgrade (`brew upgrade playbook` when the
+     binary path resolves to Homebrew, else `playbook update`). A plugin on an
+     older minor line gets `claude plugin update playbook@pragmatic-engineer`. The
      plugin is found the same way as `playbook path plugin-root`, with
      `PLAYBOOK_PLUGIN_DIR` first.
    - **Upgrade record row.** Reads the version record in `config.db` read-only

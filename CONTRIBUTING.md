@@ -28,7 +28,12 @@ Run `just test` for everything, or `cargo nextest run -p playbook-code --config-
 
 ### Releases
 
-`vX.Y.Z` releases `playbook`. `telemetry-vX.Y.Z` releases `playbook-telemetry`. Pushing the signed tag is enough: `release.yml` creates the release if it is missing (with `--latest=false` for every prefix except `v`, so GitHub's latest release stays on the `v` line), builds and uploads the assets, and stops. The Homebrew tap checks for new releases every 30 minutes and updates the matching formula. To rehearse, run the `release` workflow by hand with a `tag` such as `v0.26.0` or `telemetry-v0.2.0`: a manual run is always a dry run that builds without publishing.
+`vX.Y.Z` releases the `playbook` binary and the plugin together, with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). `telemetry-vX.Y.Z` releases `playbook-telemetry` until the release workflow ships it with `vX.Y.Z`. To cut a release:
+
+1. Open a release pull request that runs `scripts/bump-version.sh X.Y.Z`. It sets the version in `Cargo.toml`, `Cargo.lock`, `plugins/playbook/.claude-plugin/plugin.json` (`version` and `metadata.minBinaryVersion`) and the `PLAYBOOK_REF` pins. The version must rise. The `version-sync` check fails when these disagree.
+2. After it merges, push the signed tag `vX.Y.Z` on the merged commit. `release.yml` creates the release if it is missing (with `--latest=false` for every prefix except `v`, so GitHub's latest release stays on the `v` line), builds and uploads the assets, and stops.
+
+The Homebrew tap checks for new releases every 30 minutes and updates the matching formula. Claude Code updates the plugin when it sees the new version on `main`. To rehearse, run the `release` workflow by hand with a `tag` such as `v0.32.0` or `telemetry-v0.2.0`: a manual run is always a dry run that builds without publishing.
 
 ### Compatibility policy
 
@@ -39,10 +44,9 @@ Every release is backward compatible, or ships a migration that runs on first us
 The skills, commands, agents and output style live in `plugins/playbook` and ship to users through the `pragmatic-engineer/marketplace` listing. See [ADR-0032](docs/adr/0032-plugin-in-the-playbook-repo.md) for how.
 
 - Keep the folder to markdown and `plugin.json`. The `payload-guard` check fails on anything else.
-- Bump `version` in `plugins/playbook/.claude-plugin/plugin.json` and add a `## playbook <version>` section to the top of `CHANGELOG.md` in the same pull request. Claude Code updates the plugin only when the version changes, and the `version-bump` check enforces both. A patch is a wording fix or a repair, a minor version changes how a command, skill or agent behaves, and a major version removes or renames a command or changes the contract with the binary.
+- Do not bump the plugin version. The plugin ships with the next `vX.Y.Z` release, which sets one version for the binary and the plugin ([ADR-0038](docs/adr/0038-one-release-line.md)). Claude Code updates an installed plugin only when that version rises, so a plugin fix reaches users with the next release.
 - When prose needs a task from the binary, name the task in plain words and list its intent in `intents.json`. Do not write a subcommand into the prose. The `intents-contract` check compares the list with `playbook tools map`.
 - Run `cargo test -p playbook-plugin-checks` for the prose and structure checks, `scripts/check-plugin.sh payload` for the payload, and `scripts/check-breaking.sh mirror` for the breaking changes copy in `plugin.json`.
-- `plugin-release.yml` tags and releases the plugin after the pull request merges. Do not tag it by hand.
 
 ### Editing agents
 

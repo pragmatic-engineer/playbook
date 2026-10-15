@@ -387,9 +387,10 @@ fn plugin_dir(env: &Env) -> Option<PathBuf> {
     .map(|r| r.root)
 }
 
-/// The binary against the plugin (ADR 0034 decision 11): a pass while the
-/// plugin is inside the range this binary supports and the binary is not
-/// older than the plugin's `minBinaryVersion`. Different versions are normal.
+/// The binary against the plugin (ADR 0038 decision 7): a pass while the
+/// plugin is in the minor line of the binary on PATH and that binary is not
+/// older than the plugin's `minBinaryVersion`. Different patch versions are
+/// normal.
 fn version_row(env: &Env, bin: &Path, bin_ver: &str) -> Row {
     use crate::plugin_root::{binary_too_old, plugin_out_of_range, plugin_version};
     let plugin = plugin_dir(env);
@@ -406,7 +407,7 @@ fn version_row(env: &Env, bin: &Path, bin_ver: &str) -> Row {
     plugin
         .as_deref()
         .and_then(|root| binary_too_old(root, bin_ver, homebrew))
-        .or_else(|| plugin_out_of_range(&version, homebrew))
+        .or_else(|| plugin_out_of_range(&version, bin_ver, homebrew))
         .map_or_else(
             || {
                 Row::new(

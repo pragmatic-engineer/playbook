@@ -257,15 +257,17 @@ fn other_playbook_plugins(ctx: &Ctx) -> Outcome {
     ))
 }
 
-/// The installed plugin is older than this binary supports, or has a major
-/// version it does not know. Reads what Claude Code installed under
-/// `ctx.claude_home`, not the process environment.
+/// The installed plugin is not in the minor line of this binary (ADR 0038
+/// decision 7). Reads what Claude Code installed under `ctx.claude_home`,
+/// not the process environment.
 fn plugin_version_range(ctx: &Ctx) -> Outcome {
     let exe = std::env::current_exe().unwrap_or_default();
     let homebrew = crate::update::is_homebrew(&std::fs::canonicalize(&exe).unwrap_or(exe));
     crate::plugin_root::find(None, &ctx.claude_home)
         .and_then(|root| crate::plugin_root::plugin_version(&root))
-        .and_then(|v| crate::plugin_root::plugin_out_of_range(&v, homebrew))
+        .and_then(|v| {
+            crate::plugin_root::plugin_out_of_range(&v, env!("CARGO_PKG_VERSION"), homebrew)
+        })
         .map_or(Outcome::Quiet, Outcome::Warn)
 }
 

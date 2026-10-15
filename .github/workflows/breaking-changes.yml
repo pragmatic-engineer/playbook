@@ -6,8 +6,8 @@
 # entry in breaking-changes.json for a component it touches, with a version
 # above that component's latest tag. The pull request title and body become
 # the squash commit, so this is where the marker first appears. Before a
-# release, verify-version in release.yml and version-bump in plugin-guards.yml
-# check the commits again for the exact version.
+# release, verify-version in release.yml checks the commits again for the
+# exact version.
 
 name: breaking-changes
 
