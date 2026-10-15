@@ -19,10 +19,6 @@ use std::path::Path;
 const BINARY_KEY: &str = "notices/binary";
 const PLUGIN_KEY: &str = "notices/plugin";
 
-/// Set by the install script for the commands it runs after it printed the
-/// block itself.
-const SHOWN_ENV: &str = "PLAYBOOK_BREAKING_SHOWN";
-
 /// What a step shows: the block, and a line when the plugin lists an entry
 /// this binary cannot read.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -137,11 +133,23 @@ pub fn prepare(
 
 impl Pending {
     /// Moves each key in one transaction, if no other process moved it
-    /// first, and returns the entries of the keys this process moved. The
-    /// playbook entries are recorded but not returned when the install
-    /// script already showed them.
+    /// first, and returns the entries of the keys this process moved.
+    ///
+    /// A caller that already printed the playbook block, such as the install
+    /// script or `playbook update`, sets `breaking::SHOWN_ENV` to the version
+    /// that block started from. Only the playbook entries at or below it are
+    /// returned then, since the caller showed the rest. An empty or unset
+    /// value means nothing was shown.
     pub fn commit(self, root: &Path) -> Notices {
-        let shown_by_installer = std::env::var(SHOWN_ENV).is_ok_and(|v| v == "1");
+        let since = std::env::var(breaking::SHOWN_ENV).ok();
+        self.commit_shown(root, since.as_deref())
+    }
+
+    fn commit_shown(self, root: &Path, shown_since: Option<&str>) -> Notices {
+        // The same rule `playbook breaking --since` reads its version with.
+        let shown_since = shown_since
+            .map(|v| v.trim_start_matches('v'))
+            .filter(|v| breaking::is_version(v));
         let mut notices = Notices {
             entries: Vec::new(),
             error: self.error,
@@ -161,10 +169,16 @@ impl Pending {
         })
         .unwrap_or_default();
         for m in self.moves {
-            let hidden = m.key == BINARY_KEY && shown_by_installer;
-            if moved.contains(&m.key) && !hidden {
-                notices.entries.extend(m.entries);
+            if !moved.contains(&m.key) {
+                continue;
             }
+            let shown = |e: &Entry| {
+                m.key == BINARY_KEY
+                    && shown_since.is_some_and(|v| compare(&e.version, v) == Ordering::Greater)
+            };
+            notices
+                .entries
+                .extend(m.entries.into_iter().filter(|e| !shown(e)));
         }
         notices
     }
@@ -236,6 +250,69 @@ mod tests {
         // Assert
         assert!(entries.is_empty());
         assert_eq!(shown(&root, BINARY_KEY), Ok(Some("999.0.0".into())));
+    }
+
+    #[test]
+    fn a_caller_that_showed_the_block_leaves_only_the_entries_at_or_below_its_start() {
+        // Arrange: each case moves both keys in its own home. The playbook
+        // block spans 0.20.0 and 0.30.0; the plugin entry is above both.
+        let entry = |version: &str, component| Entry {
+            version: version.into(),
+            component,
+            summary: format!("change in {version}"),
+            action: "run something".into(),
+            migration: None,
+        };
+        let older = entry("0.20.0", breaking::Component::Playbook);
+        let newer = entry("0.30.0", breaking::Component::Playbook);
+        let plugin = entry("0.40.0", breaking::Component::Plugin);
+        let commit_with = |tag: &str, shown_since: Option<&str>| {
+            let (_, root) = home(tag);
+            let pending = Pending {
+                moves: vec![
+                    Move {
+                        key: BINARY_KEY,
+                        before: None,
+                        to: RUNNING.into(),
+                        entries: vec![older.clone(), newer.clone()],
+                    },
+                    Move {
+                        key: PLUGIN_KEY,
+                        before: None,
+                        to: "0.40.0".into(),
+                        entries: vec![plugin.clone()],
+                    },
+                ],
+                error: None,
+            };
+            let notices = pending.commit_shown(&root, shown_since).entries;
+            (notices, shown(&root, BINARY_KEY))
+        };
+
+        // Act
+        let shown_from_zero = commit_with("notices-shown-zero", Some("0.0.0"));
+        let shown_from_older = commit_with("notices-shown-older", Some("0.20.0"));
+        let with_a_v = commit_with("notices-shown-v", Some("v0.20.0"));
+        let nothing_shown = commit_with("notices-shown-empty", Some(""));
+        let not_a_version = commit_with("notices-shown-bad", Some("1"));
+
+        // Assert: the caller's start keeps only the playbook entries at or
+        // below it, and the plugin entry always shows.
+        assert_eq!(shown_from_zero.0, std::slice::from_ref(&plugin));
+        assert_eq!(shown_from_older.0, [older.clone(), plugin.clone()]);
+        assert_eq!(with_a_v.0, shown_from_older.0);
+        let everything = [older, newer, plugin];
+        assert_eq!(nothing_shown.0, everything);
+        assert_eq!(not_a_version.0, everything);
+        for (_, recorded) in [
+            shown_from_zero,
+            shown_from_older,
+            with_a_v,
+            nothing_shown,
+            not_a_version,
+        ] {
+            assert_eq!(recorded, Ok(Some(RUNNING.into())));
+        }
     }
 
     #[test]
