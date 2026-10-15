@@ -432,6 +432,7 @@ fn the_first_run_step_heals_once_before_any_command_and_keeps_stdout_clean() {
 
         // Act
         let first = h.playbook(args, stdin);
+        let after_first = tree(&h.home);
         let second = h.playbook(args, stdin);
 
         // Assert: it heals exactly once, says so on stderr only, and leaves
@@ -448,6 +449,12 @@ fn the_first_run_step_heals_once_before_any_command_and_keeps_stdout_clean() {
         }
         assert_eq!(stdout(&first), stdout(&second), "{class}");
         assert!(!stdout(&first).contains("of its own files"), "{class}");
+        if heals {
+            assert_eq!(first.status.code(), Some(0), "{class}: {notice}");
+            assert!(stdout(&first).contains("ask"), "{class}");
+            assert_eq!(again, "", "{class}");
+            assert_eq!(tree(&h.home), after_first, "{class}");
+        }
         assert_eq!(
             notice.contains("updated 1 of its own files after the upgrade"),
             heals,
@@ -477,15 +484,28 @@ fn the_first_run_step_skips_homeless_commands_and_does_nothing_after_a_downgrade
     assert_eq!(String::from_utf8_lossy(&json.stderr), "");
     assert_eq!(tree(&h.home), before);
 
+    // Arrange: a home with a playbook folder and no record yet, as an
+    // install that skipped `migrate` leaves it.
+    let fresh = V025Home::new("start-fresh");
+    let _ = fs::remove_dir_all(&fresh.home);
+    fs::create_dir_all(playbook::common::paths::playbook_root_from(&fresh.home)).unwrap();
+
+    // Act
+    let first = fresh.playbook(&["mode", "status"], "");
+    let written = tree(&fresh.home);
+    let second = fresh.playbook(&["mode", "status"], "");
+
+    // Assert: the first command records this binary quietly, the next one
+    // changes nothing.
+    assert_eq!(String::from_utf8_lossy(&first.stderr), "");
+    assert_eq!(String::from_utf8_lossy(&second.stderr), "");
+    assert!(recorded_here(&fresh.home));
+    assert_eq!(tree(&fresh.home), written);
+
     // Arrange: a newer playbook ran here.
     let root = playbook::common::paths::playbook_root_from(&h.home);
-    playbook::heal::Record {
-        binary: Some("999.0.0".into()),
-        schema: 999,
-        ..Default::default()
-    }
-    .write(&root)
-    .unwrap();
+    playbook::state::set(&root, "versions/binary", "999.0.0").unwrap();
+    playbook::state::set(&root, "versions/schema", "999").unwrap();
     let downgraded = tree(&h.home);
 
     // Act

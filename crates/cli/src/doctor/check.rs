@@ -467,7 +467,7 @@ fn heal_row(env: &Env, bin_ver: &str) -> Row {
         return Row::new(
             "6",
             Level::Info,
-            "no upgrade record yet; the next session start writes it",
+            "no upgrade record yet; the next playbook command or session start writes it",
         )
         .hint(fix);
     };
@@ -485,7 +485,7 @@ fn heal_row(env: &Env, bin_ver: &str) -> Row {
         std::cmp::Ordering::Less => Row::new(
             "6",
             Level::Info,
-            format!("the upgrade record names playbook {b}; the next session start updates it"),
+            format!("the upgrade record names playbook {b}; the next playbook command or session start updates it"),
         )
         .hint(fix),
     }

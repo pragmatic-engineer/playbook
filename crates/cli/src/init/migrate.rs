@@ -3,7 +3,8 @@
 
 //! Ordered migration registry (ADR 0016, ADR 0034). Auto migrations run once
 //! and are recorded; Manual ones only warn. `init` runs every entry; the
-//! session hook and `doctor --fix` run only the `Owned` ones (`run_owned`).
+//! session hook, the first-run step, `migrate` and `doctor --fix` run only
+//! the `Owned` ones (`run_owned`).
 
 use crate::common::atomic::{acquire_dir_lock, ensure_private_dir, remove_stale_lock_dir};
 use crate::common::paths::playbook_root_from;
@@ -880,8 +881,15 @@ fn with_lock_retry(home: &Path, retries: u32, f: impl FnOnce()) -> bool {
     if !acquire_dir_lock(&lock, retries, Duration::from_millis(100)) {
         return false;
     }
+    /// Removes the lock when it goes out of scope, also when `f` panics.
+    struct Release<'a>(&'a Path);
+    impl Drop for Release<'_> {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir(self.0);
+        }
+    }
+    let _release = Release(&lock);
     f();
-    let _ = fs::remove_dir(&lock);
     true
 }
 
@@ -991,9 +999,6 @@ fn run_idempotent(
 /// caller holds the migration lock. A failure stops the later ones.
 fn run_auto(migrations: &[Migration], ctx: &Ctx, report: &mut Report, deadline: Option<Instant>) {
     for m in migrations.iter().filter(|m| matches!(m.kind, Kind::Auto)) {
-        if out_of_time(deadline, report) {
-            return;
-        }
         let Some(mut lines) = load_state(&ctx.home) else {
             report.failed = true;
             report
@@ -1003,6 +1008,9 @@ fn run_auto(migrations: &[Migration], ctx: &Ctx, report: &mut Report, deadline: 
         };
         if applied(&lines).iter().any(|d| d == m.id) {
             continue;
+        }
+        if out_of_time(deadline, report) {
+            return;
         }
         match (m.run)(ctx) {
             Outcome::Done(step) => {
@@ -1231,6 +1239,44 @@ mod tests {
         // Assert
         assert!(report.lock_busy);
         assert!(!report.failed);
+    }
+
+    fn sleepy(_: &Ctx) -> Outcome {
+        std::thread::sleep(Duration::from_millis(60));
+        done("sleepy")
+    }
+
+    #[test]
+    fn a_deadline_lets_the_running_migration_finish_and_starts_no_other() {
+        // Arrange
+        let h = home("deadline");
+        let ms = [auto("s", sleepy), auto("n", never)];
+        let mut report = Report::default();
+        let deadline = Instant::now() + Duration::from_millis(20);
+
+        // Act
+        let locked = with_lock_retry(&h, 0, || {
+            run_auto(&ms, &ctx(&h), &mut report, Some(deadline))
+        });
+
+        // Assert
+        assert!(locked && report.timed_out && !report.failed);
+        let lines = read_state(&h);
+        assert!(lines.iter().any(|l| l == "applied s"), "{lines:?}");
+        assert!(!lines.iter().any(|l| l == "applied n"), "{lines:?}");
+    }
+
+    #[test]
+    fn a_panic_under_the_lock_still_releases_it() {
+        // Arrange
+        let h = home("unwind");
+
+        // Act
+        let caught = std::panic::catch_unwind(|| with_lock_retry(&h, 0, || panic!("boom")));
+
+        // Assert
+        assert!(caught.is_err());
+        assert!(!playbook_root_from(&h).join(LOCK_DIR).exists());
     }
 
     fn slow(_: &Ctx) -> Outcome {

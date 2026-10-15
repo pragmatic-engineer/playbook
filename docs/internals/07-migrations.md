@@ -7,11 +7,11 @@ The migration registry carries an existing install across breaking changes. It l
 Each migration also has a scope: `Owned` writes only playbook's own files, `Consent` writes a file you own, and `Report` writes nothing and reports on files Claude Code owns. Only `Owned` migrations run on their own:
 
 - `playbook migrate` runs them and prints the command for each item that needs you. `playbook doctor --fix` is the same step. `--status` and `--dry-run` show what stands and what would run, and write nothing.
-- The first command after an upgrade runs them once, before the command, and prints one notice on stderr. Hooks, the status line and `shell-init` skip this, so they stay fast.
+- The first command after an upgrade runs them once, before the command, and prints one notice on stderr. Hot paths skip this so they stay fast: hooks, the status line, `shell-init`, `version` and the hidden `json` helpers. So do `usage`, which the session hooks start in the background, the commands that run their own heal (`migrate`, `doctor --fix`, `init`), `update`, `uninstall`, and `doctor` and `state`, which show the home as it is.
 - The `session-init` hook runs them once per session when the binary is newer than the record, and adds one line to the session message.
-- `playbook update` runs the new binary's `migrate` after the swap. The install script runs it after an install.
+- `playbook update` runs the new binary's `migrate` after the swap. The install script runs it after an install when it has a terminal or `--yes`, and not with `--no-init`.
 
-`playbook init` runs every migration, `Consent` ones included, because it asks first. Nothing else writes Claude Code settings or your shell files. The version record in the `state` table says which binary last ran the `Owned` migrations cleanly, so each of these runs once per version.
+`playbook init` runs every migration, `Consent` ones included, because it asks first. Nothing else writes Claude Code settings or your shell files. The version record in the `state` table says which binary last ran the `Owned` migrations cleanly, so the first-run step and the session hook run once per version. `migrate` and `doctor --fix` run every time you call them.
 
 ## The three kinds
 
