@@ -143,7 +143,9 @@ fn grid(body: Rect, n: usize) -> Vec<Rect> {
 /// screen: no tab bar, and the budget strip from 36 rows as before.
 pub fn place(area: Rect, ids: &[PanelId], tabbed: bool) -> Placed {
     let wants_budget = ids.contains(&PanelId::Budget);
-    let min_rows = if tabbed {
+    // A tab with few other panels can afford the strip on a short screen.
+    let few = ids.iter().filter(|id| **id != PanelId::Budget).count() <= 3;
+    let min_rows = if tabbed && few {
         TAB_BUDGET_MIN_ROWS
     } else {
         BUDGET_MIN_ROWS
@@ -322,10 +324,24 @@ fn render_tabbar(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
     let chosen = Style::default()
         .fg(pal.color(pal.hi))
         .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+    let full: usize = app
+        .layout
+        .tabs
+        .iter()
+        .enumerate()
+        .map(|(i, t)| format!(" F{} {} ", i + 1, t.name).chars().count())
+        .sum();
+    // When the names do not fit, only the selected tab keeps its name.
+    let names = full <= usize::from(area.width);
     let mut spans = Vec::new();
     for (i, tab) in app.layout.tabs.iter().enumerate() {
         let style = if i == app.tab { chosen } else { plain };
-        spans.push(Span::styled(format!(" F{} {} ", i + 1, tab.name), style));
+        let text = if names || i == app.tab {
+            format!(" F{} {} ", i + 1, tab.name)
+        } else {
+            format!(" F{} ", i + 1)
+        };
+        spans.push(Span::styled(text, style));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -1363,10 +1379,11 @@ mod tests {
     #[test]
     fn a_number_key_ignores_a_panel_the_tab_does_not_show() {
         let mut app = tabbed_app();
+        app.go_tab(0);
 
         app.key(KeyEvent::new(KeyCode::Char('6'), KeyModifiers::NONE));
 
-        assert_ne!(app.focus, crate::tui::sort::Panel::Sessions);
+        assert_eq!(app.focus, crate::tui::sort::Panel::Spend);
     }
 
     #[test]
@@ -1377,5 +1394,122 @@ mod tests {
         let text = screen(&app, 100, 24);
 
         assert!(text.contains("Budget"), "{text}");
+    }
+
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn after_a_layout_is_loaded_the_focus_sits_on_a_panel_of_the_shown_tab() {
+        let mut app = App::new(Range::All);
+        app.layout = Layout::default();
+
+        app.apply_ui_state(&crate::tui::ui_state::UiState::default());
+
+        assert_eq!(app.focus, crate::tui::sort::Panel::Spend);
+    }
+
+    #[test]
+    fn a_function_key_past_the_last_tab_does_nothing() {
+        let mut app = tabbed_app();
+        app.go_tab(1);
+
+        app.key(press(KeyCode::F(4)));
+
+        assert_eq!(app.tab, 1);
+    }
+
+    #[test]
+    fn with_one_tab_the_tab_key_moves_the_panel_focus_as_before() {
+        let mut app = App::new(Range::All);
+        let before = app.focus;
+
+        app.key(press(KeyCode::Tab));
+
+        assert_ne!(app.focus, before);
+        assert_eq!(app.tab, 0);
+    }
+
+    #[test]
+    fn the_bracket_key_wraps_inside_the_panels_of_a_tab() {
+        let mut app = tabbed_app();
+        app.go_tab(1);
+        app.focus = crate::tui::sort::Panel::Projects;
+
+        app.key(press(KeyCode::Char(']')));
+
+        assert_eq!(app.focus, crate::tui::sort::Panel::Models);
+    }
+
+    #[test]
+    fn from_a_hidden_focus_the_bracket_key_lands_on_the_second_panel() {
+        let mut app = tabbed_app();
+        app.focus = crate::tui::sort::Panel::Sessions;
+
+        app.key(press(KeyCode::Char(']')));
+
+        assert_eq!(app.focus, crate::tui::sort::Panel::Tokens);
+    }
+
+    #[test]
+    fn a_tab_with_only_the_budget_leaves_the_row_keys_inert() {
+        let mut app = app_with(&[event("opus", "alpha", 1.0)]);
+        app.layout = Layout::parse("Money=budget;Other=models").unwrap();
+        let before = app.sorts;
+
+        let effect = app.key(press(KeyCode::Char('s')));
+
+        assert_eq!(effect, crate::tui::app::Effect::None);
+        assert_eq!(app.sorts, before);
+    }
+
+    #[test]
+    fn every_panel_count_fills_the_tab_body_without_overlap() {
+        let area = Rect::new(0, 0, 100, 30);
+        for n in 1..=6 {
+            let ids: Vec<PanelId> = ALL.iter().copied().take(n).collect();
+
+            let placed = place(area, &ids, true);
+
+            assert_eq!(placed.panels.len(), n, "{n} panels");
+            for (i, (_, a)) in placed.panels.iter().enumerate() {
+                assert!(
+                    a.y >= placed.tabbar.bottom() && a.bottom() <= placed.footer.y,
+                    "{n}"
+                );
+                for (_, b) in placed.panels.iter().skip(i + 1) {
+                    assert!(!a.intersects(*b), "{n} panels overlap");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_wide_tab_bar_on_a_narrow_screen_keeps_the_selected_name() {
+        let names: Vec<String> = (0..9).map(|i| format!("Tab-number-{i:04}")).collect();
+        let text = names
+            .iter()
+            .map(|n| format!("{n}=spend"))
+            .collect::<Vec<_>>()
+            .join(";");
+        let mut app = app_with(&[event("opus", "alpha", 1.0)]);
+        app.layout = Layout::parse(&text).unwrap();
+        app.go_tab(8);
+
+        let shown = screen(&app, 80, 24);
+
+        assert!(shown.contains("Tab-number-0008"), "{shown}");
+    }
+
+    #[test]
+    fn the_cursor_keys_do_nothing_on_a_tab_without_charts() {
+        let mut app = tabbed_app();
+        app.go_tab(1);
+
+        app.key(press(KeyCode::Left));
+        app.key(press(KeyCode::Right));
+
+        assert_eq!(app.cursor, None);
     }
 }

@@ -236,6 +236,7 @@ impl App {
         if let Some(filter) = &state.filter {
             self.filter = filter.clone();
         }
+        self.fix_focus();
     }
 
     pub fn sort(&self, panel: Panel) -> Sort {
@@ -443,7 +444,14 @@ impl App {
     /// Moves the chart cursor by `by` bars, or to an end of the chart with
     /// `isize::MIN` or `isize::MAX` steps. With no cursor yet it starts from today's bar.
     fn move_cursor(&mut self, by: isize) {
-        let chart = if self.tab_panels().contains(&Panel::Spend) {
+        let shown = self.tab_panels();
+        // The daily table owns the cursor keys while it has the focus;
+        // otherwise the chart that is shown moves the shared cursor.
+        let chart = if shown.contains(&Panel::Spend)
+            && (!self.is_table(Panel::Spend)
+                || self.focus == Panel::Spend
+                || !shown.contains(&Panel::Tokens))
+        {
             Panel::Spend
         } else {
             Panel::Tokens
@@ -520,6 +528,26 @@ impl App {
     /// Runs one command.
     fn run(&mut self, cmd: Cmd, code: KeyCode) -> Effect {
         let focus = self.focus;
+        // A tab with no focusable panel (only the budget strip) has nothing
+        // for the row, sort and view keys to act on.
+        let acts_on_focus = matches!(
+            cmd,
+            Cmd::CursorLeft
+                | Cmd::CursorRight
+                | Cmd::First
+                | Cmd::Last
+                | Cmd::Down
+                | Cmd::Up
+                | Cmd::PageDown
+                | Cmd::PageUp
+                | Cmd::NextView
+                | Cmd::Sort
+                | Cmd::SortFlip
+                | Cmd::Pick
+        );
+        if acts_on_focus && !self.tab_panels().contains(&focus) {
+            return Effect::None;
+        }
         match cmd {
             Cmd::Quit => self.quit = true,
             Cmd::Theme if !self.no_color => self.theme = self.theme.next(),
@@ -556,6 +584,10 @@ impl App {
                     }
                 }
             }
+            // With one tab there is nothing to switch to, so the key moves the
+            // panel focus as it did before tabs.
+            Cmd::NextTab if self.layout.tabs.len() < 2 => self.focus_next(1),
+            Cmd::PrevTab if self.layout.tabs.len() < 2 => self.focus_next(-1),
             Cmd::NextTab => self.go_tab(self.tab as isize + 1),
             Cmd::PrevTab => self.go_tab(self.tab as isize - 1),
             Cmd::GoTab => {
