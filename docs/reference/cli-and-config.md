@@ -78,6 +78,8 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `launcher.shortName` | `false` | `true`, `false` |
 | `hooks.rmGuard.allowedRoots` | `[]` | see the config keys guide |
 | `hooks.proseLint.mode` | `warn` | `warn`, `block`, `off` |
+| `update.mode` | `notify` | `notify`, `auto`, `off` |
+| `update.checkIntervalHours` | `24` | a number, see the config keys guide for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands

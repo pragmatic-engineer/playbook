@@ -5,6 +5,7 @@
 //! build attestation), swap it in with a backup, then check PATH.
 //! Install.sh and this share one policy; see `verify`.
 
+pub mod check;
 pub mod download;
 pub mod pathcheck;
 pub mod resolve;
@@ -57,10 +58,15 @@ impl Env {
             os: std::env::consts::OS.to_string(),
             arch: std::env::consts::ARCH.to_string(),
             current_version: env!("CARGO_PKG_VERSION").to_string(),
-            api_base: format!("https://api.github.com/repos/{REPO}"),
+            api_base: api_base(),
             download_base: format!("https://github.com/{REPO}/releases/download"),
         })
     }
+}
+
+/// The GitHub API base for the release repo.
+pub fn api_base() -> String {
+    format!("https://api.github.com/repos/{REPO}")
 }
 
 /// Lines to print: `out` to stdout, `warnings` to stderr.
@@ -190,7 +196,7 @@ fn releases(
             env.api_base,
             v.strip_prefix('v').unwrap_or(v)
         ),
-        None => format!("{}/releases?per_page=30", env.api_base),
+        None => format!("{}{}", env.api_base, resolve::RELEASES_PAGE),
     };
     resolve::parse_releases(
         &fetch_text(fetcher, &url).map_err(|e| format!("could not read the release list: {e}"))?,
@@ -338,7 +344,7 @@ mod tests {
         let asset = "playbook-0.17.0-x86_64-unknown-linux-musl";
         let list = r#"[{"tag_name":"v0.18.0-rc.1","prerelease":true},{"tag_name":"v0.17.0","prerelease":false}]"#;
         let mut f = FakeFetcher::default();
-        f.0.insert(format!("{API}/releases?per_page=30"), list.into());
+        f.0.insert(format!("{API}{}", resolve::RELEASES_PAGE), list.into());
         f.0.insert(
             format!("{API}/releases/tags/v0.17.0"),
             r#"{"tag_name":"v0.17.0"}"#.into(),
