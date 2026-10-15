@@ -219,7 +219,14 @@ jobs:
         env:
           COMPONENT: ${{ needs.resolve.outputs.component }}
           TAG_VERSION: ${{ needs.resolve.outputs.version }}
-        run: scripts/check-breaking.sh release "$COMPONENT" "$TAG_VERSION"
+        run: |
+          set -euo pipefail
+          scripts/check-breaking.sh release "$COMPONENT" "$TAG_VERSION"
+          # The plugin ships in the playbook release (ADR 0038), so its
+          # commits since the previous v tag are checked too.
+          if [ "$COMPONENT" = "playbook" ]; then
+            scripts/check-breaking.sh release plugin "$TAG_VERSION"
+          fi
 
       # A dry run never creates the release, so show the body and the JSON
       # it would publish. The create-release job builds the same text.

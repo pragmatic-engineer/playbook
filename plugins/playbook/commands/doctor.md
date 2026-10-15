@@ -53,7 +53,7 @@ and stop.
    - **Version row.** The binary and the plugin share one version line. The
      row passes while the plugin has the same MAJOR.MINOR as the binary on
      PATH (a different patch is normal) and the binary meets the plugin's
-     `minBinaryVersion` from `plugin.json` metadata. Otherwise it warns with
+     `minBinaryVersion` from `plugin.json` metadata, the X.Y.0 of its line. Otherwise it warns with
      one fix command. A binary below `minBinaryVersion` or a plugin on a newer
      minor line gets the binary upgrade (`brew upgrade playbook` when the
      binary path resolves to Homebrew, else `playbook update`). A plugin on an

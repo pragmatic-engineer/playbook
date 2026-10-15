@@ -479,7 +479,12 @@ fn l6_a_plugin_in_the_minor_line_of_the_binary_passes_even_when_patches_differ()
     let b = Box::new("l6k");
     let bin = b.stub("bin1", "0.31.0", true);
     let root = b.root.join("plugin");
-    manifest(&root, "0.31.1");
+    // bump-version.sh sets the minimum to the first release of the line.
+    manifest_with(
+        &root,
+        "0.31.1",
+        r#","metadata":{"minBinaryVersion":"0.31.0"}"#,
+    );
     let rows = b.run(&[&bin], "/bin/zsh", Some(&root));
     let t = version_row(&rows);
     assert!(t.starts_with("PASS") && t.contains("0.31.1"), "{t}");
@@ -506,7 +511,9 @@ fn l6_a_plugin_on_a_newer_minor_line_warns_with_the_upgrade_command() {
     manifest(&root, "0.32.0");
     let t = version_row(&b.run(&[&bin], "/bin/zsh", Some(&root)));
     assert!(
-        t.starts_with("WARN") && t.contains("newer than the 0.31 line of this binary (0.31.0)"),
+        t.starts_with("WARN")
+            && t.contains("newer than the 0.31 line of this binary (0.31.0)")
+            && t.ends_with("Run: playbook update"),
         "{t}"
     );
 }

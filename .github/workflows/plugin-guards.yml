@@ -6,12 +6,13 @@
 #   payload-guard: the directory holds only markdown and the manifest, and
 #   metadata.breakingChanges in plugin.json lists the plugin entries of
 #   breaking-changes.json (ADR 0035 decision 4.6).
-#   version-sync: the plugin version in plugin.json, its minBinaryVersion and
-#   the workspace version in Cargo.toml are the same (ADR 0038). The binary and
-#   the plugin ship as one release line, so a plugin change between releases
-#   needs no bump; the release bumps all three.
+#   version-sync: the plugin version in plugin.json equals the workspace
+#   version in Cargo.toml, and its minBinaryVersion is the X.Y.0 of that
+#   minor line (ADR 0038). The binary and the plugin ship as one release
+#   line, so a plugin change between releases needs no bump; the release
+#   bumps all three.
 # They run when the plugin, the versions, the changelog or a script changes,
-# and on every push to main.
+# on a pull request and on a push to main.
 
 name: plugin-guards
 
@@ -28,6 +29,11 @@ on:
       - ".github/workflows/plugin-guards.yml"
   push:
     branches: [main]
+    paths:
+      - "plugins/**"
+      - "Cargo.toml"
+      - "scripts/check-plugin.sh"
+      - ".github/workflows/plugin-guards.yml"
   workflow_dispatch:
 
 permissions: {}

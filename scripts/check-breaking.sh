@@ -69,7 +69,7 @@ prefix_of() {
   case "$1" in
     playbook) echo "v" ;;
     telemetry) echo "telemetry-v" ;;
-    plugin) echo "playbook-plugin-v" ;;
+    plugin) echo "v" ;; # the plugin ships in the v release (ADR 0038)
   esac
 }
 

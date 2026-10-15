@@ -10,10 +10,14 @@
 #     binary or a stray config file would ship to every user.
 #
 #   check-plugin.sh version
-#     Fails when the plugin version in plugin.json, its
-#     metadata.minBinaryVersion and the workspace version in Cargo.toml are
-#     not the same. The binary and the plugin ship as one release line
+#     Fails unless the plugin version in plugin.json equals the workspace
+#     version in Cargo.toml, and its metadata.minBinaryVersion is the X.Y.0
+#     of that minor line. The binary and the plugin ship as one release line
 #     (ADR 0038), and scripts/bump-version.sh sets all three.
+#
+#   check-plugin.sh cargo-version
+#     Prints the workspace version in Cargo.toml, the one reader of it that
+#     the other scripts use.
 #
 # Run from anywhere inside the repository.
 set -euo pipefail
@@ -57,23 +61,32 @@ payload() {
   echo "PASS the plugin payload holds $count files, all plain markdown or the manifest"
 }
 
+cargo_version() {
+  local v
+  v="$(awk '/^\[workspace.package\]/ { on = 1; next } /^\[/ { on = 0 }
+    on && /^version = / { gsub(/"/, "", $3); print $3; exit }' Cargo.toml)"
+  [ -n "$v" ] || fail "Cargo.toml has no [workspace.package] version"
+  check_semver "$v"
+  echo "$v"
+}
+
 version() {
   [ -f "$MANIFEST" ] || fail "$MANIFEST is missing"
-  local plugin_v min_v cargo_v
+  local plugin_v min_v cargo_v floor
   plugin_v="$(manifest_version < "$MANIFEST")" || fail "$MANIFEST is not valid JSON"
   check_semver "$plugin_v"
   min_v="$(jq -r '.metadata.minBinaryVersion // empty' "$MANIFEST")"
-  cargo_v="$(awk '/^\[workspace.package\]/ { on = 1; next } /^\[/ { on = 0 }
-    on && /^version = / { gsub(/"/, "", $3); print $3; exit }' Cargo.toml)"
-  [ -n "$cargo_v" ] || fail "Cargo.toml has no [workspace.package] version"
-  if [ "$plugin_v" != "$cargo_v" ] || [ "$min_v" != "$cargo_v" ]; then
-    fail "Cargo.toml says $cargo_v, $MANIFEST says version $plugin_v and minBinaryVersion ${min_v:-none}. They must match; run scripts/bump-version.sh <version>."
+  cargo_v="$(cargo_version)" || { echo "$cargo_v"; exit 1; }
+  floor="${cargo_v%.*}.0"
+  if [ "$plugin_v" != "$cargo_v" ] || [ "$min_v" != "$floor" ]; then
+    fail "Cargo.toml says $cargo_v, $MANIFEST says version $plugin_v and minBinaryVersion ${min_v:-none}. The plugin version must be $cargo_v and minBinaryVersion $floor; run scripts/bump-version.sh <version>."
   fi
-  echo "PASS the binary and the plugin are both at $cargo_v"
+  echo "PASS the binary and the plugin are both at $cargo_v, for binaries from $floor"
 }
 
 case "${1:-}" in
   payload) payload ;;
   version) version ;;
-  *) echo "usage: check-plugin.sh payload | version"; exit 2 ;;
+  cargo-version) cargo_version ;;
+  *) echo "usage: check-plugin.sh payload | version | cargo-version"; exit 2 ;;
 esac

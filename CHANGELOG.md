@@ -1,6 +1,6 @@
 # Changelog
 
-Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.32.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections below 0.32.0 are plugin releases from before the two lines joined. The binary skips 0.27 to 0.31: it goes from 0.26 to 0.32.0.
+Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.33.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.32.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.32: it goes from 0.26 to 0.33.0.
 
 ## playbook 0.33.0
 

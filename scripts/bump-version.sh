@@ -7,11 +7,14 @@
 # MAJOR.MINOR.PATCH to:
 #   - the workspace version in Cargo.toml, and the playbook and
 #     playbook-code entries in Cargo.lock;
-#   - version and metadata.minBinaryVersion in the plugin's plugin.json;
+#   - version in the plugin's plugin.json, and metadata.minBinaryVersion as
+#     the X.Y.0 of the same minor line;
 #   - the PLAYBOOK_REF pins in README.md and docs/guides/00-install.md.
 # The version must be above the current one, since Claude Code updates the
-# plugin only when its version rises. Run it in the release pull request,
-# then push the signed tag vX.Y.Z after it merges.
+# plugin only when its version rises. Every file is written to a temporary
+# copy first and replaced only when all of them are ready, then
+# scripts/check-plugin.sh version checks the result. Run it in the release
+# pull request.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,33 +34,35 @@ version_gt() {
   [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)" = "$1" ]
 }
 
-cargo_now="$(awk '/^\[workspace.package\]/ { on = 1; next } /^\[/ { on = 0 }
-  on && /^version = / { gsub(/"/, "", $3); print $3; exit }' Cargo.toml)"
+cargo_now="$(scripts/check-plugin.sh cargo-version)" || fail "${cargo_now#FAIL }"
 plugin_now="$(jq -r '.version // empty' "$MANIFEST")"
-[ -n "$cargo_now" ] || fail "Cargo.toml has no [workspace.package] version"
 version_gt "$new" "$cargo_now" || fail "$new is not above the current version $cargo_now"
-# The plugin version never goes down. It can already equal the new version
-# when the plugin line ran ahead of the binary, as before 0.32.0.
-[ "$new" = "$plugin_now" ] || version_gt "$new" "$plugin_now" \
-  || fail "$new is below the plugin version $plugin_now"
+version_gt "$new" "$plugin_now" || fail "$new is not above the plugin version $plugin_now"
 
-tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 
 awk -v v="$new" '/^\[workspace.package\]/ { on = 1 } /^\[/ && !/^\[workspace.package\]/ { on = 0 }
-  on && /^version = / { print "version = \"" v "\""; on = 0; next } { print }' Cargo.toml > "$tmp"
-cat "$tmp" > Cargo.toml
+  on && /^version = / { print "version = \"" v "\""; on = 0; next } { print }' Cargo.toml > "$tmp/Cargo.toml"
 
 awk -v v="$new" '/^name = "(playbook|playbook-code)"$/ { hit = 1; print; next }
-  hit && /^version = / { print "version = \"" v "\""; hit = 0; next } { hit = 0; print }' Cargo.lock > "$tmp"
-cat "$tmp" > Cargo.lock
+  hit && /^version = / { print "version = \"" v "\""; hit = 0; next } { hit = 0; print }' Cargo.lock > "$tmp/Cargo.lock"
 
-jq --arg v "$new" '.version = $v | .metadata.minBinaryVersion = $v' "$MANIFEST" > "$tmp"
-cat "$tmp" > "$MANIFEST"
+jq --arg v "$new" --arg min "${new%.*}.0" '.version = $v | .metadata.minBinaryVersion = $min' \
+  "$MANIFEST" > "$tmp/plugin.json"
 
 for f in "${PINS[@]}"; do
-  sed -E "s/PLAYBOOK_REF=v[0-9]+\.[0-9]+\.[0-9]+/PLAYBOOK_REF=v$new/g" "$f" > "$tmp"
-  cat "$tmp" > "$f"
+  out="$tmp/$(basename "$f")"
+  sed -E "s/PLAYBOOK_REF=v[0-9]+\.[0-9]+\.[0-9]+/PLAYBOOK_REF=v$new/g" "$f" > "$out"
+  grep -q "PLAYBOOK_REF=v$new" "$out" || fail "$f has no PLAYBOOK_REF=vX.Y.Z pin to update"
 done
 
+# Every copy is ready, so replace the files.
+cat "$tmp/Cargo.toml" > Cargo.toml
+cat "$tmp/Cargo.lock" > Cargo.lock
+cat "$tmp/plugin.json" > "$MANIFEST"
+for f in "${PINS[@]}"; do cat "$tmp/$(basename "$f")" > "$f"; done
+
+scripts/check-plugin.sh version >/dev/null || fail "the files disagree after the bump; run scripts/check-plugin.sh version"
+grep -Eq "^version = \"$new\"$" Cargo.lock || fail "Cargo.lock has no playbook entry at $new"
 echo "Set the version to $new in Cargo.toml, Cargo.lock, $MANIFEST and ${PINS[*]}."

@@ -243,11 +243,21 @@ pub fn binary_too_old(root: &Path, binary: &str, homebrew: bool) -> Option<Strin
 /// One line when the plugin `version` is not in the minor line of `binary`
 /// (ADR 0038 decision 7), naming the command that fixes it, else `None`.
 /// A plugin and a binary work together when their MAJOR.MINOR match.
-/// `homebrew` picks the binary upgrade command for a newer plugin. A version
-/// that does not parse says nothing.
+/// `homebrew` picks the binary upgrade command for a newer plugin. A leading
+/// `v` and a `+build` suffix are ignored, as `update::resolve::compare`
+/// ignores them. A plugin version that does not parse says nothing, and a
+/// binary version that does not parse says the range was not checked.
 pub fn plugin_out_of_range(version: &str, binary: &str, homebrew: bool) -> Option<String> {
-    let plugin = version_key(version).map(|k| (k.0, k.1))?;
-    let line = version_key(binary).map(|k| (k.0, k.1))?;
+    let minor_line = |v: &str| {
+        let v = v.strip_prefix('v').unwrap_or(v);
+        version_key(v.split('+').next().unwrap_or(v)).map(|k| (k.0, k.1))
+    };
+    let plugin = minor_line(version)?;
+    let Some(line) = minor_line(binary) else {
+        return Some(format!(
+            "cannot read the playbook binary version '{binary}', so the plugin {version} was not checked against it"
+        ));
+    };
     match plugin.cmp(&line) {
         std::cmp::Ordering::Equal => None,
         std::cmp::Ordering::Less => Some(format!(
@@ -828,8 +838,20 @@ mod tests {
         assert_eq!(plugin_out_of_range("0.32.0", "0.32.0", false), None);
         assert_eq!(plugin_out_of_range("0.32.4", "0.32.1", false), None);
         assert_eq!(plugin_out_of_range("0.32.0-rc.1", "0.32.3", false), None);
+        assert_eq!(plugin_out_of_range("0.32.0", "v0.32.1+dirty", false), None);
         assert_eq!(plugin_out_of_range("not a version", "0.32.0", false), None);
-        assert_eq!(plugin_out_of_range("0.32.0", "not a version", false), None);
+    }
+
+    #[test]
+    fn a_binary_version_that_does_not_parse_says_the_range_was_not_checked() {
+        // Act
+        let line = plugin_out_of_range("0.32.0", "1.2", false);
+
+        // Assert
+        assert_eq!(
+            line.as_deref(),
+            Some("cannot read the playbook binary version '1.2', so the plugin 0.32.0 was not checked against it")
+        );
     }
 
     #[test]

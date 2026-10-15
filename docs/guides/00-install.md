@@ -58,7 +58,7 @@ Pass `--yes` to say yes to every question, including `playbook init`. Flags go a
 Pin a version with `PLAYBOOK_REF`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.32.0 bash
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.33.0 bash
 ```
 
 A release tag installs that release. A branch or commit is refused, because it has no published binary.
@@ -135,7 +135,7 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 | Install script (recommended) | `playbook update`, or run the installer again (`--check` to look, `--list` for releases, `--pre` for pre-releases, `--yes` in auto mode) |
 | Homebrew | `brew upgrade playbook` |
 
-`playbook update` verifies SHA256SUMS and the attestation, keeps the old binary as `playbook.<version>.bak` (the newest three are kept), refuses a Homebrew install, and warns when another `playbook` earlier on `PATH` hides the new one. It does not compare the plugin version with the binary version, because the plugin has its own version line. Update the plugin with `claude plugin update playbook@pragmatic-engineer` when you want its newer skills. To roll back, move a backup over the binary:
+`playbook update` verifies SHA256SUMS and the attestation, keeps the old binary as `playbook.<version>.bak` (the newest three are kept), refuses a Homebrew install, and warns when another `playbook` earlier on `PATH` hides the new one. The binary and the plugin share one version line ([ADR 0038](../adr/0038-one-release-line.md)), and they work together while they are on the same MAJOR.MINOR. After a binary update to a new minor line, update the plugin with `claude plugin update playbook@pragmatic-engineer`, and `playbook doctor` warns until you do. A binary pinned with `PLAYBOOK_REF` gets the same warning once the plugin moves to a newer minor line. To roll back, move a backup over the binary:
 
 ```bash
 mv -f ~/.local/bin/playbook.0.19.0.bak ~/.local/bin/playbook

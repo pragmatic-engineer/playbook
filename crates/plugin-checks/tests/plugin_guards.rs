@@ -153,12 +153,17 @@ fn the_same_version_everywhere_passes() {
 
 #[test]
 fn a_plugin_version_or_minimum_that_differs_from_cargo_fails() {
-    for (version, min) in [("1.0.1", "1.0.0"), ("1.0.0", "0.9.0")] {
+    // The plugin is off, the minimum is off, or both agree with each other
+    // and Cargo.toml is the one that differs.
+    for (version, min) in [("1.0.1", "1.0.0"), ("1.0.0", "0.9.0"), ("1.1.0", "1.1.0")] {
+        // Arrange
         let r = Repo::new();
         r.manifest(version, min);
 
+        // Act
         let out = r.run(&["version"]);
 
+        // Assert
         assert!(!out.status.success(), "{version} {min}");
         assert!(
             text_of(&out).contains("run scripts/bump-version.sh"),
@@ -169,16 +174,41 @@ fn a_plugin_version_or_minimum_that_differs_from_cargo_fails() {
 }
 
 #[test]
+fn the_minimum_binary_is_the_first_release_of_the_minor_line() {
+    // Arrange
+    let r = Repo::new();
+    r.write("Cargo.toml", "[workspace.package]\nversion = \"1.0.2\"\n");
+
+    // Act
+    r.manifest("1.0.2", "1.0.2");
+    let full = r.run(&["version"]);
+    r.manifest("1.0.2", "1.0.0");
+    let floor = r.run(&["version"]);
+
+    // Assert
+    assert!(
+        text_of(&full).contains("minBinaryVersion 1.0.0"),
+        "{}",
+        text_of(&full)
+    );
+    assert!(!full.status.success());
+    assert!(floor.status.success(), "{}", text_of(&floor));
+}
+
+#[test]
 fn the_bump_script_sets_one_version_everywhere() {
+    // Arrange
     let r = Repo::new();
 
-    let out = r.script("bump-version.sh", &["1.1.0"]);
+    // Act
+    let out = r.script("bump-version.sh", &["1.1.3"]);
 
+    // Assert
     assert!(out.status.success(), "{}", text_of(&out));
     assert!(r.run(&["version"]).status.success());
     let cargo = r.read("Cargo.toml");
     assert!(
-        cargo.contains("[workspace.package]\nversion = \"1.1.0\""),
+        cargo.contains("[workspace.package]\nversion = \"1.1.3\""),
         "{cargo}"
     );
     assert!(
@@ -186,37 +216,68 @@ fn the_bump_script_sets_one_version_everywhere() {
         "{cargo}"
     );
     assert_eq!(
-        r.read("Cargo.lock").matches("version = \"1.1.0\"").count(),
+        r.read("Cargo.lock").matches("version = \"1.1.3\"").count(),
         2,
         "only the playbook and playbook-code entries move"
     );
-    assert!(r.read("README.md").contains("PLAYBOOK_REF=v1.1.0"));
+    let manifest = r.read("plugins/playbook/.claude-plugin/plugin.json");
+    assert!(manifest.contains("\"version\": \"1.1.3\""), "{manifest}");
+    assert!(
+        manifest.contains("\"minBinaryVersion\": \"1.1.0\""),
+        "{manifest}"
+    );
+    assert!(r.read("README.md").contains("PLAYBOOK_REF=v1.1.3"));
     assert!(r
         .read("docs/guides/00-install.md")
-        .contains("PLAYBOOK_REF=v1.1.0"));
+        .contains("PLAYBOOK_REF=v1.1.3"));
 }
 
 #[test]
 fn the_bump_script_refuses_a_version_that_does_not_rise() {
-    for version in ["1.0.0", "0.9.9", "1.1"] {
+    for (version, plugin, reason) in [
+        ("1.0.0", "1.0.0", "is not above the current version 1.0.0"),
+        ("0.9.9", "1.0.0", "is not above the current version 1.0.0"),
+        ("1.1", "1.0.0", "is not MAJOR.MINOR.PATCH"),
+        ("1.1.0", "1.2.0", "is not above the plugin version 1.2.0"),
+    ] {
+        // Arrange
         let r = Repo::new();
+        r.manifest(plugin, "1.0.0");
 
+        // Act
         let out = r.script("bump-version.sh", &[version]);
 
+        // Assert
         assert!(!out.status.success(), "{version}");
+        assert!(
+            text_of(&out).contains(reason),
+            "{version}: {}",
+            text_of(&out)
+        );
         assert!(r.read("Cargo.toml").contains("version = \"1.0.0\""));
     }
 }
 
 #[test]
-fn the_bump_script_accepts_a_plugin_already_at_the_new_version() {
+fn the_bump_script_changes_nothing_when_a_pin_is_missing() {
+    // Arrange
     let r = Repo::new();
-    r.manifest("1.2.0", "1.0.0");
+    r.write("README.md", "No pin here.\n");
 
-    let out = r.script("bump-version.sh", &["1.2.0"]);
+    // Act
+    let out = r.script("bump-version.sh", &["1.1.0"]);
 
-    assert!(out.status.success(), "{}", text_of(&out));
-    assert!(r.run(&["version"]).status.success());
+    // Assert
+    assert!(!out.status.success());
+    assert!(
+        text_of(&out).contains("README.md has no PLAYBOOK_REF"),
+        "{}",
+        text_of(&out)
+    );
+    assert!(r.read("Cargo.toml").contains("version = \"1.0.0\""));
+    assert!(r
+        .read("plugins/playbook/.claude-plugin/plugin.json")
+        .contains("\"version\":\"1.0.0\""));
 }
 
 #[test]

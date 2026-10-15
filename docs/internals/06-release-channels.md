@@ -20,8 +20,8 @@ described next.
 
 The binary and the plugin share one version line
 ([ADR 0038](../adr/0038-one-release-line.md)). The `version` in `plugin.json`
-and its `metadata.minBinaryVersion` equal the workspace version in
-`Cargo.toml`. The `version-sync` check in `plugin-guards.yml` fails a pull
+equals the workspace version in `Cargo.toml`, and its
+`metadata.minBinaryVersion` is the `X.Y.0` of that minor line. The `version-sync` check in `plugin-guards.yml` fails a pull
 request or a push to `main` when they differ, and the `verify-version` job of
 `release.yml` checks them again before a `v` release. The release pull request
 runs `scripts/bump-version.sh X.Y.Z`, which sets all of them and the
@@ -31,7 +31,9 @@ The marketplace repository `pragmatic-engineer/marketplace` lists the plugin as
 a `git-subdir` source that points at `plugins/playbook` in this repository, with
 no `ref` and no `version`. Claude Code follows the default branch, copies only
 that folder and updates the plugin when the `version` in `plugin.json` rises,
-which happens when the release pull request merges. There is no separate plugin
+which happens when the release pull request merges. ADR 0038 moves the entry
+to a `ref` on the release tag, which the release workflow sets after the
+release is published, starting with the first joint release. There is no separate plugin
 release. The `playbook-plugin-v` tags made before 0.32.0 stay as history. The
 `payload-guard` check keeps the folder to markdown and the manifest.
 
