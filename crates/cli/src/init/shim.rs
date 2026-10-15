@@ -130,17 +130,7 @@ pub fn rewire_rc_file(home: &Path, shell_kind: ShellKind) -> io::Result<ShimOutc
 /// touched. Returns the rc files changed.
 pub fn upgrade_legacy_rc_files(home: &Path) -> io::Result<Vec<PathBuf>> {
     let mut changed = Vec::new();
-    for kind in ShellKind::ALL {
-        let rc_file = home.join(kind.rc_file_name());
-        let Ok(existing) = fs::read(&rc_file) else {
-            continue;
-        };
-        let Some(content) = rewrite_legacy_lines(&existing, kind) else {
-            continue;
-        };
-        if !owner_can_write(&rc_file) {
-            continue;
-        }
+    for (rc_file, content) in legacy_rewrites(home) {
         atomic_write_rc_file(&rc_file, &content)?;
         changed.push(rc_file);
     }
@@ -149,16 +139,20 @@ pub fn upgrade_legacy_rc_files(home: &Path) -> io::Result<Vec<PathBuf>> {
 
 /// The rc files `upgrade_legacy_rc_files` would rewrite. Reads only.
 pub fn legacy_rc_files(home: &Path) -> Vec<PathBuf> {
+    legacy_rewrites(home).into_iter().map(|(f, _)| f).collect()
+}
+
+/// Each writable rc file under `home` with a legacy launcher line, and its
+/// rewritten content.
+fn legacy_rewrites(home: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     ShellKind::ALL
-        .iter()
-        .map(|kind| (home.join(kind.rc_file_name()), *kind))
-        .filter(|(rc_file, kind)| {
-            fs::read(rc_file)
-                .ok()
-                .is_some_and(|existing| rewrite_legacy_lines(&existing, *kind).is_some())
-                && owner_can_write(rc_file)
+        .into_iter()
+        .filter_map(|kind| {
+            let rc_file = home.join(kind.rc_file_name());
+            let existing = fs::read(&rc_file).ok()?;
+            let content = rewrite_legacy_lines(&existing, kind)?;
+            owner_can_write(&rc_file).then_some((rc_file, content))
         })
-        .map(|(rc_file, _)| rc_file)
         .collect()
 }
 

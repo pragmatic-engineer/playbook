@@ -182,10 +182,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     crate::heal::run(
         &ctx,
         crate::heal::Trigger::Init {
-            failed: migrated
-                .steps
-                .iter()
-                .any(|s| s.status == StepStatus::Failed),
+            failed: migrated.failed || migrated.lock_busy,
+            statusline: paths.statusline,
         },
         crate::common::time::now_epoch_secs(),
     );

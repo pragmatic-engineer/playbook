@@ -2030,19 +2030,14 @@ fn main() {
             fix: true,
             sub: None,
         } => {
-            let home = common::home_dir();
-            let ctx = init::migrate::Ctx {
-                claude_home: home.join(".claude"),
-                home,
-                self_root: None,
-                repo: None,
-            };
+            let ctx = init::migrate::Ctx::for_home(&common::home_dir());
             let out = playbook::heal::run(
                 &ctx,
                 playbook::heal::Trigger::Fix,
                 common::time::now_epoch_secs(),
             );
             print!("{}", playbook::heal::render_fix(&out));
+            std::process::exit(out.exit_code());
         }
         Command::Doctor {
             fix: false,
