@@ -16,7 +16,9 @@ It is part of the [playbook](https://github.com/pragmatic-engineer/playbook) too
 - Cost and tokens per day, model, repo, branch and session, with a week over week comparison.
 - Cache read and write tokens, split into the five minute and one hour tiers.
 - Tool, skill and agent breakdowns and latency, when Claude Code telemetry is on (see the receiver below).
-- Budget, rate limit and projection panels (when each limit is reached at the current pace), when you set budgets or provide limits.
+- Tabs (Charts, Numbers, Sessions by default) with the panels you choose. Press `e` to edit the layout, `Tab` and `F1` to `F9` to switch tabs.
+- Budget, rate limit and projection panels (when each limit is reached at the current pace). The limits come from the playbook statusline (Pro and Max windows), from the usage numbers Claude Code caches in its config file (the 5 hour and weekly windows, or the monthly spend limit on Enterprise, shown with its age), or from a budget you set.
+- Your last tab, range, views, sorts and filter, restored on the next start.
 - Codex session history, read the same way.
 
 ## Install
@@ -55,6 +57,7 @@ pbtop --range 30d     # today, week, last-week, month, last-month, 30d, 60d, 90d
 pbtop status          # is the telemetry receiver running
 pbtop collect         # run the local OpenTelemetry receiver in the foreground
 pbtop prune --dry-run # say what old telemetry rows would be removed
+pbtop doctor          # where the limits can be read on this machine (add --raw for the plan field values)
 ```
 
 `playbook-telemetry` takes the same arguments and is the long name for scripts. `pbtop --help` and `pbtop --version` print `pbtop`, and the long name prints `playbook-telemetry`.
@@ -62,6 +65,12 @@ pbtop prune --dry-run # say what old telemetry rows would be removed
 Times and days use your local time zone by default, daylight saving included, and a day runs from local midnight to local midnight. Every view says which zone it uses: the footer of the terminal view reads `local time (UTC+10)` or `UTC`, the text summary opens with `Times and days are in ...`, and `--json` carries a `time_zone` object with the `mode`, the `offset_seconds` and a `label`. To use UTC instead, pass `--utc` (or `--local` to force the default), set `PLAYBOOK_TELEMETRY_TZ=utc`, or run `playbook config set usage.timeZone utc`. The flag beats the environment variable, which beats the setting. A value that is not `local` or `utc` is ignored with a warning. Weeks start on Monday unless `usage.weekStart` says otherwise.
 
 It finds Claude Code history in `~/.claude/projects`, or in `$CLAUDE_CONFIG_DIR/projects` when that variable is set.
+
+## Limits on Enterprise and other plans
+
+The Budget panel names where each limit came from: `measured` (the statusline, `measured, stale` when the reading is over six hours old), `cached` (the Claude Code config file, with its age, and `cached, stale` when it is over six hours old), `manual` (the `usage.budget.*` keys). A fresh cached monthly spend limit wins over `usage.budget.monthlyUsd`. The cached numbers are not documented by Anthropic and can change. When a plan has no 5 hour and weekly windows, the panels say so and do not show zeros. The plan is guessed from the rate limit tier names and shows as "Enterprise or unknown plan" for anything that is not a Max tier.
+
+Run `pbtop doctor` to see which sources exist on a machine. It lists field names, ages, the plan label, the window percentages and the manual budget amounts, and never an email, name, id, organization or token. `pbtop doctor --raw` adds the values of six plan fields and the cached spend limit.
 
 ## Where it keeps its data
 
@@ -92,7 +101,7 @@ Settings are playbook's own, from the global tier of its config store (`~/.confi
 | `usage.autoIngestMinutes` | `10` | number |
 | `usage.budget.monthlyUsd` | `0` | number |
 | `usage.budget.weeklyUsd` | `0` | number |
-| `usage.ui.layout` | empty | text like `Charts=spend,tokens;Numbers=models`; press `e` in pbtop to edit |
+| `usage.ui.layout` | empty | text like `Charts=spend,tokens;Numbers=models,budget,projection`; press `e` in pbtop to edit |
 | `usage.ui.state` | empty | text written by pbtop: the screen setup it restores |
 
 ## Telemetry receiver
