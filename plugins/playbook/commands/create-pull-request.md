@@ -94,7 +94,7 @@ If `ticket=` holds a real key (not empty, not `none`), the key goes on the very 
 
 ## Step 2: Generate the title (conventional commits)
 
-Derive the title from the diff and commit log gathered in Step 1.
+Derive the title from the diff and commit log gathered in Step 1. Read `$CLAUDE_PLUGIN_ROOT/skills/writing-style/references/conventional-commits.md` before writing it, and follow it for the title only.
 
 - Format: `type(scope): summary`. With a ticket key, the key is the scope: `feat(PROJ-123): add retry to the sync job`. Without one, use a module name as the scope, e.g. `feat(auth): add SSO retry logic`, or no scope.
 - In a stacked PR set, every PR title and every commit carries the key. Squash merge turns the title into the commit message, so the title follows the same format.
