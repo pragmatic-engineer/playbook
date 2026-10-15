@@ -3,14 +3,15 @@
 
 //! Ordered migration registry (ADR 0016, ADR 0034). Auto migrations run once
 //! and are recorded; Manual ones only warn. `init` runs every entry; the
-//! session hook and `doctor --fix` run only the `Owned` ones (`run_owned`).
+//! session hook, the first-run step, `migrate` and `doctor --fix` run only
+//! the `Owned` ones (`run_owned`).
 
 use crate::common::atomic::{acquire_dir_lock, ensure_private_dir, remove_stale_lock_dir};
 use crate::common::paths::playbook_root_from;
 use crate::init::run::{StepReport, StepStatus};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const LOCK_DIR: &str = "migrations.lock";
 const SYSTEM_PROMPT_KEY: &str = "system-prompt";
@@ -107,6 +108,8 @@ pub struct Report {
     pub failed: bool,
     /// Another process held the migration lock, so the locked part did not run.
     pub lock_busy: bool,
+    /// The deadline passed, so the later migrations did not start.
+    pub timed_out: bool,
 }
 
 /// Shipped migrations in apply order. Append only; never reorder or reuse an id.
@@ -687,12 +690,13 @@ pub fn open_items(ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
 
 /// Runs the `Owned` migrations that write, under the migration lock, taken
 /// with `retries` tries 100 ms apart. A `Consent` migration never runs here.
-pub fn run_owned(ctx: &Ctx, retries: u32) -> Report {
+/// No migration starts after `deadline`; the report then says it timed out.
+pub fn run_owned(ctx: &Ctx, retries: u32, deadline: Option<Instant>) -> Report {
     let owned: Vec<Migration> = registry().into_iter().filter(heal_runs).collect();
     let mut report = Report::default();
     let locked = with_lock_retry(&ctx.home, retries, || {
-        run_idempotent(&owned, ctx, &mut report);
-        run_auto(&owned, ctx, &mut report);
+        run_idempotent(&owned, ctx, &mut report, deadline);
+        run_auto(&owned, ctx, &mut report, deadline);
     });
     report.lock_busy = !locked;
     report
@@ -877,8 +881,15 @@ fn with_lock_retry(home: &Path, retries: u32, f: impl FnOnce()) -> bool {
     if !acquire_dir_lock(&lock, retries, Duration::from_millis(100)) {
         return false;
     }
+    /// Removes the lock when it goes out of scope, also when `f` panics.
+    struct Release<'a>(&'a Path);
+    impl Drop for Release<'_> {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir(self.0);
+        }
+    }
+    let _release = Release(&lock);
     f();
-    let _ = fs::remove_dir(&lock);
     true
 }
 
@@ -925,14 +936,14 @@ fn run_with_retries(migrations: &[Migration], ctx: &Ctx, retries: u32) -> Report
             report.warnings.push(format!("{}: {msg}", m.id));
         }
     }
-    run_idempotent(migrations, ctx, &mut report);
+    run_idempotent(migrations, ctx, &mut report, None);
     let done = applied(&read_state(&ctx.home));
     let pending = |m: &&Migration| matches!(m.kind, Kind::Auto) && !done.iter().any(|d| d == m.id);
     if !migrations.iter().any(|m| pending(&m)) {
         return report;
     }
     let locked = with_lock_retry(&ctx.home, retries, || {
-        run_auto(migrations, ctx, &mut report)
+        run_auto(migrations, ctx, &mut report, None)
     });
     if !locked {
         report.lock_busy = true;
@@ -951,13 +962,27 @@ fn applied(lines: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Whether `deadline` has passed, which marks `report` as timed out.
+fn out_of_time(deadline: Option<Instant>, report: &mut Report) -> bool {
+    report.timed_out |= deadline.is_some_and(|d| Instant::now() >= d);
+    report.timed_out
+}
+
 /// Runs every `Idempotent` migration in `migrations`. A failure is reported
 /// and the rest still run.
-fn run_idempotent(migrations: &[Migration], ctx: &Ctx, report: &mut Report) {
+fn run_idempotent(
+    migrations: &[Migration],
+    ctx: &Ctx,
+    report: &mut Report,
+    deadline: Option<Instant>,
+) {
     for m in migrations
         .iter()
         .filter(|m| matches!(m.kind, Kind::Idempotent))
     {
+        if out_of_time(deadline, report) {
+            return;
+        }
         match (m.run)(ctx) {
             Outcome::Failed(step) => {
                 report.failed = true;
@@ -972,7 +997,7 @@ fn run_idempotent(migrations: &[Migration], ctx: &Ctx, report: &mut Report) {
 
 /// Runs each `Auto` migration not yet applied, in order, and records it. The
 /// caller holds the migration lock. A failure stops the later ones.
-fn run_auto(migrations: &[Migration], ctx: &Ctx, report: &mut Report) {
+fn run_auto(migrations: &[Migration], ctx: &Ctx, report: &mut Report, deadline: Option<Instant>) {
     for m in migrations.iter().filter(|m| matches!(m.kind, Kind::Auto)) {
         let Some(mut lines) = load_state(&ctx.home) else {
             report.failed = true;
@@ -983,6 +1008,9 @@ fn run_auto(migrations: &[Migration], ctx: &Ctx, report: &mut Report) {
         };
         if applied(&lines).iter().any(|d| d == m.id) {
             continue;
+        }
+        if out_of_time(deadline, report) {
+            return;
         }
         match (m.run)(ctx) {
             Outcome::Done(step) => {
@@ -1213,6 +1241,44 @@ mod tests {
         assert!(!report.failed);
     }
 
+    fn sleepy(_: &Ctx) -> Outcome {
+        std::thread::sleep(Duration::from_millis(60));
+        done("sleepy")
+    }
+
+    #[test]
+    fn a_deadline_lets_the_running_migration_finish_and_starts_no_other() {
+        // Arrange
+        let h = home("deadline");
+        let ms = [auto("s", sleepy), auto("n", never)];
+        let mut report = Report::default();
+        let deadline = Instant::now() + Duration::from_millis(20);
+
+        // Act
+        let locked = with_lock_retry(&h, 0, || {
+            run_auto(&ms, &ctx(&h), &mut report, Some(deadline))
+        });
+
+        // Assert
+        assert!(locked && report.timed_out && !report.failed);
+        let lines = read_state(&h);
+        assert!(lines.iter().any(|l| l == "applied s"), "{lines:?}");
+        assert!(!lines.iter().any(|l| l == "applied n"), "{lines:?}");
+    }
+
+    #[test]
+    fn a_panic_under_the_lock_still_releases_it() {
+        // Arrange
+        let h = home("unwind");
+
+        // Act
+        let caught = std::panic::catch_unwind(|| with_lock_retry(&h, 0, || panic!("boom")));
+
+        // Assert
+        assert!(caught.is_err());
+        assert!(!playbook_root_from(&h).join(LOCK_DIR).exists());
+    }
+
     fn slow(_: &Ctx) -> Outcome {
         SLOW_RUNS.fetch_add(1, Ordering::SeqCst);
         std::thread::sleep(Duration::from_millis(150));
@@ -1352,7 +1418,7 @@ mod tests {
         let before = outside(&h);
 
         // Act
-        let run = run_owned(&ctx(&h), 0);
+        let run = run_owned(&ctx(&h), 0, None);
         let notes = owned_notes(&ctx(&h));
         let open = open_items(&ctx(&h), None);
 

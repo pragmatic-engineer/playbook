@@ -1,10 +1,17 @@
 # Internals: Migrations
 
-`playbook init` carries an existing install across breaking changes. The registry lives in `crates/cli/src/init/migrate.rs`, and the reasoning is in [ADR 0016](../adr/0016-migration-framework.md). This page says how it behaves, so you know what runs when you update.
+The migration registry carries an existing install across breaking changes. It lives in `crates/cli/src/init/migrate.rs`. The reasoning is in [ADR 0016](../adr/0016-migration-framework.md) and [ADR 0034](../adr/0034-self-healing-upgrades.md). This page says how it behaves, so you know what runs when you update.
 
 ## When it runs
 
-Only `playbook init` runs migrations. Hooks never do, so a session does not pay for them. After an update, run `playbook init`. The installer and `brew` caveat both say so, and `install.sh` offers to run it, and runs it on a yes or with `--yes`.
+Each migration also has a scope: `Owned` writes only playbook's own files, `Consent` writes a file you own, and `Report` writes nothing and reports on files Claude Code owns. Only `Owned` migrations run on their own:
+
+- `playbook migrate` runs them and prints the command for each item that needs you. `playbook doctor --fix` is the same step. `--status` and `--dry-run` show what stands and what would run, and write nothing.
+- The first command after an upgrade runs them once, before the command, and prints one notice on stderr. Hot paths skip this so they stay fast: hooks, the status line, `shell-init`, `version` and the hidden `json` helpers. So do `usage`, which the session hooks start in the background, the commands that run their own heal (`migrate`, `doctor --fix`, `init`), `update`, `uninstall`, and `doctor` and `state`, which show the home as it is.
+- The `session-init` hook runs them once per session when the binary is newer than the record, and adds one line to the session message.
+- `playbook update` runs the new binary's `migrate` after the swap. The install script runs it after an install when it has a terminal or `--yes`, and not with `--no-init`.
+
+`playbook init` runs every migration, `Consent` ones included, because it asks first. Nothing else writes Claude Code settings or your shell files. The version record in the `state` table says which binary last ran the `Owned` migrations cleanly, so the first-run step and the session hook run once per version. `migrate` and `doctor --fix` run every time you call them.
 
 ## The three kinds
 
@@ -13,7 +20,7 @@ Each migration has an id such as `0006-statusline-rust-command`. Ids are append 
 | Kind | Runs | Recorded | What it does |
 |---|---|---|---|
 | Auto | Once, until it succeeds | Yes, as `applied <id>` | Moves or rewrites state, then never runs again. A failure is not recorded and stops the later Auto migrations, so order holds. |
-| Idempotent | On every `init` | No | Repairs state and does nothing when there is nothing to repair. It takes no lock, and a failure in one does not block the others. |
+| Idempotent | On every `init`, `migrate` and heal | No | Repairs state and does nothing when there is nothing to repair. It takes no lock, and a failure in one does not block the others. |
 | Manual | On every `init` and in `playbook doctor pending-migrations` | No | Never changes anything. It prints a warning that tells you what to do. |
 
 No Auto migration ships today. The current entries are:
@@ -47,6 +54,8 @@ Playbook does not overwrite a file you edited. It leaves it, prints a warning, a
 
 1. Append an entry to `registry()` in `crates/cli/src/init/migrate.rs` with the next id. Never reorder or reuse an id.
 2. Pick the kind: Auto for a one-time move, Idempotent for a self-healing repair, Manual for something only you can resolve.
-3. Add a test next to the existing ones in that file.
+3. Pick the scope: `Owned` when it writes only playbook's own files, `Consent` with a check and an `init` command when it writes a file the user owns, `Report` when it only reports.
+4. Add a test next to the existing ones in that file.
+5. A change that needs the user also gets an entry in `breaking-changes.json` ([ADR 0035](../adr/0035-breaking-change-notices.md)).
 
 See also: [Launcher and hooks](01-launcher-and-hooks.md), [Docs index](../index.md).

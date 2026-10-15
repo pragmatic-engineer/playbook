@@ -569,7 +569,7 @@ fn l6_the_upgrade_record_row_follows_the_record_of_the_binary_on_path() {
     set(&[("versions/binary", "0.18.0")]);
     let t = row();
     assert!(
-        t.starts_with("INFO") && t.contains("next session start updates it"),
+        t.starts_with("INFO") && t.contains("next playbook command or session start updates it"),
         "{t}"
     );
     set(&[("versions/binary", "0.20.0")]);

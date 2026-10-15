@@ -3,14 +3,15 @@
 
 //! Self healing after an upgrade (ADR 0034). A version record in the `state`
 //! table says which binary last ran the `Owned` migrations cleanly. The
-//! session hook, `doctor --fix` and `init` compare it with the running binary,
-//! run what is safe, and report what needs the user. Nothing here writes a
-//! Claude Code settings file.
+//! first-run step, the session hook, `migrate` and `init` compare it with the
+//! running binary, run what is safe, and report what needs the user. Nothing
+//! here writes a Claude Code settings file.
 
 use crate::init::migrate::{self, Ctx, OpenItem};
 use crate::init::run::{StepReport, StepStatus};
 use std::cmp::Ordering;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 const BINARY_KEY: &str = "versions/binary";
 const SCHEMA_KEY: &str = "versions/schema";
@@ -20,6 +21,14 @@ const FAILED_AT_KEY: &str = "versions/failed-at";
 
 /// How long the hook waits before it retries after a failed run.
 const RETRY_AFTER_SECS: u64 = 24 * 60 * 60;
+
+/// The note for a run the deadline stopped. It records nothing, so the next
+/// run starts the rest.
+const TIME_LIMIT_NOTE: &str = "stopped at the time limit; the rest runs next time";
+
+/// How long the first-run step may start new migrations before the command
+/// goes on. The rest runs on the next command.
+pub const START_BUDGET: Duration = Duration::from_secs(2);
 
 /// The version record. Every field is empty on a machine that never ran it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -102,8 +111,11 @@ fn set_key(root: &Path, key: &str, value: &str) -> bool {
 pub enum Trigger {
     /// The `session-init` hook: never waits for the lock, retries once a day.
     Hook,
-    /// `playbook doctor --fix`: waits for the lock, retries at once.
+    /// `playbook migrate` and `doctor --fix`: waits for the lock, retries at once.
     Fix,
+    /// The first-run step before a command: never waits for the lock, starts
+    /// no migration after `deadline`, and retries after a failure once a day.
+    Start { deadline: Instant },
     /// `playbook init`, after it ran every migration itself. `statusline` is
     /// false when the user declined the status line, so its item is dropped.
     /// The dead hook item stays even when hooks were left off, because those
@@ -154,6 +166,8 @@ pub struct Outcome {
     pub open: Vec<OpenItem>,
     /// Whether the record now names this binary.
     pub recorded: bool,
+    /// Whether the deadline stopped the run before every migration started.
+    pub timed_out: bool,
     /// Why nothing ran, when nothing did.
     pub skipped: Option<Skip>,
 }
@@ -186,7 +200,7 @@ impl Outcome {
         }
         if !self.failed.is_empty() {
             parts.push(format!(
-                "{} migration(s) failed: run `playbook doctor --fix`",
+                "{} migration(s) failed: run `playbook migrate`",
                 self.failed.len()
             ));
         }
@@ -207,7 +221,7 @@ impl Outcome {
         let reports = self.open.len() - consent;
         if reports > 0 {
             parts.push(format!(
-                "{reports} item(s) need you: run `playbook doctor --fix`"
+                "{reports} item(s) need you: run `playbook migrate`"
             ));
         }
         (!parts.is_empty()).then(|| {
@@ -266,7 +280,8 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
     }
     match trigger {
         Trigger::Hook if order == Ordering::Equal => recheck_pending(ctx, &root, &record),
-        Trigger::Hook => {
+        Trigger::Start { .. } if order == Ordering::Equal => Outcome::default(),
+        Trigger::Hook | Trigger::Start { .. } => {
             let waiting = record
                 .failed_at
                 .is_some_and(|at| now.saturating_sub(at) < RETRY_AFTER_SECS);
@@ -276,10 +291,14 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
                     ..Outcome::skipped(Skip::WaitingAfterFailure)
                 };
             }
-            heal_now(ctx, &root, 0, now)
+            let deadline = match trigger {
+                Trigger::Start { deadline } => Some(deadline),
+                _ => None,
+            };
+            heal_now(ctx, &root, 0, now, deadline)
         }
         Trigger::Fix => {
-            let mut out = heal_now(ctx, &root, migrate::LOCK_RETRIES, now);
+            let mut out = heal_now(ctx, &root, migrate::LOCK_RETRIES, now, None);
             out.warnings.extend(migrate::owned_notes(ctx));
             out
         }
@@ -318,9 +337,10 @@ fn recheck_pending(ctx: &Ctx, root: &Path, record: &Record) -> Outcome {
 }
 
 /// Runs the `Owned` migrations, then records this binary when they all
-/// finished, or the failure time when one did not.
-fn heal_now(ctx: &Ctx, root: &Path, retries: u32, now: u64) -> Outcome {
-    let report = migrate::run_owned(ctx, retries);
+/// finished, or the failure time when one did not. A run that hit `deadline`
+/// records neither, so the next run goes on from there.
+fn heal_now(ctx: &Ctx, root: &Path, retries: u32, now: u64, deadline: Option<Instant>) -> Outcome {
+    let report = migrate::run_owned(ctx, retries, deadline);
     if report.lock_busy {
         return Outcome::skipped(Skip::LockBusy);
     }
@@ -335,6 +355,11 @@ fn heal_now(ctx: &Ctx, root: &Path, retries: u32, now: u64) -> Outcome {
         warnings: report.warnings,
         ..Outcome::default()
     };
+    if report.timed_out {
+        out.timed_out = true;
+        out.warnings.push(TIME_LIMIT_NOTE.into());
+        return out;
+    }
     if report.failed {
         if !set_key(root, FAILED_AT_KEY, &now.to_string()) {
             out.warnings
@@ -380,6 +405,78 @@ pub fn session_line(home: &Path) -> Option<String> {
     std::panic::catch_unwind(|| run(&ctx, Trigger::Hook, now))
         .ok()?
         .line()
+}
+
+/// Whether the first-run step runs before `command`. Hot paths never pay for
+/// it (`Command::is_hot_path`), and neither does `usage`, which the session
+/// hooks start in the background; the `session-init` hook is the trigger on
+/// that side. Commands that run their own heal (`migrate`, `doctor --fix`,
+/// `init`), replace the binary (`update`) or remove playbook (`uninstall`)
+/// skip it too. So do `doctor` and `state`, which show the home as it is;
+/// the doctor names `playbook migrate` when a heal is due.
+pub fn runs_on_start(command: &crate::Command) -> bool {
+    use crate::Command as C;
+    !command.is_hot_path()
+        && !matches!(
+            command,
+            C::Usage { .. }
+                | C::Migrate { .. }
+                | C::Init { .. }
+                | C::Update { .. }
+                | C::Uninstall { .. }
+                | C::Doctor { .. }
+                | C::State { .. }
+        )
+}
+
+/// The first-run step (ADR 0034 decision 13): before `command` runs, when
+/// the record names an older binary, runs the `Owned` migrations once and
+/// prints one notice on stderr. It asks nothing, writes no Claude Code
+/// settings, skips a busy lock, starts no migration after `START_BUDGET`,
+/// and does nothing on a fresh home, after a downgrade, or while it waits a
+/// day after a failed run.
+pub fn on_start(command: &crate::Command) {
+    if !runs_on_start(command) {
+        return;
+    }
+    let home = crate::common::home_dir();
+    if crate::common::home_error(&home).is_some() {
+        return;
+    }
+    let deadline = Instant::now() + START_BUDGET;
+    if let Ok(Some(text)) = std::panic::catch_unwind(|| start(&home, deadline)) {
+        eprintln!("{text}");
+    }
+}
+
+/// The notice the first-run step prints for `home`, if any. Cheap when there
+/// is nothing to do or it waits after a failure: one read of the record,
+/// which writes nothing.
+fn start(home: &Path, deadline: Instant) -> Option<String> {
+    let root = crate::common::paths::playbook_root_from(home);
+    if !root.is_dir() {
+        return None;
+    }
+    let record = Record::read_only(&root).ok()?;
+    if record.compare_with(env!("CARGO_PKG_VERSION"), migrate::schema()) != Ordering::Less {
+        return None;
+    }
+    let now = crate::common::time::now_epoch_secs();
+    if record
+        .failed_at
+        .is_some_and(|at| now.saturating_sub(at) < RETRY_AFTER_SECS)
+    {
+        return None;
+    }
+    let out = run(&Ctx::for_home(home), Trigger::Start { deadline }, now);
+    if out.skipped.is_some() {
+        return None;
+    }
+    let mut lines: Vec<String> = out.line().into_iter().collect();
+    if out.timed_out {
+        lines.push(format!("playbook: {TIME_LIMIT_NOTE}"));
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 #[cfg(test)]
@@ -435,6 +532,68 @@ mod tests {
         assert_eq!(rec.binary.as_deref(), Some(env!("CARGO_PKG_VERSION")));
         assert_eq!(rec.schema, migrate::schema());
         assert!(!home.join(".claude").exists());
+    }
+
+    #[test]
+    fn the_first_run_step_stops_at_its_deadline_and_retries_next_time() {
+        // Arrange
+        let home = scratch_dir("heal-deadline");
+        let before = seed(&home, "0.25.0", 1, None);
+        let script = root(&home).join("hooks/lib/config-hash.sh");
+        fs::create_dir_all(script.parent().unwrap()).unwrap();
+        fs::write(&script, "x").unwrap();
+
+        // Act: a deadline that has passed, then one with time left.
+        let late = run(
+            &ctx(&home),
+            Trigger::Start {
+                deadline: Instant::now(),
+            },
+            1000,
+        );
+        let after_late = Record::read(&root(&home)).unwrap();
+        let kept = script.exists();
+        let text = start(&home, Instant::now() + START_BUDGET);
+        let again = start(&home, Instant::now() + START_BUDGET);
+
+        // Assert
+        assert!(!late.recorded && late.failed.is_empty());
+        assert!(late.timed_out && late.warnings.iter().any(|w| w == TIME_LIMIT_NOTE));
+        assert_eq!(after_late, before);
+        assert!(kept);
+        assert!(text.is_some_and(|t| t.contains("updated 1 of its own files")));
+        assert!(!script.exists());
+        assert_eq!(again, None);
+    }
+
+    #[test]
+    fn the_first_run_step_skips_hot_paths_and_commands_with_their_own_heal() {
+        use clap::Parser;
+        let parse = |args: &[&str]| {
+            let mut all = vec!["playbook"];
+            all.extend_from_slice(args);
+            crate::Cli::try_parse_from(all).unwrap().command
+        };
+        for args in [
+            &["hook", "session-init"][..],
+            &["statusline"],
+            &["shell-init"],
+            &["version"],
+            &["json", "valid-json"],
+            &["usage", "warm"],
+            &["migrate"],
+            &["init", "--yes"],
+            &["update"],
+            &["uninstall", "--yes"],
+            &["doctor", "--fix"],
+            &["doctor", "pending-migrations"],
+            &["state", "list"],
+        ] {
+            assert!(!runs_on_start(&parse(args)), "{args:?}");
+        }
+        for args in [&["mode", "status"][..], &["plans"], &["config", "list"]] {
+            assert!(runs_on_start(&parse(args)), "{args:?}");
+        }
     }
 
     #[test]
@@ -631,7 +790,7 @@ mod tests {
         assert!(out
             .line()
             .unwrap()
-            .contains("1 migration(s) failed: run `playbook doctor --fix`"));
+            .contains("1 migration(s) failed: run `playbook migrate`"));
         assert!(render_fix(&out).contains("failed: config-hash: "));
         let rec = Record::read(&root(&home)).unwrap();
         assert_eq!(rec.binary.as_deref(), Some("0.25.0"));

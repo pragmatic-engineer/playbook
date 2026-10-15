@@ -40,13 +40,13 @@ A user's skill failed with "could not find the plugin root folder". The binary p
    | 0008, 0009, 0010 | Idempotent | Owned |
 
    One test runs every `Owned` and `Manual` migration against a scratch home and checks that no file outside `~/.config/playbook` changed.
-7. **Four triggers run the same code.**
+7. **Four triggers run the same code.** Decision 13 adds a fifth, the first-run step.
    1. `playbook init` runs every migration, as it does today, with the consent `init` already asks for.
    2. `playbook update` runs `<new binary> migrate` after the swap, so the new binary runs its own migrations (decision 12). A new binary without `migrate` exits 2, and the update runs its `doctor --fix` instead. The step is skipped when the new version is older than the first release with `--fix`, and a failure is a warning, not an update failure.
    3. The `session-init` hook reads the version record. When the running binary's version and schema match it and `versions/pending` is empty, it does nothing more. When `versions/pending` is not empty, it reruns only those checks. When the binary is newer, it runs the `Owned` migrations under the migration lock, without waiting for it, then the `Consent` and `Report` checks. It adds one line to the session message naming what changed and the command to run. It asks no question, writes no Claude settings and does not fail the hook. When the record is newer than the running binary, a downgrade, the hook runs nothing and leaves the record alone.
    4. `playbook migrate` and `playbook doctor --fix` run the `Owned` migrations, then print the command for each open `Consent` or `Report` item and the notes of the `Owned` `Manual` checks. They exit 1 when a migration failed, the lock was busy or the record was not written, so `playbook update` shows a warning.
 
-   Every trigger writes the version record only when it held the lock and every `Owned` migration finished. A busy lock or a failed migration leaves the record unchanged. After a failure the hook retries at most once a day, and `init`, `migrate` and `doctor --fix` retry at once. The per session cost on the fast path is one read of the `state` table, which the hook already opens for the worktree sweep.
+   Every trigger writes the version record only when it held the lock and every `Owned` migration finished. A busy lock or a failed migration leaves the record unchanged. After a failure the hook and the first-run step retry at most once a day, and `init`, `migrate` and `doctor --fix` retry at once. The per session cost on the fast path is one read of the `state` table, which the hook already opens for the worktree sweep.
 8. **Only consent changes settings.** `init`, `uninstall` and `config` write `~/.claude/settings.json`, with consent. The hook, `migrate` and `doctor --fix` only report what needs `playbook init`.
 9. **New migrations for the 0.25 to 0.26 gap.**
    - A hook entry in settings.json whose command runs a script under `~/.claude/hooks/`, with an optional `bash`, `sh` or `python3` in front, where the script no longer exists, is dead. A command with a shell operator or `$(` does not count as dead, because a later part may still run. `init` removes the entry after a backup when the hooks are on (`Consent`, `playbook init --hooks`), and the doctor's missing file row names that command. An entry whose script exists stays. This amends ADR 0031 decision 3 for the dead case only.
@@ -62,7 +62,17 @@ A user's skill failed with "could not find the plugin root folder". The binary p
     - It exits 0 when it finished or had nothing to do, and 1 when a migration failed, the lock was busy or the record was not written. `--status` and `--dry-run` exit 0 unless the record cannot be read.
     - `Consent` and `Report` items print their command and are not applied.
 
-    Each channel runs it after it installs a binary. `playbook update` runs the new binary's `migrate` and warns when it takes over 120 seconds. The install script runs it when it has a terminal or `--yes`, and skips it with `--no-init` or on a binary that has no `migrate`. Neither writes Claude settings. The Homebrew formula has no `post_install` step, because the session hook heals on the next session after `brew upgrade`.
+    Each channel runs it after it installs a binary. `playbook update` runs the new binary's `migrate` and warns when it takes over 120 seconds. The install script runs it when it has a terminal or `--yes`, and skips it with `--no-init` or on a binary that has no `migrate`. Neither writes Claude settings. The Homebrew formula has no `post_install` step, because the first-run step in decision 13 heals on the first command after `brew upgrade`.
+13. **The first run of a new binary heals, before most commands.** One step in `main()`, after the arguments parse and before the command runs, reads the version record. When it names an older binary, the step runs the `Owned` migrations once with the code `migrate` runs, then the command goes on.
+    - It asks no question, writes no Claude settings and does not fail the command: a panic or an unreadable store is ignored.
+    - It does not wait for the migration lock. A busy lock skips the step, and the next command tries again.
+    - It starts no migration after 2 seconds; one that is already running finishes. It then leaves the record unchanged and sets no failure time. The next command runs the `Idempotent` migrations again from the start and skips the `Auto` ones already applied.
+    - After a failed migration it records the failure time and, like the hook, retries at most once a day. While it waits it prints nothing and costs one read of the record.
+    - It prints one short notice on stderr: how many files changed, the `init` commands for changes to settings or shell files, and `playbook migrate` for the other items. Standard output stays the command's own, so `--json` output is unchanged. The notice shows once per version change, because a clean run records the new binary.
+    - It does nothing after a downgrade, on a home with no playbook folder yet, or when the record already names the running binary. That last check is one read of the record through a read-only connection.
+
+    Hot paths skip the step. Hooks fire on every tool call, and the status line redraws every few hundred milliseconds, so `playbook hook` and `playbook statusline` return through the fast path before the arguments parse. `shell-init` runs on every new shell, and the hidden `json` helpers run inside hook scripts, so they skip it too, as does `version`. One list, `Command::is_hot_path`, names them. The session hooks start `usage` in the background, so `usage` skips the step as well. On that side, the `session-init` hook is the trigger, once per session (decision 7, trigger 3). Commands that run their own heal (`migrate`, `doctor --fix`, `init`), replace the binary (`update`) or remove playbook (`uninstall`) skip it. So do `doctor` and `state`, which show the home as it is; the doctor row names `playbook migrate` when a heal is due.
+14. **Every release is backward compatible or migrates.** A change to playbook's config, its data files, the entries it writes into Claude Code settings, or the contract between the binary and the plugin has to keep working for a user who upgrades. When it cannot, it ships a registry entry that the first-run step runs. Either way the change is listed in `breaking-changes.json`, as ADR 0035 decision 2 requires: one a migration handles names the migration with the action `none, migrated automatically`, and one that needs the user says what to do. ADR 0035 turns the file into the notice every update channel shows.
 
 ## Alternatives considered
 
@@ -75,7 +85,8 @@ A user's skill failed with "could not find the plugin root folder". The binary p
 
 ## Consequences
 
-- A binary upgrade through `playbook update` or the install script heals the playbook files right after the install. One through Homebrew or a copied file heals them on the next session start. None of them needs a run of `init`.
+- A binary upgrade through `playbook update` or the install script heals the playbook files right after the install. One through Homebrew or a copied file heals them on the first command or session start after it. None of them needs a run of `init`.
+- The first command after an upgrade can take about 2 seconds longer, plus the migration still running at that mark and the checks that follow. Every later command pays one read of the record.
 - A binary released before this change cannot heal itself or read `minBinaryVersion`. For those, the only fix is an upgrade, and the plugin's own text has to tell the user, because the old binary runs the hooks.
 - Settings problems still need the user. The hook repeats the command each session until the item is fixed.
 - A dev checkout no longer wins over an installed plugin through `CLAUDE_PLUGIN_ROOT`. It needs `PLAYBOOK_PLUGIN_DIR`.
