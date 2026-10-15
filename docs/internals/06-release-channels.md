@@ -49,9 +49,12 @@ uploads one asset per target. `checksums` writes `SHA256SUMS` and attests the
 assets. The workflow only publishes.
 
 The release notes for a `v*` release start with the upgrade note in
-`.github/release-notes-upgrade.md`. Paste it above the generated notes while
-the move from the `playbook-hooks` plugin is still recent, and drop it when
-most users have upgraded.
+`.github/release-notes-upgrade.md`. The `create-release` job puts that file
+above the generated notes for plain `vX.Y.Z` releases and not for
+`telemetry-v*` releases. When most users have upgraded from the
+`playbook-hooks` plugin, remove the `--notes-file` argument, the dry-run
+preview step and the file together. A
+dry run prints the start of the body in the run summary.
 
 To rehearse, run the `release` workflow by hand with a `tag` input. A manual run
 is always a dry run: it resolves, verifies and builds, and skips release
