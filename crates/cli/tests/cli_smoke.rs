@@ -837,6 +837,10 @@ fn check(c: &Case) -> Vec<String> {
     if !c.writes && before != after_first {
         bad.push(format!("wrote files: {:?}", diff(&before, &after_first)));
     }
+    let (after_first, after_second) = (
+        without_sidecars(after_first),
+        without_sidecars(after_second),
+    );
     if !c.grows && after_first != after_second {
         bad.push(format!(
             "not idempotent: {:?}",
@@ -844,6 +848,21 @@ fn check(c: &Case) -> Vec<String> {
         ));
     }
     bad
+}
+
+/// The snapshot without the `-wal` and `-shm` files of `config.db`. Its
+/// contents are compared by presence only (see `walk`), and `doctor check`
+/// opens it from parallel probes, read-write and read-only, so these files
+/// stay or go depending on which connection closes last. The other
+/// databases keep their sidecars in the comparison, and the "wrote files"
+/// check still sees all of them, so a read-only command that leaves them
+/// fails.
+fn without_sidecars(mut map: BTreeMap<PathBuf, u64>) -> BTreeMap<PathBuf, u64> {
+    map.retain(|p, _| {
+        let name = p.file_name().unwrap_or_default();
+        name != "config.db-wal" && name != "config.db-shm"
+    });
+    map
 }
 
 fn diff(a: &BTreeMap<PathBuf, u64>, b: &BTreeMap<PathBuf, u64>) -> Vec<String> {
