@@ -928,3 +928,11 @@ fn the_numbers_tab_shows_the_tables_and_the_budget_at_100x30() {
 fn the_sessions_tab_stacks_live_and_sessions_at_80x24() {
     check("tab_sessions_80x24", &draw(&tabbed(2), 80, 24));
 }
+
+#[test]
+fn the_layout_editor_window_at_100x30() {
+    let mut a = tabbed(0);
+    a.editor = Some(crate::tui::editor::Editor::new(&a.layout, 0));
+
+    check("layout_editor_100x30", &draw(&a, 100, 30));
+}

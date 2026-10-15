@@ -29,22 +29,22 @@
 │■ opus-5                                │v          Next view of the focused panel           Spend, Projects         │           10  238.0K    $11.85 ■■■■■···│
 │■ sonnet-5                              │t          Next color theme (off with NO_COLOR)     all panels              │            9  214.2K     $8.25 ■■■·····│
 │■ haiku-5                               │p          Open the full screen Sessions list       all panels              │            7  166.6K     $0.17 ········│
+│                                        │e          Edit the tabs and the panels on each     all panels              │                                        │
 │                                        │h, ?       Show this help                           all panels              │                                        │
 │                                        │                                                                            │                                        │
 │                                        │Sorting                                                                     │                                        │
-│                                        │s          Sort by the next column                  tables                  │                                        │
-╰────────────────────────────────────────│S          Reverse the sort order                   tables                  │────────────────────────────────────────╯
-╭─┤⁵Live sessions├───────────────────────│                                                                            │──────────────────────────────────┤UTC├─╮
-│state project                    model  │Filtering                                                                   │model              msgs  tokens    cost▼│
-│live  alpha                      opus-5 │/          Type a filter on any field               all panels              │opus-5                2   47.6K    $1.25│
-│                                        │Enter      Filter to selected row; again to undo    tables 3-6              │sonnet-5              1   23.8K    $1.25│
-│                                        │c          Clear the filter                         all panels              │sonnet-5              1   23.8K    $0.55│
-│                                        │                                                                            │opus-5                1   23.8K    $0.80│
-│                                        │Refresh                                                                     │sonnet-5              1   23.8K    $0.95│
-│                                        │R          Read new usage now (also automatic)      all panels              │opus-5                1   23.8K    $1.40│
-│                                        │                                                                            │sonnet-5              1   23.8K    $0.20│
-│                                        │Quit                                                                        │opus-5                1   23.8K    $6.00│
-│                                        │q, Esc     Quit                                     all panels              │haiku-5               1   23.8K    $0.01│
-│                                        │Ctrl-C     Quit, also while typing a filter         all panels              │haiku-5               1   23.8K    $0.02│
-╰────────────────────────────────────────╰┤ any key closes ├──────────────────────────────────────────────────────────╯────────────────────────────────────────╯
+╰────────────────────────────────────────│s          Sort by the next column                  tables                  │────────────────────────────────────────╯
+╭─┤⁵Live sessions├───────────────────────│S          Reverse the sort order                   tables                  │──────────────────────────────────┤UTC├─╮
+│state project                    model  │                                                                            │model              msgs  tokens    cost▼│
+│live  alpha                      opus-5 │Filtering                                                                   │opus-5                2   47.6K    $1.25│
+│                                        │/          Type a filter on any field               all panels              │sonnet-5              1   23.8K    $1.25│
+│                                        │Enter      Filter to selected row; again to undo    tables 3-6              │sonnet-5              1   23.8K    $0.55│
+│                                        │c          Clear the filter                         all panels              │opus-5                1   23.8K    $0.80│
+│                                        │                                                                            │sonnet-5              1   23.8K    $0.95│
+│                                        │Refresh                                                                     │opus-5                1   23.8K    $1.40│
+│                                        │R          Read new usage now (also automatic)      all panels              │sonnet-5              1   23.8K    $0.20│
+│                                        │                                                                            │opus-5                1   23.8K    $6.00│
+│                                        │Quit                                                                        │haiku-5               1   23.8K    $0.01│
+│                                        │q, Esc     Quit                                     all panels              │haiku-5               1   23.8K    $0.02│
+╰────────────────────────────────────────╰┤ ↑/↓ scroll, any other key closes ├────────────────────────────────────────╯────────────────────────────────────────╯
  1-6 panel d day w week m month a all ←/→ day r range v view / filter s/S sort t theme (default) h help enter select q quit      updated 01:46:40 UTC, every 5s

@@ -139,6 +139,32 @@ pub fn save(home: &Path, state: &UiState) {
     let _ = crate::config::save_app(home, KEY, &Value::from(state.to_text()));
 }
 
+/// Stores the layout text; empty text goes back to the default tabs.
+/// `Ok(false)` means there is no config store to write to; the layout then
+/// lasts only for this run.
+pub fn save_layout(home: &Path, text: &str) -> Result<bool, String> {
+    crate::config::save_app(home, "usage.ui.layout", &Value::from(text))
+}
+
+/// `text` as one single-quoted shell word.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+/// What to tell the user after a layout save, `None` when nothing needs saying.
+pub fn save_notice(result: Result<bool, String>, text: &str) -> Option<String> {
+    match result {
+        Ok(true) => None,
+        // The default layout needs no stored value.
+        Ok(false) if text.is_empty() => None,
+        Ok(false) => Some(format!(
+            "Layout kept for this run only. To keep it, run: playbook config set --global usage.ui.layout {}",
+            shell_quote(text)
+        )),
+        Err(e) => Some(e),
+    }
+}
+
 /// The stored layout text and the layout it gives, with a message when the
 /// stored text is invalid.
 pub fn load_layout(home: &Path) -> (super::layout::Layout, Option<String>) {
@@ -257,5 +283,66 @@ mod tests {
 
         assert_eq!(layout, super::super::layout::Layout::default());
         assert!(warning.is_some_and(|w| w.contains("bogus")));
+    }
+
+    fn store(tag: &str) -> std::path::PathBuf {
+        let home = crate::util::scratch_dir(tag);
+        let data = crate::config::root(&home).join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let conn = rusqlite::Connection::open(playbook_data::config::db_in(&data)).unwrap();
+        conn.execute_batch(playbook_data::config::SCHEMA_SQL)
+            .unwrap();
+        home
+    }
+
+    #[test]
+    fn a_saved_layout_is_read_back_on_the_next_load() {
+        let home = store("ui-save-layout");
+
+        let wrote = save_layout(&home, "Money=budget;Live=live").unwrap();
+        let (layout, warning) = load_layout(&home);
+
+        assert!(wrote);
+        assert!(warning.is_none());
+        assert_eq!(layout.to_text(), "Money=budget;Live=live");
+    }
+
+    #[test]
+    fn resetting_the_layout_clears_the_saved_layout() {
+        let home = store("ui-reset-layout");
+        save_layout(&home, "Money=budget").unwrap();
+
+        save_layout(&home, "").unwrap();
+
+        assert_eq!(
+            load_layout(&home).0,
+            super::super::layout::Layout::default()
+        );
+    }
+
+    #[test]
+    fn the_no_store_notice_quotes_a_tab_name_with_a_single_quote() {
+        let notice = save_notice(Ok(false), "Bob's=spend").unwrap();
+
+        assert!(notice.ends_with("'Bob'\\''s=spend'"), "{notice}");
+    }
+
+    #[test]
+    fn the_save_notice_is_silent_on_success_and_for_a_reset_without_a_store() {
+        assert_eq!(save_notice(Ok(true), "A=spend"), None);
+        assert_eq!(save_notice(Ok(false), ""), None);
+        assert_eq!(
+            save_notice(Err("boom".into()), "A=spend"),
+            Some("boom".into())
+        );
+    }
+
+    #[test]
+    fn saving_a_layout_without_a_config_store_reports_that_nothing_was_written() {
+        let home = crate::util::scratch_dir("ui-save-nostore");
+
+        let wrote = save_layout(&home, "Money=budget").unwrap();
+
+        assert!(!wrote);
     }
 }

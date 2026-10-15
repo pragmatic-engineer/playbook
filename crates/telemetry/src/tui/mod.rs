@@ -9,6 +9,7 @@ pub mod app;
 pub mod budget;
 pub mod chart;
 pub mod data;
+pub mod editor;
 pub mod fmt;
 pub mod icon;
 pub mod keys;
@@ -102,9 +103,7 @@ fn event_loop(
     let (layout, layout_warning) = ui_state::load_layout(&home);
     app.layout = layout;
     app.apply_ui_state(&saved);
-    if let Some(warning) = layout_warning {
-        app.error = Some(warning);
-    }
+    app.note = layout_warning;
     let mut last_saved = state_to_save(&app, flag, &saved);
     app.sources = paths.claude_projects.display().to_string();
     app.week_start = super::entry::configured_week_start();
@@ -155,6 +154,10 @@ fn event_loop(
                 Event::Key(key) if key.kind == KeyEventKind::Press => match app.key(key) {
                     Effect::Requery => worker.ask(app.range, &app.filter),
                     Effect::Sessions => sessions.open(),
+                    Effect::SaveLayout(text) => {
+                        let result = ui_state::save_layout(&home, &text);
+                        app.note = ui_state::save_notice(result, &text);
+                    }
                     Effect::None => {}
                 },
                 _ => {}
