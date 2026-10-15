@@ -301,7 +301,7 @@ pub fn list_read_only(root: &Path, prefix: &str) -> Result<Vec<(String, String)>
 /// A read-only connection that leaves no file behind. With no `-wal` file
 /// every row is in the main file, so it opens as immutable and SQLite makes
 /// no `-wal` or `-shm` file; with one, a plain read-only open reads it.
-fn open_read_only(path: &Path) -> rusqlite::Result<rusqlite::Connection> {
+pub(crate) fn open_read_only(path: &Path) -> rusqlite::Result<rusqlite::Connection> {
     use rusqlite::OpenFlags;
     let mut wal = path.as_os_str().to_owned();
     wal.push("-wal");
