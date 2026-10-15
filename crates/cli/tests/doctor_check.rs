@@ -590,6 +590,18 @@ fn l6_the_upgrade_record_row_follows_the_record_of_the_binary_on_path() {
         t.starts_with("WARN") && t.contains("last upgrade heal failed"),
         "{t}"
     );
+    let rows = b.run(&[&bin], "/bin/zsh", None);
+    let hint = hints(&layer(&rows, "6")[1..2]);
+    assert_eq!(hint, "run: playbook migrate");
+    let doc = fs::read_to_string(
+        std::path::Path::new(env!("PLAYBOOK_REPO_ROOT"))
+            .join("plugins/playbook/commands/doctor.md"),
+    )
+    .unwrap();
+    assert!(
+        doc.contains(&format!("`{hint}`")),
+        "doctor.md must quote the hint {hint}"
+    );
 }
 
 #[test]
