@@ -850,15 +850,17 @@ fn check(c: &Case) -> Vec<String> {
     bad
 }
 
-/// The snapshot without SQLite's `-wal` and `-shm` files. A command that
-/// opens the database from parallel threads leaves them or not depending on
-/// which connection closes last, so their presence says nothing about
-/// whether a second run changed state. The "wrote files" check still sees
-/// them, so a read-only command that leaves them fails.
+/// The snapshot without the `-wal` and `-shm` files of `config.db`. Its
+/// contents are compared by presence only (see `walk`), and `doctor check`
+/// opens it from parallel probes, read-write and read-only, so these files
+/// stay or go depending on which connection closes last. The other
+/// databases keep their sidecars in the comparison, and the "wrote files"
+/// check still sees all of them, so a read-only command that leaves them
+/// fails.
 fn without_sidecars(mut map: BTreeMap<PathBuf, u64>) -> BTreeMap<PathBuf, u64> {
     map.retain(|p, _| {
-        let name = p.file_name().unwrap_or_default().to_string_lossy();
-        !(name.ends_with(".db-wal") || name.ends_with(".db-shm"))
+        let name = p.file_name().unwrap_or_default();
+        name != "config.db-wal" && name != "config.db-shm"
     });
     map
 }
