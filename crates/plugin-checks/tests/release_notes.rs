@@ -497,3 +497,21 @@ fn a_bad_component_or_version_fails() {
     assert!(!component.status.success() && text_of(&component).contains("unknown component"));
     assert!(!version.status.success() && text_of(&version).contains("MAJOR.MINOR.PATCH"));
 }
+
+#[test]
+fn the_release_commit_of_a_version_is_left_out() {
+    // Arrange
+    let r = Repo::new();
+    r.change("Cargo.toml", "chore(release): playbook 0.1.1 (#40)");
+    r.change("crates/cli/src/lib.rs", "chore(deps): bump a crate (#41)");
+    r.change(
+        "crates/cli/src/main.rs",
+        "chore(release): check the tag first (#42)",
+    );
+
+    // Act
+    let notes = r.notes("playbook", "0.1.1");
+
+    // Assert
+    assert_eq!(r.query(&notes, "[.sections[].items[].pr]"), "[41,42]");
+}
