@@ -40,7 +40,7 @@ pub fn session(
     home: &Path,
     claude_home: &Path,
     cwd: &Path,
-    plugin_root_env: Option<&str>,
+    plugin_root: Option<&Path>,
     temp: &Path,
 ) -> Option<Session> {
     if args
@@ -56,7 +56,7 @@ pub fn session(
     if mode == Mode::Off {
         return None;
     }
-    let root = crate::plugin_root::find(plugin_root_env, claude_home)?;
+    let root = plugin_root?.to_path_buf();
     let claude = effort::claude_cap(claude_home, cwd);
     let ceiling_of = |name: &str| {
         component::resolve_with(

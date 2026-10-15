@@ -180,6 +180,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
     };
     let sh = scratch.0.clone();
     let scratch_paths = InitPaths {
+        plugin_root: paths.plugin_root.clone(),
         self_root: paths.self_root.clone(),
         claude_home: sh.join(".claude"),
         home: sh.clone(),

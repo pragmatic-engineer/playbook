@@ -42,6 +42,9 @@ impl Source {
 pub struct Resolved {
     pub root: PathBuf,
     pub source: Source,
+    /// Places tried before this one that were set but not usable, such as a
+    /// stale override. Empty in the usual case.
+    pub skipped: Vec<String>,
 }
 
 /// Nothing resolved. Each entry names one place tried and why it was skipped.
@@ -83,6 +86,7 @@ pub fn resolve(inputs: &Inputs) -> Result<Resolved, NotFound> {
             return Ok(Resolved {
                 root,
                 source: Source::Override,
+                skipped: tried,
             });
         }
         tried.push(format!("{OVERRIDE_ENV} {} (not usable)", root.display()));
@@ -94,10 +98,18 @@ pub fn resolve(inputs: &Inputs) -> Result<Resolved, NotFound> {
             return Ok(Resolved {
                 root: root.clone(),
                 source: Source::InstallPath,
+                skipped: tried,
             })
         }
         None if listed.is_empty() => tried.push("installPath (not listed)".to_string()),
-        None => tried.push(format!("installPath {} (not usable)", listed[0].display())),
+        None => tried.push(format!(
+            "installPath {} (not usable)",
+            listed
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
     }
 
     match inputs.env.filter(|s| !s.is_empty()).map(PathBuf::from) {
@@ -105,6 +117,7 @@ pub fn resolve(inputs: &Inputs) -> Result<Resolved, NotFound> {
             return Ok(Resolved {
                 root,
                 source: Source::Env,
+                skipped: tried,
             })
         }
         Some(root) => tried.push(format!(
@@ -119,6 +132,7 @@ pub fn resolve(inputs: &Inputs) -> Result<Resolved, NotFound> {
         return Ok(Resolved {
             root,
             source: Source::Cache,
+            skipped: tried,
         });
     }
     tried.push(format!("{} (no usable version)", cache.display()));
@@ -140,14 +154,20 @@ pub fn resolve_here() -> Result<Resolved, NotFound> {
     })
 }
 
-/// The resolved directory, or `None`. For callers that treat a missing plugin
-/// as "no plugin files", never as an error.
+/// `resolve_here`'s directory, or `None`, for callers that treat a missing
+/// plugin as "no plugin files", never as an error.
+pub fn find_here() -> Option<PathBuf> {
+    resolve_here().ok().map(|r| r.root)
+}
+
+/// The resolved directory for an explicit `CLAUDE_PLUGIN_ROOT` value and Claude
+/// home, with no override, or `None`. Reads only the current directory from
+/// the process.
 pub fn find(env: Option<&str>, claude_home: &Path) -> Option<PathBuf> {
     let cwd = std::env::current_dir().unwrap_or_default();
-    let override_env = std::env::var(OVERRIDE_ENV).ok();
     resolve(&Inputs {
         claude_home,
-        override_env: override_env.as_deref(),
+        override_env: None,
         env,
         cwd: &cwd,
     })
@@ -166,11 +186,15 @@ pub fn is_plugin_dir(dir: &Path) -> bool {
         && is_ours(dir)
 }
 
-/// Not marked orphaned by Claude Code, and a manifest (when present) that
-/// names `playbook`. Rejects the old `playbook-hooks` plugin and the
-/// `playbook-variants` session plugin.
+/// Not marked orphaned by Claude Code, and either no manifest or one that
+/// names `playbook`. Rejects the old `playbook-hooks` plugin, the
+/// `playbook-variants` session plugin and a manifest that cannot be read.
 pub fn is_ours(dir: &Path) -> bool {
-    !dir.join(ORPHAN_MARKER).exists() && manifest_name(dir).is_none_or(|name| name == PLUGIN_NAME)
+    if dir.join(ORPHAN_MARKER).exists() {
+        return false;
+    }
+    let manifest = dir.join(".claude-plugin/plugin.json");
+    !manifest.exists() || manifest_name(dir).is_some_and(|name| name == PLUGIN_NAME)
 }
 
 /// The `version` in the directory's `.claude-plugin/plugin.json`.
@@ -188,43 +212,37 @@ fn manifest_field(dir: &Path, key: &str) -> Option<String> {
     value.get(key)?.as_str().map(str::to_string)
 }
 
-/// The `installPath` values Claude Code lists for the plugin, best first: a
-/// project entry whose `projectPath` holds `cwd` (deepest first), then user
-/// entries, then the rest.
+/// The `installPath` values Claude Code lists for the plugin, best first: an
+/// entry whose `projectPath` holds `cwd` (deepest first), then user entries,
+/// then other entries without a `projectPath`. An entry for another project is
+/// dropped, because Claude Code does not load it here.
 fn install_paths(claude_home: &Path, cwd: &Path) -> Vec<PathBuf> {
-    let Ok(text) = std::fs::read_to_string(claude_home.join("plugins/installed_plugins.json"))
-    else {
-        return Vec::new();
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return Vec::new();
-    };
-    let key = crate::common::plugin_state::PLUGIN_KEY;
-    let entry = value
-        .get("plugins")
-        .and_then(|p| p.get(key))
-        .or_else(|| value.get(key));
-    let entries: Vec<&serde_json::Value> = match entry {
-        Some(serde_json::Value::Array(list)) => list.iter().collect(),
+    let entries: Vec<serde_json::Value> = match crate::common::plugin_state::installed_entry_at(
+        claude_home,
+        crate::common::plugin_state::PLUGIN_KEY,
+    ) {
+        Some(serde_json::Value::Array(list)) => list,
         Some(obj @ serde_json::Value::Object(_)) => vec![obj],
         _ => return Vec::new(),
     };
-    let mut ranked: Vec<(usize, PathBuf)> = entries
-        .into_iter()
+    let mut ranked: Vec<((u8, std::cmp::Reverse<usize>), PathBuf)> = entries
+        .iter()
         .filter_map(|e| {
             let path = PathBuf::from(e.get("installPath")?.as_str()?);
             let rank = match e.get("projectPath").and_then(|p| p.as_str()) {
-                Some(project) if cwd.starts_with(project) => {
-                    usize::MAX - Path::new(project).components().count()
+                Some(project) if cwd.starts_with(project) => (
+                    0,
+                    std::cmp::Reverse(Path::new(project).components().count()),
+                ),
+                Some(_) => return None,
+                None if e.get("scope").and_then(|s| s.as_str()) == Some("user") => {
+                    (1, std::cmp::Reverse(0))
                 }
-                Some(_) => usize::MAX - 1,
-                None if e.get("scope").and_then(|s| s.as_str()) == Some("user") => usize::MAX - 2,
-                None => usize::MAX - 1,
+                None => (2, std::cmp::Reverse(0)),
             };
             Some((rank, path))
         })
         .collect();
-    // Lower rank first: deepest matching project, then user, then the rest.
     ranked.sort_by_key(|(rank, _)| *rank);
     ranked.into_iter().map(|(_, p)| p).collect()
 }
@@ -497,5 +515,83 @@ mod tests {
         let root = plugin_at(&home.join("p"), "playbook", "0.30.1");
         assert_eq!(plugin_version(&root).as_deref(), Some("0.30.1"));
         assert_eq!(plugin_version(&home.join("missing")), None);
+    }
+
+    #[test]
+    fn an_unusable_override_falls_through_and_is_named() {
+        // Arrange
+        let home = scratch_dir("plugin-root-bad-override");
+        let empty = home.join("empty");
+        fs::create_dir_all(&empty).unwrap();
+        let cache = cached(&home, "0.30.0");
+        let inputs = |claude_home: &Path| {
+            resolve(&Inputs {
+                claude_home,
+                override_env: empty.to_str(),
+                env: None,
+                cwd: Path::new("/nowhere"),
+            })
+        };
+
+        // Act
+        let found = inputs(&home).unwrap();
+        let missing = inputs(&scratch_dir("plugin-root-bad-override-none")).unwrap_err();
+
+        // Assert
+        assert_eq!(found.root, cache);
+        assert!(
+            found.skipped[0].starts_with(OVERRIDE_ENV),
+            "{:?}",
+            found.skipped
+        );
+        assert!(missing.to_string().contains(OVERRIDE_ENV), "{missing}");
+    }
+
+    #[test]
+    fn install_entries_rank_by_project_depth_then_user_and_skip_other_projects() {
+        // Arrange
+        let home = scratch_dir("plugin-root-rank");
+        let shallow = cached(&home, "0.27.0");
+        let deep = cached(&home, "0.28.0");
+        let user = cached(&home, "0.29.0");
+        let other = cached(&home, "0.31.0");
+        list_install(
+            &home,
+            &format!(
+                r#"{{"scope":"local","projectPath":"/elsewhere","installPath":"{}"}},{{"scope":"user","installPath":"{}"}},{{"scope":"project","projectPath":"/w","installPath":"{}"}},{{"scope":"local","projectPath":"/w/repo","installPath":"{}"}}"#,
+                other.display(),
+                user.display(),
+                shallow.display(),
+                deep.display()
+            ),
+        );
+        let at = |cwd: &str| {
+            resolve(&Inputs {
+                claude_home: &home,
+                override_env: None,
+                env: None,
+                cwd: Path::new(cwd),
+            })
+            .unwrap()
+            .root
+        };
+
+        // Act and assert
+        assert_eq!(at("/w/repo/src"), deep);
+        assert_eq!(at("/w/other"), shallow);
+        assert_eq!(at("/somewhere"), user);
+    }
+
+    #[test]
+    fn a_broken_or_foreign_manifest_is_not_ours() {
+        let home = scratch_dir("plugin-root-broken-manifest");
+        let broken = home.join("broken");
+        fs::create_dir_all(broken.join(".claude-plugin")).unwrap();
+        fs::create_dir_all(broken.join("skills")).unwrap();
+        fs::write(broken.join(".claude-plugin/plugin.json"), "{not json").unwrap();
+        let no_manifest = home.join("bare");
+        fs::create_dir_all(no_manifest.join("skills")).unwrap();
+        assert!(!is_plugin_dir(&broken));
+        assert!(is_plugin_dir(&no_manifest));
     }
 }

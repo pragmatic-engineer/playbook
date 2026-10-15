@@ -19,6 +19,9 @@ use std::path::{Path, PathBuf};
 /// scratch directory, the same split `init::shim`
 /// already draw between resolving paths and acting on them.
 pub struct InitPaths {
+    /// The installed playbook plugin (`plugin_root::resolve`), whose shipped
+    /// skills init records to notice later edits. `None` when not installed.
+    pub plugin_root: Option<PathBuf>,
     /// Where the shipped template, shell runtime and system prompt live.
     /// `None` when `CLAUDE_PLUGIN_ROOT` is unset and no plugin cache exists, in which case every step
     /// that needs it is skipped rather than guessing a path.
@@ -166,8 +169,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 
     // The skills live in the `playbook` plugin, not in the root the seed files
     // come from, so the skill-edit tracking looks for them separately.
-    let skills_root =
-        crate::plugin_root::find(self_root.and_then(Path::to_str), &paths.claude_home);
+    let skills_root = paths.plugin_root.clone();
     let ctx = migrate::Ctx {
         home: paths.home.clone(),
         claude_home: paths.claude_home.clone(),

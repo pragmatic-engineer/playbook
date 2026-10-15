@@ -65,7 +65,18 @@ pub const HOOKS_PLUGIN_KEY: &str = "playbook-hooks@pragmatic-engineer";
 pub const MARKETPLACE: &str = "pragmatic-engineer";
 
 fn installed_entry(home: &Path, key: &str) -> Option<Option<serde_json::Value>> {
-    let path = home.join(".claude/plugins/installed_plugins.json");
+    installed_value(&home.join(".claude"), key)
+}
+
+/// `key`'s entry in `<claude_home>/plugins/installed_plugins.json`: a list of
+/// scoped entries (version 2) or one object (version 1). `None` when the file
+/// is missing, malformed or does not list `key`.
+pub fn installed_entry_at(claude_home: &Path, key: &str) -> Option<serde_json::Value> {
+    installed_value(claude_home, key).flatten()
+}
+
+fn installed_value(claude_home: &Path, key: &str) -> Option<Option<serde_json::Value>> {
+    let path = claude_home.join("plugins/installed_plugins.json");
     let value: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
     let find = |v: &serde_json::Value| v.get(key).filter(|e| !e.is_null()).cloned();

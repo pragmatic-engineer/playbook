@@ -183,6 +183,7 @@ fn find_step<'a>(outcome: &'a InitOutcome, name: &str) -> &'a StepReport {
 
 fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
     InitPaths {
+        plugin_root: None,
         self_root: Some(self_root()),
         claude_home: claude_home_of(home),
         home: home.to_path_buf(),
@@ -828,6 +829,7 @@ fn missing_self_root_skips_template_dependent_steps() {
     // Arrange: `CLAUDE_PLUGIN_ROOT` unresolved, modelled as `self_root: None`.
     let home = scratch_home("no-root");
     let paths = InitPaths {
+        plugin_root: None,
         self_root: None,
         claude_home: claude_home_of(&home),
         home: home.clone(),
@@ -888,6 +890,7 @@ fn aliases_false_skips_shim_entirely() {
     // Arrange
     let home = scratch_home("no-aliases");
     let paths = InitPaths {
+        plugin_root: None,
         self_root: Some(self_root()),
         claude_home: claude_home_of(&home),
         home: home.clone(),

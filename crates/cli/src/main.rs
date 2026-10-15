@@ -137,10 +137,7 @@ fn main() {
             let claude_home = home.join(".claude");
             let cwd = std::env::current_dir().unwrap_or_default();
             let claude = effort::claude_cap(&claude_home, &cwd);
-            let root = playbook::plugin_root::find(
-                std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
-                &claude_home,
-            );
+            let root = playbook::plugin_root::find_here();
             match sub {
                 playbook::EffortCommand::List { json } => {
                     println!(
@@ -296,10 +293,7 @@ fn main() {
                 let claude_home = home.join(".claude");
                 let cwd = std::env::current_dir().unwrap_or_default();
                 let claude = effort::claude_cap(&claude_home, &cwd);
-                let root = playbook::plugin_root::find(
-                    std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
-                    &claude_home,
-                );
+                let root = playbook::plugin_root::find_here();
                 let resolved = effort::component::resolve_capped(
                     effort::component::Kind::Command,
                     command.as_deref().unwrap_or_default(),
@@ -566,6 +560,7 @@ fn main() {
                 common::paths::RepoScope::Worktree,
             ));
             let paths = InitPaths {
+                plugin_root: playbook::plugin_root::find_here(),
                 repo,
                 self_root,
                 claude_home,
@@ -1152,12 +1147,7 @@ fn main() {
                     commit,
                 } => {
                     let root = plugin_root
-                        .or_else(|| {
-                            playbook::plugin_root::find(
-                                std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
-                                &common::home_dir().join(".claude"),
-                            )
-                        })
+                        .or_else(playbook::plugin_root::find_here)
                         .unwrap_or_default();
                     let dir = std::env::temp_dir()
                         .join(format!("create-pr-step0-{}", std::process::id()));
@@ -1872,7 +1862,12 @@ fn main() {
         Command::Path { kind, create } => {
             if matches!(kind, playbook::PathKind::PluginRoot) {
                 match playbook::plugin_root::resolve_here() {
-                    Ok(found) => println!("{}", found.root.display()),
+                    Ok(found) => {
+                        for note in &found.skipped {
+                            eprintln!("playbook path: skipped {note}");
+                        }
+                        println!("{}", found.root.display());
+                    }
                     Err(err) => {
                         eprintln!("playbook path: {err}");
                         std::process::exit(1);
@@ -2075,10 +2070,7 @@ fn main() {
             DoctorCommand::PendingMigrations => {
                 let home = common::home_dir();
                 let claude_home = home.join(".claude");
-                let self_root = playbook::plugin_root::find(
-                    std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
-                    &claude_home,
-                );
+                let self_root = playbook::plugin_root::find_here();
                 let ctx = init::migrate::Ctx {
                     home,
                     claude_home,

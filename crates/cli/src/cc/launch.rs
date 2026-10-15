@@ -249,7 +249,7 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         &home,
         &home.join(".claude"),
         &cwd_now,
-        std::env::var("CLAUDE_PLUGIN_ROOT").ok().as_deref(),
+        crate::plugin_root::find_here().as_deref(),
         &std::env::temp_dir(),
     ) {
         all.extend(session.args);
