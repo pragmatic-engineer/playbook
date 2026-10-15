@@ -6,6 +6,7 @@
 //! backup, then check PATH.
 //! Install.sh and this share one policy; see `verify`.
 
+pub mod auto;
 pub mod check;
 pub mod download;
 pub mod pathcheck;

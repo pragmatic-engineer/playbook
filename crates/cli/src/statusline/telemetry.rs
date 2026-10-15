@@ -6,7 +6,6 @@
 
 use super::fmt::int_part;
 use std::io::Write;
-use std::path::Path;
 
 fn or_zero(v: &str) -> &str {
     if v.is_empty() {
@@ -27,7 +26,7 @@ pub fn runtime_dir(home: &str, sid: &str) -> std::path::PathBuf {
 pub fn record(home: &str, sid: &str, cost: &str, used: &str, capture_at: i64, now: i64) {
     let dir = runtime_dir(home, sid);
     let _ = std::fs::create_dir_all(&dir);
-    if !dir.is_dir() || !is_writable(&dir) {
+    if !dir.is_dir() || !crate::common::paths::is_writable(&dir) {
         return;
     }
     if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -58,20 +57,4 @@ pub fn record(home: &str, sid: &str, cost: &str, used: &str, capture_at: i64, no
     } else {
         let _ = std::fs::remove_file(&fired);
     }
-}
-
-/// `[[ -w dir ]]`: true when the effective user may write into `dir`.
-#[cfg(unix)]
-fn is_writable(dir: &Path) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-    let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
-        return false;
-    };
-    // SAFETY: `c` is a valid NUL-terminated path for the duration of the call.
-    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
-}
-
-#[cfg(not(unix))]
-fn is_writable(dir: &Path) -> bool {
-    std::fs::metadata(dir).is_ok_and(|m| !m.permissions().readonly())
 }

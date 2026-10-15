@@ -87,6 +87,38 @@ pub struct Cache {
     /// `<version>@<unix seconds>` of the last notice.
     #[serde(default)]
     pub notified: Option<String>,
+    /// `<version>@<unix seconds>` of the last auto update attempt.
+    #[serde(default)]
+    pub tried: Option<String>,
+    /// Why auto holds a version back, found by the detached process.
+    #[serde(default)]
+    pub held: Option<Held>,
+    /// Lines the auto update left for the next command in a terminal.
+    #[serde(default)]
+    pub report: Vec<String>,
+}
+
+/// A version auto does not install, why, and until when (unix seconds).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Held {
+    pub version: String,
+    pub reason: String,
+    pub until: u64,
+}
+
+/// The `<version>@<unix seconds>` stamp `notified` and `tried` hold.
+pub fn stamp(version: &str, now: u64) -> String {
+    format!("{version}@{now}")
+}
+
+/// Whether a `<version>@<unix seconds>` stamp names `version` and is less
+/// than a day old at `now`.
+fn stamped_recently(stamp: Option<&str>, version: &str, now: u64) -> bool {
+    stamp
+        .and_then(|n| n.rsplit_once('@'))
+        .filter(|(v, _)| *v == version)
+        .and_then(|(_, at)| at.parse::<u64>().ok())
+        .is_some_and(|at| at <= now && now - at < DAY_SECS)
 }
 
 impl Cache {
@@ -116,12 +148,20 @@ impl Cache {
 
     /// Whether the notice for `version` showed less than a day before `now`.
     fn shown_recently(&self, version: &str, now: u64) -> bool {
-        self.notified
-            .as_deref()
-            .and_then(|n| n.rsplit_once('@'))
-            .filter(|(v, _)| *v == version)
-            .and_then(|(_, at)| at.parse::<u64>().ok())
-            .is_some_and(|at| at <= now && now - at < DAY_SECS)
+        stamped_recently(self.notified.as_deref(), version, now)
+    }
+
+    /// Whether auto tried `version` less than a day before `now`.
+    pub fn tried_recently(&self, version: &str, now: u64) -> bool {
+        stamped_recently(self.tried.as_deref(), version, now)
+    }
+
+    /// Why auto still holds `version` back at `now`, if it does.
+    pub fn held_reason(&self, version: &str, now: u64) -> Option<&str> {
+        self.held
+            .as_ref()
+            .filter(|h| h.version == version && now < h.until)
+            .map(|h| h.reason.as_str())
     }
 }
 
@@ -271,7 +311,7 @@ pub fn execute(root: &Path, plan: &Plan, now: u64, spawn: &dyn Fn(), print: &mut
             .as_ref()
             .filter(|n| !cache.shown_recently(&n.version, now));
         if let Some(n) = notice {
-            cache.notified = Some(format!("{}@{now}", n.version));
+            cache.notified = Some(stamp(&n.version, now));
         }
         (refresh, notice.map(|n| n.line.clone()))
     });

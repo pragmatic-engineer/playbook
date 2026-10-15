@@ -2282,6 +2282,12 @@ fn main() {
                 yes,
             };
             let result = update::Env::real().and_then(|env| {
+                let root = common::paths::playbook_root_from(&common::home_dir());
+                let _lock = if opts.check || opts.list {
+                    None
+                } else {
+                    Some(update::auto::try_lock(&root).map_err(|e| e.to_string())?)
+                };
                 let mut outcome = update::run(
                     &opts,
                     &env,
