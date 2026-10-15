@@ -36,16 +36,18 @@ impl Component {
 /// The action of a change that a migration handles with no step from the user.
 pub const AUTO_ACTION: &str = "none, migrated automatically";
 
+/// The fields an entry may have.
+const FIELDS: [&str; 5] = ["version", "component", "summary", "action", "migration"];
+
 /// One breaking change.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Entry {
     /// The release that brings the change, as MAJOR.MINOR.PATCH.
     pub version: String,
     pub component: Component,
     /// One plain line that says what changed.
     pub summary: String,
-    /// The command or step the user runs, or "none, migrated automatically".
+    /// The command or step the user runs, or `AUTO_ACTION`.
     pub action: String,
     /// The id of the migration that handles it, when one does.
     pub migration: Option<String>,
@@ -55,46 +57,94 @@ impl Entry {
     /// True when the user has to run something, so an automatic update
     /// should stop and tell them.
     pub fn needs_user(&self) -> bool {
-        self.action.trim() != AUTO_ACTION
+        self.action != AUTO_ACTION
     }
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct File {
-    entries: Vec<Entry>,
+    entries: Vec<serde_json::Value>,
 }
 
-/// Parses and checks a record. Every version is MAJOR.MINOR.PATCH, and the
-/// summary, action and migration id are each one non empty line.
+/// Parses and checks a record strictly: an unknown field or a bad entry is
+/// an error. Used for the embedded file and the release guards.
 pub fn parse(text: &str) -> Result<Vec<Entry>, String> {
     let file: File =
         serde_json::from_str(text).map_err(|e| format!("breaking-changes.json: {e}"))?;
-    for (i, e) in file.entries.iter().enumerate() {
-        let at = format!("breaking-changes.json entry {}", i + 1);
-        if !is_plain_version(&e.version) {
-            return Err(format!(
-                "{at}: version '{}' is not MAJOR.MINOR.PATCH",
-                e.version
-            ));
-        }
-        let mut lines = vec![
-            ("summary", e.summary.as_str()),
-            ("action", e.action.as_str()),
-        ];
-        if let Some(id) = &e.migration {
-            lines.push(("migration", id.as_str()));
-        }
-        for (field, value) in lines {
-            if value.trim().is_empty() || value.contains('\n') {
-                return Err(format!("{at}: {field} must be one non empty line"));
+    file.entries
+        .into_iter()
+        .enumerate()
+        .map(|(i, value)| {
+            let at = format!("breaking-changes.json entry {}", i + 1);
+            if let Some(key) = value
+                .as_object()
+                .and_then(|o| o.keys().find(|k| !FIELDS.contains(&k.as_str())))
+            {
+                return Err(format!("{at}: unknown field '{key}'"));
             }
-        }
-    }
-    Ok(file.entries)
+            let entry: Entry = serde_json::from_value(value).map_err(|e| format!("{at}: {e}"))?;
+            validate(&entry).map_err(|e| format!("{at}: {e}"))?;
+            Ok(entry)
+        })
+        .collect()
 }
 
-fn is_plain_version(v: &str) -> bool {
+/// Reads entries the way an older binary must read a newer plugin's list:
+/// unknown fields are ignored, and an entry that does not parse or check,
+/// such as one with a component this binary does not know, is skipped.
+pub fn lenient(values: &[serde_json::Value]) -> Vec<Entry> {
+    values
+        .iter()
+        .filter_map(|v| serde_json::from_value::<Entry>(v.clone()).ok())
+        .filter(|e| validate(e).is_ok())
+        .collect()
+}
+
+/// Checks one entry. The version is MAJOR.MINOR.PATCH. The summary, action
+/// and migration id are each one non empty line with no character that a
+/// shell, a Ruby string or markdown would read as code. An action of
+/// `AUTO_ACTION` names its migration, and a near miss of it is refused.
+pub fn validate(e: &Entry) -> Result<(), String> {
+    if !is_release_version(&e.version) {
+        return Err(format!("version '{}' is not MAJOR.MINOR.PATCH", e.version));
+    }
+    let mut lines = vec![
+        ("summary", e.summary.as_str()),
+        ("action", e.action.as_str()),
+    ];
+    if let Some(id) = &e.migration {
+        lines.push(("migration", id.as_str()));
+    }
+    for (field, value) in lines {
+        if value.trim().is_empty() {
+            return Err(format!("{field} must be one non empty line"));
+        }
+        if value.contains("#{")
+            || value
+                .chars()
+                .any(|c| c.is_control() || matches!(c, '\\' | '"' | '`' | '$' | '<' | '>'))
+        {
+            return Err(format!(
+                "{field} must be one line without control characters, \\, \", `, $, <, > or #{{"
+            ));
+        }
+    }
+    let loose = e.action.trim().trim_end_matches('.');
+    if loose.eq_ignore_ascii_case(AUTO_ACTION) {
+        if e.action != AUTO_ACTION {
+            return Err(format!("action must be exactly '{AUTO_ACTION}'"));
+        }
+        if e.migration.is_none() {
+            return Err(format!("action '{AUTO_ACTION}' needs a migration id"));
+        }
+    }
+    Ok(())
+}
+
+/// MAJOR.MINOR.PATCH with no leading zeros and no pre-release, the only
+/// shape a released version has.
+fn is_release_version(v: &str) -> bool {
     let parts: Vec<&str> = v.split('.').collect();
     parts.len() == 3
         && parts.iter().all(|p| {
@@ -112,9 +162,15 @@ pub fn all() -> &'static [Entry] {
 }
 
 /// The entries of `component` in `entries` with `from < version <= to`,
-/// oldest first. Nothing when `to` is not above `from`.
+/// oldest first. Nothing when `to` is not above `from`, or when either is
+/// not a version (an optional leading `v` and a pre-release are fine), so
+/// an empty or corrupt record never shows the whole history.
 pub fn select(entries: &[Entry], component: Component, from: &str, to: &str) -> Vec<Entry> {
-    if compare(to, from) != Ordering::Greater {
+    let (from, to) = (from.trim_start_matches('v'), to.trim_start_matches('v'));
+    if !crate::plugin_root::is_plain_version(from)
+        || !crate::plugin_root::is_plain_version(to)
+        || compare(to, from) != Ordering::Greater
+    {
         return Vec::new();
     }
     let mut found: Vec<Entry> = entries
@@ -136,7 +192,7 @@ pub fn entries_between(from: &str, to: &str) -> Vec<Entry> {
     select(all(), Component::Playbook, from, to)
 }
 
-/// One short block for stderr, or an empty string when there is nothing.
+/// One short block for the user, or an empty string when there is nothing.
 pub fn render(entries: &[Entry]) -> String {
     if entries.is_empty() {
         return String::new();
@@ -168,6 +224,18 @@ mod tests {
         }
     }
 
+    fn record(
+        version: &str,
+        component: &str,
+        summary: &str,
+        action: &str,
+        migration: &str,
+    ) -> String {
+        format!(
+            r#"{{"entries":[{{"version":"{version}","component":"{component}","summary":"{summary}","action":"{action}","migration":{migration}}}]}}"#
+        )
+    }
+
     #[test]
     fn the_embedded_record_parses_and_names_only_registered_migrations() {
         // Arrange
@@ -196,7 +264,7 @@ mod tests {
             (first.version.as_str(), first.component),
             ("0.26.0", Component::Playbook)
         );
-        assert_eq!(first.action, "brew upgrade playbook or playbook update");
+        assert!(first.needs_user());
     }
 
     #[test]
@@ -223,6 +291,27 @@ mod tests {
         let entries = vec![entry("0.26.0", Component::Playbook)];
         assert!(select(&entries, Component::Playbook, "0.26.0", "0.26.0").is_empty());
         assert!(select(&entries, Component::Playbook, "0.27.0", "0.25.0").is_empty());
+    }
+
+    #[test]
+    fn select_is_empty_when_a_version_is_missing_or_corrupt() {
+        let entries = vec![entry("0.26.0", Component::Playbook)];
+        for from in ["", "latest", "0.25", "0.25.0.1"] {
+            assert!(
+                select(&entries, Component::Playbook, from, "0.27.0").is_empty(),
+                "{from:?}"
+            );
+        }
+        assert!(select(&entries, Component::Playbook, "0.25.0", "").is_empty());
+    }
+
+    #[test]
+    fn select_accepts_a_leading_v() {
+        let entries = vec![entry("0.26.0", Component::Playbook)];
+        assert_eq!(
+            select(&entries, Component::Playbook, "v0.25.0", "v0.26.0").len(),
+            1
+        );
     }
 
     #[test]
@@ -267,27 +356,86 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_a_bad_version_an_empty_line_and_an_unknown_component() {
-        let base = |version: &str, summary: &str, component: &str| {
-            format!(
-                r#"{{"entries":[{{"version":"{version}","component":"{component}","summary":"{summary}","action":"x","migration":null}}]}}"#
-            )
-        };
-        assert!(parse(&base("0.26", "s", "playbook"))
-            .unwrap_err()
-            .contains("MAJOR.MINOR.PATCH"));
-        assert!(parse(&base("0.26.01", "s", "playbook")).is_err());
-        assert!(parse(&base("0.26.0", " ", "playbook"))
-            .unwrap_err()
-            .contains("summary"));
-        assert!(parse(&base("0.26.0", "a\\nb", "playbook"))
-            .unwrap_err()
-            .contains("summary"));
-        assert!(parse(&base("0.26.0", "s", "code")).is_err());
+    fn parse_rejects_a_bad_version_and_an_unknown_component_or_field() {
+        let err = |text: &str| parse(text).unwrap_err();
+        assert!(err(&record("0.26", "playbook", "s", "x", "null")).contains("MAJOR.MINOR.PATCH"));
+        assert!(parse(&record("0.26.01", "playbook", "s", "x", "null")).is_err());
+        assert!(parse(&record("0.26.0", "code", "s", "x", "null")).is_err());
+        assert!(err(r#"{"entries":[{"version":"0.26.0","component":"plugin","summary":"s","action":"x","migration":null,"extra":1}]}"#).contains("unknown field 'extra'"));
         assert!(parse(r#"{"entries":[],"extra":1}"#).is_err());
         assert_eq!(
-            parse(&base("0.26.0", "s", "telemetry")).unwrap()[0].component,
+            parse(&record("0.26.0", "telemetry", "s", "x", "null")).unwrap()[0].component,
             Component::Telemetry
         );
+    }
+
+    #[test]
+    fn parse_checks_the_summary_the_action_and_the_migration_id() {
+        let err = |text: String| parse(&text).unwrap_err();
+        assert!(err(record("0.26.0", "playbook", " ", "x", "null")).contains("summary"));
+        assert!(err(record("0.26.0", "playbook", "a\\nb", "x", "null")).contains("summary"));
+        assert!(err(record("0.26.0", "playbook", "s", "", "null")).contains("action"));
+        assert!(err(record("0.26.0", "playbook", "s", "a\\nb", "null")).contains("action"));
+        assert!(err(record("0.26.0", "playbook", "s", "x", "\"\"")).contains("migration"));
+        assert!(err(record("0.26.0", "playbook", "s", "x", "\"a\\nb\"")).contains("migration"));
+    }
+
+    #[test]
+    fn parse_refuses_text_that_a_shell_ruby_or_markdown_would_run() {
+        for bad in [
+            "run $(id)",
+            "#{system}",
+            "a `b`",
+            "x \\\" y",
+            "<b>",
+            "a\\\\b",
+        ] {
+            let text = record("0.26.0", "playbook", "s", bad, "null");
+            assert!(parse(&text).unwrap_err().contains("action"), "{bad}");
+        }
+        assert!(parse(&record(
+            "0.26.0",
+            "playbook",
+            "it's fine, really",
+            "brew upgrade playbook",
+            "null"
+        ))
+        .is_ok());
+    }
+
+    #[test]
+    fn the_automatic_action_needs_a_migration_and_an_exact_spelling() {
+        let auto =
+            |action: &str, migration: &str| record("0.27.0", "playbook", "s", action, migration);
+        assert!(parse(&auto(AUTO_ACTION, "null"))
+            .unwrap_err()
+            .contains("needs a migration"));
+        assert!(parse(&auto(
+            "None, migrated automatically.",
+            "\"0001-memory-store-move\""
+        ))
+        .unwrap_err()
+        .contains("exactly"));
+        assert!(parse(&auto(AUTO_ACTION, "\"0001-memory-store-move\"")).is_ok());
+    }
+
+    #[test]
+    fn lenient_ignores_unknown_fields_and_skips_entries_it_cannot_read() {
+        // Arrange
+        let values: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+              {"version":"0.32.0","component":"plugin","summary":"s","action":"x","migration":null,"since":"later"},
+              {"version":"0.33.0","component":"future","summary":"s","action":"x","migration":null},
+              {"version":"bad","component":"plugin","summary":"s","action":"x","migration":null}
+            ]"#,
+        )
+        .unwrap();
+
+        // Act
+        let got = lenient(&values);
+
+        // Assert
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].version, "0.32.0");
     }
 }

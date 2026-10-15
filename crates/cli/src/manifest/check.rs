@@ -17,10 +17,11 @@
 use std::path::{Path, PathBuf};
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 17] = [
+const ALLOW_FILES: [&str; 18] = [
     ".gitignore",
     "CHANGELOG.md",
     "intents.json",
+    "breaking-changes.json",
     "README.md",
     "LICENSE",
     "NOTICE",
@@ -157,6 +158,12 @@ mod tests {
     #[test]
     fn rust_toolchain_toml_is_allowlisted() {
         let tracked = vec!["rust-toolchain.toml".to_string()];
+        assert!(violations(&tracked).is_empty());
+    }
+
+    #[test]
+    fn breaking_changes_json_is_allowlisted() {
+        let tracked = vec!["breaking-changes.json".to_string()];
         assert!(violations(&tracked).is_empty());
     }
 

@@ -212,7 +212,7 @@ pub fn min_binary_version(root: &Path) -> Option<String> {
 
 /// `MAJOR.MINOR.PATCH` with an optional `-pre` of ASCII letters, digits and
 /// dots. Anything else never reaches the session message.
-fn is_plain_version(v: &str) -> bool {
+pub(crate) fn is_plain_version(v: &str) -> bool {
     let (core, pre) = v.split_once('-').unwrap_or((v, ""));
     let parts: Vec<&str> = core.split('.').collect();
     parts.len() == 3
