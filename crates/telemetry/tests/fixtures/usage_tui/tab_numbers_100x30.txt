@@ -1,0 +1,30 @@
+╭─┤playbook usage├──┤UTC├──────────────────────────────────────────────────────────────────────────╮
+│last 30 days Aug 5 to Sep 3, 2026  (no previous period to compare)                                │
+│cost          $20.27                                                                              │
+│tokens        618.8K                                                                              │
+│messages          26                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ F1 Charts  F2 Numbers  F3 Sessions
+╭─┤Budget├─────────────────────────────────────────────────────────────────────┤UTC  all projects├─╮
+│Limit unknown: playbook config set --global usage.budget.monthlyUsd <usd> (or weeklyUsd),         │
+│or use Claude Code on Pro or Max with the playbook statusline for the 5 hour and weekly limits.   │
+│this week spend [local history]  $0.00 so far  avg n/a  last week n/a                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─┤³Models├────────────────────────────────────────────────────────────────────────────────────────╮
+│name                                                               msgs  tokens     cost▼ share   │
+│■ opus-5                                                             10  238.0K    $14.25 ■■■■■■··│
+│■ sonnet-5                                                            9  214.2K     $5.85 ■■······│
+│■ haiku-5                                                             7  166.6K     $0.17 ········│
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─┤⁴Projects├─┤v view: projects├───────────────────────────────────────────────────────────────────╮
+│name                                                               msgs  tokens     cost▼ share   │
+│beta                                                                 10  238.0K    $11.85 ■■■■■···│
+│alpha                                                                 9  214.2K     $8.25 ■■■·····│
+│gamma                                                                 7  166.6K     $0.17 ········│
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Tab tab w week m month r range v view / filter h help q quit        updated 01:46:40 UTC, every 5s

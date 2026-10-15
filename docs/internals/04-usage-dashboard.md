@@ -20,7 +20,7 @@ Every command that shows data reads new history first, so you never need to inge
 
 The view is styled after a classic terminal system monitor, and the `default` theme is that look: a black ground, rounded boxes with the key hint and title in the top border (`╭─┤¹Spend per day├──╮`), a gradient on the graphs and the meters, and a highlighted selected row. Each box has its own outline color: spend uses the cpu green, tokens the net purple, models and projects the mem olive, sessions and messages the proc red.
 
-The view needs a screen of at least 80 columns by 24 rows. Below that it says so and draws nothing else. From 36 rows a Budget panel is added under the header (see [Spending limits and budget headroom](#spending-limits-and-budget-headroom)). Resizing needs no handling because every redraw reads the current size. It shows six panels under a header with the range, the cost, the tokens and the messages.
+The view needs a screen of at least 80 columns by 24 rows. Below that it says so and draws nothing else. The panels are split across tabs, three by default: Charts (spend and tokens), Numbers (models, breakdown and the Budget panel, see [Spending limits and budget headroom](#spending-limits-and-budget-headroom)) and Sessions (live sessions and sessions per day). A header with the range, the cost, the tokens and the messages is on every tab, and a tab bar under it names the tabs. The tabs and their panels come from the `usage.ui.layout` config key (see the config keys guide). A layout with one tab keeps the old single screen, with the Budget panel from 36 rows. Resizing needs no handling because every redraw reads the current size.
 
 For `today`, `week` and `month` the header is a comparison: it says which two spans are compared and that they cover the same elapsed span (see [Period comparison](#period-comparison)), then shows cost, tokens and messages for both with the change in amount and percent (`new` when the previous value was zero). Increases are yellow and decreases green, and the sign says it without color. The other ranges show their own totals and say `(no previous period to compare)`. Everything is UTC and the header says so, with the first day of the week when the range is a week.
 
@@ -64,7 +64,9 @@ Keys:
 
 | Key | Action |
 |---|---|
-| `1` to `6`, `Tab`, `Shift-Tab` | Focus a panel. The focused panel's hint is a badge. |
+| `Tab`, `Shift-Tab` | Show the next or previous tab. With one tab they move the panel focus instead. |
+| `F1` to `F9` | Show a tab by its number. |
+| `1` to `6`, `]`, `[` | Focus a panel of the current tab by its number, or the next or previous one. The focused panel's hint is a badge. |
 | `Left`, `Right` | Move the chart cursor one day (or one bar). `Home`, `End`, `g`, `G` jump to the ends while a chart has the focus. |
 | `Up`, `Down`, `j`, `k`, `PageUp`, `PageDown`, `Home`, `End`, `g`, `G` | Move the selected row of the focused table. |
 | `v` | Change the view of the focused panel, and only that panel. With Spend focused it steps total, by model and daily table. With Projects focused it steps projects, agents, skills, tools and health. On the other four panels it does nothing. The title of Spend and Projects always shows `v view: <name>`, and the other panels show no such tag. |
@@ -84,7 +86,7 @@ Keys:
 
 The view is keyboard only, so the terminal's own text selection and scrolling keep working.
 
-**Help window.** `h` or `?` opens a centered window over the panels. It groups the keys (navigation, periods, views, sorting, filtering, refresh, quit) and says which panels each key acts on. It is sized for 80 by 24, and when the screen is shorter than the text the arrows, `PageUp`, `PageDown`, `Home` and `End` scroll it. Any other key closes it, and `Ctrl-C` still quits. Data keeps refreshing underneath and nothing the user set (focus, selection, sorts, views, cursor) changes. The key handler, the footer hints and the help window all read one table, `BINDINGS` in `crates/telemetry/src/tui/keys.rs`, so the help cannot list a key that does not work or miss one that does. A test presses every key on every panel and fails if one changes anything without a row in the table. The footer shows each hint with its verb (`m month`, `/ filter`, `h help`), and on a narrow screen drops hints in the table's `drop` order, always keeping `v view`, `/ filter`, `h help` and `q quit`.
+**Help window.** `h` or `?` opens a centered window over the panels. It groups the keys (navigation, periods, views, sorting, filtering, refresh, quit) and says which panels each key acts on. It is sized for 80 by 24, and when the screen is shorter than the text the arrows, `PageUp`, `PageDown`, `Home` and `End` scroll it. Any other key closes it, and `Ctrl-C` still quits. Data keeps refreshing underneath and nothing the user set (focus, selection, sorts, views, cursor) changes. The key handler, the footer hints and the help window all read one table, `BINDINGS` in `crates/telemetry/src/tui/keys.rs`, so the help cannot list a key that does not work or miss one that does. A test presses every key on every panel and fails if one changes anything without a row in the table. The footer shows each hint with its verb (`m month`, `/ filter`, `h help`), and on a narrow screen drops hints in the table's `drop` order, always keeping `v view`, `/ filter`, `h help` and `q quit`, and `Tab tab` when there is more than one tab.
 
 ### Ranges
 

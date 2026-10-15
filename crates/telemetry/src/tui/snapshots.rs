@@ -906,3 +906,25 @@ fn the_header_has_no_icon_in_plain_text_mode() {
     assert!(plain.contains("\u{2500}\u{2524}playbook usage"), "{plain}");
     assert!(!plain.contains('\u{1F4FA}'));
 }
+
+fn tabbed(tab: usize) -> App {
+    let mut a = app(Theme::Standard);
+    a.layout = crate::tui::layout::Layout::default();
+    a.go_tab(tab as isize);
+    a
+}
+
+#[test]
+fn the_charts_tab_stacks_the_two_charts_at_100x30() {
+    check("tab_charts_100x30", &draw(&tabbed(0), 100, 30));
+}
+
+#[test]
+fn the_numbers_tab_shows_the_tables_and_the_budget_at_100x30() {
+    check("tab_numbers_100x30", &draw(&tabbed(1), 100, 30));
+}
+
+#[test]
+fn the_sessions_tab_stacks_live_and_sessions_at_80x24() {
+    check("tab_sessions_80x24", &draw(&tabbed(2), 80, 24));
+}
