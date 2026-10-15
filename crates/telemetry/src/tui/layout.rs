@@ -57,6 +57,20 @@ impl PanelId {
         }
     }
 
+    /// The focusable panel behind this id. The budget strip has none.
+    pub fn panel(self) -> Option<super::sort::Panel> {
+        use super::sort::Panel;
+        match self {
+            PanelId::Spend => Some(Panel::Spend),
+            PanelId::Tokens => Some(Panel::Tokens),
+            PanelId::Models => Some(Panel::Models),
+            PanelId::Breakdown => Some(Panel::Projects),
+            PanelId::Live => Some(Panel::Live),
+            PanelId::Sessions => Some(Panel::Sessions),
+            PanelId::Budget => None,
+        }
+    }
+
     pub fn parse(word: &str) -> Option<PanelId> {
         let word = word.trim().to_ascii_lowercase();
         ALL.into_iter().find(|p| p.word() == word)
@@ -100,6 +114,16 @@ impl Default for Layout {
 }
 
 impl Layout {
+    /// One tab with every panel: the single screen pbtop had before tabs.
+    pub fn classic() -> Layout {
+        Layout {
+            tabs: vec![Tab {
+                name: "All".to_string(),
+                panels: ALL.to_vec(),
+            }],
+        }
+    }
+
     /// Reads `Name=panel,panel;Name=panel`. The error says what is wrong.
     pub fn parse(text: &str) -> Result<Layout, String> {
         let mut tabs: Vec<Tab> = Vec::new();
