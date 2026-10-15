@@ -102,7 +102,7 @@ const BREAKING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10)
 /// did not start or did not answer in time is an error, so the update can say
 /// the check did not run.
 pub fn breaking_notice(exe: &Path, since: &str) -> Result<String, String> {
-    let out = run_fresh(exe, &["breaking", "--since", since, "--json"], BREAKING_TIMEOUT)
+    let out = run_fresh(exe, &["breaking", "--since", since, "--json"], &[], BREAKING_TIMEOUT)
         .ok_or_else(|| {
             format!(
                 "could not read the breaking changes of the new binary within {} s; run `playbook breaking --since {since}` after the update",
@@ -127,9 +127,13 @@ const HEAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// instead. Returns the command that ran and what it printed. Best effort: a
 /// release older than `FIRST_FIX_VERSION` is skipped, and any failure is a
 /// warning that names the command that ran and carries the lines it printed.
+/// `shown` says the update already printed the breaking changes block, so
+/// the heal gets `PLAYBOOK_BREAKING_SHOWN=1` and records it without printing
+/// it again (ADR 0035).
 pub fn heal_after_swap(
     exe: &Path,
     installed: &str,
+    shown: bool,
 ) -> Result<Option<(&'static str, String)>, String> {
     if resolve::compare(installed, FIRST_FIX_VERSION).is_lt() {
         return Ok(None);
@@ -141,10 +145,10 @@ pub fn heal_after_swap(
         )
     };
     let mut name = "migrate";
-    let mut out = run_heal(exe, &[name]).ok_or_else(|| late(name))?;
+    let mut out = run_heal(exe, &[name], shown).ok_or_else(|| late(name))?;
     if out.status.code() == Some(2) {
         name = "doctor --fix";
-        out = run_heal(exe, &["doctor", "--fix"]).ok_or_else(|| late(name))?;
+        out = run_heal(exe, &["doctor", "--fix"], shown).ok_or_else(|| late(name))?;
     }
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     if !out.status.success() {
@@ -166,23 +170,33 @@ pub fn heal_after_swap(
     Ok(Some((name, text)))
 }
 
-/// Runs `<exe> <args>` with the heal deadline.
-fn run_heal(exe: &Path, args: &[&str]) -> Option<std::process::Output> {
-    run_fresh(exe, args, HEAL_TIMEOUT)
+/// Runs `<exe> <args>` with the heal deadline, telling it whether the
+/// update already showed the breaking changes block.
+fn run_heal(exe: &Path, args: &[&str], shown: bool) -> Option<std::process::Output> {
+    let flag = if shown { "1" } else { "" };
+    run_fresh(
+        exe,
+        args,
+        &[("PLAYBOOK_BREAKING_SHOWN", flag)],
+        HEAL_TIMEOUT,
+    )
 }
 
-/// Runs a freshly written binary with a deadline. A spawn that fails at once
-/// (a fresh binary can be refused while another process still holds it open)
-/// is tried again twice.
+/// Runs a freshly written binary with `envs` set and a deadline. A spawn that
+/// fails at once (a fresh binary can be refused while another process still
+/// holds it open) is tried again twice.
 fn run_fresh(
     exe: &Path,
     args: &[&str],
+    envs: &[(&str, &str)],
     timeout: std::time::Duration,
 ) -> Option<std::process::Output> {
     for _ in 0..3 {
         let started = std::time::Instant::now();
         let mut cmd = std::process::Command::new(exe);
-        cmd.args(args).stdin(std::process::Stdio::null());
+        cmd.args(args)
+            .envs(envs.iter().copied())
+            .stdin(std::process::Stdio::null());
         if let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, timeout) {
             return Some(out);
         }
@@ -200,7 +214,7 @@ pub fn finish_with_heal(outcome: &mut Outcome, exe: &Path) {
     let Some(version) = outcome.installed.clone() else {
         return;
     };
-    match heal_after_swap(exe, &version) {
+    match heal_after_swap(exe, &version, !outcome.breaking.is_empty()) {
         Ok(Some((name, text))) => outcome
             .out
             .extend(text.lines().map(|l| format!("{name}: {l}"))),
@@ -621,9 +635,38 @@ mod tests {
     }
 
     #[test]
+    fn the_heal_is_told_when_the_update_already_showed_the_block() {
+        // Arrange
+        let env = env_in("heal-shown");
+        std::fs::write(
+            &env.exe,
+            "#!/bin/sh\necho \"shown=${PLAYBOOK_BREAKING_SHOWN:-unset}\"\n",
+        )
+        .unwrap();
+        swap::make_executable(&env.exe).unwrap();
+        let mut shown = Outcome {
+            installed: Some("0.27.0".into()),
+            breaking: "Breaking changes in this upgrade:\n".into(),
+            ..Outcome::default()
+        };
+        let mut quiet = Outcome {
+            installed: Some("0.27.0".into()),
+            ..Outcome::default()
+        };
+
+        // Act
+        finish_with_heal(&mut shown, &env.exe);
+        finish_with_heal(&mut quiet, &env.exe);
+
+        // Assert
+        assert_eq!(shown.out, vec!["migrate: shown=1"]);
+        assert_eq!(quiet.out, vec!["migrate: shown=unset"]);
+    }
+
+    #[test]
     fn the_heal_after_a_swap_skips_releases_without_doctor_fix() {
         let env = env_in("heal-old");
-        assert_eq!(heal_after_swap(&env.exe, "0.26.0"), Ok(None));
+        assert_eq!(heal_after_swap(&env.exe, "0.26.0", false), Ok(None));
     }
 
     #[test]
@@ -646,19 +689,19 @@ mod tests {
             "#!/bin/sh\necho 'failed: state: locked'\nexit 1\n",
         )
         .unwrap();
-        let failed = heal_after_swap(&env.exe, "1.0.0").unwrap_err();
+        let failed = heal_after_swap(&env.exe, "1.0.0", false).unwrap_err();
         std::fs::write(
             &env.exe,
             "#!/bin/sh\n[ \"$1\" = migrate ] && exit 2\necho \"ran: $*\"\n",
         )
         .unwrap();
-        let older = heal_after_swap(&env.exe, "0.27.0").unwrap();
+        let older = heal_after_swap(&env.exe, "0.27.0", false).unwrap();
         std::fs::write(
             &env.exe,
             "#!/bin/sh\n[ \"$1\" = migrate ] && exit 2\necho 'failed: x'\nexit 1\n",
         )
         .unwrap();
-        let older_failed = heal_after_swap(&env.exe, "0.27.0").unwrap_err();
+        let older_failed = heal_after_swap(&env.exe, "0.27.0", false).unwrap_err();
 
         // Assert
         assert_eq!(done.out, vec!["migrate: ran: migrate"]);
