@@ -837,6 +837,10 @@ fn check(c: &Case) -> Vec<String> {
     if !c.writes && before != after_first {
         bad.push(format!("wrote files: {:?}", diff(&before, &after_first)));
     }
+    let (after_first, after_second) = (
+        without_sidecars(after_first),
+        without_sidecars(after_second),
+    );
     if !c.grows && after_first != after_second {
         bad.push(format!(
             "not idempotent: {:?}",
@@ -844,6 +848,19 @@ fn check(c: &Case) -> Vec<String> {
         ));
     }
     bad
+}
+
+/// The snapshot without SQLite's `-wal` and `-shm` files. A command that
+/// opens the database from parallel threads leaves them or not depending on
+/// which connection closes last, so their presence says nothing about
+/// whether a second run changed state. The "wrote files" check still sees
+/// them, so a read-only command that leaves them fails.
+fn without_sidecars(mut map: BTreeMap<PathBuf, u64>) -> BTreeMap<PathBuf, u64> {
+    map.retain(|p, _| {
+        let name = p.file_name().unwrap_or_default().to_string_lossy();
+        !(name.ends_with(".db-wal") || name.ends_with(".db-shm"))
+    });
+    map
 }
 
 fn diff(a: &BTreeMap<PathBuf, u64>, b: &BTreeMap<PathBuf, u64>) -> Vec<String> {
