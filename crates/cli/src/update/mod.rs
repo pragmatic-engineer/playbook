@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook update`: fetch a release binary, verify it (SHA256SUMS, then the
-//! build attestation), show the breaking changes it brings, swap it in with a
-//! backup, then check PATH.
+//! build attestation), show its release notes, swap it in with a backup,
+//! then check PATH.
 //! Install.sh and this share one policy; see `verify`.
 
 pub mod auto;
@@ -42,8 +42,9 @@ pub struct Env {
     pub current_version: String,
     pub api_base: String,
     pub download_base: String,
-    /// Shows text to the user at once, before the swap: the breaking
-    /// changes block.
+    /// The playbook folder, where the release notes are recorded as shown.
+    pub root: PathBuf,
+    /// Shows text to the user at once, before the swap: the release notes.
     pub announce: fn(&str),
 }
 
@@ -65,6 +66,7 @@ impl Env {
             current_version: env!("CARGO_PKG_VERSION").to_string(),
             api_base: api_base(),
             download_base: format!("https://github.com/{REPO}/releases/download"),
+            root: crate::common::paths::playbook_root(),
             announce: |text| eprint!("{text}"),
         })
     }
@@ -82,44 +84,15 @@ pub struct Outcome {
     pub warnings: Vec<String>,
     /// The version swapped in, when the update replaced the binary.
     pub installed: Option<String>,
-    /// The breaking changes block of the new binary, shown again after the
-    /// swap and the heal. Empty when the upgrade crosses none.
-    pub breaking: String,
-    /// The version the shown block started from, set where the block is
-    /// announced. The heal gets it so it does not print the block again.
-    pub breaking_shown_since: Option<String>,
+    /// The release notes of an upgrade (ADR 0037), shown before the swap and
+    /// again after the swap and the heal. Empty for any other run.
+    pub notes: String,
 }
 
 /// The first release whose binary has `doctor --fix`; `migrate` comes in the
 /// same or a later one. The `-0` sorts below every 0.27.0 pre-release, so a
 /// release candidate counts too.
 pub const FIRST_FIX_VERSION: &str = "0.27.0-0";
-
-/// How long `update` waits for the new binary's breaking change list.
-const BREAKING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-
-/// Asks the binary at `exe` for the playbook entries newer than `since`
-/// (ADR 0035), as JSON, and renders them with this binary. A binary without
-/// the `breaking` command is older than this one, so a failed exit or output
-/// that is not the JSON list means there is nothing to show. A binary that
-/// did not start or did not answer in time is an error, so the update can say
-/// the check did not run.
-pub fn breaking_notice(exe: &Path, since: &str) -> Result<String, String> {
-    let out = run_fresh(exe, &["breaking", "--since", since, "--json"], &[], BREAKING_TIMEOUT)
-        .ok_or_else(|| {
-            format!(
-                "could not read the breaking changes of the new binary within {} s; run `playbook breaking --since {since}` after the update",
-                BREAKING_TIMEOUT.as_secs()
-            )
-        })?;
-    if !out.status.success() {
-        return Ok(String::new());
-    }
-    let Ok(values) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) else {
-        return Ok(String::new());
-    };
-    Ok(crate::breaking::render(&crate::breaking::lenient(&values)))
-}
 
 /// How long `update` waits for the new binary's `migrate`.
 const HEAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
@@ -130,13 +103,9 @@ const HEAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// instead. Returns the command that ran and what it printed. Best effort: a
 /// release older than `FIRST_FIX_VERSION` is skipped, and any failure is a
 /// warning that names the command that ran and carries the lines it printed.
-/// `shown_since` is the version the block the update printed started from.
-/// The heal gets it in `breaking::SHOWN_ENV`, so it records the notice
-/// without printing those entries again (ADR 0035 decision 4.2).
 pub fn heal_after_swap(
     exe: &Path,
     installed: &str,
-    shown_since: Option<&str>,
 ) -> Result<Option<(&'static str, String)>, String> {
     if resolve::compare(installed, FIRST_FIX_VERSION).is_lt() {
         return Ok(None);
@@ -148,13 +117,12 @@ pub fn heal_after_swap(
         )
     };
     let mut name = "migrate";
-    let mut out = run_heal(exe, &[name], shown_since).ok_or_else(|| late(name))?;
+    let mut out = run_fresh(exe, &[name], HEAL_TIMEOUT).ok_or_else(|| late(name))?;
     if out.status.code() == Some(2) {
         name = "doctor --fix";
-        out = run_heal(exe, &["doctor", "--fix"], shown_since).ok_or_else(|| late(name))?;
+        out = run_fresh(exe, &["doctor", "--fix"], HEAL_TIMEOUT).ok_or_else(|| late(name))?;
     }
-    // The new binary prints the breaking changes block (ADR 0035) on stderr
-    // and records it as shown, so it is passed on with the report.
+    // Whatever the new binary prints on stderr is passed on with the report.
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stderr),
@@ -179,29 +147,18 @@ pub fn heal_after_swap(
     Ok(Some((name, text)))
 }
 
-/// Runs `<exe> <args>` with the heal deadline, telling it where the block
-/// the update showed started. An empty value, rather than none, overrides a
-/// value inherited from a shell that an older install.sh exported it into.
-fn run_heal(exe: &Path, args: &[&str], shown_since: Option<&str>) -> Option<std::process::Output> {
-    let shown = [(crate::breaking::SHOWN_ENV, shown_since.unwrap_or(""))];
-    run_fresh(exe, args, &shown, HEAL_TIMEOUT)
-}
-
-/// Runs a freshly written binary with `envs` set and a deadline. A spawn that
-/// fails at once (a fresh binary can be refused while another process still
-/// holds it open) is tried again twice.
+/// Runs a freshly written binary with a deadline. A spawn that fails at once
+/// (a fresh binary can be refused while another process still holds it open)
+/// is tried again twice.
 fn run_fresh(
     exe: &Path,
     args: &[&str],
-    envs: &[(&str, &str)],
     timeout: std::time::Duration,
 ) -> Option<std::process::Output> {
     for _ in 0..3 {
         let started = std::time::Instant::now();
         let mut cmd = std::process::Command::new(exe);
-        cmd.args(args)
-            .envs(envs.iter().copied())
-            .stdin(std::process::Stdio::null());
+        cmd.args(args).stdin(std::process::Stdio::null());
         if let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, timeout) {
             return Some(out);
         }
@@ -214,12 +171,17 @@ fn run_fresh(
 }
 
 /// Runs the heal after a swap, when `outcome` names an installed version,
-/// and adds its lines to `outcome`.
-pub fn finish_with_heal(outcome: &mut Outcome, exe: &Path) {
+/// and adds its lines to `outcome`. After an upgrade, whose notes the update
+/// printed, the new version is recorded as shown first, so the heal does not
+/// print the release notes line as well (ADR 0037 decision 5.1).
+pub fn finish_with_heal(outcome: &mut Outcome, env: &Env) {
     let Some(version) = outcome.installed.clone() else {
         return;
     };
-    match heal_after_swap(exe, &version, outcome.breaking_shown_since.as_deref()) {
+    if !outcome.notes.is_empty() {
+        crate::notices::record(&env.root, &version);
+    }
+    match heal_after_swap(&env.exe, &version) {
         Ok(Some((name, text))) => outcome
             .out
             .extend(text.lines().map(|l| format!("{name}: {l}"))),
@@ -361,14 +323,17 @@ pub fn run(
     }
 
     if order.is_gt() {
-        match breaking_notice(&stage, current) {
-            Ok(text) => o.breaking = text,
-            Err(warning) => o.warnings.push(warning),
-        }
-        if !o.breaking.is_empty() {
-            (env.announce)(&o.breaking);
-            o.breaking_shown_since = Some(current.to_string());
-        }
+        // The notes never fail an update: without them, only the link shows.
+        let notes = match crate::release_notes::fetch(fetcher, &base, Some(&sums)) {
+            Ok(notes) => notes,
+            Err(err) => {
+                o.warnings
+                    .push(format!("the release notes were not shown: {err}"));
+                None
+            }
+        };
+        o.notes = crate::release_notes::render(notes.as_ref(), current, &version);
+        (env.announce)(&o.notes);
     }
 
     let done = swap::install(&stage, &env.exe, current, &version, smoke)?;
@@ -413,7 +378,7 @@ mod tests {
         swap::make_executable(&exe).unwrap();
         Env {
             exe,
-            path_var: dir.into_os_string(),
+            path_var: dir.clone().into_os_string(),
             auto_mode: false,
             strict: false,
             windows: false,
@@ -422,6 +387,7 @@ mod tests {
             current_version: "0.16.0".into(),
             api_base: API.into(),
             download_base: DL.into(),
+            root: dir.join("root"),
             announce: announce_to_test,
         }
     }
@@ -438,20 +404,32 @@ mod tests {
         ANNOUNCED.with(|a| a.borrow_mut().drain(..).collect())
     }
 
-    /// A 0.17.0 binary whose `breaking --since <v> --json` lists one entry.
-    fn breaking_script() -> Vec<u8> {
-        concat!(
-            "#!/bin/sh\n",
-            "if [ \"$*\" = 'breaking --since 0.16.0 --json' ]; then\n",
-            "  echo '[{\"version\":\"0.17.0\",\"component\":\"playbook\",",
-            "\"summary\":\"The old flag is gone.\",\"action\":\"playbook setup\",",
-            "\"migration\":null}]'\n",
-            "elif [ \"$1\" = breaking ]; then exit 2\n",
-            "else echo 'playbook 0.17.0'; fi\n"
-        )
-        .as_bytes()
-        .to_vec()
+    const NOTES: &str = r#"{"format":1,"component":"playbook","version":"0.17.0","tag":"v0.17.0",
+        "previous":"0.16.0","previous_tag":"v0.16.0","date":"2026-10-16","sections":[
+        {"name":"breaking","title":"Breaking changes","items":[
+        {"type":"feat","scope":null,"text":"The old flag is gone; run playbook setup","pr":7,"breaking":true}]}]}"#;
+
+    /// The fixture with release-notes.json, listed in SHA256SUMS with the
+    /// hash of `notes_hash_of`.
+    fn fixture_with_notes(binary: &[u8], notes_hash_of: &[u8]) -> FakeFetcher {
+        let mut f = fixture(binary, binary);
+        let url = format!("{DL}/v0.17.0/SHA256SUMS");
+        let mut sums = String::from_utf8(f.0[&url].clone()).unwrap();
+        sums.push_str(&format!(
+            "{}  {}\n",
+            verify::sha256_hex(notes_hash_of),
+            crate::release_notes::ASSET
+        ));
+        f.0.insert(url, sums.into_bytes());
+        f.0.insert(
+            format!("{DL}/v0.17.0/{}", crate::release_notes::ASSET),
+            NOTES.into(),
+        );
+        f
     }
+
+    const LINK: &str =
+        "Full notes: https://github.com/pragmatic-engineer/playbook/releases/tag/v0.17.0\n";
 
     fn fixture(binary: &[u8], sums_hash_of: &[u8]) -> FakeFetcher {
         let asset = "playbook-0.17.0-x86_64-unknown-linux-musl";
@@ -552,10 +530,37 @@ mod tests {
     }
 
     #[test]
-    fn an_update_shows_the_new_binary_s_breaking_changes_before_the_swap() {
+    fn an_update_shows_the_breaking_changes_of_the_release_before_the_swap() {
         // Arrange
-        let env = env_in("up-breaking");
-        let bin = breaking_script();
+        let env = env_in("up-notes");
+        let bin = script_bytes("0.17.0");
+        announced();
+
+        // Act
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture_with_notes(&bin, NOTES.as_bytes()),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(
+            out.notes,
+            format!("Breaking changes in playbook 0.17.0:\n  - The old flag is gone; run playbook setup (#7)\n{LINK}")
+        );
+        assert_eq!(announced(), vec![out.notes.clone()]);
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+        assert_eq!(out.installed.as_deref(), Some("0.17.0"));
+    }
+
+    #[test]
+    fn a_release_without_notes_shows_only_the_link() {
+        // Arrange
+        let env = env_in("up-no-notes");
+        let bin = script_bytes("0.17.0");
         announced();
 
         // Act
@@ -569,24 +574,51 @@ mod tests {
         .unwrap();
 
         // Assert
-        assert_eq!(
-            out.breaking,
-            "Breaking changes in this upgrade:\n  playbook 0.17.0: The old flag is gone.\n    Action: playbook setup\n"
-        );
-        assert_eq!(announced(), vec![out.breaking.clone()]);
+        assert_eq!(out.notes, LINK);
+        assert_eq!(announced(), vec![LINK.to_string()]);
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
         assert_eq!(out.installed.as_deref(), Some("0.17.0"));
     }
 
     #[test]
-    fn the_block_is_shown_before_a_swap_that_fails() {
-        let env = env_in("up-breaking-fail");
-        let bin = breaking_script();
+    fn notes_that_do_not_match_their_checksum_show_only_the_link_and_a_warning() {
+        // Arrange
+        let env = env_in("up-notes-bad");
+        let bin = script_bytes("0.17.0");
+        announced();
+
+        // Act
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture_with_notes(&bin, b"other bytes"),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(out.notes, LINK);
+        assert!(
+            out.warnings
+                .iter()
+                .any(|w| w.starts_with("the release notes were not shown")),
+            "{:?}",
+            out.warnings
+        );
+        assert_eq!(out.installed.as_deref(), Some("0.17.0"));
+    }
+
+    #[test]
+    fn the_notes_are_shown_before_a_swap_that_fails() {
+        let env = env_in("up-notes-fail");
+        let bin = script_bytes("0.17.0");
         announced();
 
         let err = run(
             &Options::default(),
             &env,
-            &fixture(&bin, &bin),
+            &fixture_with_notes(&bin, NOTES.as_bytes()),
             &ok_attest(),
             &|_: &Path| Err("smoke test failed".to_string()),
         )
@@ -598,29 +630,10 @@ mod tests {
     }
 
     #[test]
-    fn a_new_binary_without_the_breaking_command_shows_nothing() {
-        let env = env_in("up-no-breaking");
-        let bin = script_bytes("0.17.0");
-        announced();
-
-        let out = run(
-            &Options::default(),
-            &env,
-            &fixture(&bin, &bin),
-            &ok_attest(),
-            &swap::run_version,
-        )
-        .unwrap();
-
-        assert_eq!(out.breaking, "");
-        assert!(announced().is_empty());
-    }
-
-    #[test]
-    fn a_downgrade_shows_no_breaking_changes() {
-        let mut env = env_in("up-down-breaking");
+    fn a_downgrade_shows_no_notes() {
+        let mut env = env_in("up-down-notes");
         env.current_version = "0.19.0".into();
-        let bin = breaking_script();
+        let bin = script_bytes("0.17.0");
         let opts = Options {
             version: Some("0.17.0".into()),
             ..Options::default()
@@ -630,61 +643,60 @@ mod tests {
         let out = run(
             &opts,
             &env,
-            &fixture(&bin, &bin),
+            &fixture_with_notes(&bin, NOTES.as_bytes()),
             &ok_attest(),
             &swap::run_version,
         )
         .unwrap();
 
-        assert_eq!(out.breaking, "");
+        assert_eq!(out.notes, "");
         assert!(announced().is_empty());
     }
 
     #[test]
-    fn the_heal_is_told_when_the_update_already_showed_the_block() {
+    fn an_upgrade_records_its_notes_as_shown_before_the_heal() {
         // Arrange
         let env = env_in("heal-shown");
         std::fs::write(
             &env.exe,
-            "#!/bin/sh\necho \"shown=${PLAYBOOK_BREAKING_SHOWN-unset}\"\n",
+            "#!/bin/sh
+echo ran\n",
         )
         .unwrap();
         swap::make_executable(&env.exe).unwrap();
         let mut shown = Outcome {
             installed: Some("0.27.0".into()),
-            breaking: "Breaking changes in this upgrade:\n".into(),
-            breaking_shown_since: Some("0.26.0".into()),
+            notes: LINK.into(),
             ..Outcome::default()
         };
-        let mut quiet = Outcome {
-            installed: Some("0.27.0".into()),
-            ..Outcome::default()
-        };
+        let notices =
+            |root: &Path| crate::state::list_read_only(root, "notices/binary").unwrap_or_default();
 
         // Act
-        finish_with_heal(&mut shown, &env.exe);
-        finish_with_heal(&mut quiet, &env.exe);
+        let before = notices(&env.root);
+        finish_with_heal(&mut shown, &env);
+        let after = notices(&env.root);
 
         // Assert
-        assert_eq!(shown.out, vec!["migrate: shown=0.26.0"]);
-        assert_eq!(quiet.out, vec!["migrate: shown="]);
+        assert!(before.is_empty());
+        assert_eq!(
+            after,
+            vec![("notices/binary".to_string(), "0.27.0".to_string())]
+        );
+        assert_eq!(shown.out, vec!["migrate: ran"]);
     }
 
     #[test]
     fn the_heal_after_a_swap_skips_releases_without_doctor_fix() {
         let env = env_in("heal-old");
-        assert_eq!(heal_after_swap(&env.exe, "0.26.0", None), Ok(None));
+        assert_eq!(heal_after_swap(&env.exe, "0.26.0"), Ok(None));
     }
 
     #[test]
     fn the_heal_after_a_swap_runs_the_new_binary_and_reports_its_failure() {
         // Arrange
         let env = env_in("heal-run");
-        std::fs::write(
-            &env.exe,
-            "#!/bin/sh\necho 'Breaking changes in this upgrade:' >&2\necho \"ran: $*\"\n",
-        )
-        .unwrap();
+        std::fs::write(&env.exe, "#!/bin/sh\necho 'a note' >&2\necho \"ran: $*\"\n").unwrap();
         swap::make_executable(&env.exe).unwrap();
         let mut done = Outcome {
             installed: Some("0.27.0-rc.1".into()),
@@ -692,36 +704,30 @@ mod tests {
         };
 
         // Act
-        finish_with_heal(&mut done, &env.exe);
+        finish_with_heal(&mut done, &env);
         let mut untouched = Outcome::default();
-        finish_with_heal(&mut untouched, &env.exe);
+        finish_with_heal(&mut untouched, &env);
         std::fs::write(
             &env.exe,
             "#!/bin/sh\necho 'failed: state: locked'\nexit 1\n",
         )
         .unwrap();
-        let failed = heal_after_swap(&env.exe, "1.0.0", None).unwrap_err();
+        let failed = heal_after_swap(&env.exe, "1.0.0").unwrap_err();
         std::fs::write(
             &env.exe,
             "#!/bin/sh\n[ \"$1\" = migrate ] && exit 2\necho \"ran: $*\"\n",
         )
         .unwrap();
-        let older = heal_after_swap(&env.exe, "0.27.0", None).unwrap();
+        let older = heal_after_swap(&env.exe, "0.27.0").unwrap();
         std::fs::write(
             &env.exe,
             "#!/bin/sh\n[ \"$1\" = migrate ] && exit 2\necho 'failed: x'\nexit 1\n",
         )
         .unwrap();
-        let older_failed = heal_after_swap(&env.exe, "0.27.0", None).unwrap_err();
+        let older_failed = heal_after_swap(&env.exe, "0.27.0").unwrap_err();
 
         // Assert
-        assert_eq!(
-            done.out,
-            vec![
-                "migrate: Breaking changes in this upgrade:",
-                "migrate: ran: migrate"
-            ]
-        );
+        assert_eq!(done.out, vec!["migrate: a note", "migrate: ran: migrate"]);
         assert_eq!(older, Some(("doctor --fix", "ran: doctor --fix\n".into())));
         assert!(
             older_failed.starts_with("doctor --fix exited with")
