@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 /// The embedded record, as committed at build time.
 const EMBEDDED: &str = include_str!("../../../breaking-changes.json");
 
-/// What an entry applies to. From 0.33.0 the plugin shares the playbook
+/// What an entry applies to. From 0.34.0 the plugin shares the playbook
 /// version (ADR 0038), and telemetry keeps its own line until it joins the
 /// `v` tags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]

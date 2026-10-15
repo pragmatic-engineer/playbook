@@ -34,7 +34,7 @@ that folder and updates the plugin when the `version` in `plugin.json` rises,
 which happens when the release pull request merges. ADR 0038 moves the entry
 to a `ref` on the release tag, which the release workflow sets after the
 release is published, starting with the first joint release. There is no separate plugin
-release. The `playbook-plugin-v` tags made before 0.32.0 stay as history. The
+release. The `playbook-plugin-v` tags made before 0.34.0 stay as history. The
 `payload-guard` check keeps the folder to markdown and the manifest.
 
 ## One workflow, one tag prefix per tool

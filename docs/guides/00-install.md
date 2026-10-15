@@ -58,7 +58,7 @@ Pass `--yes` to say yes to every question, including `playbook init`. Flags go a
 Pin a version with `PLAYBOOK_REF`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.33.0 bash
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | PLAYBOOK_REF=v0.34.0 bash
 ```
 
 A release tag installs that release. A branch or commit is refused, because it has no published binary.

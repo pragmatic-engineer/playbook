@@ -34,7 +34,7 @@ Run `just test` for everything, or `cargo nextest run -p playbook-code --config-
 2. In the same pull request, add a `## playbook X.Y.Z` section to the top of `CHANGELOG.md` with the sections that `scripts/release-notes.sh json playbook X.Y.Z` and `scripts/release-notes.sh markdown` print, one heading level lower.
 3. After it merges, push the signed tag `vX.Y.Z` on the merged commit. `release.yml` creates the release if it is missing (with `--latest=false` for every prefix except `v`, so GitHub's latest release stays on the `v` line), builds and uploads the assets, and stops.
 
-The Homebrew tap checks for new releases every 30 minutes and updates the matching formula. Claude Code updates the plugin when it sees the new version on `main`. To rehearse, run the `release` workflow by hand with a `tag` such as `v0.33.0` or `telemetry-v0.2.0`: a manual run is always a dry run that builds without publishing.
+The Homebrew tap checks for new releases every 30 minutes and updates the matching formula. Claude Code updates the plugin when it sees the new version on `main`. To rehearse, run the `release` workflow by hand with a `tag` such as `v0.34.0` or `telemetry-v0.2.0`: a manual run is always a dry run that builds without publishing.
 
 ### Compatibility policy
 
