@@ -12,10 +12,10 @@
 # The workflow creates the GitHub release for the tag when it does not exist,
 # then builds, ad hoc codesigns and uploads the artefacts plus SHA256SUMS, and
 # attests their build provenance. Every release also gets breaking-changes.json
-# as an asset, and its body starts with the release's breaking changes from
-# that file (ADR 0035). verify-version fails when a commit since the previous
-# tag of the tool is marked breaking and the file has no entry for the
-# version. Releases for telemetry-v and code-v tags are created with
+# as an asset, listed in SHA256SUMS, and its body starts with the release's
+# breaking changes from that file (ADR 0035). verify-version fails when a
+# commit since the previous tag of the tool that touches its paths is marked
+# breaking and the file has no entry for the version. Releases for telemetry-v and code-v tags are created with
 # `--latest=false`, so GitHub's "latest release" stays on the playbook
 # `vX.Y.Z` line that install.sh reads.
 #
@@ -218,7 +218,7 @@ jobs:
         env:
           COMPONENT: ${{ needs.resolve.outputs.component }}
           TAG_VERSION: ${{ needs.resolve.outputs.version }}
-          IS_PLAYBOOK: ${{ needs.resolve.outputs.is_playbook }}
+          TOOL: ${{ needs.resolve.outputs.tool }}
         run: |
           set -euo pipefail
           {
@@ -227,8 +227,7 @@ jobs:
             echo "The body starts with this text. A playbook release adds the generated notes after it."
             echo
             echo '~~~markdown'
-            scripts/check-breaking.sh notes "$COMPONENT" "$TAG_VERSION"
-            if [ "$IS_PLAYBOOK" = "true" ]; then cat .github/release-notes-upgrade.md; fi
+            scripts/check-breaking.sh body "$COMPONENT" "$TAG_VERSION" "$TOOL"
             echo '~~~'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -268,7 +267,15 @@ jobs:
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
+            # A release drafted by hand keeps its body, with the breaking
+            # changes put on top when they are not there yet.
             echo "Release $TAG already exists."
+            breaking="$(scripts/check-breaking.sh notes "$COMPONENT" "$VERSION")"
+            current="$(gh release view "$TAG" --json body -q .body)"
+            if [ -n "$breaking" ] && ! grep -q '^## Breaking changes$' <<<"$current"; then
+              printf '%s\n\n%s\n' "$breaking" "$current" > "$RUNNER_TEMP/release-notes.md"
+              gh release edit "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+            fi
             exit 0
           fi
           args=("$TAG" --verify-tag --title "$TOOL $VERSION")
@@ -276,20 +283,17 @@ jobs:
             args+=("$LATEST_FLAG")
           fi
           # The breaking changes go first, then the upgrade note for playbook
-          # or the archive note for other tools.
+          # or the assets note for other tools.
           notes="$RUNNER_TEMP/release-notes.md"
-          scripts/check-breaking.sh notes "$COMPONENT" "$VERSION" > "$notes"
+          scripts/check-breaking.sh body "$COMPONENT" "$VERSION" "$TOOL" > "$notes"
+          args+=(--notes-file "$notes")
           if [ "$IS_PLAYBOOK" = "true" ]; then
-            cat .github/release-notes-upgrade.md >> "$notes"
-            args+=(--notes-file "$notes" --generate-notes)
-          else
-            echo "Release of $TOOL $VERSION. The archives below hold both binaries for each platform, and SHA256SUMS lists their checksums." >> "$notes"
-            args+=(--notes-file "$notes")
+            args+=(--generate-notes)
           fi
           gh release create "${args[@]}"
 
       # The Homebrew tap reads this asset to write a caveat, so every release
-      # carries it, also one that existed before this run.
+      # carries it, including a release that existed before this run.
       - name: Attach breaking-changes.json
         env:
           GH_TOKEN: ${{ github.token }}
@@ -502,7 +506,10 @@ jobs:
             find . -type f
             exit 1
           fi
-          shasum -a 256 "${TOOL}"-* > SHA256SUMS
+          # breaking-changes.json is listed and attested too, so the tap can
+          # check the file it reads.
+          gh release download "$TAG" --pattern breaking-changes.json --clobber
+          shasum -a 256 "${TOOL}"-* breaking-changes.json > SHA256SUMS
           shasum -a 256 -c SHA256SUMS
           cat SHA256SUMS
           gh release upload "$TAG" SHA256SUMS --clobber
@@ -512,4 +519,5 @@ jobs:
         with:
           subject-path: |
             dist/${{ needs.resolve.outputs.tool }}-*
+            dist/breaking-changes.json
             dist/SHA256SUMS

@@ -5,8 +5,9 @@
 # has `!` after the type, or whose body has a BREAKING CHANGE footer, needs an
 # entry in breaking-changes.json for a component it touches, with a version
 # above that component's latest tag. The pull request title and body become
-# the squash commit, so this is where the marker first appears. The release
-# workflow checks the same rule again before it publishes.
+# the squash commit, so this is where the marker first appears. Before a
+# release, verify-version in release.yml and version-bump in plugin-guards.yml
+# check the commits again for the exact version.
 
 name: breaking-changes
 
@@ -34,11 +35,10 @@ jobs:
             api.github.com:443
             github.com:443
 
-      # Full history and tags, so the check can find the merge base and each
-      # component's latest tag.
+      # A shallow checkout. The script fetches the history and the tags only
+      # when the pull request is marked breaking.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 0
           persist-credentials: false
 
       - name: A breaking pull request needs an entry
