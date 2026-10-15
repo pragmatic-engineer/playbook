@@ -884,6 +884,23 @@ pub enum Command {
     },
 }
 
+impl Command {
+    /// Commands that run many times a session or inside other commands:
+    /// hooks, the status line, `shell-init` (every new shell), `version`, and
+    /// the hidden `json` helpers that hook scripts call. Steps that run before
+    /// a command (the first-run heal, the update check) skip them.
+    pub fn is_hot_path(&self) -> bool {
+        matches!(
+            self,
+            Command::Hook { .. }
+                | Command::Statusline
+                | Command::ShellInit { .. }
+                | Command::Version
+                | Command::Json { .. }
+        )
+    }
+}
+
 /// `playbook eval` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum EvalCommand {

@@ -87,6 +87,9 @@ fn main() {
             std::process::exit(1);
         }
     }
+    // The first-run step (ADR 0034 decision 13): heal once after an upgrade,
+    // before most commands. Hot paths returned above or skip it.
+    playbook::heal::on_start(&cli.command);
 
     update::check::on_start(&cli.command, &args);
 
