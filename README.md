@@ -32,6 +32,16 @@ The installer only installs the `playbook` binary (checksum verified) and puts i
 
 To see what `playbook init` changes before you agree, read [What init installs](docs/guides/06-what-init-installs.md) and the [hook reference](docs/reference/hooks.md).
 
+### Telemetry
+
+`playbook init` asks whether to send Claude Code telemetry to a collector on your own machine, and the answer defaults to yes. It writes eight OpenTelemetry variables into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage`. Prompt text and tool content are never sent. Nothing leaves your machine: the collector listens on 127.0.0.1 only, and playbook's `session-init` hook (part of the hooks you install with init) starts it when a session begins. Without those hooks, start it with `playbook usage collect`, or let `playbook cc` do it.
+
+- To turn it on later, or after you declined: `playbook init --only telemetry`.
+- If `CLAUDE_CODE_ENABLE_TELEMETRY` is 0 in `~/.claude/settings.json` and nothing else sets telemetry, `--yes` leaves it alone; answer yes to the question or run `playbook init --only telemetry`. If telemetry is set in project settings, your shell or next to other `OTEL_` keys, init leaves all of it as it is (see [What init installs](docs/guides/06-what-init-installs.md)). `DISABLE_TELEMETRY` and `DO_NOT_TRACK` only turn off Anthropic's own analytics and are left as they are.
+- Restart Claude Code after init, because it reads settings at start.
+- `playbook doctor` checks that settings point at the collector, that it runs, and that rows arrived in the last day.
+- `playbook uninstall` removes exactly the keys init wrote and puts back any value they replaced, unless you changed a key since.
+
 Optional: the standalone usage dashboard for machines without playbook, `brew install pragmatic-engineer/tap/playbook-telemetry`, then run `pbtop`. `pbtop` is the short alias of `playbook-telemetry`. With playbook installed you do not need it, because `playbook usage` runs the same code. The code index gets the same treatment: `pbcode` is the planned alias of the standalone `playbook-code` tool, which has no release yet, so use `playbook code` today.
 
 Pin a version with `PLAYBOOK_REF=v0.26.0`. Update later with `playbook update`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
