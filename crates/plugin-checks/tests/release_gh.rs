@@ -21,8 +21,10 @@ fn text_of(out: &Output) -> String {
 
 /// A fake `gh` on PATH. Each line of `table` is `pattern<TAB>exit<TAB>output`;
 /// the first pattern that matches the arguments as a shell glob answers,
-/// on stdout, and also on stderr when the exit is not 0. Every call is
-/// logged, and a `--input` file is copied next to the log.
+/// on stdout, and also on stderr when the exit is not 0. A pattern that
+/// starts with `1x ` answers once, so the next call gets the row after it.
+/// An answer that is JSON goes through the call's `--jq` filter, as gh does.
+/// Every call is logged, and a `--input` file is copied next to the log.
 struct FakeGh {
     dir: PathBuf,
 }
@@ -43,16 +45,30 @@ dir="$(cd "$(dirname "$0")/.." && pwd)"
 args="$*"
 printf '%s\n' "$args" >> "$dir/log"
 prev=""
+filter=""
 for a in "$@"; do
   if [ "$prev" = "--input" ]; then cp "$a" "$dir/input.json"; fi
+  if [ "$prev" = "--jq" ]; then filter="$a"; fi
   prev="$a"
 done
+n=0
 while IFS=$'\t' read -r pattern code output; do
+  n=$((n + 1))
+  once=""
+  case "$pattern" in "1x "*) pattern="${pattern#1x }"; once=1 ;; esac
   # shellcheck disable=SC2053
   if [[ "$args" == $pattern ]]; then
+    if [ -n "$once" ]; then
+      awk -v n="$n" 'NR != n' "$dir/table" > "$dir/table.new" && mv "$dir/table.new" "$dir/table"
+    fi
     # Like gh, an answer goes to stdout, and an error body goes to stdout
     # with its message on stderr.
-    if [ -n "$output" ]; then printf '%b\n' "$output"; fi
+    if [ -n "$output" ]; then
+      case "$code:$output" in
+        0:\[* | 0:\{*) if [ -n "$filter" ]; then printf '%b\n' "$output" | jq -r "$filter"; else printf '%b\n' "$output"; fi ;;
+        *) printf '%b\n' "$output" ;;
+      esac
+    fi
     if [ -n "$output" ] && [ "$code" != 0 ]; then printf '%b\n' "$output" >&2; fi
     exit "$code"
   fi
@@ -147,21 +163,38 @@ const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const NOT_FOUND: &str = r#"{"message":"Not Found","status":"404"}"#;
 
+const RAW: &str = "api -H Accept: application/vnd.github.raw repos/o/tap/contents/Formula/pbtop.rb?ref=release/v1.0.0";
+
 #[test]
-fn an_open_or_merged_pull_request_is_reused() {
+fn an_open_or_merged_pull_request_from_the_app_is_reused() {
     // Arrange
-    let open = FakeGh::new(&[
-        ("pr list * --state open *", 0, "12"),
+    let open = FakeGh::new(&[]);
+    let (open_work, _) = checkout(&open);
+    open.answer(&[
+        ("api repos/o/tap --jq .default_branch", 0, "main"),
+        (
+            "pr list * --state open *",
+            0,
+            r#"[{"number":5,"isCrossRepository":true},{"number":12,"isCrossRepository":false}]"#,
+        ),
+        (RAW, 0, "class Pbtop\\nend"),
         ("pr merge 12 --repo o/tap --auto --squash", 0, ""),
     ]);
-    let merged = FakeGh::new(&[
-        ("pr list * --state open *", 0, ""),
-        ("pr list * --state merged *", 0, "7"),
+    let merged = FakeGh::new(&[]);
+    let (merged_work, _) = checkout(&merged);
+    merged.answer(&[
+        ("api repos/o/tap --jq .default_branch", 0, "main"),
+        ("pr list * --state open *", 0, "[]"),
+        (
+            "pr list * --state merged *",
+            0,
+            r#"[{"number":7,"isCrossRepository":false}]"#,
+        ),
     ]);
 
     // Act
-    let reused = open.run(&open.dir, &PR_ARGS);
-    let done = merged.run(&merged.dir, &PR_ARGS);
+    let reused = open.run(&open_work, &PR_ARGS);
+    let done = merged.run(&merged_work, &PR_ARGS);
 
     // Assert
     assert_eq!(text_of(&reused), "pr=12\nstate=open\n");
@@ -171,11 +204,69 @@ fn an_open_or_merged_pull_request_is_reused() {
         "auto-merge is turned on again"
     );
     assert!(
-        open.log().contains("--json number,isCrossRepository"),
+        open.log()
+            .contains("--head release/v1.0.0 --base main --state open --app igorjs"),
         "{}",
         open.log()
     );
     assert!(!open.log().contains("graphql") && !merged.log().contains("graphql"));
+}
+
+#[test]
+fn an_open_pull_request_that_differs_from_the_checkout_is_not_reused() {
+    // Arrange
+    let gh = FakeGh::new(&[]);
+    let (work, _) = checkout(&gh);
+    gh.answer(&[
+        ("api repos/o/tap --jq .default_branch", 0, "main"),
+        (
+            "pr list * --state open *",
+            0,
+            r#"[{"number":12,"isCrossRepository":false}]"#,
+        ),
+        (RAW, 0, "class Pbtop\\n  # older\\nend"),
+    ]);
+
+    // Act
+    let out = gh.run(&work, &PR_ARGS);
+
+    // Assert
+    assert!(!out.status.success());
+    assert!(
+        text_of(&out).contains("Formula/pbtop.rb on o/tap#12 differs from the checkout"),
+        "{}",
+        text_of(&out)
+    );
+    assert!(!gh.log().contains("pr merge"), "{}", gh.log());
+}
+
+#[test]
+fn a_file_outside_the_checkout_stops_the_pull_request_before_any_call() {
+    // Arrange
+    let gh = FakeGh::new(&[]);
+    let (work, _) = checkout(&gh);
+    std::os::unix::fs::symlink("/etc/hosts", work.join("Formula/link.rb")).expect("symlink");
+    let mut parent = PR_ARGS;
+    parent[6] = "../body.md";
+    let mut link = PR_ARGS;
+    link[6] = "Formula/link.rb";
+
+    // Act
+    let up = gh.run(&work, &parent);
+    let linked = gh.run(&work, &link);
+
+    // Assert
+    assert!(
+        text_of(&up).contains("'../body.md' is not a plain path"),
+        "{}",
+        text_of(&up)
+    );
+    assert!(
+        text_of(&linked).contains("Formula/link.rb is a symlink"),
+        "{}",
+        text_of(&linked)
+    );
+    assert_eq!(gh.log(), "", "nothing is called");
 }
 
 #[test]
@@ -251,9 +342,14 @@ fn a_rerun_drops_a_stale_branch_and_falls_back_for_a_merge_queue() {
 
     // Assert
     assert!(out.status.success(), "{}", text_of(&out));
-    assert!(gh
-        .log()
-        .contains("api -X DELETE repos/o/tap/git/refs/heads/release/v1.0.0"));
+    let log = gh.log();
+    let delete = log
+        .find("api -X DELETE repos/o/tap/git/refs/heads/release/v1.0.0")
+        .expect("the stale branch is deleted");
+    let create = log
+        .find("api -X POST repos/o/tap/git/refs")
+        .expect("the branch is created");
+    assert!(delete < create, "{log}");
     assert!(
         gh.log().ends_with("pr merge 34 --repo o/tap --auto\n"),
         "{}",
@@ -333,6 +429,15 @@ fn a_tag_is_created_once_and_never_moved() {
             "Repository rule violations found",
         ),
     ]);
+    let raced = FakeGh::new(&[
+        ("1x api repos/o/r/git/ref/tags/v1.0.0", 1, NOT_FOUND),
+        (
+            "api -X POST repos/o/r/git/refs *",
+            1,
+            "Reference already exists",
+        ),
+        ("api repos/o/r/git/ref/tags/v1.0.0", 0, &lightweight),
+    ]);
     let args = ["tag", "o/r", "v1.0.0", A];
 
     // Act
@@ -342,6 +447,7 @@ fn a_tag_is_created_once_and_never_moved() {
     let elsewhere = moved.run(&moved.dir, &args);
     let unknown = broken.run(&broken.dir, &args);
     let blocked = refused.run(&refused.dir, &args);
+    let late = raced.run(&raced.dir, &args);
 
     // Assert
     assert_eq!(text_of(&created), "tag=v1.0.0\nstate=created\n");
@@ -364,6 +470,7 @@ fn a_tag_is_created_once_and_never_moved() {
     assert!(!broken.log().contains("POST"));
     assert_eq!(blocked.status.code(), Some(3), "{}", text_of(&blocked));
     assert!(text_of(&blocked).contains("Repository rule violations"));
+    assert_eq!(text_of(&late), "tag=v1.0.0\nstate=exists\n");
 }
 
 #[test]
@@ -374,11 +481,17 @@ fn a_release_is_created_only_when_missing() {
         ("release view *", 1, ""),
         ("release create *", 0, "https://x/new"),
     ]);
+    let raced = FakeGh::new(&[
+        ("1x release view *", 1, ""),
+        ("release create *", 1, "already exists"),
+        ("release view *", 0, "https://x/v1.0.0"),
+    ]);
     let args = ["release", "o/r", "v1.0.0", "playbook 1.0.0", "notes.md"];
 
     // Act
     let kept = exists.run(&exists.dir, &args);
     let made = missing.run(&missing.dir, &args);
+    let late = raced.run(&raced.dir, &args);
 
     // Assert
     assert_eq!(text_of(&kept), "url=https://x/v1.0.0\n");
@@ -387,6 +500,12 @@ fn a_release_is_created_only_when_missing() {
         .log()
         .contains("release create v1.0.0 --repo o/r --verify-tag --latest"));
     assert_eq!(text_of(&made), "url=https://x/new\n");
+    assert!(late.status.success(), "{}", text_of(&late));
+    assert!(
+        String::from_utf8_lossy(&late.stdout).ends_with("url=https://x/v1.0.0\n"),
+        "{}",
+        text_of(&late)
+    );
 }
 
 #[test]
@@ -395,7 +514,12 @@ fn waiting_reports_the_merge_commit_or_why_it_stopped() {
     let merged = FakeGh::new(&[("pr view 34 *", 0, &format!("MERGED {A}"))]);
     let closed = FakeGh::new(&[("pr view 34 *", 0, "CLOSED ")]);
     let open = FakeGh::new(&[("pr view 34 *", 0, "OPEN ")]);
-    let failing = FakeGh::new(&[("pr view 34 *", 1, "HTTP 502")]);
+    // A failed poll prints nothing on stdout, like gh.
+    let failing = FakeGh::new(&[("pr view 34 *", 1, "")]);
+    let recovered = FakeGh::new(&[
+        ("1x pr view 34 *", 1, ""),
+        ("pr view 34 *", 0, &format!("MERGED {A}")),
+    ]);
 
     // Act
     let done = merged.run(&merged.dir, &["wait", "o/r", "34", "60"]);
@@ -403,6 +527,7 @@ fn waiting_reports_the_merge_commit_or_why_it_stopped() {
     let late = open.run(&open.dir, &["wait", "o/r", "34", "0"]);
     let flaky = failing.run(&failing.dir, &["wait", "o/r", "34", "0"]);
     let bad = open.run(&open.dir, &["wait", "o/r", "34", "1+1"]);
+    let retried = recovered.run(&recovered.dir, &["wait", "o/r", "34", "60"]);
 
     // Assert
     assert_eq!(text_of(&done), format!("sha={A}\n"));
@@ -416,10 +541,12 @@ fn waiting_reports_the_merge_commit_or_why_it_stopped() {
         "{}",
         text_of(&late)
     );
+    assert_eq!(flaky.status.code(), Some(1), "{}", text_of(&flaky));
     assert!(
         text_of(&flaky).contains("did not merge within 0 seconds"),
         "{}",
         text_of(&flaky)
     );
+    assert_eq!(text_of(&retried), format!("sha={A}\n"));
     assert_eq!(bad.status.code(), Some(2));
 }

@@ -13,9 +13,10 @@
 #     its HEAD, which must still be the head of the default branch, so the
 #     commit cannot undo a change that landed after the checkout. The commit
 #     is made with createCommitOnBranch, so GitHub signs it. <branch> must be
-#     release/vX.Y.Z. An open pull request from <branch> in <repo> is reused
-#     (auto-merge is turned on again), and a merged one is reported as
-#     merged. Prints pr=<number> and state=open|merged.
+#     release/vX.Y.Z, and each <file> a regular file inside <dir>. An open
+#     pull request from <branch> in <repo> by the app is reused when its
+#     files match <dir> (auto-merge is turned on again), and a merged one is
+#     reported as merged. Prints pr=<number> and state=open|merged.
 #
 #   release-gh.sh wait <repo> <pr> <seconds>
 #     Waits until the pull request merges, then prints sha=<merge commit>.
@@ -25,7 +26,8 @@
 #   release-gh.sh tag <repo> <tag> <sha>
 #     Creates the lightweight tag <tag> on <sha>. A tag that already points
 #     at <sha>, an annotated one included, is fine, and one that points
-#     elsewhere fails. Exits 3 when GitHub refuses to create it, so the
+#     elsewhere fails. When the create fails, the tag is read again, since
+#     another run may have made it. Exits 3 when it is still missing, so the
 #     caller can print the manual step.
 #
 #   release-gh.sh release <repo> <tag> <title> <notes-file>
@@ -45,11 +47,15 @@ usage() {
 }
 
 SHA='^[0-9a-f]{40}$'
+# The GitHub App that opens release pull requests.
+APP="${RELEASE_GH_APP:-igorjs}"
 
-# The number of the pull request from <branch> in <repo> itself, in <state>.
-# A pull request from a fork with the same branch name does not count.
+# The number of the pull request from <branch> into <base> in <repo> itself,
+# opened by the release app, in <state>. A pull request from a fork, from
+# another author or into another branch does not count.
 find_pr() {
-  gh pr list --repo "$1" --head "$2" --state "$3" --json number,isCrossRepository \
+  gh pr list --repo "$1" --head "$2" --base "$3" --state "$4" --app "$APP" \
+    --json number,isCrossRepository \
     --jq '[.[] | select(.isCrossRepository | not)][0].number // empty'
 }
 
@@ -68,20 +74,38 @@ pr() {
   shift 5
   [[ "$branch" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "branch '$branch' is not release/vX.Y.Z"
   local number base head want f
-  number="$(find_pr "$repo" "$branch" open)"
+  # Each file is a regular file inside <dir>, checked before anything is
+  # written. A symlink could make jq read a file outside the checkout.
+  for f in "$@"; do
+    case "/$f/" in
+      //* | */../* | */./*) fail "'$f' is not a plain path inside the checkout" ;;
+    esac
+    [ ! -L "$dir/$f" ] || fail "$dir/$f is a symlink"
+    [ -f "$dir/$f" ] || fail "$dir/$f is missing"
+  done
+  base="$(gh api "repos/$repo" --jq .default_branch)"
+
+  number="$(find_pr "$repo" "$branch" "$base" open)"
   if [ -n "$number" ]; then
+    # A pull request left by an earlier run must carry the same changes, or
+    # it would merge content the checkout no longer has.
+    for f in "$@"; do
+      gh api -H "Accept: application/vnd.github.raw" "repos/$repo/contents/$f?ref=$branch" > "$TMP/remote" \
+        || fail "could not read $f on $branch in $repo"
+      cmp -s "$TMP/remote" "$dir/$f" \
+        || fail "$f on $repo#$number differs from the checkout. Close the pull request, then run again."
+    done
     auto_merge "$repo" "$number"
     printf 'pr=%s\nstate=open\n' "$number"
     return 0
   fi
-  number="$(find_pr "$repo" "$branch" merged)"
+  number="$(find_pr "$repo" "$branch" "$base" merged)"
   if [ -n "$number" ]; then
     printf 'pr=%s\nstate=merged\n' "$number"
     return 0
   fi
 
   want="$(git -C "$dir" rev-parse HEAD)"
-  base="$(gh api "repos/$repo" --jq .default_branch)"
   head="$(gh api "repos/$repo/git/ref/heads/$base" --jq .object.sha)"
   [ "$head" = "$want" ] || fail "$repo $base moved from $want to $head since the checkout. Run again."
   # A branch left by a failed run is dropped, so the commit starts from the
@@ -94,7 +118,6 @@ pr() {
   # jq reads each file itself, so a large file never goes through argv.
   : > "$TMP/files.jsonl"
   for f in "$@"; do
-    [ -f "$dir/$f" ] || fail "$dir/$f is missing"
     jq -n -c --arg path "$f" --rawfile c "$dir/$f" '{path: $path, contents: ($c | @base64)}' >> "$TMP/files.jsonl"
   done
   jq -s --arg repo "$repo" --arg branch "$branch" --arg head "$head" --arg msg "$title" \
@@ -134,29 +157,43 @@ wait_merged() {
   done
 }
 
-tag() {
-  [ "$#" -eq 3 ] || usage
-  local repo="$1" tag="$2" sha="$3" ref have type err
-  [[ "$sha" =~ $SHA ]] || fail "'$sha' is not a commit sha"
-  # gh prints the error body on stdout, so the exit status decides, and only
-  # a 404 means the tag is missing.
+# Prints the commit <tag> in <repo> points at, an annotated tag followed, or
+# nothing when the tag is missing. gh prints the error body on stdout, so the
+# exit status decides, and any error but a 404 fails.
+tag_commit() {
+  local repo="$1" tag="$2" ref type have
   if ref="$(gh api "repos/$repo/git/ref/tags/$tag" 2>/dev/null)"; then
     type="$(jq -r '.object.type' <<<"$ref")"
     have="$(jq -r '.object.sha' <<<"$ref")"
     if [ "$type" = tag ]; then
       have="$(gh api "repos/$repo/git/tags/$have" --jq .object.sha)"
     fi
-    [ "$have" = "$sha" ] || fail "tag $tag in $repo points at $have, not $sha. Not moving it."
-    printf 'tag=%s\nstate=exists\n' "$tag"
+    printf '%s\n' "$have"
     return 0
   fi
   [ "$(jq -r '.status // empty' <<<"$ref" 2>/dev/null)" = 404 ] \
     || fail "could not read tag $tag in $repo: $ref"
-  if ! err="$(gh api -X POST "repos/$repo/git/refs" -f "ref=refs/tags/$tag" -f "sha=$sha" 2>&1 >/dev/null)"; then
-    echo "GitHub refused to create $tag in $repo: $err" >&2
-    exit 3
+}
+
+tag() {
+  [ "$#" -eq 3 ] || usage
+  local repo="$1" tag="$2" sha="$3" have err
+  [[ "$sha" =~ $SHA ]] || fail "'$sha' is not a commit sha"
+  have="$(tag_commit "$repo" "$tag")"
+  if [ -z "$have" ]; then
+    if err="$(gh api -X POST "repos/$repo/git/refs" -f "ref=refs/tags/$tag" -f "sha=$sha" 2>&1 >/dev/null)"; then
+      printf 'tag=%s\nstate=created\n' "$tag"
+      return 0
+    fi
+    # Another run may have made the tag in the meantime.
+    have="$(tag_commit "$repo" "$tag")"
+    if [ -z "$have" ]; then
+      echo "GitHub refused to create $tag in $repo: $err" >&2
+      exit 3
+    fi
   fi
-  printf 'tag=%s\nstate=created\n' "$tag"
+  [ "$have" = "$sha" ] || fail "tag $tag in $repo points at $have, not $sha. Not moving it."
+  printf 'tag=%s\nstate=exists\n' "$tag"
 }
 
 release() {
