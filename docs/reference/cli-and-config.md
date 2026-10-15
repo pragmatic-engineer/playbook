@@ -895,7 +895,7 @@ Memory is rebuilt on its own when a fact is saved, so you only need this after e
 
 Bring playbook's own files up to date with this binary
 
-Runs the migrations that write only playbook's own files, then records this binary as the one that ran them. The ones that run once start only after an upgrade, and the checks that repair a file run every time. Nothing runs after a downgrade. A change to Claude Code settings or a shell file prints the `playbook init` command that applies it, and a report prints its own fix. It never writes Claude Code settings. `update`, the install script and `doctor --fix` run the same step.
+Runs the migrations that write only playbook's own files, then records this binary as the one that ran them. The ones that run once start only after an upgrade, and the checks that repair a file run every time. Nothing runs after a downgrade. A change to Claude Code settings or a shell file prints the `playbook setup` command that applies it, and a report prints its own fix. It never writes Claude Code settings. `update`, the install script and `doctor --fix` run the same step.
 
 Exit codes: 0 when it finished or had nothing to do, 1 when the record could not be read or written, a migration failed, or another playbook process held the lock.
 
@@ -1374,7 +1374,7 @@ A program cannot change its parent shell's directory, so this wraps `playbook` t
 
 Inspect playbook's own bookkeeping (migration record, sweep markers)
 
-`list` prints the rows of the `state` table in `config.db`, sorted by key, optionally only those under a prefix. Read only: use `playbook init` to repair and `playbook config export` to back up the config.
+`list` prints the rows of the `state` table in `config.db`, sorted by key, optionally only those under a prefix. Read only: use `playbook setup` to repair and `playbook config export` to back up the config.
 
 Example: `playbook state list migrations/`
 
@@ -1461,7 +1461,7 @@ Listens on 127.0.0.1 only (default port 47318, chosen once and then kept; a free
 
 Example: `playbook usage collect --idle-seconds 1800`
 
-- `--port <PORT>`: Port to listen on (an error when busy). Default: the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook init --only telemetry` afterwards
+- `--port <PORT>`: Port to listen on (an error when busy). Default: the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook setup --only telemetry` afterwards (older versions: `playbook init --only telemetry`)
 - `--idle-seconds <IDLE_SECONDS>`: Stop after this many seconds with no request; 0 means never
 
 ### `playbook usage doctor`

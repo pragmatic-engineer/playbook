@@ -102,7 +102,7 @@ const PERMS_NOALLOW: &str = r#"{"allow":[],"deny":[],"ask":[]}"#;
 /// Hooks-heavy source matching the shell test's `SRC_HOOKS`: a bare
 /// `session-init` entry plus a `PreToolUse` group mixing two guards already
 /// on their bare binary form, one guard still on its legacy `.sh` command
-/// (WU-13 ported all four, but a machine that has not re-run `playbook init`
+/// (WU-13 ported all four, but a machine that has not re-run `playbook setup`
 /// yet can still have one wired that way), a functional `rtk hook claude`
 /// command, and a `Read` matcher with only a functional hook, plus a
 /// `PostToolUse` group that is entirely functional.

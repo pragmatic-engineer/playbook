@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The guided `playbook init` in a terminal: one screen per asked part with
+//! The guided `playbook setup` in a terminal: one screen per asked part with
 //! what happens on yes and on no, then a summary and a confirm. The screens
 //! are built from the part catalog, so a new part shows up here without a
 //! change to this file. Nothing is written until the confirm.
@@ -167,7 +167,7 @@ pub fn summary_detail(item: &Item, on: bool) -> String {
 
 /// What opens the guided run.
 pub fn welcome(caps: &Caps) -> String {
-    let mut out = render::heading(caps, "playbook init");
+    let mut out = render::heading(caps, "playbook setup");
     out.push_str(&render::wrap(
         "This walks through each change playbook can make to your machine. Nothing is written until you confirm at the end. playbook never changes Claude Code's memory, and it edits settings.json only for the parts you accept.",
         caps.width,
@@ -206,7 +206,7 @@ pub fn progress(caps: &Caps, steps: &[StepReport]) -> String {
     if counts.failed > 0 {
         next.insert(
             0,
-            "Fix the failed lines above, then run `playbook init` again. It is safe to repeat.",
+            "Fix the failed lines above, then run `playbook setup` again. It is safe to repeat.",
         );
     }
     out.push_str(&render::next_steps(caps, counts, &next));

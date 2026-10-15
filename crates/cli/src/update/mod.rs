@@ -444,7 +444,7 @@ mod tests {
             "#!/bin/sh\n",
             "if [ \"$*\" = 'breaking --since 0.16.0 --json' ]; then\n",
             "  echo '[{\"version\":\"0.17.0\",\"component\":\"playbook\",",
-            "\"summary\":\"The old flag is gone.\",\"action\":\"playbook init\",",
+            "\"summary\":\"The old flag is gone.\",\"action\":\"playbook setup\",",
             "\"migration\":null}]'\n",
             "elif [ \"$1\" = breaking ]; then exit 2\n",
             "else echo 'playbook 0.17.0'; fi\n"
@@ -571,7 +571,7 @@ mod tests {
         // Assert
         assert_eq!(
             out.breaking,
-            "Breaking changes in this upgrade:\n  playbook 0.17.0: The old flag is gone.\n    Action: playbook init\n"
+            "Breaking changes in this upgrade:\n  playbook 0.17.0: The old flag is gone.\n    Action: playbook setup\n"
         );
         assert_eq!(announced(), vec![out.breaking.clone()]);
         assert_eq!(out.installed.as_deref(), Some("0.17.0"));

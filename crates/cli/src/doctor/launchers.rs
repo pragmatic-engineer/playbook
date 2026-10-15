@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Finds the old `ccc` and `ccd` launchers so `playbook doctor` and
-//! `playbook init` can point at their replacements. Read only: nothing here
+//! `playbook setup` can point at their replacements. Read only: nothing here
 //! deletes or edits a user's file.
 
 use std::ffi::OsStr;

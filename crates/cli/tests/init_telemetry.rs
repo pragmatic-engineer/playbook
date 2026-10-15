@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook init` and the telemetry part, against a scratch `$HOME`: the
+//! `playbook setup` and the telemetry part, against a scratch `$HOME`: the
 //! default yes, the off switches, a user's own endpoint, `--only`, and
 //! uninstall putting every value back.
 
@@ -128,7 +128,7 @@ fn only_telemetry_changes_the_telemetry_keys_and_nothing_else() {
     fs::write(sb.home.join(".zshrc"), "# mine\n").unwrap();
     let before = sb.snapshot_without_telemetry();
 
-    let out = sb.run(&["init", "--only", "telemetry"]);
+    let out = sb.run(&["setup", "--only", "telemetry"]);
 
     assert!(out.status.success(), "{}", text(&out));
     let env = sb.env();
@@ -151,7 +151,7 @@ fn a_bare_telemetry_flag_means_only_telemetry() {
     fs::write(sb.home.join(".zshrc"), "# mine\n").unwrap();
     let before = sb.snapshot_without_telemetry();
 
-    let out = sb.run(&["init", "--telemetry"]);
+    let out = sb.run(&["setup", "--telemetry"]);
 
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(sb.env()["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
@@ -162,7 +162,7 @@ fn a_bare_telemetry_flag_means_only_telemetry() {
 fn an_unknown_part_name_lists_the_valid_names() {
     let sb = Sandbox::new("unknown", None);
 
-    let out = sb.run(&["init", "--only", "bogus"]);
+    let out = sb.run(&["setup", "--only", "bogus"]);
 
     assert!(!out.status.success());
     let msg = text(&out);
@@ -174,7 +174,7 @@ fn an_unknown_part_name_lists_the_valid_names() {
 fn only_with_the_no_flag_of_the_same_part_is_a_clear_conflict() {
     let sb = Sandbox::new("conflict", None);
 
-    let out = sb.run(&["init", "--only", "telemetry", "--no-telemetry"]);
+    let out = sb.run(&["setup", "--only", "telemetry", "--no-telemetry"]);
 
     assert!(!out.status.success());
     assert!(
@@ -188,7 +188,7 @@ fn only_with_the_no_flag_of_the_same_part_is_a_clear_conflict() {
 fn only_with_dry_run_shows_just_that_part_and_writes_nothing() {
     let sb = Sandbox::new("dry", Some("{}"));
 
-    let out = sb.run(&["init", "--only", "telemetry", "--dry-run"]);
+    let out = sb.run(&["setup", "--only", "telemetry", "--dry-run"]);
 
     assert!(out.status.success(), "{}", text(&out));
     let msg = text(&out);
@@ -201,7 +201,7 @@ fn only_with_dry_run_shows_just_that_part_and_writes_nothing() {
 fn only_with_explain_describes_the_named_part() {
     let sb = Sandbox::new("explain", None);
 
-    let out = sb.run(&["init", "--only", "telemetry", "--explain"]);
+    let out = sb.run(&["setup", "--only", "telemetry", "--explain"]);
 
     assert!(out.status.success(), "{}", text(&out));
     let msg = text(&out);
@@ -213,7 +213,7 @@ fn only_with_explain_describes_the_named_part() {
 fn the_three_off_switches_get_one_switch_flipped_and_two_left_alone() {
     let sb = Sandbox::new("trio", Some(OFF_TRIO));
 
-    let out = sb.run(&["init", "--only", "telemetry"]);
+    let out = sb.run(&["setup", "--only", "telemetry"]);
 
     assert!(out.status.success(), "{}", text(&out));
     let env = sb.env();
@@ -229,12 +229,12 @@ fn the_three_off_switches_get_one_switch_flipped_and_two_left_alone() {
 fn yes_alone_does_not_replace_an_off_switch_the_user_set() {
     let sb = Sandbox::new("yes-off", Some(OFF_TRIO));
 
-    let out = sb.run(&["init", "--yes", "--no-hooks", "--no-statusline"]);
+    let out = sb.run(&["setup", "--yes", "--no-hooks", "--no-statusline"]);
 
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(sb.env()["CLAUDE_CODE_ENABLE_TELEMETRY"], "0");
     assert!(
-        text(&out).contains("playbook init --only telemetry"),
+        text(&out).contains("playbook setup --only telemetry"),
         "{}",
         text(&out)
     );
@@ -244,7 +244,7 @@ fn yes_alone_does_not_replace_an_off_switch_the_user_set() {
 fn yes_counts_as_consent_when_nothing_is_set() {
     let sb = Sandbox::new("yes", Some("{}"));
 
-    let out = sb.run(&["init", "--yes"]);
+    let out = sb.run(&["setup", "--yes"]);
 
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(sb.env()["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
@@ -254,12 +254,12 @@ fn yes_counts_as_consent_when_nothing_is_set() {
 fn no_terminal_and_no_yes_writes_nothing_and_prints_the_command() {
     let sb = Sandbox::new("unattended", Some("{}"));
 
-    let out = sb.run(&["init"]);
+    let out = sb.run(&["setup"]);
 
     assert!(out.status.success(), "{}", text(&out));
     assert!(sb.env().is_empty());
     assert!(
-        text(&out).contains("playbook init --only telemetry"),
+        text(&out).contains("playbook setup --only telemetry"),
         "{}",
         text(&out)
     );
@@ -269,7 +269,7 @@ fn no_terminal_and_no_yes_writes_nothing_and_prints_the_command() {
 fn declining_with_the_no_flag_writes_nothing() {
     let sb = Sandbox::new("decline", Some("{}"));
 
-    let out = sb.run(&["init", "--yes", "--no-telemetry"]);
+    let out = sb.run(&["setup", "--yes", "--no-telemetry"]);
 
     assert!(out.status.success(), "{}", text(&out));
     assert!(sb.env().is_empty());
@@ -280,7 +280,7 @@ fn an_enabled_setup_with_the_users_own_endpoint_is_left_alone() {
     let own = r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"https://mine.example"}}"#;
     let sb = Sandbox::new("own", Some(own));
 
-    let out = sb.run(&["init", "--only", "telemetry"]);
+    let out = sb.run(&["setup", "--only", "telemetry"]);
 
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(
@@ -296,7 +296,7 @@ fn an_enabled_setup_with_the_users_own_endpoint_is_left_alone() {
 #[test]
 fn uninstall_puts_back_the_three_off_values() {
     let sb = Sandbox::new("restore", Some(OFF_TRIO));
-    sb.run(&["init", "--only", "telemetry"]);
+    sb.run(&["setup", "--only", "telemetry"]);
 
     let out = sb.run(&["uninstall", "--yes"]);
 
@@ -313,7 +313,7 @@ fn a_copy_of_the_settings_env_in_the_process_environment_is_not_a_second_setup()
     let sb = Sandbox::new("mirrored", Some(OFF_TRIO));
 
     let out = sb.run_with(
-        &["init", "--only", "telemetry"],
+        &["setup", "--only", "telemetry"],
         &[
             ("CLAUDE_CODE_ENABLE_TELEMETRY", "0"),
             ("DISABLE_TELEMETRY", "1"),
@@ -329,7 +329,7 @@ fn an_endpoint_in_the_process_environment_that_settings_do_not_name_is_left_alon
     let sb = Sandbox::new("process-own", Some(OFF_TRIO));
 
     let out = sb.run_with(
-        &["init", "--only", "telemetry"],
+        &["setup", "--only", "telemetry"],
         &[("OTEL_EXPORTER_OTLP_ENDPOINT", "https://mine.example")],
     );
 
@@ -342,7 +342,7 @@ fn yes_with_an_explicit_telemetry_flag_replaces_the_off_switch() {
     let sb = Sandbox::new("yes-flag", Some(OFF_TRIO));
 
     let out = sb.run(&[
-        "init",
+        "setup",
         "--yes",
         "--telemetry",
         "--no-hooks",
@@ -358,7 +358,7 @@ fn a_dry_run_over_an_off_switch_changes_no_file() {
     let sb = Sandbox::new("dry-off", Some(OFF_TRIO));
     let before = fs::read_to_string(sb.home.join(".claude/settings.json")).unwrap();
 
-    let out = sb.run(&["init", "--only", "telemetry", "--dry-run"]);
+    let out = sb.run(&["setup", "--only", "telemetry", "--dry-run"]);
 
     assert!(out.status.success(), "{}", text(&out));
     assert!(!text(&out).contains("Runs every time"), "{}", text(&out));
@@ -371,7 +371,7 @@ fn a_dry_run_over_an_off_switch_changes_no_file() {
 fn a_part_that_is_not_a_choice_is_refused_by_only() {
     let sb = Sandbox::new("only-trust", None);
 
-    let out = sb.run(&["init", "--only", "trust"]);
+    let out = sb.run(&["setup", "--only", "trust"]);
 
     assert!(!out.status.success());
     assert!(
@@ -388,7 +388,7 @@ fn a_settings_file_created_by_init_is_owner_only() {
     let sb = Sandbox::new("mode", None);
     fs::remove_dir_all(sb.home.join(".claude")).unwrap();
 
-    let out = sb.run(&["init", "--only", "telemetry"]);
+    let out = sb.run(&["setup", "--only", "telemetry"]);
 
     assert!(out.status.success(), "{}", text(&out));
     let mode = fs::metadata(sb.home.join(".claude/settings.json"))

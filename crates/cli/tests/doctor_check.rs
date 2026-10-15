@@ -745,7 +745,7 @@ fn the_probes_run_side_by_side_but_the_table_keeps_its_order() {
     }
 }
 
-// The hooks `playbook init` writes into settings.json
+// The hooks `playbook setup` writes into settings.json
 
 fn wire_all(b: &Box) -> PathBuf {
     let path = b.home().join(".claude/settings.json");
@@ -814,7 +814,7 @@ fn nothing_wired_is_a_warning_with_the_one_command_to_fix_it() {
         rows[0].starts_with("WARN playbook hooks are not in settings.json"),
         "{rows:?}"
     );
-    assert!(rows[0].ends_with("run: playbook init --yes"), "{rows:?}");
+    assert!(rows[0].ends_with("run: playbook setup --yes"), "{rows:?}");
 }
 
 #[test]
@@ -1105,7 +1105,7 @@ fn telemetry_that_is_not_set_up_warns_with_the_init_command() {
         "{}",
         text(&mine)
     );
-    assert!(hints(&mine).contains("playbook init --only telemetry"));
+    assert!(hints(&mine).contains("playbook setup --only telemetry"));
 }
 
 #[test]
@@ -1121,7 +1121,7 @@ fn an_off_switch_warns_with_the_init_command() {
         "{}",
         text(&mine)
     );
-    assert!(hints(&mine).contains("playbook init --only telemetry"));
+    assert!(hints(&mine).contains("playbook setup --only telemetry"));
 }
 
 #[test]
@@ -1190,7 +1190,7 @@ fn a_port_in_settings_that_differs_from_the_collector_warns() {
         "{}",
         text(&mine)
     );
-    assert!(hints(&mine).contains("playbook init --only telemetry"));
+    assert!(hints(&mine).contains("playbook setup --only telemetry"));
 }
 
 #[test]

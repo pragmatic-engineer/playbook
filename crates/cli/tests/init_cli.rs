@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook init` as `/playbook:setup` runs it, against a scratch `$HOME`:
+//! `playbook setup` as `/playbook:setup` runs it, against a scratch `$HOME`:
 //! the golden settings a fresh and a contested install must produce, what a
 //! plain run leaves alone, and what `--aliases` and `--system-prompt` add.
 
@@ -42,7 +42,7 @@ impl Sandbox {
 
     fn init_raw(&self, shell: &str, flags: &[&str]) -> Output {
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-            .arg("init")
+            .arg("setup")
             .args(flags)
             .env("HOME", &self.home)
             .env("SHELL", shell)
@@ -445,7 +445,7 @@ fn the_retired_settings_flags_are_refused() {
 
     for flag in ["--settings", "--no-settings"] {
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-            .args(["init", flag])
+            .args(["setup", flag])
             .env("HOME", &sb.home)
             .current_dir(&sb.home)
             .output()
@@ -486,7 +486,7 @@ fn a_run_with_no_terminal_and_no_yes_leaves_the_claude_settings_alone() {
     let out = h.init_raw("/bin/zsh", &[]);
 
     let t = text(&out);
-    assert!(t.contains("playbook init --yes"), "{t}");
+    assert!(t.contains("playbook setup --yes"), "{t}");
     assert!(t.contains("hooks and status line"), "{t}");
     let settings = fs::read_to_string(h.path(".claude/settings.json")).unwrap_or_default();
     assert!(!settings.contains("playbook hook"), "{settings}");

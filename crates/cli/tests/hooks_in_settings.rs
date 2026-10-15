@@ -105,7 +105,7 @@ fn user_hooks() -> Value {
 fn init_writes_every_hook_including_the_worktree_and_session_ones() {
     let h = Home::new("writes");
 
-    h.run(&["init", "--hooks"]);
+    h.run(&["setup", "--hooks"]);
 
     let s = h.settings();
     for hook in playbook::init::wire::wired_hooks() {
@@ -125,7 +125,7 @@ fn init_writes_every_hook_including_the_worktree_and_session_ones() {
 fn the_hook_commands_are_the_bare_name_never_an_absolute_path() {
     let h = Home::new("bare");
 
-    h.run(&["init", "--hooks"]);
+    h.run(&["setup", "--hooks"]);
 
     let ours: Vec<String> = commands(&h.settings())
         .into_iter()
@@ -144,7 +144,7 @@ fn init_keeps_the_hooks_and_keys_a_user_already_has() {
     let h = Home::new("preserve");
     h.write_settings(&user_hooks());
 
-    h.run(&["init", "--hooks"]);
+    h.run(&["setup", "--hooks"]);
 
     let s = h.settings();
     assert_eq!(s["theme"], "dark");
@@ -158,7 +158,7 @@ fn init_keeps_the_hooks_and_keys_a_user_already_has() {
 fn uninstall_removes_only_the_entries_init_owns() {
     let h = Home::new("uninstall");
     h.write_settings(&user_hooks());
-    h.run(&["init", "--hooks"]);
+    h.run(&["setup", "--hooks"]);
 
     h.run(&["uninstall", "--yes"]);
 
@@ -178,7 +178,7 @@ fn uninstall_removes_only_the_entries_init_owns() {
 #[test]
 fn the_doctor_reports_the_wired_hooks_as_present() {
     let h = Home::new("doctor");
-    h.run(&["init", "--hooks"]);
+    h.run(&["setup", "--hooks"]);
 
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["doctor", "check"])

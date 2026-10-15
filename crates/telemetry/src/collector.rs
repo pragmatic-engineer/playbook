@@ -187,7 +187,7 @@ fn bind_recorded(port: u16, wait: Duration) -> Result<std::net::TcpListener, Str
             }
             Err(e) if std::time::Instant::now() >= deadline => {
                 return Err(format!(
-                    "port {port} is in use by another program ({e}). The collector keeps its recorded port so the Claude Code settings stay valid. Free the port, or move to a new one with `{} --port <N>` and then run `playbook init --only telemetry` to rewrite the endpoint in your settings",
+                    "port {port} is in use by another program ({e}). The collector keeps its recorded port so the Claude Code settings stay valid. Free the port, or move to a new one with `{} --port <N>` and then run `playbook setup --only telemetry` (older versions: `playbook init --only telemetry`) to rewrite the endpoint in your settings",
                     super::host::command("usage collect")
                 ));
             }
@@ -197,7 +197,7 @@ fn bind_recorded(port: u16, wait: Duration) -> Result<std::net::TcpListener, Str
 }
 
 /// The collector state with a token and port recorded, creating the file when
-/// there is none (no process, `pid` 0). `init --telemetry` uses this so the
+/// there is none (no process, `pid` 0). `setup --telemetry` uses this so the
 /// settings it writes name the same port and token the collector reuses.
 pub fn ensure_state(paths: &Paths) -> Result<State, String> {
     let path = state_path(paths);
@@ -805,7 +805,10 @@ mod tests {
 
         let message = result.unwrap_err();
         assert!(message.contains("in use by another program"), "{message}");
-        assert!(message.contains("init --only telemetry"), "{message}");
+        assert!(
+            message.contains("playbook setup --only telemetry"),
+            "{message}"
+        );
         let after = read_state(&state_path(&p)).unwrap();
         assert_eq!((after.port, after.token.as_str()), (port, "t"));
     }

@@ -437,7 +437,7 @@ pub enum Command {
     /// this binary as the one that ran them. The ones that run once start only
     /// after an upgrade, and the checks that repair a file run every time.
     /// Nothing runs after a downgrade. A change to Claude Code settings or a
-    /// shell file prints the `playbook init` command that applies it, and a
+    /// shell file prints the `playbook setup` command that applies it, and a
     /// report prints its own fix. It never writes Claude Code settings.
     /// `update`, the install script and `doctor --fix` run the same step.
     ///
@@ -497,7 +497,7 @@ pub enum Command {
     ///
     /// `list` prints the rows of the `state` table in `config.db`, sorted by
     /// key, optionally only those under a prefix. Read only: use `playbook
-    /// init` to repair and `playbook config export` to back up the config.
+    /// setup` to repair and `playbook config export` to back up the config.
     ///
     /// Example: `playbook state list migrations/`
     State {

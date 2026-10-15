@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook effort` end to end: the ceiling reaches `maxEffortLevel` in
-//! `settings.json`, `playbook init` keeps it applied, and `auto` clears only
+//! `settings.json`, `playbook setup` keeps it applied, and `auto` clears only
 //! a cap playbook wrote.
 
 use serde_json::Value;
@@ -90,7 +90,7 @@ fn an_unknown_level_fails_and_writes_nothing() {
 fn init_never_writes_a_cap() {
     let h = Home::new("init");
     assert!(h.run(&["effort", "low"]).status.success());
-    let out = h.run(&["init", "--yes"]);
+    let out = h.run(&["setup", "--yes"]);
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(h.cap(), None);
 }

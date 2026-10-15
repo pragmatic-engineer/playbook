@@ -302,7 +302,7 @@ mod tests {
             version: version.into(),
             component,
             summary: format!("change in {version}"),
-            action: "playbook init".into(),
+            action: "playbook setup".into(),
             migration: None,
         }
     }
@@ -425,7 +425,7 @@ mod tests {
         // Assert
         assert_eq!(
             text,
-            "Breaking changes in this upgrade:\n  playbook 0.26.0: change in 0.26.0\n    Action: playbook init\n  plugin 0.27.0: change in 0.27.0\n    Action: none, migrated automatically\n"
+            "Breaking changes in this upgrade:\n  playbook 0.26.0: change in 0.26.0\n    Action: playbook setup\n  plugin 0.27.0: change in 0.27.0\n    Action: none, migrated automatically\n"
         );
         assert_eq!(render(&[]), "");
     }
@@ -507,7 +507,7 @@ mod tests {
         // Older binaries parse this exact shape in `playbook update`.
         assert_eq!(
             to_json(&[entry("0.26.0", Component::Playbook)]),
-            r#"[{"version":"0.26.0","component":"playbook","summary":"change in 0.26.0","action":"playbook init","migration":null}]"#
+            r#"[{"version":"0.26.0","component":"playbook","summary":"change in 0.26.0","action":"playbook setup","migration":null}]"#
         );
     }
 
@@ -565,7 +565,7 @@ mod tests {
             r#"{"name":"playbook","metadata":{"breakingChanges":[
               {"version":"0.31.0","component":"plugin","summary":"old","action":"none needed","migration":null},
               {"version":"0.32.0","component":"plugin","summary":"new","action":"run /playbook:doctor","migration":null,"extra":1},
-              {"version":"0.32.0","component":"playbook","summary":"binary","action":"playbook init","migration":null},
+              {"version":"0.32.0","component":"playbook","summary":"binary","action":"playbook setup","migration":null},
               {"version":"0.32.0","component":"desktop","summary":"later","action":"none needed","migration":null}
             ]}}"#,
         )

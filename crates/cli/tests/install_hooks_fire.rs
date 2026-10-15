@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The hook fire matrix. `install.sh --yes` wires settings.json
-//! through the real `playbook init`. Every distinct hook name found there must
+//! through the real `playbook setup`. Every distinct hook name found there must
 //! have a case below that fires the installed binary on a real payload and
 //! checks the observable effect, so a hook that is wired but dead, or wired
 //! with no case, fails here.

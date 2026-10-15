@@ -250,7 +250,7 @@ fn layer2(env: &Env) -> Row {
             Level::Fail,
             format!("safety guards wired {wired}/{total}, not wired:{problems}"),
         )
-        .hint("run `playbook init`, which rewrites every guard to its bare form")
+        .hint("run `playbook setup`, which rewrites every guard to its bare form")
     }
 }
 
@@ -271,7 +271,7 @@ fn layer3(env: &Env) -> Row {
         return Row::new(
             "3",
             Level::Info,
-            "outdated launcher line (run `playbook init`)",
+            "outdated launcher line (run `playbook setup`)",
         );
     }
     if text.contains("playbook shell-init") && on_path(env, "playbook").is_some() {
@@ -342,7 +342,7 @@ fn layer5(env: &Env) -> Option<Row> {
                 Level::Fail,
                 format!("status line runs the retired statusline.sh: {cmd}"),
             )
-            .hint("run `playbook init`, which rewrites it to `playbook statusline`"),
+            .hint("run `playbook setup`, which rewrites it to `playbook statusline`"),
         );
     }
     let last = cmd.split_whitespace().next_back().unwrap_or("");
@@ -618,9 +618,9 @@ fn layer7(env: &Env) -> Vec<Row> {
         .into_iter()
         .map(|cmd| {
             let hint = if crate::init::dead_hooks::is_dead(&cmd, &env.home, &env.claude_home) {
-                "this hook does nothing every time it fires; run: playbook init --hooks (it removes the entry after a backup)"
+                "this hook does nothing every time it fires; run: playbook setup --hooks (it removes the entry after a backup)"
             } else {
-                "this hook does nothing every time it fires; `playbook init` will not remove it, so delete the entry from ~/.claude/settings.json by hand"
+                "this hook does nothing every time it fires; `playbook setup` will not remove it, so delete the entry from ~/.claude/settings.json by hand"
             };
             Row::new("7", Level::Fail, format!("hook command points at a missing file: {cmd}")).hint(hint)
         })
@@ -701,7 +701,7 @@ fn worktree_rows(env: &Env) -> Vec<Row> {
     }
 }
 
-/// The endpoint `playbook init` recorded in its marker file, if any.
+/// The endpoint `playbook setup` recorded in its marker file, if any.
 fn marker_endpoint(home: &Path) -> Option<String> {
     let text = std::fs::read_to_string(
         crate::common::paths::playbook_root_from(home).join("telemetry-env.json"),
@@ -713,7 +713,7 @@ fn marker_endpoint(home: &Path) -> Option<String> {
         .map(|e| e.trim_end_matches('/').to_string())
 }
 
-const TELEMETRY_INIT_FIX: &str = "run: playbook init --only telemetry";
+const TELEMETRY_INIT_FIX: &str = "run: playbook setup --only telemetry";
 
 /// The telemetry rows: Claude Code's settings point at the playbook
 /// collector, the collector runs, and rows arrived in the last day. Each
@@ -829,7 +829,7 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
                     state.port
                 ),
             )
-            .hint("free the port, or run: playbook usage collect --port <N>, then playbook init --only telemetry"),
+            .hint("free the port, or run: playbook usage collect --port <N>, then playbook setup --only telemetry"),
         );
     } else {
         rows.push(
@@ -960,7 +960,7 @@ fn migration_rows(env: &Env) -> Vec<Row> {
 /// could not get, not as a missing binary.
 const LOGIN_SHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// The hooks `playbook init` writes into `settings.json`: present, current,
+/// The hooks `playbook setup` writes into `settings.json`: present, current,
 /// known to the binary that runs them, and reachable from a shell that starts
 /// with a minimal PATH. Hook commands are the bare `playbook hook <name>`, so
 /// the last probe starts a login shell with only the system directories on
@@ -981,7 +981,7 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
                 Level::Warn,
                 "playbook hooks are not in settings.json, so the guards and worktree hooks do not run",
             )
-            .hint("run: playbook init --yes"),
+            .hint("run: playbook setup --yes"),
         );
     } else if !found.missing.is_empty() {
         rows.push(
@@ -994,7 +994,7 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
                     found.missing.join(", ")
                 ),
             )
-            .hint("run: playbook init --yes"),
+            .hint("run: playbook setup --yes"),
         );
     } else {
         rows.push(Row::new(
@@ -1067,7 +1067,7 @@ fn hook_binary_rows(env: &Env) -> Vec<Row> {
                 Level::Warn,
                 "a login shell with a minimal PATH cannot find playbook, so hooks fail when Claude Code starts from a launcher or an IDE",
             )
-            .hint("run: playbook init, which puts the binary's directory on PATH for every shell start"),
+            .hint("run: playbook setup, which puts the binary's directory on PATH for every shell start"),
         ),
         None if !env.shell.is_empty() => rows.push(Row::new(
             "-",

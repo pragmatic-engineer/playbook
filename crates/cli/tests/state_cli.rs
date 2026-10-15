@@ -73,7 +73,7 @@ fn init_imports_the_old_files_once_and_keeps_them_renamed() {
     let out = run(
         &h,
         &[
-            "init",
+            "setup",
             "--yes",
             "--no-hooks",
             "--no-statusline",
@@ -101,7 +101,7 @@ fn init_imports_the_old_files_once_and_keeps_them_renamed() {
     let again = run(
         &h,
         &[
-            "init",
+            "setup",
             "--yes",
             "--no-hooks",
             "--no-statusline",

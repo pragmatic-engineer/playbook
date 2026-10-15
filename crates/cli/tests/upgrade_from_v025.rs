@@ -201,7 +201,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     );
     for message in [&first, &second] {
         for part in [
-            "3 change(s) to your settings or shell files need `playbook init` and `playbook init --hooks` and `playbook init --statusline`",
+            "3 change(s) to your settings or shell files need `playbook setup` and `playbook setup --hooks` and `playbook setup --statusline`",
             "2 item(s) need you: run `playbook migrate`",
         ] {
             assert!(message.contains(part), "{message}");
@@ -213,7 +213,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
         "claude plugin uninstall playbook-hooks@pragmatic-engineer",
         "claude plugin update playbook@pragmatic-engineer",
         "0014-orphaned-plugin-caches: 1 old plugin folder(s)",
-        "(run `playbook init --hooks`)",
+        "(run `playbook setup --hooks`)",
     ] {
         assert!(report.contains(line), "{report}");
     }
@@ -251,7 +251,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     assert_eq!(fs::read(h.settings()).unwrap(), after_init);
     assert_eq!(h.user_files()[2..], user_files[2..]);
     let settled = h.session_message();
-    assert!(!settled.contains("playbook init"), "{settled}");
+    assert!(!settled.contains("playbook setup"), "{settled}");
     assert!(settled.contains("2 item(s) need you"), "{settled}");
 }
 
@@ -305,7 +305,7 @@ fn migrate_on_a_v025_home_previews_runs_once_and_leaves_user_files_alone() {
     let dry = stdout(&dry);
     assert!(dry.starts_with("would run: "), "{dry}");
     for line in [
-        "(run `playbook init --hooks`)",
+        "(run `playbook setup --hooks`)",
         "note: 0014-orphaned-plugin-caches: 1 old plugin folder(s)",
         "claude plugin uninstall playbook-hooks@pragmatic-engineer",
     ] {
@@ -338,7 +338,7 @@ fn migrate_on_a_v025_home_previews_runs_once_and_leaves_user_files_alone() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|i| i["command"] == "playbook init --hooks"));
+        .any(|i| i["command"] == "playbook setup --hooks"));
     assert!(
         stdout(&after).starts_with("would run: 0001-memory-store-move"),
         "{}",
@@ -467,7 +467,7 @@ fn the_first_run_step_heals_once_before_any_command_and_keeps_stdout_clean() {
             "{class}: {notice}"
         );
         assert_eq!(
-            notice.contains("need `playbook init` and `playbook init --hooks`"),
+            notice.contains("need `playbook setup` and `playbook setup --hooks`"),
             heals,
             "{class}: {notice}"
         );
@@ -577,7 +577,7 @@ fn init_prints_the_block_once_and_the_session_shows_plugin_changes() {
     let block = playbook::breaking::render(&entries);
     let h = ran_before("notice-init");
     let init =
-        |envs: &[(&str, &str)]| h.playbook_env(&["init", "--yes", "--no-telemetry"], "", envs);
+        |envs: &[(&str, &str)]| h.playbook_env(&["setup", "--yes", "--no-telemetry"], "", envs);
 
     // Act
     let first = init(&[]);

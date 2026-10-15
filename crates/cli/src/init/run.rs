@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Orchestrates `playbook init`: composes `merge`, `wire` and `shim`
+//! Orchestrates `playbook setup`: composes `merge`, `wire` and `shim`
 //! into one idempotent repair, backing `Command::Init`.
 
 use crate::init::merge;

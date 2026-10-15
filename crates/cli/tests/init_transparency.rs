@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook init --dry-run`, `--explain`, `playbook hooks list` and the
+//! `playbook setup --dry-run`, `--explain`, `playbook hooks list` and the
 //! summary after a run, all against a scratch `$HOME`.
 
 use playbook::init::wire::wired_hooks;
@@ -86,7 +86,7 @@ fn a_dry_run_changes_nothing_and_exits_zero() {
     let sb = Sandbox::new("dry");
     let before = sb.snapshot();
 
-    let out = sb.run(&["init", "--dry-run", "--aliases", "--system-prompt"]);
+    let out = sb.run(&["setup", "--dry-run", "--aliases", "--system-prompt"]);
 
     assert!(out.status.success(), "{}", stdout(&out));
     assert_eq!(sb.snapshot(), before, "a dry run wrote a file");
@@ -96,7 +96,13 @@ fn a_dry_run_changes_nothing_and_exits_zero() {
 fn a_dry_run_names_the_files_and_the_changes_for_each_part() {
     let sb = Sandbox::new("dry-text");
 
-    let text = stdout(&sb.run(&["init", "--dry-run", "--yes", "--aliases", "--system-prompt"]));
+    let text = stdout(&sb.run(&[
+        "setup",
+        "--dry-run",
+        "--yes",
+        "--aliases",
+        "--system-prompt",
+    ]));
 
     let hooks = format!("add {} hook entries", wired_hooks().count());
     for needle in [
@@ -116,7 +122,7 @@ fn a_dry_run_names_the_files_and_the_changes_for_each_part() {
 fn a_dry_run_reports_a_part_you_turned_off_as_skipped() {
     let sb = Sandbox::new("dry-off");
 
-    let text = stdout(&sb.run(&["init", "--dry-run", "--no-hooks"]));
+    let text = stdout(&sb.run(&["setup", "--dry-run", "--no-hooks"]));
 
     assert!(text.contains("hooks (off)\n  skipped"), "{text}");
 }
@@ -124,9 +130,9 @@ fn a_dry_run_reports_a_part_you_turned_off_as_skipped() {
 #[test]
 fn a_dry_run_describes_what_a_real_run_then_does() {
     let sb = Sandbox::new("dry-vs-real");
-    let plan = stdout(&sb.run(&["init", "--dry-run", "--yes", "--aliases"]));
+    let plan = stdout(&sb.run(&["setup", "--dry-run", "--yes", "--aliases"]));
 
-    let real = sb.run(&["init", "--yes", "--aliases"]);
+    let real = sb.run(&["setup", "--yes", "--aliases"]);
 
     assert!(real.status.success());
     let settings = fs::read_to_string(sb.home.join(".claude/settings.json")).unwrap();
@@ -134,7 +140,7 @@ fn a_dry_run_describes_what_a_real_run_then_does() {
     assert!(fs::read_to_string(sb.home.join(".zshrc"))
         .unwrap()
         .contains("playbook shell-init"));
-    let again = stdout(&sb.run(&["init", "--dry-run", "--yes", "--aliases"]));
+    let again = stdout(&sb.run(&["setup", "--dry-run", "--yes", "--aliases"]));
     assert!(!again.contains("add statusLine"), "{again}");
     assert!(
         again.contains("no change") || again.contains("already"),
@@ -147,7 +153,7 @@ fn explain_with_a_part_describes_it_and_changes_nothing() {
     let sb = Sandbox::new("explain-one");
     let before = sb.snapshot();
 
-    let out = sb.run(&["init", "--explain", "path"]);
+    let out = sb.run(&["setup", "--explain", "path"]);
 
     assert!(out.status.success());
     let text = stdout(&out);
@@ -163,7 +169,7 @@ fn explain_with_a_part_describes_it_and_changes_nothing() {
 fn explain_without_a_part_describes_every_part() {
     let sb = Sandbox::new("explain-all");
 
-    let text = stdout(&sb.run(&["init", "--explain"]));
+    let text = stdout(&sb.run(&["setup", "--explain"]));
 
     for part in [
         "hooks",
@@ -185,7 +191,7 @@ fn explain_without_a_part_describes_every_part() {
 fn explain_hooks_lists_every_hook_init_wires() {
     let sb = Sandbox::new("explain-hooks");
 
-    let text = stdout(&sb.run(&["init", "--explain", "hooks"]));
+    let text = stdout(&sb.run(&["setup", "--explain", "hooks"]));
 
     for h in wired_hooks() {
         assert!(
@@ -200,7 +206,7 @@ fn explain_hooks_lists_every_hook_init_wires() {
 fn explain_of_an_unknown_part_fails_and_lists_the_parts() {
     let sb = Sandbox::new("explain-bad");
 
-    let out = sb.run(&["init", "--explain", "nope"]);
+    let out = sb.run(&["setup", "--explain", "nope"]);
 
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("Choose one of"));
@@ -210,7 +216,7 @@ fn explain_of_an_unknown_part_fails_and_lists_the_parts() {
 fn dry_run_and_explain_cannot_be_combined() {
     let sb = Sandbox::new("conflict");
 
-    let out = sb.run(&["init", "--dry-run", "--explain"]);
+    let out = sb.run(&["setup", "--dry-run", "--explain"]);
 
     assert!(!out.status.success());
 }
@@ -238,7 +244,7 @@ fn hooks_list_prints_every_hook_with_event_matcher_and_purpose() {
 fn a_real_run_ends_with_how_to_undo_each_changed_part() {
     let sb = Sandbox::new("summary");
 
-    let text = stdout(&sb.run(&["init", "--yes"]));
+    let text = stdout(&sb.run(&["setup", "--yes"]));
 
     assert!(text.contains("What changed and how to undo it:"), "{text}");
     assert!(
@@ -252,9 +258,9 @@ fn a_real_run_ends_with_how_to_undo_each_changed_part() {
 #[test]
 fn a_second_run_prints_no_undo_summary() {
     let sb = Sandbox::new("summary-twice");
-    sb.run(&["init", "--yes"]);
+    sb.run(&["setup", "--yes"]);
 
-    let text = stdout(&sb.run(&["init", "--yes"]));
+    let text = stdout(&sb.run(&["setup", "--yes"]));
 
     assert!(!text.contains("What changed and how to undo it:"), "{text}");
 }
@@ -264,7 +270,7 @@ fn init_says_telemetry_is_already_on_and_does_not_ask() {
     let sandbox = Sandbox::new("telemetry-on");
 
     let out = sandbox.run_with_env(
-        &["init", "--dry-run"],
+        &["setup", "--dry-run"],
         &[("CLAUDE_CODE_ENABLE_TELEMETRY", "1")],
     );
 
@@ -279,7 +285,7 @@ fn init_says_telemetry_is_already_on_and_does_not_ask() {
 fn init_stays_quiet_about_telemetry_when_it_is_not_set() {
     let sandbox = Sandbox::new("telemetry-unset");
 
-    let out = sandbox.run(&["init", "--dry-run"]);
+    let out = sandbox.run(&["setup", "--dry-run"]);
 
     assert!(
         !stdout(&out).contains("telemetry: already"),
@@ -293,7 +299,7 @@ fn an_explicit_telemetry_flag_still_wins_over_the_already_on_line() {
     let sandbox = Sandbox::new("telemetry-flag");
 
     let out = sandbox.run_with_env(
-        &["init", "--dry-run", "--no-telemetry"],
+        &["setup", "--dry-run", "--no-telemetry"],
         &[("CLAUDE_CODE_ENABLE_TELEMETRY", "1")],
     );
 

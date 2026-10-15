@@ -1030,7 +1030,7 @@ fn run_session_init_hook(home: &Path, session_id: &str) -> Output {
 }
 
 /// The `session-init` hook's own fallback covers a session starting before
-/// `playbook init` is re-run after an upgrade, and stays idempotent.
+/// `playbook setup` is re-run after an upgrade, and stays idempotent.
 #[test]
 fn session_init_fallback_migrates_legacy_graph_file_and_is_idempotent() {
     // Arrange: only the pre-rename filename exists.

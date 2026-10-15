@@ -65,8 +65,8 @@ substring "warning", so the normalisation changes nothing the tests verify.
 | `gen-shared-settings.non-ascii.json` | `shell/gen-shared-settings.py` | `{"customUnknownKey":"café ☃"}` and `CANNED_PERMS` | 2026-08-21, at v0.11.0 |
 | `gen-shared-settings.model-present.json` | `shell/gen-shared-settings.py` | `SRC_OPUS` and `CANNED_PERMS` | 2026-08-21, at v0.11.0 |
 | `gen-shared-settings.hooks-filter.json` | `shell/gen-shared-settings.py` | `SRC_HOOKS` and `CANNED_PERMS` | 2026-08-21, at v0.11.0 |
-| `init.clean-install.json` | `playbook init`, first captured from the retired `shell/setup-local.sh` (renamed from `setup-local.clean-install.json` when that script was deleted) | a fresh install: empty `CLAUDE_HOME`, no pre-existing `settings.json` | 2026-09-07, at v0.14.0 (regenerated, see note below) |
-| `init.skip-triggering.json` | the same pipeline, as `playbook init` (checked by `tests/init_cli.rs`) | an existing `settings.json` seeded with a `cleanupPeriodDays` collision against the template | 2026-09-07, at v0.14.0 (regenerated, see note below) |
+| `init.clean-install.json` | `playbook setup`, first captured from the retired `shell/setup-local.sh` (renamed from `setup-local.clean-install.json` when that script was deleted) | a fresh install: empty `CLAUDE_HOME`, no pre-existing `settings.json` | 2026-09-07, at v0.14.0 (regenerated, see note below) |
+| `init.skip-triggering.json` | the same pipeline, as `playbook setup` (checked by `tests/init_cli.rs`) | an existing `settings.json` seeded with a `cleanupPeriodDays` collision against the template | 2026-09-07, at v0.14.0 (regenerated, see note below) |
 
 **Do not regenerate a golden to make a failing test pass.** The whole point is
 that it does not move. If Rust output legitimately changes, that is a

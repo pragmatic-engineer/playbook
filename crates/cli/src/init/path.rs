@@ -4,7 +4,7 @@
 //! Puts the directory holding the `playbook` binary on PATH for every shell
 //! start, so hooks and the `playbook cc` launcher find it whichever route installed it
 //! (installer, Homebrew, or the Claude Code marketplace plus the first run of
-//! `playbook init`).
+//! `playbook setup`).
 //!
 //! Hook commands run in a non-interactive shell, which never reads `.zshrc`.
 //! So zsh gets `~/.zshenv`, bash gets `~/.bashrc` and its login file, and fish

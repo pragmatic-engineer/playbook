@@ -190,7 +190,7 @@ fn append_auto_mode_note(extra_context: &mut String) {
     push_context(extra_context, &note);
 }
 
-/// Defensive fallback for a session starting before `playbook init` is
+/// Defensive fallback for a session starting before `playbook setup` is
 /// re-run after an upgrade, so the memory store is in its current location
 /// before the reads below need it.
 fn prepare_memory_store() {

@@ -612,7 +612,7 @@ fn self_referential_symlink_does_not_hang_the_migration() {
     // Act: poll rather than block on `wait`, so a hang can be killed instead
     // of leaving the test suite stuck.
     let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .arg("init")
+        .arg("setup")
         .env("HOME", &home)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

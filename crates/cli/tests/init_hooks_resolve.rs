@@ -7,14 +7,14 @@
 //! WRITTEN to `settings.json`, never that the written thing exists and
 //! actually runs:
 //!
-//! - `playbook init` once wrote four `~/.claude/hooks/<name>.sh` guard
+//! - `playbook setup` once wrote four `~/.claude/hooks/<name>.sh` guard
 //!   commands into `settings.json` while placing none of the scripts.
 //! - `settings.shared.json` once seeded those same commands directly,
 //!   bypassing the gate meant to stop exactly that.
 //!
 //! A `settings.json` command naming a missing script fails OPEN and silent:
 //! Claude Code invokes it, the file is not there, nothing runs, nothing is
-//! reported. This module runs a real `playbook init` against a scratch
+//! reported. This module runs a real `playbook setup` against a scratch
 //! `$HOME`, walks EVERY command anywhere under the resulting `.hooks`, and
 //! asserts each one resolves:
 //! - a bare `playbook hook <name>` command: `<name>` must be a hook the
@@ -165,12 +165,12 @@ fn every_wired_command_after_a_real_init_resolves_to_something_that_actually_run
     let accepted = accepted_hook_names();
     let home = scratch_home("resolves");
 
-    // Act: a real `playbook init` against a clean scratch HOME, the exact
+    // Act: a real `playbook setup` against a clean scratch HOME, the exact
     // machine shape both defects reached production on.
     let status = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")
-        .args(["init", "--yes"])
+        .args(["setup", "--yes"])
         .env("HOME", &home)
         .env("CLAUDE_PLUGIN_ROOT", self_root())
         .env("SHELL", "/bin/bash")
@@ -178,7 +178,7 @@ fn every_wired_command_after_a_real_init_resolves_to_something_that_actually_run
         .expect("playbook binary should spawn");
     assert!(
         status.success(),
-        "playbook init should exit 0 against a clean scratch HOME"
+        "playbook setup should exit 0 against a clean scratch HOME"
     );
 
     let settings_path = home.join(".claude").join("settings.json");
@@ -192,7 +192,7 @@ fn every_wired_command_after_a_real_init_resolves_to_something_that_actually_run
     // Assert: the walk itself is not vacuous.
     assert!(
         !commands.is_empty(),
-        "a real `playbook init` should have written at least one .hooks command"
+        "a real `playbook setup` should have written at least one .hooks command"
     );
 
     for cmd in &commands {
