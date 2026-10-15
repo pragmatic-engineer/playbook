@@ -6,7 +6,11 @@
 #   payload-guard: the directory holds only markdown and the manifest.
 #   version-bump: a plugin change comes with a higher version in plugin.json
 #   and a matching "## playbook <version>" section at the top of CHANGELOG.md.
-# Both run only when the plugin, the changelog or the script changes.
+#   When the version rises, a commit since the last plugin tag that touches
+#   the plugin, or the pull request title or body, marked breaking needs a
+#   plugin entry in breaking-changes.json, and that entry needs a
+#   "### Breaking" heading in the changelog section (ADR 0035).
+# Both run only when the plugin, the changelog, the record or a script changes.
 
 name: plugin-guards
 
@@ -15,7 +19,9 @@ on:
     paths:
       - "plugins/**"
       - "CHANGELOG.md"
+      - "breaking-changes.json"
       - "scripts/check-plugin.sh"
+      - "scripts/check-breaking.sh"
       - ".github/workflows/plugin-guards.yml"
   workflow_dispatch:
 
@@ -43,8 +49,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Lint the script
-        run: shellcheck --severity=warning scripts/check-plugin.sh
+      - name: Lint the scripts
+        run: shellcheck --severity=warning scripts/check-plugin.sh scripts/check-breaking.sh
 
       - name: Check the plugin payload
         run: scripts/check-plugin.sh payload
@@ -63,16 +69,31 @@ jobs:
             api.github.com:443
             github.com:443
 
+      # Full history and tags, so the breaking change check can list the
+      # commits since the last plugin tag.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
-
-      - name: Fetch the base commit
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: git fetch --no-tags --depth=1 origin "$BASE_SHA"
 
       - name: Check the version and the changelog
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: scripts/check-plugin.sh version "$BASE_SHA"
+
+      - name: A breaking plugin change needs an entry
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          manifest=plugins/playbook/.claude-plugin/plugin.json
+          head_v="$(jq -r '.version' "$manifest")"
+          base_v="$(git show "$BASE_SHA:$manifest" | jq -r '.version')"
+          if [ "$head_v" = "$base_v" ]; then
+            echo "PASS the plugin version is unchanged at $head_v"
+            exit 0
+          fi
+          scripts/check-breaking.sh release plugin "$head_v"
+          scripts/check-breaking.sh changelog "$head_v"

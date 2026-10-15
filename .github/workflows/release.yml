@@ -11,7 +11,10 @@
 #
 # The workflow creates the GitHub release for the tag when it does not exist,
 # then builds, ad hoc codesigns and uploads the artefacts plus SHA256SUMS, and
-# attests their build provenance. Releases for telemetry-v and code-v tags are
+# attests their build provenance. Every release also gets breaking-changes.json
+# as an asset, and its body starts with the release's breaking changes from
+# that file (ADR 0035). verify-version fails when a commit since the previous
+# tag of the tool is marked breaking and the file has no entry for the version. Releases for telemetry-v and code-v tags are
 # created with `--latest=false`, so GitHub's "latest release" stays on the
 # playbook `vX.Y.Z` line that install.sh reads.
 #
@@ -80,6 +83,7 @@ jobs:
       tool: ${{ steps.map.outputs.tool }}
       latest_flag: ${{ steps.map.outputs.latest_flag }}
       is_playbook: ${{ steps.map.outputs.is_playbook }}
+      component: ${{ steps.map.outputs.component }}
       dry_run: ${{ steps.map.outputs.dry_run }}
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -115,6 +119,7 @@ jobs:
               bins="playbook-telemetry pbtop"; archive="tar"
               cargo_toml="crates/telemetry/Cargo.toml"
               tool="playbook-telemetry"; latest_flag="--latest=false"; is_playbook=false
+              component="telemetry"
               ;;
             code-v[0-9]*)
               echo "::error::code-v tags are reserved. crates/code has no binary yet, so there is nothing to release." >&2
@@ -125,6 +130,7 @@ jobs:
               bins="playbook"; archive="raw"
               cargo_toml="Cargo.toml"
               tool="playbook"; latest_flag=""; is_playbook=true
+              component="playbook"
               ;;
             *)
               echo "::error::unknown tag '${tag}'. Expected vX.Y.Z or telemetry-vX.Y.Z." >&2
@@ -148,6 +154,7 @@ jobs:
             echo "tool=${tool}"
             echo "latest_flag=${latest_flag}"
             echo "is_playbook=${is_playbook}"
+            echo "component=${component}"
             echo "dry_run=${dry_run}"
           } >> "$GITHUB_OUTPUT"
           echo "tag ${tag} resolves to package ${package}, dry run ${dry_run}"
@@ -170,7 +177,12 @@ jobs:
             github.com:443
             objects.githubusercontent.com:443
 
+      # Full history and tags, so the breaking change check can list the
+      # commits since the previous tag of the tool.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Tag and Cargo.toml must agree
         id: check
@@ -190,20 +202,32 @@ jobs:
           fi
           echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
 
-      # A dry run never creates the release, so show what the body of a plain
-      # vX.Y.Z release would start with. The create-release job puts the same
-      # file above the generated notes.
+      # A commit since the previous tag of the tool with `!` after its type or
+      # a BREAKING CHANGE footer needs an entry in breaking-changes.json.
+      - name: A breaking change needs an entry
+        env:
+          COMPONENT: ${{ needs.resolve.outputs.component }}
+          TAG_VERSION: ${{ needs.resolve.outputs.version }}
+        run: scripts/check-breaking.sh release "$COMPONENT" "$TAG_VERSION"
+
+      # A dry run never creates the release, so show what the body would start
+      # with. The create-release job builds the same text.
       - name: Show the release notes preview on a dry run
-        if: needs.resolve.outputs.dry_run == 'true' && needs.resolve.outputs.is_playbook == 'true'
+        if: needs.resolve.outputs.dry_run == 'true'
+        env:
+          COMPONENT: ${{ needs.resolve.outputs.component }}
+          TAG_VERSION: ${{ needs.resolve.outputs.version }}
+          IS_PLAYBOOK: ${{ needs.resolve.outputs.is_playbook }}
         run: |
           set -euo pipefail
           {
             echo "## Release body preview"
             echo
-            echo "The body starts with .github/release-notes-upgrade.md, then the generated notes follow."
+            echo "The body starts with this text. A playbook release adds the generated notes after it."
             echo
             echo '~~~markdown'
-            cat .github/release-notes-upgrade.md
+            scripts/check-breaking.sh notes "$COMPONENT" "$TAG_VERSION"
+            if [ "$IS_PLAYBOOK" = "true" ]; then cat .github/release-notes-upgrade.md; fi
             echo '~~~'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -224,6 +248,7 @@ jobs:
           allowed-endpoints: >
             api.github.com:443
             github.com:443
+            uploads.github.com:443
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -238,6 +263,7 @@ jobs:
           TOOL: ${{ needs.resolve.outputs.tool }}
           LATEST_FLAG: ${{ needs.resolve.outputs.latest_flag }}
           IS_PLAYBOOK: ${{ needs.resolve.outputs.is_playbook }}
+          COMPONENT: ${{ needs.resolve.outputs.component }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -248,13 +274,27 @@ jobs:
           if [ -n "$LATEST_FLAG" ]; then
             args+=("$LATEST_FLAG")
           fi
+          # The breaking changes go first, then the upgrade note for playbook
+          # or the archive note for other tools.
+          notes="$RUNNER_TEMP/release-notes.md"
+          scripts/check-breaking.sh notes "$COMPONENT" "$VERSION" > "$notes"
           if [ "$IS_PLAYBOOK" = "true" ]; then
-            # The upgrade note goes above the generated notes.
-            args+=(--notes-file .github/release-notes-upgrade.md --generate-notes)
+            cat .github/release-notes-upgrade.md >> "$notes"
+            args+=(--notes-file "$notes" --generate-notes)
           else
-            args+=(--notes "Release of $TOOL $VERSION. The archives below hold both binaries for each platform, and SHA256SUMS lists their checksums.")
+            echo "Release of $TOOL $VERSION. The archives below hold both binaries for each platform, and SHA256SUMS lists their checksums." >> "$notes"
+            args+=(--notes-file "$notes")
           fi
           gh release create "${args[@]}"
+
+      # The Homebrew tap reads this asset to write a caveat, so every release
+      # carries it, also one that existed before this run.
+      - name: Attach breaking-changes.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: gh release upload "$TAG" breaking-changes.json --clobber
 
   build:
     needs: [resolve, verify-version, create-release]

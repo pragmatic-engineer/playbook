@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# A light check for breaking changes (ADR 0035). A pull request whose title
+# has `!` after the type, or whose body has a BREAKING CHANGE footer, needs an
+# entry in breaking-changes.json for a component it touches, with a version
+# above that component's latest tag. The pull request title and body become
+# the squash commit, so this is where the marker first appears. The release
+# workflow checks the same rule again before it publishes.
+
+name: breaking-changes
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: breaking-changes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  entry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+
+      # Full history and tags, so the check can find the merge base and each
+      # component's latest tag.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: A breaking pull request needs an entry
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: scripts/check-breaking.sh pr "$BASE_SHA"
