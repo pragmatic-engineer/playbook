@@ -1,6 +1,6 @@
 # ADR-0037: Release Notes Built from Conventional Commits
 
-- **Status:** Accepted
+- **Status:** Accepted. Decisions 1.1, 1.3, 2, 3 and 5.6 are amended by [ADR 0038](0038-one-release-line.md): the plugin ships in the `vX.Y.Z` release, so it has no component, release page, notes or version bump of its own, and its paths count for playbook.
 - **Date created:** 2026-10-16
 - **Date modified:** 2026-10-16
 - **Supersedes:** [ADR 0035](0035-breaking-change-notices.md).

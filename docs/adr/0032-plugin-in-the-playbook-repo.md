@@ -1,6 +1,6 @@
 # ADR-0032: Keep the Plugin in the Playbook Repository
 
-- **Status:** Accepted. Decision 5 is amended by [ADR 0037](0037-release-notes-from-conventional-commits.md): only a change to `plugin.json` starts the plugin release, and its notes are built from the commits.
+- **Status:** Accepted. Decisions 3 and 5 are superseded by [ADR 0038](0038-one-release-line.md): the plugin shares the binary's version and ships in its `vX.Y.Z` release. Decision 2 is amended by ADR 0038: the marketplace entry gets a `ref` on the release tag. Decision 5 was first amended by [ADR 0037](0037-release-notes-from-conventional-commits.md).
 - **Date created:** 2026-10-14
 - **Date modified:** 2026-10-16
 - **Supersedes:** decisions 1, 5, 6 and 7 of [ADR 0030](0030-skills-and-commands-in-their-own-repo.md): the second repository, the daily comparison, the checks crate there and the version line

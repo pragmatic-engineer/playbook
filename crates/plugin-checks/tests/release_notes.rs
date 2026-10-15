@@ -17,9 +17,8 @@ struct Repo {
 }
 
 impl Repo {
-    /// A repository with one commit, tagged v0.1.0, telemetry-v0.1.0 and
-    /// playbook-plugin-v1.0.0, and a commit before the tags that no notes
-    /// may list.
+    /// A repository with one commit, tagged v0.1.0 and telemetry-v0.1.0,
+    /// and a commit before the tags that no notes may list.
     fn new() -> Repo {
         assert!(
             Command::new("jq").arg("--version").output().is_ok(),
@@ -41,7 +40,6 @@ impl Repo {
         repo.change("crates/cli/src/lib.rs", "feat(cli): before the tag (#1)");
         repo.git(&["tag", "v0.1.0"]);
         repo.git(&["tag", "telemetry-v0.1.0"]);
-        repo.git(&["tag", "playbook-plugin-v1.0.0"]);
         repo
     }
 
@@ -178,7 +176,7 @@ fn commits_land_in_their_section_in_order() {
         concat!(
             r#"[["breaking",["drop the old flag","the config moved; run playbook init"]],"#,
             r#"["features",["add a flag","add a panel"]],"#,
-            r#"["fixes",["repair the parser","share a helper"]],"#,
+            r#"["fixes",["repair the parser","reword the fix command","share a helper"]],"#,
             r#"["performance",["read the file once"]],"#,
             r#"["other",["explain the flag","Update the readme"]]]"#
         )
@@ -215,23 +213,18 @@ fn each_component_lists_only_the_commits_on_its_paths() {
 
     // Act
     let telemetry = repo.notes("telemetry", "0.2.0");
-    let plugin = repo.notes("plugin", "1.0.1");
     let playbook = repo.notes("playbook", "0.2.0");
 
-    // Assert: a commit before the previous tag shows nowhere. The telemetry
-    // crate and the shared crates count for both binaries, and the plugin
-    // checks and Cargo.lock count for none.
+    // Assert: a commit before the previous tag shows nowhere. The plugin
+    // ships with playbook. The telemetry crate and the shared crates count
+    // for both binaries, and the plugin checks and Cargo.lock count for none.
     assert_eq!(
         repo.query(&telemetry, "[.sections[] | [.name, [.items[].pr]]]"),
         r#"[["features",[16]],["fixes",[18]]]"#
     );
     assert_eq!(
-        repo.query(&plugin, "[.sections[] | [.name, [.items[].pr]]]"),
-        r#"[["fixes",[17]]]"#
-    );
-    assert_eq!(
         repo.query(&playbook, "[.sections[].items[].pr | numbers] | sort"),
-        "[10,11,12,14,15,16,18]"
+        "[10,11,12,14,15,16,17,18]"
     );
 }
 
@@ -251,7 +244,7 @@ fn the_tag_of_the_version_itself_is_not_the_previous_tag() {
             &notes,
             "[.previous_tag, ([.sections[].items[].pr | numbers] | length)]"
         ),
-        r#"["v0.1.0",7]"#
+        r#"["v0.1.0",8]"#
     );
 }
 
@@ -477,7 +470,6 @@ fn the_body_puts_the_upgrade_note_or_the_assets_note_above_the_notes() {
     let playbook = repo.run(&["body", "playbook", "0.2.0", out_path]);
     let written = fs::read_to_string(&out_json).expect("the json was written");
     let telemetry = repo.run(&["body", "telemetry", "0.2.0", out_path]);
-    let plugin = repo.run(&["body", "plugin", "1.0.1", out_path]);
 
     // Assert
     assert!(playbook.status.success(), "{}", text_of(&playbook));
@@ -490,7 +482,6 @@ fn the_body_puts_the_upgrade_note_or_the_assets_note_above_the_notes() {
     let telemetry = String::from_utf8_lossy(&telemetry.stdout);
     assert!(telemetry.starts_with("## Assets\n"), "{telemetry}");
     assert!(telemetry.contains("\n## Features\n"), "{telemetry}");
-    assert!(String::from_utf8_lossy(&plugin.stdout).starts_with("## Fixes\n"));
 }
 
 #[test]
@@ -499,7 +490,7 @@ fn a_bad_component_or_version_fails() {
     let repo = Repo::new();
 
     // Act
-    let component = repo.run(&["json", "code", "0.1.0"]);
+    let component = repo.run(&["json", "plugin", "0.1.0"]);
     let version = repo.run(&["json", "playbook", "v0.1"]);
 
     // Assert

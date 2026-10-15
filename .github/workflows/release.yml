@@ -9,6 +9,9 @@
 # The first job, `resolve`, maps the prefix to the package, binaries, archive
 # shape and tool name and fails on any other tag.
 #
+# A vX.Y.Z release ships the binary and the plugin together: plugin.json has
+# the same version, and the marketplace reads the plugin from main (ADR 0038).
+#
 # The workflow creates the GitHub release for the tag when it does not exist,
 # then builds, ad hoc codesigns and uploads the artefacts plus SHA256SUMS, and
 # attests their build provenance. scripts/release-notes.sh builds the release
@@ -192,6 +195,7 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
           TAG_VERSION: ${{ needs.resolve.outputs.version }}
           CARGO_TOML: ${{ needs.resolve.outputs.cargo_toml }}
+          COMPONENT: ${{ needs.resolve.outputs.component }}
         run: |
           set -euo pipefail
           cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$CARGO_TOML" | head -1)"
@@ -202,6 +206,11 @@ jobs:
             echo "::error::version mismatch: tag=$TAG_VERSION $CARGO_TOML=$cargo_version. Both must agree before publishing." >&2
             exit 1
           fi
+          # A playbook release ships the plugin too, with the same version
+          # (ADR 0038).
+          if [ "$COMPONENT" = "playbook" ]; then
+            scripts/check-plugin.sh version
+          fi
           echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
 
       # A commit since the previous tag of the tool with `!` after its type or
@@ -210,7 +219,14 @@ jobs:
         env:
           COMPONENT: ${{ needs.resolve.outputs.component }}
           TAG_VERSION: ${{ needs.resolve.outputs.version }}
-        run: scripts/check-breaking.sh release "$COMPONENT" "$TAG_VERSION"
+        run: |
+          set -euo pipefail
+          scripts/check-breaking.sh release "$COMPONENT" "$TAG_VERSION"
+          # The plugin ships in the playbook release (ADR 0038), so its
+          # commits since the previous v tag are checked too.
+          if [ "$COMPONENT" = "playbook" ]; then
+            scripts/check-breaking.sh release plugin "$TAG_VERSION"
+          fi
 
       # A dry run never creates the release, so show the body and the JSON
       # it would publish. The create-release job builds the same text.

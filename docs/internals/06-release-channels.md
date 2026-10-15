@@ -13,26 +13,29 @@ tap repo.
 
 A release attaches the five binaries, `release-notes.json`,
 `breaking-changes.json` and `SHA256SUMS`, which lists all seven. It builds no plugin
-archive. The plugin in `plugins/playbook` has its own version line and its own
-release, described next.
+archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as
+described next.
 
 ## The plugin release
+
+The binary and the plugin share one version line
+([ADR 0038](../adr/0038-one-release-line.md)). The `version` in `plugin.json`
+equals the workspace version in `Cargo.toml`, and its
+`metadata.minBinaryVersion` is the `X.Y.0` of that minor line. The `version-sync` check in `plugin-guards.yml` fails a pull
+request or a push to `main` when they differ, and the `verify-version` job of
+`release.yml` checks them again before a `v` release. The release pull request
+runs `scripts/bump-version.sh X.Y.Z`, which sets all of them and the
+`PLAYBOOK_REF` pins together. A plugin change between releases needs no bump.
 
 The marketplace repository `pragmatic-engineer/marketplace` lists the plugin as
 a `git-subdir` source that points at `plugins/playbook` in this repository, with
 no `ref` and no `version`. Claude Code follows the default branch, copies only
-that folder and updates the plugin when the `version` in `plugin.json` changes.
-
-A change under `plugins/playbook` needs a higher version in `plugin.json` and a
-`## playbook <version>` section at the top of `CHANGELOG.md`. The `version-bump`
-check enforces both and the `payload-guard` check keeps the folder to markdown
-and the manifest. When `plugin.json` changes on `main`,
-`plugin-release.yml` creates the tag `playbook-plugin-v<version>` and a release
-whose notes `scripts/release-notes.sh` builds from the commits since the previous
-plugin tag that touch `plugins/playbook`. It stops when the tag exists and marks the release
-as not latest. The tag does not match `v*`, so `release.yml` never runs for it.
-See [ADR 0032](../adr/0032-plugin-in-the-playbook-repo.md) for the versioning
-rules.
+that folder and updates the plugin when the `version` in `plugin.json` rises,
+which happens when the release pull request merges. ADR 0038 moves the entry
+to a `ref` on the release tag, which the release workflow sets after the
+release is published, starting with the first joint release. There is no separate plugin
+release. The `playbook-plugin-v` tags made before 0.34.0 stay as history. The
+`payload-guard` check keeps the folder to markdown and the manifest.
 
 ## One workflow, one tag prefix per tool
 

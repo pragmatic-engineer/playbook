@@ -1,6 +1,60 @@
 # Changelog
 
-Release notes for the playbook plugin in `plugins/playbook`. The binary has its own releases. Each plugin release has a section named `## playbook <version>`, newest first, and the top section always matches the version in `plugins/playbook/.claude-plugin/plugin.json`.
+Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
+
+## playbook 0.34.0
+
+The first release with one version for the binary and the plugin. The binary goes from 0.26 to 0.34.0, so binary versions 0.27 to 0.33 do not exist.
+
+### Features
+
+- **telemetry**: start the collector from SessionStart, add doctor rows ([#1015](https://github.com/pragmatic-engineer/playbook/pull/1015))
+- **review**: follow Conventional Comments in review skills ([#1021](https://github.com/pragmatic-engineer/playbook/pull/1021))
+- **telemetry**: add the pbtop layout editor ([#1018](https://github.com/pragmatic-engineer/playbook/pull/1018))
+- **review**: add review suggest for a quick or deep call ([#1022](https://github.com/pragmatic-engineer/playbook/pull/1022))
+- **telemetry**: add a projection panel to pbtop ([#1026](https://github.com/pragmatic-engineer/playbook/pull/1026))
+- **telemetry**: add usage doctor to list limit sources ([#1028](https://github.com/pragmatic-engineer/playbook/pull/1028))
+- **review**: add /playbook:review to pick a quick or deep review ([#1027](https://github.com/pragmatic-engineer/playbook/pull/1027))
+- **telemetry**: read cached limits and plan in pbtop ([#1031](https://github.com/pragmatic-engineer/playbook/pull/1031))
+- **cli**: record versions and heal owned files at session start ([#1037](https://github.com/pragmatic-engineer/playbook/pull/1037))
+- **cli**: add doctor --fix and heal after playbook update ([#1038](https://github.com/pragmatic-engineer/playbook/pull/1038))
+- **cli**: add migrations for the 0.25 to 0.26 upgrade gap ([#1039](https://github.com/pragmatic-engineer/playbook/pull/1039))
+- **cli**: check for newer releases and print a notice ([#1043](https://github.com/pragmatic-engineer/playbook/pull/1043))
+- **cli**: add playbook migrate as the front door to migrations ([#1046](https://github.com/pragmatic-engineer/playbook/pull/1046))
+- **cli**: add the auto update that installs a newer release ([#1047](https://github.com/pragmatic-engineer/playbook/pull/1047))
+- **install**: show breaking changes when replacing a binary ([#1049](https://github.com/pragmatic-engineer/playbook/pull/1049))
+- **cli**: heal once on the first run of a new binary ([#1051](https://github.com/pragmatic-engineer/playbook/pull/1051))
+- **plugin**: check the breaking changes mirror in plugin.json ([#1052](https://github.com/pragmatic-engineer/playbook/pull/1052))
+- **cli**: turn on update.mode auto in the release check ([#1050](https://github.com/pragmatic-engineer/playbook/pull/1050))
+- **cli**: show breaking changes in playbook update ([#1048](https://github.com/pragmatic-engineer/playbook/pull/1048))
+- **update**: show the release check status and add ADR 0036 ([#1054](https://github.com/pragmatic-engineer/playbook/pull/1054))
+- **cli**: show breaking changes once when a new binary heals ([#1055](https://github.com/pragmatic-engineer/playbook/pull/1055))
+- **plugin**: add Rust engineering standards skill ([#1060](https://github.com/pragmatic-engineer/playbook/pull/1060))
+- **plugin**: add the remaining Rust standards references ([#1061](https://github.com/pragmatic-engineer/playbook/pull/1061))
+- **release**: ship the binary and the plugin as one release line
+
+### Fixes
+
+- **update**: stop warning that the plugin differs from the binary ([#1023](https://github.com/pragmatic-engineer/playbook/pull/1023))
+- **plugin**: stop using a bare plugin root path ([#1029](https://github.com/pragmatic-engineer/playbook/pull/1029))
+- **plugin**: hint to upgrade an old binary ([#1032](https://github.com/pragmatic-engineer/playbook/pull/1032))
+- **plugin**: find the plugin root with one resolver ([#1033](https://github.com/pragmatic-engineer/playbook/pull/1033))
+- **plugin**: add path plugin-root and fallbacks for an old setup ([#1035](https://github.com/pragmatic-engineer/playbook/pull/1035))
+- **doctor**: check the plugin against the supported version range ([#1042](https://github.com/pragmatic-engineer/playbook/pull/1042))
+- pass the breaking notice flag only to the steps that read it ([#1056](https://github.com/pragmatic-engineer/playbook/pull/1056))
+- **cli**: hide only the breaking entries the caller already showed ([#1058](https://github.com/pragmatic-engineer/playbook/pull/1058))
+- **release**: address review findings for one release line
+
+### Other changes
+
+- docs(telemetry): document telemetry on by default and add ADR 0033 ([#1019](https://github.com/pragmatic-engineer/playbook/pull/1019))
+- docs(plugin): add a Conventional Commits reference ([#1025](https://github.com/pragmatic-engineer/playbook/pull/1025))
+- docs(telemetry): describe tabs, limit sources and usage doctor ([#1034](https://github.com/pragmatic-engineer/playbook/pull/1034))
+- test(telemetry): give each collector test its own port ([#1036](https://github.com/pragmatic-engineer/playbook/pull/1036))
+- docs(adr): add ADR 0035 and the breaking changes record ([#1041](https://github.com/pragmatic-engineer/playbook/pull/1041))
+- docs(plugin): match doctor.md to the new layer 6 checks ([#1044](https://github.com/pragmatic-engineer/playbook/pull/1044))
+- docs(plugin): describe playbook migrate in the doctor command ([#1053](https://github.com/pragmatic-engineer/playbook/pull/1053))
+- test(cli): ignore SQLite sidecars in the smoke idempotence check ([#1057](https://github.com/pragmatic-engineer/playbook/pull/1057))
 
 ## playbook 0.33.0
 

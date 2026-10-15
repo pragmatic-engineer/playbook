@@ -475,25 +475,45 @@ fn l6_no_binary_on_path_fails() {
 }
 
 #[test]
-fn l6_a_plugin_inside_the_supported_range_passes_even_when_versions_differ() {
+fn l6_a_plugin_in_the_minor_line_of_the_binary_passes_even_when_patches_differ() {
     let b = Box::new("l6k");
-    let bin = b.stub("bin1", "0.19.0", true);
+    let bin = b.stub("bin1", "0.31.0", true);
     let root = b.root.join("plugin");
-    manifest(&root, "0.31.1");
+    // bump-version.sh sets the minimum to the first release of the line.
+    manifest_with(
+        &root,
+        "0.31.1",
+        r#","metadata":{"minBinaryVersion":"0.31.0"}"#,
+    );
     let rows = b.run(&[&bin], "/bin/zsh", Some(&root));
     let t = version_row(&rows);
     assert!(t.starts_with("PASS") && t.contains("0.31.1"), "{t}");
 }
 
 #[test]
-fn l6_a_plugin_older_than_the_supported_range_warns_with_the_update_command() {
+fn l6_a_plugin_on_an_older_minor_line_warns_with_the_update_command() {
     let b = Box::new("l6s");
-    let bin = b.stub("bin1", "0.19.0", true);
+    let bin = b.stub("bin1", "0.31.0", true);
     let root = b.root.join("plugin");
-    manifest(&root, "0.25.0");
+    manifest(&root, "0.30.9");
     let t = version_row(&b.run(&[&bin], "/bin/zsh", Some(&root)));
     assert!(
         t.starts_with("WARN") && t.contains("claude plugin update playbook@pragmatic-engineer"),
+        "{t}"
+    );
+}
+
+#[test]
+fn l6_a_plugin_on_a_newer_minor_line_warns_with_the_upgrade_command() {
+    let b = Box::new("l6p");
+    let bin = b.stub("bin1", "0.31.0", true);
+    let root = b.root.join("plugin");
+    manifest(&root, "0.32.0");
+    let t = version_row(&b.run(&[&bin], "/bin/zsh", Some(&root)));
+    assert!(
+        t.starts_with("WARN")
+            && t.contains("newer than the 0.31 line of this binary (0.31.0)")
+            && t.ends_with("Run: playbook update"),
         "{t}"
     );
 }
@@ -529,7 +549,7 @@ fn l6_no_manifest_is_info_not_fail() {
 #[test]
 fn l6_the_newest_cached_plugin_is_the_baseline() {
     let b = Box::new("l6c");
-    let bin = b.stub("bin1", "0.19.0", true);
+    let bin = b.stub("bin1", "0.31.0", true);
     for v in ["0.9.0", "0.31.1"] {
         manifest(
             &b.home().join(format!(

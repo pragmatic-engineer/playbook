@@ -50,7 +50,7 @@ A Homebrew install updates with `brew upgrade playbook`. On a brew-managed insta
 
 Optional: the standalone usage dashboard for machines without playbook, `brew install pragmatic-engineer/tap/playbook-telemetry`, then run `pbtop`. `pbtop` is the short alias of `playbook-telemetry`. With playbook installed you do not need it, because `playbook usage` runs the same code. The code index gets the same treatment: `pbcode` is the planned alias of the standalone `playbook-code` tool, which has no release yet, so use `playbook code` today.
 
-Pin a version with `PLAYBOOK_REF=v0.26.0`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
+Pin a version with `PLAYBOOK_REF=v0.34.0`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
 
 | Mode | What you get | Commands |
 |---|---|---|
@@ -198,7 +198,7 @@ Start at the [docs index](docs/index.md).
 
 ## Repository layout
 
-This repository holds the `playbook` binary and `install.sh`. The skills, commands and agents live in `plugins/playbook`. The Rust code is a Cargo workspace under `crates/`: `cli` (the `playbook` binary), `common`, `code`, `telemetry` (`playbook-telemetry` and `pbtop`) and `data`. See [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout).
+This repository holds the `playbook` binary and `install.sh`. The skills, commands and agents live in `plugins/playbook`. The Rust code is a Cargo workspace under `crates/`: `cli` (the `playbook` binary), `common`, `code`, `telemetry` (`playbook-telemetry` and `pbtop`) and `data`. See [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout). A `vX.Y.Z` release ships the binary and the plugin with the same version ([ADR-0038](docs/adr/0038-one-release-line.md)).
 
 ## License
 
