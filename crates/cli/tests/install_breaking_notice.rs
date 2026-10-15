@@ -19,13 +19,14 @@ use std::process::{Command, Stdio};
 use fx::{both, install_stubs, repo_root, sha256_hex, write_exec, Work};
 
 /// A 0.17.0 binary that knows `breaking` and `migrate`. It lists one entry
-/// only for `breaking --since 0.16.0`. Every other call except `--version`
-/// logs its arguments and whether the installer marked the notice as shown.
+/// only for `breaking --since 0.16.0`. Every call except `--version` and
+/// `version`, the breaking one included, logs its arguments and the
+/// PLAYBOOK_BREAKING_SHOWN it saw: `unset` when it has none.
 const NEW_BINARY: &str = r#"#!/usr/bin/env bash
 case "$*" in
   --version|version) echo "playbook 0.17.0"; exit 0 ;;
 esac
-printf '%s|%s\n' "$*" "${PLAYBOOK_BREAKING_SHOWN:-unset}" >> "$HOME/calls.log"
+printf '%s|%s\n' "$*" "${PLAYBOOK_BREAKING_SHOWN-unset}" >> "$HOME/calls.log"
 case "$*" in
   "breaking --since 0.16.0") printf 'Breaking changes in this upgrade:\n  playbook 0.17.0: The old flag is gone.\n    Action: playbook init\n' ;;
   breaking*) exit 2 ;;
@@ -75,6 +76,11 @@ impl Sandbox {
     /// Installs `body` as release 0.17.0 with `flags`, returning stdout then
     /// stderr.
     fn install(&self, body: &str, flags: &[&str]) -> String {
+        self.install_with(body, flags, &[])
+    }
+
+    /// Like `install`, with `envs` set after the inherited ones are removed.
+    fn install_with(&self, body: &str, flags: &[&str], envs: &[(&str, &str)]) -> String {
         let sums = format!(
             "{}  playbook-0.17.0-x86_64-unknown-linux-musl",
             sha256_hex(body.as_bytes())
@@ -110,7 +116,8 @@ impl Sandbox {
             .env("SHELL", "/bin/bash")
             .env("STUB_BODY", "{\"tag_name\": \"v0.17.0\"}")
             .env("STUB_ASSET_BODY", body)
-            .env("STUB_SUMS_BODY", sums);
+            .env("STUB_SUMS_BODY", sums)
+            .envs(envs.iter().copied());
         let out = both(&command.output().expect("bash should spawn"));
         assert!(
             out.contains("Installed playbook 0.17.0"),
@@ -155,14 +162,15 @@ fn a_shown_notice_is_marked_only_for_the_migrate_and_init_that_run_next() {
 
     // Act
     upgrade.install(NEW_BINARY, &["--yes"]);
-    fresh.install(NEW_BINARY, &["--yes"]);
+    fresh.install_with(NEW_BINARY, &["--yes"], &[("PLAYBOOK_BREAKING_SHOWN", "1")]);
 
     // Assert
-    assert_eq!(upgrade.shown_for("migrate"), ["1"]);
-    assert_eq!(upgrade.shown_for("init"), ["1"]);
+    assert_eq!(upgrade.shown_for("migrate"), ["0.16.0"]);
+    assert_eq!(upgrade.shown_for("init"), ["0.16.0"]);
     assert_eq!(upgrade.shown_for("init --help"), ["unset"]);
-    assert_eq!(fresh.shown_for("migrate"), ["unset"]);
-    assert_eq!(fresh.shown_for("init"), ["unset"]);
+    assert_eq!(fresh.shown_for("migrate"), [""]);
+    assert_eq!(fresh.shown_for("init"), [""]);
+    assert_eq!(fresh.shown_for("init --help"), ["unset"]);
 }
 
 #[test]

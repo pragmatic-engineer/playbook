@@ -85,6 +85,9 @@ pub struct Outcome {
     /// The breaking changes block of the new binary, shown again after the
     /// swap and the heal. Empty when the upgrade crosses none.
     pub breaking: String,
+    /// The version the shown block started from, set where the block is
+    /// announced. The heal gets it so it does not print the block again.
+    pub breaking_shown_since: Option<String>,
 }
 
 /// The first release whose binary has `doctor --fix`; `migrate` comes in the
@@ -127,13 +130,13 @@ const HEAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// instead. Returns the command that ran and what it printed. Best effort: a
 /// release older than `FIRST_FIX_VERSION` is skipped, and any failure is a
 /// warning that names the command that ran and carries the lines it printed.
-/// `shown` says the update already printed the breaking changes block, so
-/// the heal gets `PLAYBOOK_BREAKING_SHOWN=1` and records it without printing
-/// it again (ADR 0035).
+/// `shown_since` is the version the block the update printed started from.
+/// The heal gets it in `breaking::SHOWN_ENV`, so it records the notice
+/// without printing those entries again (ADR 0035 decision 4.2).
 pub fn heal_after_swap(
     exe: &Path,
     installed: &str,
-    shown: bool,
+    shown_since: Option<&str>,
 ) -> Result<Option<(&'static str, String)>, String> {
     if resolve::compare(installed, FIRST_FIX_VERSION).is_lt() {
         return Ok(None);
@@ -145,10 +148,10 @@ pub fn heal_after_swap(
         )
     };
     let mut name = "migrate";
-    let mut out = run_heal(exe, &[name], shown).ok_or_else(|| late(name))?;
+    let mut out = run_heal(exe, &[name], shown_since).ok_or_else(|| late(name))?;
     if out.status.code() == Some(2) {
         name = "doctor --fix";
-        out = run_heal(exe, &["doctor", "--fix"], shown).ok_or_else(|| late(name))?;
+        out = run_heal(exe, &["doctor", "--fix"], shown_since).ok_or_else(|| late(name))?;
     }
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     if !out.status.success() {
@@ -170,16 +173,12 @@ pub fn heal_after_swap(
     Ok(Some((name, text)))
 }
 
-/// Runs `<exe> <args>` with the heal deadline, telling it whether the
-/// update already showed the breaking changes block.
-fn run_heal(exe: &Path, args: &[&str], shown: bool) -> Option<std::process::Output> {
-    let flag = if shown { "1" } else { "" };
-    run_fresh(
-        exe,
-        args,
-        &[("PLAYBOOK_BREAKING_SHOWN", flag)],
-        HEAL_TIMEOUT,
-    )
+/// Runs `<exe> <args>` with the heal deadline, telling it where the block
+/// the update showed started. An empty value, rather than none, overrides a
+/// value inherited from a shell that an older install.sh exported it into.
+fn run_heal(exe: &Path, args: &[&str], shown_since: Option<&str>) -> Option<std::process::Output> {
+    let shown = [(crate::breaking::SHOWN_ENV, shown_since.unwrap_or(""))];
+    run_fresh(exe, args, &shown, HEAL_TIMEOUT)
 }
 
 /// Runs a freshly written binary with `envs` set and a deadline. A spawn that
@@ -214,7 +213,7 @@ pub fn finish_with_heal(outcome: &mut Outcome, exe: &Path) {
     let Some(version) = outcome.installed.clone() else {
         return;
     };
-    match heal_after_swap(exe, &version, !outcome.breaking.is_empty()) {
+    match heal_after_swap(exe, &version, outcome.breaking_shown_since.as_deref()) {
         Ok(Some((name, text))) => outcome
             .out
             .extend(text.lines().map(|l| format!("{name}: {l}"))),
@@ -362,6 +361,7 @@ pub fn run(
         }
         if !o.breaking.is_empty() {
             (env.announce)(&o.breaking);
+            o.breaking_shown_since = Some(current.to_string());
         }
     }
 
@@ -640,13 +640,14 @@ mod tests {
         let env = env_in("heal-shown");
         std::fs::write(
             &env.exe,
-            "#!/bin/sh\necho \"shown=${PLAYBOOK_BREAKING_SHOWN:-unset}\"\n",
+            "#!/bin/sh\necho \"shown=${PLAYBOOK_BREAKING_SHOWN-unset}\"\n",
         )
         .unwrap();
         swap::make_executable(&env.exe).unwrap();
         let mut shown = Outcome {
             installed: Some("0.27.0".into()),
             breaking: "Breaking changes in this upgrade:\n".into(),
+            breaking_shown_since: Some("0.26.0".into()),
             ..Outcome::default()
         };
         let mut quiet = Outcome {
@@ -659,14 +660,14 @@ mod tests {
         finish_with_heal(&mut quiet, &env.exe);
 
         // Assert
-        assert_eq!(shown.out, vec!["migrate: shown=1"]);
-        assert_eq!(quiet.out, vec!["migrate: shown=unset"]);
+        assert_eq!(shown.out, vec!["migrate: shown=0.26.0"]);
+        assert_eq!(quiet.out, vec!["migrate: shown="]);
     }
 
     #[test]
     fn the_heal_after_a_swap_skips_releases_without_doctor_fix() {
         let env = env_in("heal-old");
-        assert_eq!(heal_after_swap(&env.exe, "0.26.0", false), Ok(None));
+        assert_eq!(heal_after_swap(&env.exe, "0.26.0", None), Ok(None));
     }
 
     #[test]
@@ -689,19 +690,19 @@ mod tests {
             "#!/bin/sh\necho 'failed: state: locked'\nexit 1\n",
         )
         .unwrap();
-        let failed = heal_after_swap(&env.exe, "1.0.0", false).unwrap_err();
+        let failed = heal_after_swap(&env.exe, "1.0.0", None).unwrap_err();
         std::fs::write(
             &env.exe,
             "#!/bin/sh\n[ \"$1\" = migrate ] && exit 2\necho \"ran: $*\"\n",
         )
         .unwrap();
-        let older = heal_after_swap(&env.exe, "0.27.0", false).unwrap();
+        let older = heal_after_swap(&env.exe, "0.27.0", None).unwrap();
         std::fs::write(
             &env.exe,
             "#!/bin/sh\n[ \"$1\" = migrate ] && exit 2\necho 'failed: x'\nexit 1\n",
         )
         .unwrap();
-        let older_failed = heal_after_swap(&env.exe, "0.27.0", false).unwrap_err();
+        let older_failed = heal_after_swap(&env.exe, "0.27.0", None).unwrap_err();
 
         // Assert
         assert_eq!(done.out, vec!["migrate: ran: migrate"]);
