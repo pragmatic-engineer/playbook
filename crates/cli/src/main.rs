@@ -2026,7 +2026,27 @@ fn main() {
             };
             std::process::exit(code);
         }
-        Command::Doctor { sub } => match sub {
+        Command::Doctor {
+            fix: true,
+            sub: None,
+        } => {
+            let ctx = init::migrate::Ctx::for_home(&common::home_dir());
+            let out = playbook::heal::run(
+                &ctx,
+                playbook::heal::Trigger::Fix,
+                common::time::now_epoch_secs(),
+            );
+            print!("{}", playbook::heal::render_fix(&out));
+            std::process::exit(out.exit_code());
+        }
+        Command::Doctor {
+            fix: false,
+            sub: None,
+        } => {
+            eprintln!("playbook doctor: pass a subcommand such as `check`, or `--fix`");
+            std::process::exit(2);
+        }
+        Command::Doctor { sub: Some(sub), .. } => match sub {
             DoctorCommand::Check { json } => {
                 let home = common::home_dir();
                 let claude_home = home.join(".claude");
@@ -2247,13 +2267,15 @@ fn main() {
                 yes,
             };
             let result = update::Env::real().and_then(|env| {
-                update::run(
+                let mut outcome = update::run(
                     &opts,
                     &env,
                     &update::download::HttpFetcher { local_http: false },
                     &update::verify::GhAttest,
                     &update::swap::run_version,
-                )
+                )?;
+                update::finish_with_heal(&mut outcome, &env.exe);
+                Ok(outcome)
             });
             match result {
                 Ok(outcome) if std::io::stdout().is_terminal() => {

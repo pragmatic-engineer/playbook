@@ -2428,3 +2428,34 @@ fn session_init_names_the_upgrade_when_the_plugin_needs_a_newer_binary() {
         "{message}"
     );
 }
+
+#[test]
+fn session_init_names_the_init_command_for_a_pending_settings_change() {
+    // Arrange: settings.json still runs the old status line script.
+    let home = scratch_dir("heal-line");
+    let script = playbook::init::statusline::playbook_statusline_path(&home);
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    let settings = home.join(".claude/settings.json");
+    fs::write(
+        &settings,
+        format!(
+            r#"{{"statusLine":{{"type":"command","command":"bash {}"}}}}"#,
+            script.display()
+        ),
+    )
+    .unwrap();
+    let before = fs::read(&settings).unwrap();
+
+    // Act
+    let out = run_hook("session-init", &home, &home, r#"{"source":"startup"}"#, &[]);
+
+    // Assert
+    assert_eq!(out.exit_code, 0, "{}", out.stderr);
+    let value: serde_json::Value = serde_json::from_str(&out.stdout).expect("json payload");
+    let message = value["systemMessage"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("need `playbook init --statusline`"),
+        "{message}"
+    );
+    assert_eq!(fs::read(&settings).unwrap(), before);
+}

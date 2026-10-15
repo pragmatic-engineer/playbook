@@ -49,6 +49,7 @@ mod tests {
                 "kept the previous binary as /bin/playbook.bak".into(),
             ],
             warnings: vec!["another playbook comes first on PATH".into()],
+            installed: None,
         };
         let got = render(&Caps::plain(80), &o);
         assert!(got.starts_with("[ok] verified"), "{got}");
