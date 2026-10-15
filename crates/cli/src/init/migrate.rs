@@ -16,6 +16,10 @@ const LOCK_DIR: &str = "migrations.lock";
 const SYSTEM_PROMPT_KEY: &str = "system-prompt";
 const STATUSLINE_KEY: &str = "statusline";
 const SKILL_KEY_PREFIX: &str = "skill:";
+/// The `Consent` migration `init` skips when the user declines the status line.
+pub const STATUSLINE_MIGRATION: &str = "0006-statusline-rust-command";
+/// The `Consent` migration `init` skips when the user declines the hooks.
+pub const DEAD_HOOKS_MIGRATION: &str = "0011-dead-hook-scripts";
 
 /// What a migration needs to find the state it moves.
 pub struct Ctx {
@@ -77,6 +81,9 @@ pub enum Scope {
         check: fn(&Ctx) -> Option<String>,
         command: &'static str,
     },
+    /// Reports on files Claude Code owns and writes nothing. A `Manual`
+    /// migration whose warning the session hook repeats until it clears.
+    Report,
 }
 
 pub struct Migration {
@@ -166,7 +173,103 @@ pub fn registry() -> Vec<Migration> {
             scope: Scope::Owned,
             run: state_files_to_sqlite,
         },
+        Migration {
+            id: "0011-dead-hook-scripts",
+            kind: Kind::Idempotent,
+            scope: Scope::Consent {
+                check: dead_hook_scripts_pending,
+                command: "playbook init --hooks",
+            },
+            run: dead_hook_scripts,
+        },
+        Migration {
+            id: "0012-other-playbook-plugins",
+            kind: Kind::Manual,
+            scope: Scope::Report,
+            run: other_playbook_plugins,
+        },
+        Migration {
+            id: "0013-plugin-version-range",
+            kind: Kind::Manual,
+            scope: Scope::Report,
+            run: plugin_version_range,
+        },
+        Migration {
+            id: "0014-orphaned-plugin-caches",
+            kind: Kind::Manual,
+            scope: Scope::Owned,
+            run: orphaned_plugin_caches,
+        },
     ]
+}
+
+/// Hook entries whose `~/.claude/hooks/` script is gone (ADR 0034 decision
+/// 9). Removing them writes settings.json, so only `init` does it.
+fn dead_hook_scripts(ctx: &Ctx) -> Outcome {
+    let settings = ctx.claude_home.join("settings.json");
+    let epoch = crate::common::time::now_epoch_secs();
+    match crate::init::dead_hooks::remove(&settings, &ctx.home, &ctx.claude_home, epoch) {
+        Ok(removed) if removed.is_empty() => Outcome::Quiet,
+        Ok(removed) => Outcome::Repeat(StepReport::wired(
+            "dead-hooks",
+            format!(
+                "removed {} hook(s) whose script is gone: {}",
+                removed.len(),
+                removed.join(", ")
+            ),
+        )),
+        Err(err) => Outcome::Failed(StepReport::failed("dead-hooks", err.to_string())),
+    }
+}
+
+fn dead_hook_scripts_pending(ctx: &Ctx) -> Option<String> {
+    crate::init::dead_hooks::pending(
+        &ctx.claude_home.join("settings.json"),
+        &ctx.home,
+        &ctx.claude_home,
+    )
+}
+
+/// The retired `playbook-hooks` plugin, or a `playbook` plugin from another
+/// marketplace, runs next to this one. Claude Code owns the plugin list.
+fn other_playbook_plugins(ctx: &Ctx) -> Outcome {
+    let keys = crate::common::plugin_state::other_playbook_plugins(&ctx.claude_home);
+    if keys.is_empty() {
+        return Outcome::Quiet;
+    }
+    let commands: Vec<String> = keys
+        .iter()
+        .map(|k| format!("claude plugin uninstall {k}"))
+        .collect();
+    Outcome::Warn(format!(
+        "{} also installed, so its hooks or skills run twice. Run: {}",
+        keys.join(", "),
+        commands.join("; ")
+    ))
+}
+
+/// The installed plugin is older than this binary supports, or has a major
+/// version it does not know.
+fn plugin_version_range(ctx: &Ctx) -> Outcome {
+    let env = std::env::var("CLAUDE_PLUGIN_ROOT").ok();
+    crate::plugin_root::find(env.as_deref(), &ctx.claude_home)
+        .and_then(|root| crate::plugin_root::plugin_version(&root))
+        .and_then(|v| crate::plugin_root::plugin_out_of_range(&v))
+        .map_or(Outcome::Quiet, Outcome::Warn)
+}
+
+/// Old plugin folders Claude Code marked for removal. Playbook ignores them
+/// and never deletes them.
+fn orphaned_plugin_caches(ctx: &Ctx) -> Outcome {
+    let dirs = crate::plugin_root::orphaned_cache_dirs(&ctx.claude_home);
+    if dirs.is_empty() {
+        return Outcome::Quiet;
+    }
+    Outcome::Warn(format!(
+        "{} old plugin folder(s) are marked orphaned; playbook ignores them and Claude Code removes them: {}",
+        dirs.len(),
+        join_paths(&dirs)
+    ))
 }
 
 /// A `config.json` written after the SQLite import (an older binary, or old
@@ -516,16 +619,17 @@ pub fn record_skills(home: &Path, skills_root: &Path) {
     record_many(home, &fresh, Some(&stale));
 }
 
-/// One item a run left for the user: a `Consent` migration's pending change.
+/// One item a run left for the user: a `Consent` migration's pending change or
+/// a `Report` warning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenItem {
     pub id: &'static str,
     pub message: String,
-    /// The init command that applies the change.
+    /// The init command that applies a `Consent` change. `None` for a report.
     pub command: Option<&'static str>,
 }
 
-/// The open `Consent` items, writing nothing. `only` limits the
+/// The open `Consent` and `Report` items, writing nothing. `only` limits the
 /// checks to those ids.
 pub fn open_items(ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
     registry()
@@ -537,6 +641,14 @@ pub fn open_items(ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
                 message,
                 command: Some(command),
             }),
+            Scope::Report => match (m.run)(ctx) {
+                Outcome::Warn(message) => Some(OpenItem {
+                    id: m.id,
+                    message,
+                    command: None,
+                }),
+                _ => None,
+            },
             Scope::Owned => None,
         })
         .collect()
@@ -622,18 +734,18 @@ fn with_lock_retry(home: &Path, retries: u32, f: impl FnOnce()) -> bool {
 
 /// Runs the shipped registry.
 pub fn run_pending(ctx: &Ctx) -> Report {
-    run_pending_for(ctx, true)
+    run_pending_for(ctx, true, true)
 }
 
 /// Runs the shipped registry. With `statusline` false the migration that
 /// rewrites `statusLine.command` stays pending, so init leaves that key alone.
-pub fn run_pending_for(ctx: &Ctx, statusline: bool) -> Report {
+pub fn run_pending_for(ctx: &Ctx, statusline: bool, hooks: bool) -> Report {
     let root = playbook_root_from(&ctx.home);
     let pending = crate::state::pending_legacy(&root);
     let mut migrations = registry();
-    if !statusline {
-        migrations.retain(|m| m.id != "0006-statusline-rust-command");
-    }
+    migrations.retain(|m| {
+        (statusline || m.id != STATUSLINE_MIGRATION) && (hooks || m.id != DEAD_HOOKS_MIGRATION)
+    });
     let mut report = run_with(&migrations, ctx);
     if pending > 0 && crate::state::pending_legacy(&root) == 0 {
         report.steps.insert(
@@ -1053,7 +1165,7 @@ mod tests {
     }
 
     #[test]
-    fn owned_migrations_write_nothing_outside_the_playbook_folder() {
+    fn owned_and_report_migrations_write_nothing_outside_the_playbook_folder() {
         // Arrange: user files that the Consent migrations would change.
         let h = home("scope-guard");
         let script = crate::init::statusline::playbook_statusline_path(&h);
@@ -1099,7 +1211,29 @@ mod tests {
     }
 
     #[test]
+    fn every_migration_is_safe_and_idempotent_on_a_fresh_machine() {
+        // Arrange: an empty home, so every file a migration reads is missing.
+        let h = home("fresh-all");
+
+        // Act
+        let first = run_pending(&ctx(&h));
+        let after_first = snapshot(&h);
+        let second = run_pending(&ctx(&h));
+
+        // Assert
+        for report in [&first, &second] {
+            assert!(!report.failed && !report.lock_busy);
+            assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        }
+        assert!(snapshot(&h)
+            .iter()
+            .all(|(p, _)| p.starts_with(playbook_root_from(&h))));
+        assert_eq!(snapshot(&h), after_first);
+        assert!(open_items(&ctx(&h), None).is_empty());
+    }
+
+    #[test]
     fn the_schema_is_the_highest_registry_number() {
-        assert_eq!(schema(), 10);
+        assert_eq!(schema(), 14);
     }
 }

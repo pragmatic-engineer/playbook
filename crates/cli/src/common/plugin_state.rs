@@ -83,6 +83,32 @@ fn installed_value(claude_home: &Path, key: &str) -> Option<Option<serde_json::V
     Some(value.get("plugins").and_then(find).or_else(|| find(&value)))
 }
 
+/// The keys in `installed_plugins.json` for the retired `playbook-hooks`
+/// plugin or a `playbook` plugin from another marketplace. Both run next to
+/// the one playbook supports. Empty when the file is missing or malformed.
+pub fn other_playbook_plugins(claude_home: &Path) -> Vec<String> {
+    let path = claude_home.join("plugins/installed_plugins.json");
+    let Some(value) = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    else {
+        return Vec::new();
+    };
+    let map = value.get("plugins").unwrap_or(&value);
+    let mut keys: Vec<String> = map
+        .as_object()
+        .into_iter()
+        .flat_map(|m| m.iter())
+        .filter(|(_, v)| !v.is_null())
+        .map(|(k, _)| k.clone())
+        .filter(|k| {
+            k == HOOKS_PLUGIN_KEY || (k.starts_with("playbook@") && k.as_str() != PLUGIN_KEY)
+        })
+        .collect();
+    keys.sort();
+    keys
+}
+
 /// Whether Claude Code lists `key` as installed, or `None` when
 /// `installed_plugins.json` is missing or cannot be parsed.
 pub fn listed_in(home: &Path, key: &str) -> Option<bool> {
@@ -193,5 +219,22 @@ mod tests {
         let bad = home_with(None);
         write_installed(&bad, "{not json");
         assert_eq!(installed_in(&bad), None);
+    }
+
+    #[test]
+    fn other_playbook_plugins_lists_the_hooks_plugin_and_other_marketplaces() {
+        let home = home_with(None);
+        let claude_home = home.join(".claude");
+        assert!(other_playbook_plugins(&claude_home).is_empty());
+        std::fs::create_dir_all(claude_home.join("plugins")).unwrap();
+        std::fs::write(
+            claude_home.join("plugins/installed_plugins.json"),
+            r#"{"version":2,"plugins":{"playbook@pragmatic-engineer":[{}],"playbook-hooks@pragmatic-engineer":[{}],"playbook@fork":[{}],"other@x":[{}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            other_playbook_plugins(&claude_home),
+            vec!["playbook-hooks@pragmatic-engineer", "playbook@fork"]
+        );
     }
 }

@@ -28,6 +28,7 @@
 
 pub mod catalog;
 pub mod choices;
+pub mod dead_hooks;
 pub mod memory_migrate;
 pub mod merge;
 pub mod migrate;

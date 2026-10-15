@@ -664,7 +664,18 @@ pub fn unwire_at(
     if rendered == original {
         return Ok(outcome);
     }
-    // Never reuse a name: an earlier backup holds an older state worth keeping.
+    outcome.backup_path = Some(backup_then_write(settings_path, &rendered, epoch)?);
+    Ok(outcome)
+}
+
+/// Copies `settings_path` to a new `.bak.<epoch>` file, then writes `rendered`
+/// in its place. Returns the backup path. A name is never reused, because an
+/// earlier backup holds an older state worth keeping.
+pub(crate) fn backup_then_write(
+    settings_path: &Path,
+    rendered: &str,
+    epoch: u64,
+) -> std::io::Result<PathBuf> {
     let mut stamp = epoch;
     let mut backup = timestamped_backup_path(settings_path, stamp);
     while backup.exists() {
@@ -672,9 +683,8 @@ pub fn unwire_at(
         backup = timestamped_backup_path(settings_path, stamp);
     }
     fs::copy(settings_path, &backup)?;
-    outcome.backup_path = Some(backup);
-    atomic_write(settings_path, &rendered)?;
-    Ok(outcome)
+    atomic_write(settings_path, rendered)?;
+    Ok(backup)
 }
 
 /// What a read-only look at `settings.json` found about the hooks `wire` owns.

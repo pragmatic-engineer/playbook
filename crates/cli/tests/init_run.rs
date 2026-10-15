@@ -752,9 +752,11 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
 fn hand_added_hook_entry_survives_composed_init() {
     // Arrange: a `settings.json` with a hook entry the template does not
     // know about, alongside the four guards a real unwired install ships.
+    // Its script exists, so it is the user's own and not a dead entry.
     let home = scratch_home("hand-added");
     let claude_home = claude_home_of(&home);
     let hand_added_command = "~/.claude/hooks/my-custom-guard.sh";
+    write_text(&claude_home.join("hooks/my-custom-guard.sh"), "#!/bin/sh\n");
     write_json(
         &claude_home.join("settings.json"),
         &json!({

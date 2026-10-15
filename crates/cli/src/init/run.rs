@@ -176,7 +176,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         self_root: skills_root.clone(),
         repo: paths.repo.clone(),
     };
-    let migrated = migrate::run_pending_for(&ctx, paths.statusline);
+    let migrated = migrate::run_pending_for(&ctx, paths.statusline, paths.hooks);
     // Record this binary in the version record, so the session hook does not
     // run the same migrations again (ADR 0034).
     crate::heal::run(
@@ -184,6 +184,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         crate::heal::Trigger::Init {
             failed: migrated.failed || migrated.lock_busy,
             statusline: paths.statusline,
+            hooks: paths.hooks,
         },
         crate::common::time::now_epoch_secs(),
     );

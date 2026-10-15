@@ -866,7 +866,7 @@ const LOGIN_SHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// how hook commands get their PATH. None of these rows fails: the binary and
 /// its hooks are optional.
 fn hooks_rows(env: &Env) -> Vec<Row> {
-    use crate::common::plugin_state::{listed_in, HOOKS_PLUGIN_KEY};
+    use crate::common::plugin_state::{other_playbook_plugins, HOOKS_PLUGIN_KEY, PLUGIN_KEY};
     use crate::init::wire::{audit, wired_hooks};
     let total = wired_hooks().count();
     let found = audit(&env.settings());
@@ -910,14 +910,14 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
             .hint("delete the entry from ~/.claude/settings.json by hand"),
         );
     }
-    if listed_in(&env.home, HOOKS_PLUGIN_KEY) == Some(true) {
+    for key in other_playbook_plugins(&env.claude_home) {
+        let what = if key == HOOKS_PLUGIN_KEY {
+            "the playbook-hooks plugin is still installed, so its hooks run next to the ones in settings.json".to_string()
+        } else {
+            format!("{key} is installed next to {PLUGIN_KEY}, so its skills and hooks run twice")
+        };
         rows.push(
-            Row::new(
-                "-",
-                Level::Warn,
-                "the playbook-hooks plugin is still installed, so its hooks run next to the ones in settings.json",
-            )
-            .hint("run: claude plugin uninstall playbook-hooks@pragmatic-engineer"),
+            Row::new("-", Level::Warn, what).hint(format!("run: claude plugin uninstall {key}")),
         );
     }
     if found.present > 0 {
