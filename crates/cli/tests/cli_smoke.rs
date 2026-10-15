@@ -504,7 +504,6 @@ fn table() -> Vec<Case> {
         // health facts
         case("doctor check", &["doctor", "check"]).out("FAIL").plain().writes(),
         case("doctor models", &["doctor", "models"]).out("haiku").plain(),
-        case("doctor", &["doctor", "--fix"]).out("nothing to fix").plain().writes(),
         case( "doctor pending-migrations", &["doctor", "pending-migrations"], ).writes(),
         case( "doctor plugin-version", &["doctor", "plugin-version", "{ROOT}/none.json"], ),
         case( "doctor statusline-command", &["doctor", "statusline-command", "{ROOT}/none.json"], ),

@@ -68,31 +68,6 @@ impl Env {
 pub struct Outcome {
     pub out: Vec<String>,
     pub warnings: Vec<String>,
-    /// The version swapped in, when the update replaced the binary.
-    pub installed: Option<String>,
-}
-
-/// The first release whose binary has `doctor --fix`.
-pub const FIRST_FIX_VERSION: &str = "0.27.0";
-
-/// After a swap, runs `<exe> doctor --fix` so the new binary runs its own
-/// migrations (ADR 0034). Best effort: a release older than
-/// `FIRST_FIX_VERSION` is skipped, and any failure is a warning.
-pub fn heal_after_swap(exe: &Path, installed: &str) -> Result<Option<String>, String> {
-    if resolve::compare(installed, FIRST_FIX_VERSION).is_lt() {
-        return Ok(None);
-    }
-    let out = std::process::Command::new(exe)
-        .args(["doctor", "--fix"])
-        .output()
-        .map_err(|e| format!("could not run the new binary's doctor --fix: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "doctor --fix exited with {}; run `playbook doctor --fix` by hand",
-            out.status
-        ));
-    }
-    Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()))
 }
 
 pub fn is_homebrew(exe: &Path) -> bool {
@@ -228,7 +203,6 @@ pub fn run(
     }
 
     let done = swap::install(&stage, &env.exe, current, &version, smoke)?;
-    o.installed = Some(version.clone());
     o.warnings.extend(done.warnings);
     o.out.push(format!(
         "updated playbook {current} -> {version} at {}",
@@ -375,28 +349,6 @@ mod tests {
         assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.17.0");
         assert!(env.exe.with_file_name("playbook.0.16.0.bak").exists());
         assert!(out.out.iter().any(|l| l.contains("0.16.0 -> 0.17.0")));
-        assert_eq!(out.installed.as_deref(), Some("0.17.0"));
-    }
-
-    #[test]
-    fn the_heal_after_a_swap_skips_releases_without_doctor_fix() {
-        let env = env_in("heal-old");
-        assert_eq!(heal_after_swap(&env.exe, "0.26.0"), Ok(None));
-    }
-
-    #[test]
-    fn the_heal_after_a_swap_runs_the_new_binary_and_reports_its_failure() {
-        let env = env_in("heal-run");
-        std::fs::write(&env.exe, "#!/bin/sh\necho \"fixed: $1 $2\"\n").unwrap();
-        swap::make_executable(&env.exe).unwrap();
-        assert_eq!(
-            heal_after_swap(&env.exe, "0.27.0"),
-            Ok(Some("fixed: doctor --fix\n".to_string()))
-        );
-        std::fs::write(&env.exe, "#!/bin/sh\nexit 3\n").unwrap();
-        assert!(heal_after_swap(&env.exe, "1.0.0")
-            .unwrap_err()
-            .contains("run `playbook doctor --fix` by hand"));
     }
 
     #[test]

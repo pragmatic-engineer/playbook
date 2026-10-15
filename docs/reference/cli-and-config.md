@@ -482,10 +482,6 @@ The full health check is the `/playbook:doctor` command inside Claude Code. Thes
 
 Example: `playbook doctor pending-migrations`
 
-`playbook doctor --fix` repairs playbook's own files after an upgrade and prints the command for each change that needs you. It never writes Claude Code settings.
-
-- `--fix`: Run the safe migrations for playbook's own files, then list what needs you
-
 Subcommands: `check`, `hook-commands`, `hook-commands-for-event`, `hook-commands-matching`, `models`, `pending-migrations`, `plugin-version`, `statusline-command`
 
 ### `playbook doctor check`
