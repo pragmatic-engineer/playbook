@@ -146,7 +146,10 @@ impl Pending {
     }
 
     fn commit_shown(self, root: &Path, shown_since: Option<&str>) -> Notices {
-        let shown_since = shown_since.filter(|v| crate::plugin_root::is_plain_version(v));
+        // The same rule `playbook breaking --since` reads its version with.
+        let shown_since = shown_since
+            .map(|v| v.trim_start_matches('v'))
+            .filter(|v| breaking::is_version(v));
         let mut notices = Notices {
             entries: Vec::new(),
             error: self.error,
@@ -175,7 +178,7 @@ impl Pending {
             };
             notices
                 .entries
-                .extend(m.entries.iter().filter(|e| !shown(e)).cloned());
+                .extend(m.entries.into_iter().filter(|e| !shown(e)));
         }
         notices
     }
@@ -251,38 +254,60 @@ mod tests {
 
     #[test]
     fn a_caller_that_showed_the_block_leaves_only_the_entries_at_or_below_its_start() {
-        // Arrange: each case starts from 0.0.0 in its own home.
-        let commit_with = |tag: &str, shown_since: Option<&str>| {
-            let (claude, root) = home(tag);
-            let notices = prepare(&root, &claude, None, None, true)
-                .commit_shown(&root, shown_since)
-                .entries;
-            (notices, shown(&root, BINARY_KEY))
+        // Arrange: each case moves both keys in its own home. The playbook
+        // block spans 0.20.0 and 0.30.0; the plugin entry is above both.
+        let entry = |version: &str, component| Entry {
+            version: version.into(),
+            component,
+            summary: format!("change in {version}"),
+            action: "run something".into(),
+            migration: None,
         };
-        let all = breaking::entries_between("0.0.0", RUNNING);
-        let first = all.first().expect("the embedded file lists an entry");
-        let at_or_below = |v: &str| -> Vec<Entry> {
-            all.iter()
-                .filter(|e| compare(&e.version, v) != Ordering::Greater)
-                .cloned()
-                .collect()
+        let older = entry("0.20.0", breaking::Component::Playbook);
+        let newer = entry("0.30.0", breaking::Component::Playbook);
+        let plugin = entry("0.40.0", breaking::Component::Plugin);
+        let commit_with = |tag: &str, shown_since: Option<&str>| {
+            let (_, root) = home(tag);
+            let pending = Pending {
+                moves: vec![
+                    Move {
+                        key: BINARY_KEY,
+                        before: None,
+                        to: RUNNING.into(),
+                        entries: vec![older.clone(), newer.clone()],
+                    },
+                    Move {
+                        key: PLUGIN_KEY,
+                        before: None,
+                        to: "0.40.0".into(),
+                        entries: vec![plugin.clone()],
+                    },
+                ],
+                error: None,
+            };
+            let notices = pending.commit_shown(&root, shown_since).entries;
+            (notices, shown(&root, BINARY_KEY))
         };
 
         // Act
         let shown_from_zero = commit_with("notices-shown-zero", Some("0.0.0"));
-        let shown_from_first = commit_with("notices-shown-first", Some(&first.version));
+        let shown_from_older = commit_with("notices-shown-older", Some("0.20.0"));
+        let with_a_v = commit_with("notices-shown-v", Some("v0.20.0"));
         let nothing_shown = commit_with("notices-shown-empty", Some(""));
         let not_a_version = commit_with("notices-shown-bad", Some("1"));
 
-        // Assert
-        assert!(shown_from_zero.0.is_empty());
-        assert_eq!(shown_from_first.0, at_or_below(&first.version));
-        assert!(shown_from_first.0.contains(first));
-        assert_eq!(nothing_shown.0, all);
-        assert_eq!(not_a_version.0, all);
+        // Assert: the caller's start keeps only the playbook entries at or
+        // below it, and the plugin entry always shows.
+        assert_eq!(shown_from_zero.0, std::slice::from_ref(&plugin));
+        assert_eq!(shown_from_older.0, [older.clone(), plugin.clone()]);
+        assert_eq!(with_a_v.0, shown_from_older.0);
+        let everything = [older, newer, plugin];
+        assert_eq!(nothing_shown.0, everything);
+        assert_eq!(not_a_version.0, everything);
         for (_, recorded) in [
             shown_from_zero,
-            shown_from_first,
+            shown_from_older,
+            with_a_v,
             nothing_shown,
             not_a_version,
         ] {
