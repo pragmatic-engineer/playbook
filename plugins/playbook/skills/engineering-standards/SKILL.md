@@ -21,7 +21,7 @@ Team engineering standards for code design, commits, pull requests, testing, and
 ### Boundaries and interfaces
 
 - A module's dependencies MUST point one way. No import cycles between modules.
-- Untrusted or untyped input MUST be validated at the boundary where it enters, before any use. Boundaries include HTTP requests, environment variables and config, external API responses, queue and event payloads, and anything parsed off disk. For JS/TS, `playbook:engineering-standards-javascript` names the schema-validator pattern.
+- Untrusted or untyped input MUST be validated at the boundary where it enters, before any use. Boundaries include HTTP requests, environment variables and config, external API responses, queue and event payloads, and anything parsed off disk. For JS/TS, `playbook:engineering-standards-javascript` names the schema-validator pattern. For Rust, `playbook:engineering-standards-rust` names the parse-into-a-newtype pattern.
 - A change to a published interface (an API response, a database schema, an event payload, an exported function) MUST be additive first: add the new shape, migrate the readers, remove the old shape in a later change. Never break a consumer and its producer in the same deploy.
 - Model a multi-step process as a named sequence of steps, not implicit control flow spread across helpers.
 

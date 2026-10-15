@@ -2,6 +2,11 @@
 
 Release notes for the playbook plugin in `plugins/playbook`. The binary has its own releases. Each plugin release has a section named `## playbook <version>`, newest first, and the top section always matches the version in `plugins/playbook/.claude-plugin/plugin.json`.
 
+## playbook 0.32.0
+
+- A new skill, `engineering-standards-rust`, holds the Rust rules for code and reviews. It sits next to `engineering-standards-javascript` and adds only the Rust specifics. Its first references cover ownership and borrowing, error handling, types and traits, API design, style and naming, and a checklist of antipatterns. Each rule has a reason and a Clippy lint or command that checks it.
+- `engineering-standards` and `systematic-debugging` point to the new skill for Rust, the same way they point to the JavaScript one.
+
 ## playbook 0.31.3
 
 - The doctor command text matches the binary again: the upgrade record row hints `run: playbook migrate`, and the next session start or `playbook migrate` brings the record up to date.
