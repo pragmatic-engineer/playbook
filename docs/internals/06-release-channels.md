@@ -11,8 +11,8 @@ through the GitHub API, so GitHub signs it. The tap follows a release within
 about half an hour. To update sooner, run the `release` workflow by hand in the
 tap repo.
 
-A release attaches the five binaries, `breaking-changes.json` and `SHA256SUMS`,
-which lists all six. It builds no plugin
+A release attaches the five binaries, `release-notes.json`,
+`breaking-changes.json` and `SHA256SUMS`, which lists all seven. It builds no plugin
 archive. The plugin in `plugins/playbook` has its own version line and its own
 release, described next.
 
@@ -26,9 +26,10 @@ that folder and updates the plugin when the `version` in `plugin.json` changes.
 A change under `plugins/playbook` needs a higher version in `plugin.json` and a
 `## playbook <version>` section at the top of `CHANGELOG.md`. The `version-bump`
 check enforces both and the `payload-guard` check keeps the folder to markdown
-and the manifest. When `plugin.json` or `CHANGELOG.md` changes on `main`,
+and the manifest. When `plugin.json` changes on `main`,
 `plugin-release.yml` creates the tag `playbook-plugin-v<version>` and a release
-with that changelog section. It stops when the tag exists and marks the release
+whose notes `scripts/release-notes.sh` builds from the commits since the previous
+plugin tag that touch `plugins/playbook`. It stops when the tag exists and marks the release
 as not latest. The tag does not match `v*`, so `release.yml` never runs for it.
 See [ADR 0032](../adr/0032-plugin-in-the-playbook-repo.md) for the versioning
 rules.
@@ -49,27 +50,27 @@ line. `build` compiles the five targets, ad hoc signs the macOS binaries and
 uploads one asset per target. `checksums` writes `SHA256SUMS` and attests the
 assets. The workflow only publishes.
 
-The body of every release starts with a `Breaking changes` section when
-`breaking-changes.json` has entries for the tool and version. On a release
-drafted by hand before the tag, `create-release` puts the section on top of
-the existing body. Every release attaches that file as an asset for the
-Homebrew tap (ADR 0035). `verify-version` fails when a commit since the
-previous tag of the tool that touches its paths has `!` after its type or a
-`BREAKING CHANGE:` footer, and the file has no entry for the version.
-`scripts/check-breaking.sh` holds these checks, and its `body` mode builds the
-start of the body.
+`scripts/release-notes.sh` builds the body of every release from the
+Conventional Commits since the previous tag of the tool that touch its paths
+(ADR 0037). The sections are Breaking changes, Features, Fixes, Performance and
+Other changes, in that order, and an empty one is left out. A commit is breaking
+when it has `!` after its type or scope or a `BREAKING CHANGE:` footer. The same
+notes go into `release-notes.json`, an asset that `SHA256SUMS` lists and the
+`checksums` job attests. A release drafted by hand before the tag keeps its
+body and gets the asset. Run `scripts/release-notes.sh body <component>
+<version> <json-out>` to see the notes before you push a tag.
 
-Run `scripts/check-breaking.sh release <component> <version>`, or a dry run
-of the workflow from `main`, before you push a tag. When the check fails on a
-pushed tag, merge the entry, delete the tag, and push a new signed tag on the
-commit that has the entry. A rerun checks out the old commit and fails again.
-
-The body of a `v*` release then goes on with the upgrade note in
+The body of a `v*` release starts with the upgrade note in
 `.github/release-notes-upgrade.md`, above the generated notes. A
-`telemetry-v*` release gets a short assets note instead. When most users have
+`telemetry-v*` release gets a short assets note there. When most users have
 upgraded from the `playbook-hooks` plugin, delete the file and the line in the
-`body` mode of `scripts/check-breaking.sh` that prints it. A dry run prints
-the start of the body, breaking changes included, in the run summary.
+`body` mode of `scripts/release-notes.sh` that prints it. A dry run prints the
+body and `release-notes.json` in the run summary.
+
+`breaking-changes.json` is still attached for the Homebrew tap, and
+`verify-version` still fails when a commit since the previous tag of the tool
+that touches its paths is marked breaking and that file has no entry for the
+version (ADR 0035). `scripts/check-breaking.sh` holds that check.
 
 To rehearse, run the `release` workflow by hand with a `tag` input. A manual run
 is always a dry run: it resolves, verifies and builds, and skips release
@@ -85,8 +86,8 @@ tag prefix and keeps its own version in its own `Cargo.toml`:
 
 | Tool | Tag | Release assets |
 | --- | --- | --- |
-| playbook | `vX.Y.Z` | five binaries, `breaking-changes.json`, `SHA256SUMS` |
-| playbook-telemetry | `telemetry-vX.Y.Z` | `playbook-telemetry-<version>-<target>.tar.gz` holding `playbook-telemetry` and `pbtop`, `breaking-changes.json`, `SHA256SUMS` |
-| playbook-code | `code-vX.Y.Z` | `playbook-code-<version>-<target>.tar.gz` holding `playbook-code` and `pbcode`, `breaking-changes.json`, `SHA256SUMS` |
+| playbook | `vX.Y.Z` | five binaries, `release-notes.json`, `breaking-changes.json`, `SHA256SUMS` |
+| playbook-telemetry | `telemetry-vX.Y.Z` | `playbook-telemetry-<version>-<target>.tar.gz` holding `playbook-telemetry` and `pbtop`, `release-notes.json`, `breaking-changes.json`, `SHA256SUMS` |
+| playbook-code | `code-vX.Y.Z` | `playbook-code-<version>-<target>.tar.gz` holding `playbook-code` and `pbcode`, `release-notes.json`, `breaking-changes.json`, `SHA256SUMS` |
 
 The Homebrew tap maps each formula to the repo and tag prefix.
