@@ -86,3 +86,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0030](adr/0030-skills-and-commands-in-their-own-repo.md) | Keep the skills, commands and agents in their own repository | Accepted, partly superseded by 0031 and 0032 | 2026-10-13 |
 | [0031](adr/0031-hooks-in-settings-json.md) | Put the hooks in settings.json | Accepted | 2026-10-14 |
 | [0032](adr/0032-plugin-in-the-playbook-repo.md) | Keep the plugin in the playbook repository | Accepted | 2026-10-14 |
+| [0033](adr/0033-telemetry-on-by-default.md) | Turn Claude Code telemetry on by default at install | Accepted | 2026-10-15 |
