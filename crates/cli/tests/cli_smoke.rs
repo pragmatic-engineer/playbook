@@ -622,6 +622,7 @@ fn table() -> Vec<Case> {
         case("review prepare deep", &["review", "prepare", "deep"]).code(1).err("no PR found"),
         case("review checks", &["review", "checks", "{ROOT}/none"]).out("checks skipped"),
         case("review size", &["review", "size", "--base", "main"]).commit(),
+        case("review suggest", &["review", "suggest"]).commit().code(1).err("no changed files"),
         case( "review triage-merge", &["review", "triage-merge", "--lenses", "logic"], ).out("Triage:"),
         case( "segment branch", &[ "segment", "branch", "--type", "feat", "--plan-slug", "smoke", "--n", "1", "--title", "add a thing", "--topology", "independent", ], ).commit().writes().then(1, "already exists"),
         case("segment size", &["segment", "size", "--base", "main"]).commit(),
