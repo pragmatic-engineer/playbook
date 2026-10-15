@@ -6,16 +6,24 @@
 #   payload-guard: the directory holds only markdown and the manifest.
 #   version-bump: a plugin change comes with a higher version in plugin.json
 #   and a matching "## playbook <version>" section at the top of CHANGELOG.md.
-# Both run only when the plugin, the changelog or the script changes.
+#   When the version rises, it also checks for breaking changes (ADR 0035).
+#   A breaking marker in the pull request title or body, or in a plugin commit
+#   since the last plugin tag, needs a plugin entry in breaking-changes.json.
+#   That entry needs a "### Breaking" heading in the changelog section.
+# Both run when the plugin, the changelog, breaking-changes.json or a script
+# changes, and again when the title or body is edited.
 
 name: plugin-guards
 
 on:
   pull_request:
+    types: [opened, edited, synchronize, reopened]
     paths:
       - "plugins/**"
       - "CHANGELOG.md"
+      - "breaking-changes.json"
       - "scripts/check-plugin.sh"
+      - "scripts/check-breaking.sh"
       - ".github/workflows/plugin-guards.yml"
   workflow_dispatch:
 
@@ -43,8 +51,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Lint the script
-        run: shellcheck --severity=warning scripts/check-plugin.sh
+      - name: Lint the scripts
+        run: shellcheck --severity=warning scripts/check-plugin.sh scripts/check-breaking.sh
 
       - name: Check the plugin payload
         run: scripts/check-plugin.sh payload
@@ -76,3 +84,11 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: scripts/check-plugin.sh version "$BASE_SHA"
+
+      # Fetches the full history and the tags only when the version rose.
+      - name: A breaking plugin change needs an entry
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: scripts/check-breaking.sh plugin "$BASE_SHA"
