@@ -54,7 +54,7 @@ Other facts:
 
 ## Plugin and hooks under `-p`
 
-- `--plugin-dir <checkout>` loads playbook with no marketplace install. The binary finds plugin files through `playbook path plugin-root`, which prefers the installed plugin, so set `PLAYBOOK_PLUGIN_DIR=<checkout>/plugins/playbook` when a marketplace install is also present. `system/init` in `stream-json` listed it as `playbook@inline`, version 0.16.0, with 23 playbook slash commands.
+- `--plugin-dir <checkout>` loads playbook with no marketplace install. `system/init` in `stream-json` listed it as `playbook@inline`, version 0.16.0, with 23 playbook slash commands.
 - `claude -p "/playbook:session-start"` ran the command: it called `playbook handoff show`, read the log, and checked git (4 turns, 14 cents).
 - Hooks that fired in a headless run: SessionStart (`session-init`, source `startup`), UserPromptSubmit (`auto-model-detect`, `memory-anchors`), PreToolUse (`preread-*`, `no-slop-guard`, `bg-await-guard`, `memory-anchors`), PostToolUse (`search-counter`, `post-edit-track`), Stop (`memory-capture`, `session-clean-exit`). The `statusLine` never renders.
 - Folder trust: the runs happened in a fresh scratch directory with no trust entry. The project hooks and the plugin still ran, so `playbook trust` is not needed for CI.

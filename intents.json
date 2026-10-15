@@ -104,10 +104,6 @@
     "required": false
   },
   {
-    "intent": "plugin-root",
-    "required": false
-  },
-  {
     "intent": "pr-ci-wait",
     "required": false
   },

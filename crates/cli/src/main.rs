@@ -1860,21 +1860,6 @@ fn main() {
             }
         }
         Command::Path { kind, create } => {
-            if matches!(kind, playbook::PathKind::PluginRoot) {
-                match playbook::plugin_root::resolve_here() {
-                    Ok(found) => {
-                        for note in &found.skipped {
-                            eprintln!("playbook path: skipped {note}");
-                        }
-                        println!("{}", found.root.display());
-                    }
-                    Err(err) => {
-                        eprintln!("playbook path: {err}");
-                        std::process::exit(1);
-                    }
-                }
-                return;
-            }
             if matches!(kind, playbook::PathKind::Data) {
                 let dir = common::data::data_dir();
                 if create {
@@ -1901,9 +1886,7 @@ fn main() {
                 playbook::PathKind::Plans => Some(storage::Kind::Plans),
                 playbook::PathKind::Implement => Some(storage::Kind::Implement),
                 playbook::PathKind::Worktrees => Some(storage::Kind::Worktrees),
-                playbook::PathKind::Handoff
-                | playbook::PathKind::Data
-                | playbook::PathKind::PluginRoot => None,
+                playbook::PathKind::Handoff | playbook::PathKind::Data => None,
             };
             let resolved = if matches!(kind, playbook::PathKind::Handoff) {
                 // Outside a repo this is the old shared folder, the same one

@@ -77,7 +77,7 @@ pub fn extract_commit(plugin_root: &Path, out_dir: &Path) -> Result<PathBuf, Str
     let ws = plugin_root.join("skills/writing-style/SKILL.md");
     let text = fs::read_to_string(&ws).map_err(|_| {
         format!(
-            "{} not found: run `playbook path plugin-root` to check the plugin install. Read the full skill via the Skill tool instead.",
+            "{} not found: the playbook skills plugin is not installed or not in CLAUDE_PLUGIN_ROOT. Read the full skill via the Skill tool instead.",
             ws.display()
         )
     })?;
@@ -86,7 +86,7 @@ pub fn extract_commit(plugin_root: &Path, out_dir: &Path) -> Result<PathBuf, Str
     let cp = plugin_root.join("skills/writing-style/references/commits-and-prs.md");
     let cp_text = fs::read_to_string(&cp).map_err(|_| {
         format!(
-            "{} not found: run `playbook path plugin-root` to check the plugin install. Read the full skill via the Skill tool instead.",
+            "{} not found: the playbook skills plugin is not installed or not in CLAUDE_PLUGIN_ROOT. Read the full skill via the Skill tool instead.",
             cp.display()
         )
     })?;
@@ -124,7 +124,7 @@ pub fn extract(plugin_root: &Path, out_dir: &Path) -> Result<Extracted, String> 
     let read = |p: &Path| {
         fs::read_to_string(p).map_err(|_| {
             format!(
-                "{} not found: run `playbook path plugin-root` to check the plugin install. Read the full skill via the Skill tool instead.",
+                "{} not found: the playbook skills plugin is not installed or not in CLAUDE_PLUGIN_ROOT. Read the full skill via the Skill tool instead.",
                 p.display()
             )
         })

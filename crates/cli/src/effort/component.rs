@@ -435,7 +435,7 @@ fn stale_keys(home: &Path, root: &Path) -> Vec<String> {
 /// and effective level.
 pub fn run_list(home: &Path, claude: Option<&str>, root: Option<&Path>, json: bool) -> String {
     let Some(root) = root else {
-        return "no plugin root found: run `playbook path plugin-root` to see what was tried"
+        return "no plugin root found: run from an installed plugin or set CLAUDE_PLUGIN_ROOT"
             .to_string();
     };
     let rows: Vec<Resolution> = components(root)
