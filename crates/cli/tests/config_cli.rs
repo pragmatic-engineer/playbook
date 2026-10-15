@@ -158,8 +158,8 @@ fn update_keys_go_to_the_global_tier_without_the_flag_and_refuse_org() {
     let repo = seeded_repo("set-update-key");
     let home = scratch_dir("set-update-key-home");
 
-    // Act: the refused call runs first, so no run sees update.mode auto and
-    // starts a background release check.
+    // Act: a piped debug build never starts the background release check,
+    // so neither run reaches the network.
     let org = run_playbook(
         &repo,
         &home,

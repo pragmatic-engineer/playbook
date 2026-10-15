@@ -158,6 +158,25 @@ fn init_connection(root: &Path) -> rusqlite::Result<Connection> {
     }
 }
 
+/// The global tier value of `key`, read through a read-only connection that
+/// changes nothing on disk. `None` when the database, the table or the row is
+/// missing or cannot be read.
+pub fn global_read_only(root: &Path, key: &str) -> Option<Value> {
+    let path = db_path(root);
+    if !path.is_file() {
+        return None;
+    }
+    let conn = crate::state::open_read_only(&path).ok()?;
+    let raw: String = conn
+        .query_row(
+            "SELECT value_json FROM config WHERE tier = 'global' AND scope = '' AND key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
 /// The value of `key` per tier, for the repo slug and its owner.
 /// Precedence is the caller's: this only reports what each tier holds.
 pub struct TierValues {
@@ -358,6 +377,7 @@ pub fn import(root: &Path, doc: &Value) -> Result<usize, ConfigError> {
         };
         for (key, value) in obj {
             super::write::validate_key_and_value(key, value)?;
+            super::write::require_global_for_user_key(key, tier == "global")?;
             rows.push((tier, scope.to_string(), key.clone(), value.clone()));
         }
         Ok(())
@@ -982,6 +1002,28 @@ mod tests {
             import(&b, &unknown),
             Err(ConfigError::UnknownKey(_))
         ));
+    }
+
+    #[test]
+    fn import_refuses_a_per_user_key_outside_the_global_section() {
+        let r = root("store-import-user-key");
+        let org = json!({"orgs": {"acme": {"update.mode": "off"}}});
+        let repo = json!({"repos": {"acme/w": {"update.checkIntervalHours": 6}}});
+        let global = json!({"global": {"update.mode": "off"}});
+        assert!(matches!(import(&r, &org), Err(ConfigError::GlobalOnly(_))));
+        assert!(matches!(import(&r, &repo), Err(ConfigError::GlobalOnly(_))));
+        assert_eq!(import(&r, &global).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_read_only_global_lookup_changes_nothing_on_disk() {
+        let r = root("store-global-read-only");
+        assert_eq!(global_read_only(&r, "update.mode"), None);
+        assert!(!db_path(&r).exists());
+        put(&r, Tier::Global, None, "update.mode", &json!("auto")).unwrap();
+        put(&r, Tier::Org, Some("acme/w"), "pr.draft", &json!(false)).unwrap();
+        assert_eq!(global_read_only(&r, "update.mode"), Some(json!("auto")));
+        assert_eq!(global_read_only(&r, "pr.draft"), None);
     }
 
     #[test]

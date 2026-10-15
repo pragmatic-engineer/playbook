@@ -30,11 +30,17 @@ pub fn set(
     repo_slug: Option<&str>,
 ) -> Result<(), ConfigError> {
     validate_key_and_value(key, &value)?;
-    if keys::is_user_key(key) && tier != Tier::Global {
-        return Err(ConfigError::GlobalOnly(key.to_string()));
-    }
+    require_global_for_user_key(key, tier == Tier::Global)?;
     let root = crate::common::paths::playbook_root_from(home);
     super::store::put(&root, tier, repo_slug, key, &value)
+}
+
+/// Reject a per-user key bound for the org or repo tier.
+pub(crate) fn require_global_for_user_key(key: &str, global: bool) -> Result<(), ConfigError> {
+    if keys::is_user_key(key) && !global {
+        return Err(ConfigError::GlobalOnly(key.to_string()));
+    }
+    Ok(())
 }
 
 /// Reject an unknown key, a value whose JSON type does not match
