@@ -27,7 +27,7 @@ await waitFor(() => getResult() !== undefined);
 expect(getResult()).toBeDefined();
 ```
 
-A generic poller (adapt to your stack; JS/TS teams should prefer the framework helper, e.g. Testing Library `waitFor` or Vitest `vi.waitFor`, per `playbook:engineering-standards-javascript`):
+A generic poller (adapt to your stack; JS/TS teams should prefer the framework helper, e.g. Testing Library `waitFor` or Vitest `vi.waitFor`, per `playbook:engineering-standards-javascript`; Rust teams pause Tokio's clock with `#[tokio::test(start_paused = true)]`, per `playbook:engineering-standards-rust`):
 
 ```js
 async function waitFor(condition, description, timeoutMs = 5000) {
