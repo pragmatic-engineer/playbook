@@ -396,7 +396,7 @@ fn version_row(env: &Env, bin: &Path, bin_ver: &str) -> Row {
     plugin
         .as_deref()
         .and_then(|root| binary_too_old(root, bin_ver, homebrew))
-        .or_else(|| plugin_out_of_range(&version))
+        .or_else(|| plugin_out_of_range(&version, homebrew))
         .map_or_else(
             || {
                 Row::new(
