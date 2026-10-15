@@ -12,15 +12,15 @@ A short form of the Rust API Guidelines checklist for public items, with the gui
 ## Naming
 
 1. **Follow the standard casing [C-CASE].** `UpperCamelCase` for types, traits and enum variants. `snake_case` for functions, methods, modules and locals. `SCREAMING_SNAKE_CASE` for constants and statics. An acronym is one word: `Uuid`, `HttpClient`.
-   Check: rustc `non_camel_case_types` and `non_snake_case` (warn by default), `clippy::upper_case_acronyms`.
+   Check: rustc `non_camel_case_types` and `non_snake_case` (warn by default). `clippy::upper_case_acronyms` flags only all-capital names until you set `upper-case-acronyms-aggressive = true` in `clippy.toml`. It also skips public items while `avoid-breaking-exported-api` is true (the default).
 
 2. **Conversion prefixes state the cost [C-CONV].** `as_` is a free borrowed view, `to_` does work or allocates, `into_` consumes `self`.
    Check: `clippy::wrong_self_convention`.
 
-3. **Getters have no `get_` prefix [C-GETTER].** Write `fn name(&self)`, and `set_name` for a setter. A plain `get` is fine when there is one obvious thing to get, as in `HashMap::get`.
+3. **Getters have no `get_` prefix [C-GETTER].** Write `fn name(&self)`, and `set_name` for a setter. A plain `get` is fine when there is one obvious thing to get, as in `Cell::get`.
 
 4. **Collections offer `iter`, `iter_mut` and `into_iter` [C-ITER].** The iterator types are named `Iter`, `IterMut` and `IntoIter` [C-ITER-TY]. A type with `len` also has `is_empty`.
-   Check: `clippy::len_without_is_empty`, `clippy::iter_without_into_iter` (pedantic).
+   Check: `clippy::len_without_is_empty`, and `clippy::iter_without_into_iter` (pedantic).
 
 5. **A method named like a standard trait method implements the trait.** Write `impl FromStr`, not an inherent `from_str`.
    Check: `clippy::should_implement_trait`.
@@ -64,7 +64,7 @@ A short form of the Rust API Guidelines checklist for public items, with the gui
 15. **Mark public enums and structs that will grow `#[non_exhaustive]`.**
     Check: `clippy::manual_non_exhaustive` flags the old private-field workaround.
 
-16. **Treat the public surface as a semver contract [C-STABLE].** Types from your public dependencies are part of your API. Before a release, check the change with `cargo semver-checks`, and follow the Cargo book's SemVer compatibility chapter.
+16. **Treat the public surface as a semver contract.** Types from your public dependencies are part of your API, and a 1.0 crate needs its public dependencies at 1.0 or later [C-STABLE]. Before a release, check the change with `cargo semver-checks`, and follow the Cargo book's SemVer compatibility chapter.
 
 ## Documentation
 
@@ -76,7 +76,7 @@ A short form of the Rust API Guidelines checklist for public items, with the gui
     Why: readers copy examples, and doc tests run them.
 
 19. **Document failure modes [C-FAILURE].** Add `# Errors` for a fallible function, `# Panics` for one that can panic and `# Safety` for an `unsafe fn`.
-    Check: `clippy::missing_errors_doc`, `clippy::missing_panics_doc` (pedantic), `clippy::missing_safety_doc`.
+    Check: `clippy::missing_errors_doc` (pedantic), `clippy::missing_panics_doc` (pedantic), and `clippy::missing_safety_doc`.
 
 20. **Link related items with intra-doc links [C-LINK].** Write `` [`Client::connect`] ``. Build docs with warnings denied to catch broken links.
     Check: `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps`.

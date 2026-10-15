@@ -1,23 +1,23 @@
 # Antipatterns
 
-A review checklist. Each entry names the smell, the fix and the check. The reference named in brackets holds the full rule.
+A review checklist. Each entry names the smell and the fix, and the check where a lint exists. The reference named in brackets holds the full rule.
 
 1. **Clone to quiet the borrow checker.** Fix: shorten the borrow, use `mem::take`, or split the struct. [ownership-and-borrowing]
    Check: `clippy::redundant_clone` (nursery), `clippy::implicit_clone` (pedantic).
 
 2. **`Rc<RefCell<T>>` as the default for shared data.** Fix: one owner, an arena with indices, or message passing. [ownership-and-borrowing]
-   Check: `clippy::rc_mutex` (restriction) and review.
+   Check: review. No lint flags `Rc<RefCell<T>>`.
 
 3. **Stringly typed code.** A `String` or an integer stands in for an ID, a unit or a closed set of options. Fix: a newtype or an enum, parsed at the boundary. [types-and-traits]
 
 4. **Boolean arguments.** `send(msg, true, false)`. Fix: an enum or an options struct. [types-and-traits]
-   Check: `clippy::fn_params_excessive_bools` (pedantic).
+   Check: `clippy::fn_params_excessive_bools` (pedantic), with `max-fn-params-bools` lowered in `clippy.toml`.
 
 5. **Panics in a library on caller input.** `unwrap`, `expect`, `panic!` or slice indexing on data the caller controls. Fix: return a `Result` and document the error. [error-handling]
-   Check: `clippy::unwrap_used`, `clippy::expect_used`, `clippy::indexing_slicing` (restriction).
+   Check: `clippy::unwrap_used` (restriction), `clippy::expect_used` (restriction), `clippy::indexing_slicing` (restriction).
 
 6. **Errors dropped in silence.** `let _ = save();` or `.ok()` with no comment. Fix: handle it, log it with context, or return it. [error-handling]
-   Check: rustc `unused_must_use`, `clippy::let_underscore_must_use` (restriction).
+   Check: `clippy::let_underscore_must_use` (restriction), `clippy::unused_result_ok` (restriction).
 
 7. **Over-generic code.** Traits and type parameters for an implementation that does not exist yet. Fix: write the concrete type, and make it generic when a second type arrives. [types-and-traits]
 
@@ -25,7 +25,7 @@ A review checklist. Each entry names the smell, the fix and the check. The refer
 
 9. **`#![deny(warnings)]` in source.** A new compiler or Clippy release adds lints and breaks the build on the next toolchain update. Fix: deny warnings in CI, or deny named lints in the `[lints]` table of `Cargo.toml`.
 
-10. **Truncating `as` casts.** `len as u32`. Fix: `u32::try_from(len)?`. [types-and-traits]
+10. **Truncating `as` casts.** `len as u32`. Fix: `u32::try_from(len)` with the error mapped to your type. [types-and-traits]
     Check: `clippy::cast_possible_truncation` (pedantic).
 
 11. **`&String`, `&Vec<T>` or `&Box<T>` parameters.** Fix: `&str`, `&[T]`, `&T`. [ownership-and-borrowing]

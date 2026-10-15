@@ -4,13 +4,11 @@ Local style that `rustfmt` does not fix: names, imports, pattern matching, layou
 
 ## Rules
 
-1. **Copy the naming scheme already in the project.** Then pick names that say the role of the value (`needle` and `haystack`, not `a` and `b`). Use one name for one concept, and leave the type out of the name.
-   Why: a synonym makes the reader look for a difference that does not exist.
-   Canonical's guide also sets house rules such as UK spelling and single-letter type parameters. Adopt those only as a team decision.
+1. **Naming follows the base rule in engineering-standards** and the project's existing scheme. Canonical's guide adds house rules such as UK spelling and single-letter type parameters. Adopt those only as a team decision.
 
 2. **No glob imports from other crates.** `use super::*;` in a `#[cfg(test)]` module is the usual exception.
    Why: after an upgrade, a new name in the glob can clash or hide where a name came from.
-   Check: `clippy::wildcard_imports`, `clippy::enum_glob_use` (pedantic).
+   Check: `clippy::wildcard_imports` (pedantic), `clippy::enum_glob_use` (pedantic).
 
 3. **Group imports: `std`, then external crates, then `crate`, `super` and `self`.** Leave a blank line between groups.
    Why: the reader sees where each name comes from.
@@ -27,7 +25,7 @@ Local style that `rustfmt` does not fix: names, imports, pattern matching, layou
    let Some(user) = user else { return Ok(()) };
    ```
 
-   Check: `clippy::unnecessary_unwrap`, `clippy::manual_let_else` (pedantic).
+   Check: `clippy::unnecessary_unwrap`, and `clippy::manual_let_else` (pedantic).
 
 5. **Destructure a struct with every field when the code must handle every field.** A hand-written `PartialEq`, `Hash` or `Ord` is the usual case. Write `field: _` for a field you skip on purpose.
    Why: a new field breaks the build and forces a decision.
@@ -50,5 +48,5 @@ Local style that `rustfmt` does not fix: names, imports, pattern matching, layou
 11. **Limit shadowing.** Rebinding the same value in the same scope is fine (`let line = line.trim();`). Avoid long chains of shadows that change the type more than once.
     Check: `clippy::shadow_unrelated` (restriction) for strict projects.
 
-12. **Comments explain why.** A doc comment starts with a one-line summary and names parameters in backticks. An `unsafe` block has a `// SAFETY:` comment. Do not restate the code.
-    Check: rustdoc and the `missing_docs` lint cover public items. The rest is review.
+12. **Comments explain why.** Do not restate the code. An `unsafe` block has a `// SAFETY:` comment. Doc comment rules are in the API design reference, rule 17.
+    Check: `clippy::undocumented_unsafe_blocks` (restriction) for the `SAFETY` comment. The rest is review.

@@ -56,6 +56,23 @@ fn md_links(text: &str) -> Vec<String> {
     out
 }
 
+/// Names of the `references/<name>.md` files a SKILL.md body points at.
+/// A path with a skill prefix (`skills/x/references/y.md`) points into
+/// another skill and is checked by `intent_ids_and_reference_paths_in_the_prose_resolve`.
+fn reference_pointers(body: &str) -> Vec<String> {
+    let pointer = regex::Regex::new(r"(^|[^/a-z-])references/([a-z0-9][a-z0-9-]*)\.md").unwrap();
+    pointer
+        .captures_iter(body)
+        .map(|cap| cap[2].to_string())
+        .collect()
+}
+
+#[test]
+fn reference_pointers_skip_paths_into_other_skills() {
+    let body = "Load `references/a-b.md` first, then skills/x/references/c.md.";
+    assert_eq!(reference_pointers(body), vec!["a-b".to_string()]);
+}
+
 #[test]
 fn every_skill_passes_structural_lint() {
     let mut problems = Vec::new();
@@ -97,6 +114,18 @@ fn every_skill_passes_structural_lint() {
             ));
         }
         let refs = dir.join("references");
+        // Prose may name another skill's reference ("the grounding-review
+        // skill, `references/x.md`"), so a match in any skill counts.
+        for name in reference_pointers(&body) {
+            let file = format!("references/{name}.md");
+            if !refs.join(format!("{name}.md")).is_file()
+                && !skill_dirs().iter().any(|d| d.join(&file).is_file())
+            {
+                problems.push(format!(
+                    "{dir_name}/SKILL.md: names `references/{name}.md`, which does not exist"
+                ));
+            }
+        }
         if let Ok(entries) = fs::read_dir(&refs) {
             for entry in entries.filter_map(Result::ok) {
                 let p = entry.path();

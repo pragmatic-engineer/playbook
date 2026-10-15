@@ -1,6 +1,6 @@
 # Ownership and borrowing
 
-Who owns a value, how long a borrow lives, and when shared ownership is the right tool. Each rule has a reason and a check. A lint marked (pedantic), (nursery) or (restriction) is off by default, so turn it on in `[lints.clippy]` to use it.
+Who owns a value, how long a borrow lives, and when shared ownership is the right tool. A lint marked (pedantic), (nursery) or (restriction) is off by default.
 
 ## Rules
 
@@ -41,7 +41,7 @@ Who owns a value, how long a borrow lives, and when shared ownership is the righ
    ```
 
    Why: no copy, and the borrow checker accepts it.
-   Check: `clippy::mem_replace_with_default`, `clippy::mem_replace_option_with_none`.
+   Check: `clippy::mem_replace_with_default` and `clippy::mem_replace_option_with_none` catch the `mem::replace` form. No lint catches clone then clear, so look for it in review.
 
 7. **Shrink the borrow before you clone.** End the borrow in a block, copy a small `Copy` value out first, or split a large struct into parts that borrow on their own.
    Why: a borrow lasts for its scope. A shorter scope removes the conflict with no copy.
@@ -49,11 +49,11 @@ Who owns a value, how long a borrow lives, and when shared ownership is the righ
 
 8. **A clone must be deliberate.** Cloning an `Arc`, a small value or a value off the hot path is fine. A clone whose only job is to silence the borrow checker is a design smell.
    Sources disagree here. corrode.dev accepts clones that keep code simple, and Rust Design Patterns lists clone-to-satisfy-the-borrow-checker as an anti-pattern. This skill asks for a visible reason on each clone of shared or mutable state, because two copies of that state can drift apart.
-   Check: `clippy::redundant_clone` (nursery), `clippy::clone_on_ref_ptr` (restriction) to write `Arc::clone(&x)` so the cheap clone is obvious.
+   Check: `clippy::redundant_clone` (nursery), `clippy::implicit_clone` (pedantic), and `clippy::clone_on_ref_ptr` (restriction) to write `Arc::clone(&x)` so the cheap clone is obvious.
 
-9. **Prefer single ownership.** Use `Rc` or `Arc` only when ownership is shared, and add `RefCell` or `Mutex` only when that shared value must change.
+9. **Prefer single ownership.** Use `Rc` or `Arc` only when ownership is shared, and add `RefCell` or `Mutex` only when that shared value must change. Message passing between owners is another option.
    Why: `RefCell` moves the borrow check to run time and panics on a conflict.
-   Check: `clippy::rc_mutex` (restriction). In review, ask why each `Rc<RefCell<_>>` cannot be a plain owner.
+   Check: review. No lint flags `Rc<RefCell<_>>`, so ask why each one cannot be a plain owner.
 
 10. **Use an arena for trees and graphs.** Keep nodes in a `Vec<Node>` and link them by index (or use a crate such as `slotmap`).
     Why: one owner for all nodes, no runtime borrow panics and no reference cycles.
@@ -67,7 +67,7 @@ Who owns a value, how long a borrow lives, and when shared ownership is the righ
 
 13. **Write lifetimes only where elision cannot work.** When a struct needs a lifetime parameter, first ask whether it should own its data. With more than one lifetime, name them after the data (`'src`, `'req`).
     Why: a lifetime on a type spreads to every user of that type.
-    Check: `clippy::needless_lifetimes`, `clippy::elidable_lifetime_names` (pedantic).
+    Check: `clippy::needless_lifetimes`, and `clippy::elidable_lifetime_names` (pedantic).
 
 14. **Keep `mut` in the smallest scope.** Build the value in a block with a local `let mut`, then bind the result without `mut`.
 

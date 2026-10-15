@@ -49,7 +49,7 @@ Use the type system to make wrong states fail to compile, and pick the right tra
    ```
 
    Why: the call site reads clearly, and a third option is a compiler-guided change.
-   Check: `clippy::fn_params_excessive_bools`, `clippy::struct_excessive_bools` (pedantic).
+   Check: `clippy::fn_params_excessive_bools` (pedantic) and `clippy::struct_excessive_bools` (pedantic) fire only above 3 bools by default. Set `max-fn-params-bools` and `max-struct-bools` in `clippy.toml` to lower the limit.
 
 4. **Use an enum for a closed set of values.** Parse outside text into it with `FromStr` at the boundary.
    Why: an invalid value cannot reach the code that uses it.
@@ -57,8 +57,8 @@ Use the type system to make wrong states fail to compile, and pick the right tra
 5. **Use typestate when calling in the wrong order must not compile.** Each state is its own type, and a transition takes `self` and returns the next state. When the state is known only at run time, use one enum.
    Why: a wrong-order call becomes a compile error.
 
-6. **Match your own enums exhaustively.** Leave out the `_` arm.
-   Why: a new variant makes the compiler list every place that must handle it.
+6. **Match your own enums exhaustively.** Leave out the `_` arm. In the same spirit, write every field in a struct literal where each field matters, and keep `..Default::default()` for types whose defaults are real values, such as options.
+   Why: a new variant or field makes the compiler list every place that must handle it.
    Check: `clippy::wildcard_enum_match_arm` (restriction), `clippy::match_wildcard_for_single_variants` (pedantic).
 
 ## Construction and conversion
@@ -72,7 +72,7 @@ Use the type system to make wrong states fail to compile, and pick the right tra
 
 9. **Implement `From` and `TryFrom`. Do not implement `Into` or `TryInto` directly.** A conversion that can fail or panic is `TryFrom`.
    Why: the standard library gives you `Into` from `From`, and `From` promises it cannot fail.
-   Check: `clippy::from_over_into`, `clippy::fallible_impl_from` (nursery).
+   Check: `clippy::from_over_into`, and `clippy::fallible_impl_from` (nursery).
 
 10. **Avoid `as` for number conversions that can lose data.** Use `From` to widen and `TryFrom` to narrow.
 
@@ -80,11 +80,12 @@ Use the type system to make wrong states fail to compile, and pick the right tra
     // wrong: wraps without warning when len > u32::MAX
     let n = len as u32;
     // right
-    let n = u32::try_from(len)?;
+    let n = u32::try_from(len).map_err(|source| FrameError::TooLong { len, source })?;
     ```
 
     Why: `as` does not fail. It gives a wrong number in silence.
-    Check: `clippy::cast_possible_truncation`, `clippy::cast_sign_loss`, `clippy::cast_possible_wrap`, `clippy::cast_lossless` (pedantic).
+    Floats have no `From` or `TryFrom` to integers. Check the range and that the value is finite before you cast.
+    Check: `clippy::cast_possible_truncation` (pedantic), `clippy::cast_sign_loss` (pedantic), `clippy::cast_possible_wrap` (pedantic), `clippy::cast_precision_loss` (pedantic), `clippy::cast_lossless` (pedantic).
 
 ## Common traits
 
@@ -101,7 +102,7 @@ Use the type system to make wrong states fail to compile, and pick the right tra
 
 ## Generics and trait objects
 
-14. **Generics by default, `dyn Trait` when it pays.** Use a trait object for mixed types in one collection, for a plugin boundary, or to cut compile time and binary size.
+14. **Static dispatch by default, `dyn Trait` when it pays.** Use a trait object for mixed types in one collection, for a plugin boundary, or to cut compile time and binary size.
     Why: generics allow inlining. A trait object compiles once and costs a vtable call.
 
 15. **Make a function generic when a second type uses it now.** At a public entry point a loose bound helps the caller (`impl AsRef<Path>`, `impl IntoIterator<Item = T>`). Forward to a private non-generic function to keep the generated code small.
@@ -110,8 +111,9 @@ Use the type system to make wrong states fail to compile, and pick the right tra
 16. **Put trait bounds on `impl` blocks, not on struct definitions.**
     Why: a bound on the struct spreads to every use and makes later changes breaking.
 
-17. **Seal a trait that outside crates should use but not implement.** Use a private supertrait.
-    Why: you can add methods later without a breaking change.
+17. **Seal a trait that outside crates should use but not implement.** Make it require a `pub trait Sealed` declared inside a private module: `mod private { pub trait Sealed {} }`.
+    Why: a non-`pub` supertrait trips the `private_bounds` lint.
+    You can then add methods later without a breaking change.
 
 18. **Implement `Deref` only for smart pointer types.** Do not use it to inherit methods from an inner type. Expose `as_inner()` or `AsRef` instead.
     Why: `Deref` changes method lookup in ways a reader does not expect.

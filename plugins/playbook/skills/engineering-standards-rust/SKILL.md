@@ -32,8 +32,6 @@ Load `references/ownership-and-borrowing.md` when you fix a borrow checker error
 - Library and production code MUST NOT `unwrap` or `expect` on a path that can fail at run time. Panic only for a broken invariant, and say which one in the `expect` message.
 - Add context at each fallible step. Expose the cause through `source()` and keep it out of the `Display` text.
 
-For example, this repository's CI denies `clippy::unwrap_used` and `clippy::expect_used` for `--lib --bins` and lets tests unwrap.
-
 Load `references/error-handling.md` when you define an error type, write `?`, `unwrap`, `expect` or `panic!`, or add a dependency whose errors cross your API.
 
 ### Types and traits
@@ -43,7 +41,7 @@ Load `references/error-handling.md` when you define an error type, write `?`, `u
 - Implement `From` and `TryFrom`, avoid lossy `as` casts, and derive the common traits on public types.
 - Write a concrete type first. Make it generic when a second type needs it.
 
-Load `references/types-and-traits.md` when you add a type or a trait, or a conversion between types.
+Load `references/types-and-traits.md` when you add a type or a trait, add a conversion between types, or parse untrusted input at a boundary.
 
 ### API design
 
@@ -60,7 +58,7 @@ Load `references/style-and-naming.md` when you name things, write imports or `ma
 
 ### Antipatterns
 
-Load `references/antipatterns.md` when you review a Rust diff. It is a checklist of the most common smells, each with a fix and a check.
+Load `references/antipatterns.md` when you review a Rust diff. It is a checklist of the most common smells, each with a fix, and a check where one exists.
 
 ## Sources
 

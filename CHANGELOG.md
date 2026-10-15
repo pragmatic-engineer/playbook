@@ -4,8 +4,9 @@ Release notes for the playbook plugin in `plugins/playbook`. The binary has its 
 
 ## playbook 0.32.0
 
-- A new skill, `engineering-standards-rust`, holds the Rust rules for code and reviews. It sits next to `engineering-standards-javascript` and adds only the Rust specifics. Its first references cover ownership and borrowing, error handling, types and traits, API design, style and naming, and a checklist of antipatterns. Each rule has a reason and a Clippy lint or command that checks it.
-- `engineering-standards` and `systematic-debugging` point to the new skill for Rust, the same way they point to the JavaScript one.
+- A new skill, `engineering-standards-rust`, holds the Rust rules for code and reviews. It sits next to `engineering-standards-javascript` and adds only the Rust specifics. Its first references cover ownership and borrowing, error handling, types and traits, API design, style and naming, and a checklist of antipatterns. Most rules name the Clippy lint or command that checks them.
+- `engineering-standards` points to the new skill for Rust, the same way it points to the JavaScript one.
+- A skills lint test now checks that each `references/<name>.md` named in a `SKILL.md` exists.
 
 ## playbook 0.31.3
 
