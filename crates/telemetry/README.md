@@ -17,7 +17,7 @@ It is part of the [playbook](https://github.com/pragmatic-engineer/playbook) too
 - Cache read and write tokens, split into the five minute and one hour tiers.
 - Tool, skill and agent breakdowns and latency, when Claude Code telemetry is on (see the receiver below).
 - Tabs (Charts, Numbers, Sessions by default) with the panels you choose. Press `e` to edit the layout, `Tab` and `F1` to `F9` to switch tabs.
-- Budget, rate limit and projection panels (when each limit is reached at the current pace). The limits come from the playbook statusline (Pro and Max windows), from the usage numbers Claude Code caches in its config file (the monthly spend limit on Enterprise, shown with its age), or from a budget you set.
+- Budget, rate limit and projection panels (when each limit is reached at the current pace). The limits come from the playbook statusline (Pro and Max windows), from the usage numbers Claude Code caches in its config file (the 5 hour and weekly windows, or the monthly spend limit on Enterprise, shown with its age), or from a budget you set.
 - Your last tab, range, views, sorts and filter, restored on the next start.
 - Codex session history, read the same way.
 
@@ -68,9 +68,9 @@ It finds Claude Code history in `~/.claude/projects`, or in `$CLAUDE_CONFIG_DIR/
 
 ## Limits on Enterprise and other plans
 
-The Budget and Projection panels name where each limit came from: `measured` (the statusline), `cached` (the Claude Code config file, with its age, and `cached, stale` when it is over six hours old), `manual` (the `usage.budget.*` keys). A fresh cached monthly spend limit wins over `usage.budget.monthlyUsd`. The cached numbers are not documented by Anthropic and can change. When a plan has no 5 hour and weekly windows, the panels say so and do not show zeros. The plan is guessed from the rate limit tier names and shows as "Enterprise or unknown plan" for anything that is not a Max tier.
+The Budget panel names where each limit came from: `measured` (the statusline, `measured, stale` when the reading is over six hours old), `cached` (the Claude Code config file, with its age, and `cached, stale` when it is over six hours old), `manual` (the `usage.budget.*` keys). A fresh cached monthly spend limit wins over `usage.budget.monthlyUsd`. The cached numbers are not documented by Anthropic and can change. When a plan has no 5 hour and weekly windows, the panels say so and do not show zeros. The plan is guessed from the rate limit tier names and shows as "Enterprise or unknown plan" for anything that is not a Max tier.
 
-Run `pbtop doctor` to see which sources exist on a machine. It lists field names and ages and never an email, name, id, organization or token. `pbtop doctor --raw` adds the values of six plan fields and the cached spend limit.
+Run `pbtop doctor` to see which sources exist on a machine. It lists field names, ages, the plan label, the window percentages and the manual budget amounts, and never an email, name, id, organization or token. `pbtop doctor --raw` adds the values of six plan fields and the cached spend limit.
 
 ## Where it keeps its data
 
