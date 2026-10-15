@@ -39,9 +39,11 @@ impl Home {
         cmd
     }
 
-    /// Runs `init --only telemetry` with a port of its own. Init would pick
-    /// the shared default 47318 for every test that runs at the same moment,
-    /// and only one collector can hold it, so the others never come up.
+    /// Runs `init --only telemetry` with a port that is free now. Init would
+    /// pick the shared default 47318 for every test that runs at the same
+    /// moment, and only one collector can hold it, so the others never come
+    /// up. The port is not held, so another process could still take it, but
+    /// that is rare next to the shared default.
     fn init_telemetry(&self) -> std::process::Output {
         let port = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
@@ -55,10 +57,17 @@ impl Home {
             format!(r#"{{"pid":0,"port":{port},"token":"test-token"}}"#),
         )
         .unwrap();
-        self.cmd()
+        let out = self
+            .cmd()
             .args(["init", "--only", "telemetry"])
             .output()
-            .unwrap()
+            .unwrap();
+        assert_eq!(
+            self.state().map(|s| s["port"].clone()),
+            Some(Value::from(port)),
+            "init must keep the port chosen for this test"
+        );
+        out
     }
 
     fn session_start(&self) {
