@@ -216,19 +216,15 @@ impl Cache {
 /// session hooks start, and any run with a `--json` argument never do.
 pub fn applies(command: &Command, args: &[OsString]) -> bool {
     use crate::UsageCommand;
-    let skipped = matches!(
-        command,
-        Command::Hook { .. }
-            | Command::Statusline
-            | Command::ShellInit { .. }
-            | Command::Version
-            | Command::Json { .. }
-            | Command::Update { .. }
-            | Command::Usage {
-                sub: Some(UsageCommand::Warm | UsageCommand::Collect { .. }),
-                ..
-            }
-    );
+    let skipped = command.is_hot_path()
+        || matches!(
+            command,
+            Command::Update { .. }
+                | Command::Usage {
+                    sub: Some(UsageCommand::Warm | UsageCommand::Collect { .. }),
+                    ..
+                }
+        );
     !skipped
         && !args.iter().any(|a| {
             a.to_str()
