@@ -7,7 +7,7 @@
 //! new binary can print the entries between two versions.
 
 use crate::update::resolve::compare;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 const EMBEDDED: &str = include_str!("../../../breaking-changes.json");
 
 /// What an entry applies to. Each has its own version line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Component {
     Playbook,
@@ -40,7 +40,7 @@ pub const AUTO_ACTION: &str = "none, migrated automatically";
 const FIELDS: [&str; 5] = ["version", "component", "summary", "action", "migration"];
 
 /// One breaking change.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Entry {
     /// The release that brings the change, as MAJOR.MINOR.PATCH.
     pub version: String,
@@ -161,16 +161,26 @@ pub fn all() -> &'static [Entry] {
     ALL.get_or_init(|| parse(EMBEDDED).unwrap_or_default())
 }
 
+/// True for a version `select` accepts: MAJOR.MINOR.PATCH with an optional
+/// leading `v` and an optional pre-release.
+pub fn is_version(v: &str) -> bool {
+    crate::plugin_root::is_plain_version(v.trim_start_matches('v'))
+}
+
+/// The entries as a JSON list, the shape `lenient` reads back. `playbook
+/// breaking --since <version> --json` prints it, and an older binary's
+/// `playbook update` reads it, so the argv and this shape stay stable.
+pub fn to_json(entries: &[Entry]) -> String {
+    serde_json::to_string(entries).unwrap_or_else(|_| "[]".into())
+}
+
 /// The entries of `component` in `entries` with `from < version <= to`,
 /// oldest first. Nothing when `to` is not above `from`, or when either is
 /// not a version (an optional leading `v` and a pre-release are fine), so
 /// an empty or corrupt record never shows the whole history.
 pub fn select(entries: &[Entry], component: Component, from: &str, to: &str) -> Vec<Entry> {
     let (from, to) = (from.trim_start_matches('v'), to.trim_start_matches('v'));
-    if !crate::plugin_root::is_plain_version(from)
-        || !crate::plugin_root::is_plain_version(to)
-        || compare(to, from) != Ordering::Greater
-    {
+    if !is_version(from) || !is_version(to) || compare(to, from) != Ordering::Greater {
         return Vec::new();
     }
     let mut found: Vec<Entry> = entries
@@ -184,6 +194,28 @@ pub fn select(entries: &[Entry], component: Component, from: &str, to: &str) -> 
         .collect();
     found.sort_by(|a, b| compare(&a.version, &b.version));
     found
+}
+
+/// What `playbook breaking` prints: the playbook entries since `since` up to
+/// this binary, or every entry, as text or as JSON.
+pub fn command(since: Option<&str>, json: bool) -> Result<String, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let (entries, text) = match since {
+        Some(v) if !is_version(v) => {
+            return Err(format!("'{v}' is not a version such as 0.25.0"));
+        }
+        Some(v) => {
+            let e = entries_between(v, current);
+            let t = render(&e);
+            (e, t)
+        }
+        None => (all().to_vec(), render_all(all())),
+    };
+    Ok(if json {
+        format!("{}\n", to_json(&entries))
+    } else {
+        text
+    })
 }
 
 /// The playbook entries an upgrade from `from` to `to` crosses, from the
@@ -224,12 +256,22 @@ pub fn plugin_entries(
     Ok(select(&entries, Component::Plugin, from, to))
 }
 
-/// One short block for the user, or an empty string when there is nothing.
+/// One short block for the user about an upgrade, or an empty string when
+/// there is nothing.
 pub fn render(entries: &[Entry]) -> String {
+    render_titled("Breaking changes in this upgrade:", entries)
+}
+
+/// The same block for a full listing, which belongs to no upgrade.
+pub fn render_all(entries: &[Entry]) -> String {
+    render_titled("Breaking changes this binary knows about:", entries)
+}
+
+fn render_titled(title: &str, entries: &[Entry]) -> String {
     if entries.is_empty() {
         return String::new();
     }
-    let mut out = String::from("Breaking changes in this upgrade:\n");
+    let mut out = format!("{title}\n");
     for e in entries {
         out.push_str(&format!(
             "  {} {}: {}\n    Action: {}\n",
@@ -449,6 +491,42 @@ mod tests {
         .unwrap_err()
         .contains("exactly"));
         assert!(parse(&auto(AUTO_ACTION, "\"0001-memory-store-move\"")).is_ok());
+    }
+
+    #[test]
+    fn to_json_keeps_the_shape_older_binaries_read() {
+        // Older binaries parse this exact shape in `playbook update`.
+        assert_eq!(
+            to_json(&[entry("0.26.0", Component::Playbook)]),
+            r#"[{"version":"0.26.0","component":"playbook","summary":"change in 0.26.0","action":"playbook init","migration":null}]"#
+        );
+    }
+
+    #[test]
+    fn command_lists_since_a_version_or_everything_and_refuses_a_bad_version() {
+        assert_eq!(command(Some("0.26.0"), true).unwrap(), "[]\n");
+        assert!(command(Some("0.25.0"), false)
+            .unwrap()
+            .starts_with("Breaking changes in this upgrade:\n"));
+        assert!(command(None, false)
+            .unwrap()
+            .starts_with("Breaking changes this binary knows about:\n"));
+        assert!(command(Some("latest"), false)
+            .unwrap_err()
+            .contains("not a version"));
+    }
+
+    #[test]
+    fn to_json_round_trips_through_lenient() {
+        let mut migrated = entry("0.27.0", Component::Plugin);
+        migrated.action = AUTO_ACTION.into();
+        migrated.migration = Some("0001-memory-store-move".into());
+        let entries = vec![entry("0.26.0", Component::Playbook), migrated];
+
+        let values: Vec<serde_json::Value> = serde_json::from_str(&to_json(&entries)).unwrap();
+
+        assert_eq!(lenient(&values), entries);
+        assert_eq!(to_json(&[]), "[]");
     }
 
     #[test]

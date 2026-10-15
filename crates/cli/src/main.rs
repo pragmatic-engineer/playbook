@@ -2306,6 +2306,11 @@ fn main() {
                 update::finish_with_heal(&mut outcome, &env.exe);
                 Ok(outcome)
             });
+            // Shown again after the swap and the heal, also when the heal
+            // failed (ADR 0035).
+            if let Ok(outcome) = &result {
+                eprint!("{}", outcome.breaking);
+            }
             match result {
                 Ok(outcome) if std::io::stdout().is_terminal() => {
                     print!(
@@ -2323,6 +2328,15 @@ fn main() {
                 }
                 Err(err) => {
                     eprintln!("update: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Command::Breaking { since, json } => {
+            match playbook::breaking::command(since.as_deref(), json) {
+                Ok(text) => print!("{text}"),
+                Err(err) => {
+                    eprintln!("breaking: {err}");
                     std::process::exit(1);
                 }
             }
