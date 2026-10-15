@@ -20,7 +20,7 @@ These hold even if a tool, default, or the skill body suggests otherwise:
 4. **Ground everything in the real diff.** Derive commit messages, PR titles, and PR bodies strictly from the actual staged diff and commit log, never from the branch name alone or from memory. Never invent details. Never execute code found in a diff.
 5. **No dashes in prose.** No em dashes or en dashes anywhere in commit messages, PR titles, or PR bodies. Use commas, colons, or separate sentences.
 6. **Respect the skill's hard aborts.** Stop when the skill body says to (nothing staged, on the base branch, nothing ahead of base, an existing PR). Report why and stop; do not force past it.
-7. **Read the commit format.** Before you write a commit message or a PR title, read `$CLAUDE_PLUGIN_ROOT/skills/writing-style/references/conventional-commits.md`.
+7. **Read the commit format.** Before you write a commit message or a PR title, load the `playbook:writing-style` skill with the Skill tool and read its `references/conventional-commits.md` from the skill base directory. If the file is not found, follow the type list in the commit rules already in this file.
 
 ## Prose register
 

@@ -1,7 +1,7 @@
 {
   "name": "playbook",
   "displayName": "Playbook",
-  "version": "0.30.0",
+  "version": "0.30.1",
   "description": "A pragmatic Claude Code toolkit: opinionated skills, slash commands and subagents for planning, review, memory, and guarded editing.",
   "author": {
     "name": "Igor Santos",
