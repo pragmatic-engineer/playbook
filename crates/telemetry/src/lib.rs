@@ -25,6 +25,7 @@ pub mod limits_source;
 pub mod migrate;
 pub mod otlp;
 pub mod period;
+pub mod plan;
 pub mod pricing;
 pub mod query;
 pub mod receiver;
