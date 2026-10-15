@@ -30,7 +30,6 @@ pub struct Options {
 /// Everything the update reads from the machine, so tests can fake it.
 pub struct Env {
     pub exe: PathBuf,
-    pub home: PathBuf,
     pub path_var: OsString,
     pub auto_mode: bool,
     pub strict: bool,
@@ -50,7 +49,6 @@ impl Env {
             .map_err(|e| format!("cannot locate the running binary: {e}"))?;
         Ok(Env {
             exe: std::fs::canonicalize(&exe).unwrap_or(exe),
-            home: crate::common::home_dir(),
             path_var: std::env::var_os("PATH").unwrap_or_default(),
             auto_mode: crate::common::mode::resolve_for_hook().mode
                 == crate::common::mode::Mode::Auto,
@@ -245,7 +243,6 @@ mod tests {
         swap::make_executable(&exe).unwrap();
         Env {
             exe,
-            home: dir.clone(),
             path_var: dir.into_os_string(),
             auto_mode: false,
             strict: false,
@@ -491,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn a_shadowing_binary_is_warned_about_and_the_plugin_version_is_not_compared() {
+    fn a_shadowing_binary_is_warned_about() {
         let mut env = env_in("up-shadow");
         let other = scratch_dir("up-shadow-first");
         std::fs::create_dir_all(&other).unwrap();
@@ -499,12 +496,6 @@ mod tests {
         swap::make_executable(&other.join("playbook")).unwrap();
         let own = env.exe.parent().unwrap().to_path_buf();
         env.path_var = std::env::join_paths([&other, &own]).unwrap();
-        std::fs::create_dir_all(env.home.join(".claude/plugins")).unwrap();
-        std::fs::write(
-            env.home.join(".claude/plugins/installed_plugins.json"),
-            r#"{"plugins":{"playbook@pragmatic-engineer":[{"version":"0.15.0"}]}}"#,
-        )
-        .unwrap();
         let bin = script_bytes("0.17.0");
         let out = run(
             &Options::default(),
@@ -518,15 +509,6 @@ mod tests {
             out.warnings
                 .iter()
                 .any(|w| w.contains("runs before the updated")),
-            "{:?}",
-            out.warnings
-        );
-        // The plugin has its own version line, so a plugin that differs from
-        // the binary version is not a problem and gets no warning.
-        assert!(
-            !out.warnings
-                .iter()
-                .any(|w| w.contains("claude plugin update")),
             "{:?}",
             out.warnings
         );
