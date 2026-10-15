@@ -89,3 +89,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0033](adr/0033-telemetry-on-by-default.md) | Turn Claude Code telemetry on by default at install | Accepted | 2026-10-15 |
 | [0034](adr/0034-self-healing-upgrades.md) | One plugin root resolver and migrations between versions | Accepted | 2026-10-15 |
 | [0035](adr/0035-breaking-change-notices.md) | Breaking change notices on every update channel | Accepted | 2026-10-15 |
+| [0036](adr/0036-release-check-and-automatic-updates.md) | A release check and automatic updates | Accepted | 2026-10-15 |

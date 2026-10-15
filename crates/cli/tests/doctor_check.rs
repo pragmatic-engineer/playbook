@@ -1266,3 +1266,55 @@ fn settings_that_name_the_collector_without_the_enable_switch_warn() {
         text(&mine)
     );
 }
+
+fn update_rows(rows: &[Value]) -> String {
+    let rows: Vec<&Value> = rows
+        .iter()
+        .filter(|r| {
+            let m = r["message"].as_str().unwrap_or_default();
+            m.starts_with("update.mode is") || m.contains("is available (you have")
+        })
+        .collect();
+    text(&rows)
+}
+
+#[test]
+fn doctor_shows_the_release_check_and_warns_only_for_a_newer_release() {
+    // Arrange
+    let newer = Box::new("update-newer");
+    let older = Box::new("update-older");
+    for (b, latest) in [(&newer, "999.0.0"), (&older, "0.0.1")] {
+        playbook::state::set(
+            &b.home().join(".config/playbook"),
+            playbook::update::check::CACHE_KEY,
+            &format!(r#"{{"checked_at":1792024626,"latest":"{latest}"}}"#),
+        )
+        .unwrap();
+    }
+
+    // Act
+    let newer_rows = update_rows(&newer.run(&[], "/bin/zsh", None));
+    let older_rows = update_rows(&older.run(&[], "/bin/zsh", None));
+
+    // Assert
+    assert!(
+        newer_rows.contains("INFO update.mode is notify; last background check started"),
+        "{newer_rows}"
+    );
+    assert!(
+        newer_rows.contains("WARN playbook 999.0.0 is available"),
+        "{newer_rows}"
+    );
+    assert!(!older_rows.contains("WARN"), "{older_rows}");
+}
+
+#[test]
+fn doctor_says_when_no_release_check_has_run() {
+    let b = Box::new("update-fresh");
+    let rows = update_rows(&b.run(&[], "/bin/zsh", None));
+    assert!(
+        rows.contains("update.mode is notify; no background release check has run yet"),
+        "{rows}"
+    );
+    assert!(!rows.contains("WARN"), "{rows}");
+}
