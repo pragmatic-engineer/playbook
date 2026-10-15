@@ -12,7 +12,14 @@ use std::cmp::Ordering;
 pub struct Release {
     pub tag: String,
     pub prerelease: bool,
+    /// When GitHub published it, as GitHub wrote it.
+    pub published_at: Option<String>,
 }
+
+/// The release list request, relative to the API base. One page of 100 is
+/// enough to reach past the plugin and telemetry releases that share the
+/// list with the binary.
+pub const RELEASES_PAGE: &str = "/releases?per_page=100";
 
 impl Release {
     /// The tag without its leading `v`.
@@ -38,9 +45,26 @@ pub fn parse_releases(body: &str) -> Result<Vec<Release>, String> {
             Some(Release {
                 tag: item["tag_name"].as_str()?.to_string(),
                 prerelease: item["prerelease"].as_bool().unwrap_or(false),
+                published_at: item["published_at"].as_str().map(str::to_string),
             })
         })
         .collect())
+}
+
+impl Release {
+    /// Whether this is a published plain `vX.Y.Z` binary release, so not a
+    /// pre-release and not a plugin or telemetry tag.
+    pub fn is_plain_stable(&self) -> bool {
+        let Some(rest) = self.tag.strip_prefix('v') else {
+            return false;
+        };
+        let parts: Vec<&str> = rest.split('.').collect();
+        !self.prerelease
+            && parts.len() == 3
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    }
 }
 
 /// Picks the release to install. An explicit version matches with or without

@@ -23,3 +23,53 @@ fn update_and_its_hidden_alias_share_one_help() {
         }
     }
 }
+
+/// A home whose cached release check is stale and names a newer release.
+fn home_with_a_stale_newer_release(tag: &str) -> std::path::PathBuf {
+    let home = std::env::temp_dir().join(format!(
+        "playbook-update-check-{tag}-{}",
+        std::process::id()
+    ));
+    let root = home.join(".config/playbook");
+    std::fs::create_dir_all(&root).unwrap();
+    playbook::state::set(
+        &root,
+        playbook::update::check::CACHE_KEY,
+        r#"{"checked_at":0,"latest":"999.0.0"}"#,
+    )
+    .unwrap();
+    home
+}
+
+fn cache(home: &std::path::Path) -> String {
+    playbook::state::get(
+        &home.join(".config/playbook"),
+        playbook::update::check::CACHE_KEY,
+    )
+    .unwrap()
+    .unwrap()
+}
+
+#[test]
+fn a_piped_json_run_keeps_its_stdout_and_leaves_the_check_alone() {
+    // Arrange
+    let home = home_with_a_stale_newer_release("json");
+    let before = cache(&home);
+
+    // Act
+    let out = playbook()
+        .args(["mode", "status", "--json"])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+
+    // Assert
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&stdout).is_ok(),
+        "{stdout}"
+    );
+    assert!(!stderr.contains("is available"), "{stderr}");
+    assert_eq!(cache(&home), before, "a piped run must not claim a refresh");
+}
