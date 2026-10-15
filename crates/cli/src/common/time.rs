@@ -61,6 +61,49 @@ pub fn epoch_secs_of(time: SystemTime) -> Option<i64> {
     i64::try_from(secs).ok()
 }
 
+/// Parses a `YYYY-MM-DDTHH:MM:SSZ` UTC timestamp (fractional seconds are
+/// dropped) into unix seconds, the inverse of `iso_utc`. Anything else, an
+/// out of range field included, is `None`.
+pub fn parse_iso8601_utc_epoch(s: &str) -> Option<i64> {
+    let s = s.strip_suffix('Z')?;
+    let (date, time) = s.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year: i64 = date_parts.next()?.parse().ok()?;
+    if !(0..=9999).contains(&year) {
+        return None;
+    }
+    let month: u32 = date_parts.next()?.parse().ok()?;
+    let day: u32 = date_parts.next()?.parse().ok()?;
+    let mut time_parts = time.split(':');
+    let hour: i64 = time_parts.next()?.parse().ok()?;
+    let minute: i64 = time_parts.next()?.parse().ok()?;
+    let second: i64 = time_parts.next()?.split('.').next()?.parse().ok()?;
+
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=59).contains(&second)
+    {
+        return None;
+    }
+
+    let days = days_from_civil(year, month, day);
+    Some(days * 86_400 + hour * 3600 + minute * 60 + second)
+}
+
+/// Howard Hinnant's `days_from_civil`: days since the Unix epoch for a
+/// proleptic-Gregorian `(year, month, day)`.
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (i64::from(month) + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + i64::from(day) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,5 +136,25 @@ mod iso_tests {
         assert_eq!(iso_utc(951_782_400), "2000-02-29T00:00:00Z");
         assert_eq!(iso_utc(1_791_676_800), "2026-10-11T00:00:00Z");
         assert_eq!(iso_utc(-5), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn utc_timestamps_parse_back_to_what_iso_utc_wrote() {
+        for secs in [0, 1_709_208_000, 1_792_024_626] {
+            assert_eq!(super::parse_iso8601_utc_epoch(&iso_utc(secs)), Some(secs));
+        }
+        assert_eq!(
+            super::parse_iso8601_utc_epoch("2026-10-15T00:37:06.5Z"),
+            Some(1_792_024_626)
+        );
+        for bad in [
+            "2026-13-01T00:00:00Z",
+            "2026-10-15T-1:00:00Z",
+            "99999-01-01T00:00:00Z",
+            "2026-10-15T00:00:60Z",
+            "yesterday",
+        ] {
+            assert_eq!(super::parse_iso8601_utc_epoch(bad), None, "{bad}");
+        }
     }
 }

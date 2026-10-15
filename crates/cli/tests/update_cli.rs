@@ -73,3 +73,25 @@ fn a_piped_json_run_keeps_its_stdout_and_leaves_the_check_alone() {
     assert!(!stderr.contains("is available"), "{stderr}");
     assert_eq!(cache(&home), before, "a piped run must not claim a refresh");
 }
+
+#[test]
+fn a_held_update_lock_refuses_a_manual_update() {
+    // Arrange
+    let home = std::env::temp_dir().join(format!("playbook-update-lock-{}", std::process::id()));
+    std::fs::create_dir_all(home.join(".config/playbook/update.lock")).unwrap();
+
+    // Act
+    let out = playbook()
+        .args(["update", "--yes"])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+
+    // Assert
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("another playbook process is updating"),
+        "{stderr}"
+    );
+}
