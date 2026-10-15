@@ -329,17 +329,20 @@ const EMBEDDED_RULES: [(&str, &str); 4] = [
 /// The root `playbook pr rules` reads: the resolved plugin when it holds every
 /// file the rules need, else the copies compiled into this binary, written
 /// under `~/.config/playbook/embedded/<version>/plugin`.
-pub fn rules_root(resolved: Option<PathBuf>, home: &Path) -> Option<(PathBuf, Source)> {
-    match resolved.filter(|root| {
-        EMBEDDED_RULES
-            .iter()
-            .all(|(rel, _)| root.join(rel).is_file())
-    }) {
-        Some(root) => Some((root, Source::InstallPath)),
-        None => write_embedded_rules(home)
-            .ok()
-            .map(|root| (root, Source::Embedded)),
-    }
+pub fn rules_root(resolved: Option<Resolved>, home: &Path) -> Option<Resolved> {
+    resolved
+        .filter(|r| {
+            EMBEDDED_RULES
+                .iter()
+                .all(|(rel, _)| r.root.join(rel).is_file())
+        })
+        .or_else(|| {
+            write_embedded_rules(home).ok().map(|root| Resolved {
+                root,
+                source: Source::Embedded,
+                skipped: Vec::new(),
+            })
+        })
 }
 
 fn write_embedded_rules(home: &Path) -> std::io::Result<PathBuf> {
@@ -605,13 +608,19 @@ mod tests {
         }
 
         // Act
-        let from_full = rules_root(Some(full.clone()), &home).unwrap();
-        let (from_partial, partial_source) = rules_root(Some(partial), &home).unwrap();
-        let (from_none, _) = rules_root(None, &home).unwrap();
+        let found = |root: PathBuf| Resolved {
+            root,
+            source: Source::Cache,
+            skipped: Vec::new(),
+        };
+        let from_full = rules_root(Some(found(full.clone())), &home).unwrap();
+        let from_partial = rules_root(Some(found(partial)), &home).unwrap();
+        let from_none = rules_root(None, &home).unwrap().root;
 
         // Assert
-        assert_eq!(from_full.0, full);
-        assert_eq!(partial_source, Source::Embedded);
+        assert_eq!((from_full.root, from_full.source), (full, Source::Cache));
+        assert_eq!(from_partial.source, Source::Embedded);
+        let from_partial = from_partial.root;
         assert!(from_partial.starts_with(home.join(".config/playbook/embedded")));
         assert_eq!(from_partial, from_none);
         for (rel, _) in EMBEDDED_RULES {
