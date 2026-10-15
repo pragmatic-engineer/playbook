@@ -26,13 +26,9 @@ fail() { echo "FAIL $*" >&2; exit 1; }
 
 new="${1:-}"
 [ -n "$new" ] || { echo "usage: bump-version.sh <version>" >&2; exit 2; }
-printf '%s' "$new" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
-  || fail "version '$new' is not MAJOR.MINOR.PATCH"
-
-# True when $1 is strictly greater than $2 (both MAJOR.MINOR.PATCH).
-version_gt() {
-  [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)" = "$1" ]
-}
+# shellcheck source=scripts/version-lib.sh
+. scripts/version-lib.sh
+printf '%s' "$new" | grep -Eq "$PLAIN_VERSION" || fail "version '$new' is not MAJOR.MINOR.PATCH"
 
 cargo_now="$(scripts/check-plugin.sh cargo-version)" || fail "${cargo_now#FAIL }"
 plugin_now="$(jq -r '.version // empty' "$MANIFEST")"

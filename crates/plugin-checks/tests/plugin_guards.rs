@@ -27,7 +27,7 @@ impl Repo {
         let dir = std::env::temp_dir().join(format!("plugin-guards-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("scripts")).expect("scratch repo");
-        for name in ["check-plugin.sh", "bump-version.sh"] {
+        for name in ["version-lib.sh", "check-plugin.sh", "bump-version.sh"] {
             let script = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../scripts")
                 .join(name);

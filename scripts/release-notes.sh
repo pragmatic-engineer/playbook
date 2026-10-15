@@ -25,6 +25,7 @@
 #   other        every other type, and subjects that are not conventional
 # A breaking item shows the footer text when there is one, else the subject.
 # A trailing "(#123)" becomes the pull request number.
+# The release commit, "chore(release): playbook X.Y.Z", is left out.
 #
 # GITHUB_REPOSITORY names the repository for the links. A shallow clone is
 # deepened, with its tags. Run from anywhere inside the repository; a
@@ -159,7 +160,11 @@ json() {
       def section_name:
         if .breaking then "breaking"
         else {feat: "features", fix: "fixes", perf: "performance"}[.type] // "other" end;
-      [split("\u0000")[] | ltrimstr("\n") | select(test("\\S")) | item] as $items
+      # The release commit of the version being built is left out: it only
+      # sets the version and the changelog (scripts/release-prepare.sh).
+      [split("\u0000")[] | ltrimstr("\n") | select(test("\\S")) | item
+        | select((.type == "chore" and .scope == "release"
+                  and (.text | test("^playbook [0-9]+\\.[0-9]+\\.[0-9]+$"))) | not)] as $items
       | [
           {name: "breaking", title: "Breaking changes"},
           {name: "features", title: "Features"},
