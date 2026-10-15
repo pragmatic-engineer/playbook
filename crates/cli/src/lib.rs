@@ -677,9 +677,14 @@ pub enum Command {
         #[arg(long)]
         dir: Option<String>,
     },
-    /// Print the path of one of this repo's playbook storage folders
+    /// Print the path of one of this repo's playbook storage folders, or of the plugin
     ///
     /// First moves any legacy folders from the old repo-local location.
+    /// `plugin-root` prints the installed playbook plugin folder instead. It
+    /// looks at `PLAYBOOK_PLUGIN_DIR`, then the `installPath` Claude Code
+    /// recorded, then `CLAUDE_PLUGIN_ROOT`, then the newest plugin cache
+    /// folder. When none is usable it prints one line naming each place tried
+    /// and exits 1. `--create` does not apply to it.
     Path {
         /// Which folder to print
         kind: PathKind,
@@ -979,6 +984,9 @@ pub enum PathKind {
     Handoff,
     /// The shared data folder holding every database (not tied to a repo)
     Data,
+    /// The installed playbook plugin folder, for skills and agents that need
+    /// a plugin file (not tied to a repo)
+    PluginRoot,
 }
 
 impl PathKind {
@@ -990,6 +998,7 @@ impl PathKind {
             PathKind::Worktrees => "worktrees",
             PathKind::Handoff => "handoff",
             PathKind::Data => "data",
+            PathKind::PluginRoot => "plugin-root",
         }
     }
 }
@@ -1197,12 +1206,14 @@ pub enum PrCommand {
     /// Cut the skill rules a PR title and body need
     ///
     /// Reads the writing-style and engineering-standards skills from the
-    /// plugin root (`CLAUDE_PLUGIN_ROOT` when it holds the skills, else the
-    /// installed playbook skills plugin), writes four files under `/tmp`, checks each, and
+    /// plugin root (`playbook path plugin-root` prints it), writes four files
+    /// under `/tmp`, checks each, and
     /// prints their paths. A failed check prints `ERROR: ...` and exits 1.
     /// With `--commit` it writes only the commit-message slice of writing-style.
+    /// When the plugin lacks one of the files, the copies built into this
+    /// binary are used and stderr says so.
     Rules {
-        /// Plugin root (default: the installed skills plugin)
+        /// Plugin root (default: `playbook path plugin-root`, else the built-in copies)
         #[arg(long)]
         plugin_root: Option<PathBuf>,
         /// Write only the slice a commit message needs

@@ -92,6 +92,7 @@ fn run_hook(
         .env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")
         .env_remove("CLAUDE_PLUGIN_ROOT")
+        .env_remove("PLAYBOOK_PLUGIN_DIR")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -2389,4 +2390,41 @@ fn session_init_injects_the_tool_map_before_a_handoff() {
     let map = context.find("playbook tools:").expect("tool map");
     let handoff = context.find("HANDOFFMARKER").expect("handoff");
     assert!(map < handoff, "the map should come first: {context}");
+}
+
+#[test]
+fn session_init_names_the_upgrade_when_the_plugin_needs_a_newer_binary() {
+    // Arrange: the installed plugin asks for a binary far newer than this one.
+    let home = scratch_dir("min-binary");
+    let plugin = home.join(".claude/plugins/cache/pragmatic-engineer/playbook/0.31.0");
+    fs::create_dir_all(plugin.join("skills")).unwrap();
+    fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
+    fs::write(
+        plugin.join(".claude-plugin/plugin.json"),
+        r#"{"name":"playbook","version":"0.31.0","metadata":{"minBinaryVersion":"999.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        home.join(".claude/plugins/installed_plugins.json"),
+        format!(
+            r#"{{"version":2,"plugins":{{"playbook@pragmatic-engineer":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
+            plugin.display()
+        ),
+    )
+    .unwrap();
+
+    // Act
+    let out = run_hook("session-init", &home, &home, r#"{"source":"startup"}"#, &[]);
+
+    // Assert
+    assert_eq!(out.exit_code, 0, "{}", out.stderr);
+    let value: serde_json::Value = serde_json::from_str(&out.stdout).expect("json payload");
+    let message = value["systemMessage"].as_str().unwrap_or_default();
+    assert!(
+        message.contains(&format!(
+            "playbook binary {} is older than this plugin needs (999.0.0). Run: playbook update",
+            env!("CARGO_PKG_VERSION")
+        )),
+        "{message}"
+    );
 }

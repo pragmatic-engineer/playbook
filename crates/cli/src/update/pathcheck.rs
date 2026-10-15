@@ -52,12 +52,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-fn is_homebrew(path: &Path) -> bool {
-    let text = path.to_string_lossy();
-    ["/Cellar/", "/opt/homebrew/", "/.linuxbrew/"]
-        .iter()
-        .any(|m| text.contains(m))
-}
+use super::is_homebrew;
 
 /// A warning when the first `playbook` on PATH is not `updated`, naming both
 /// paths and the fix. `None` when the updated binary wins.

@@ -1146,8 +1146,24 @@ fn main() {
                     plugin_root,
                     commit,
                 } => {
+                    let home = common::home_dir();
                     let root = plugin_root
-                        .or_else(playbook::plugin_root::find_here)
+                        .or_else(|| {
+                            let resolved = playbook::plugin_root::resolve_here().ok();
+                            let plugin = resolved.as_ref().map(|r| r.root.display().to_string());
+                            let found = playbook::plugin_root::rules_root(resolved, &home)?;
+                            if found.source == playbook::plugin_root::Source::Embedded {
+                                let why = match plugin {
+                                    Some(dir) => format!("the plugin at {dir} lacks the rule files"),
+                                    None => "no playbook plugin was found".to_string(),
+                                };
+                                eprintln!(
+                                    "pr rules: {why}, so the copies embedded in playbook {} are used",
+                                    env!("CARGO_PKG_VERSION")
+                                );
+                            }
+                            Some(found.root)
+                        })
                         .unwrap_or_default();
                     let dir = std::env::temp_dir()
                         .join(format!("create-pr-step0-{}", std::process::id()));
@@ -1860,6 +1876,21 @@ fn main() {
             }
         }
         Command::Path { kind, create } => {
+            if matches!(kind, playbook::PathKind::PluginRoot) {
+                match playbook::plugin_root::resolve_here() {
+                    Ok(found) => {
+                        for note in &found.skipped {
+                            eprintln!("playbook path: skipped {note}");
+                        }
+                        println!("{}", found.root.display());
+                    }
+                    Err(err) => {
+                        eprintln!("playbook path: {err}");
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
             if matches!(kind, playbook::PathKind::Data) {
                 let dir = common::data::data_dir();
                 if create {
@@ -1886,7 +1917,9 @@ fn main() {
                 playbook::PathKind::Plans => Some(storage::Kind::Plans),
                 playbook::PathKind::Implement => Some(storage::Kind::Implement),
                 playbook::PathKind::Worktrees => Some(storage::Kind::Worktrees),
-                playbook::PathKind::Handoff | playbook::PathKind::Data => None,
+                playbook::PathKind::Handoff
+                | playbook::PathKind::Data
+                | playbook::PathKind::PluginRoot => None,
             };
             let resolved = if matches!(kind, playbook::PathKind::Handoff) {
                 // Outside a repo this is the old shared folder, the same one

@@ -195,7 +195,9 @@ fn session_tiers(
 /// The `--agents` entries for one session: every base agent under
 /// `agents_dir` with its tiers from `session_tiers`. `ceiling_of` gives an
 /// agent's lowest ceiling. A base file that cannot be read or rendered is
-/// skipped. The result maps variant name to definition.
+/// skipped. The result maps variant name to definition. The copies run from
+/// another plugin directory, so each plugin root reference in a body is
+/// replaced with `agents_dir`'s parent, the real plugin root.
 pub fn session_agents(
     agents_dir: &Path,
     mode: Mode,
@@ -206,6 +208,7 @@ pub fn session_agents(
         let Ok(content) = fs::read_to_string(agents_dir.join(format!("{base}.md"))) else {
             continue;
         };
+        let content = pin_plugin_root(&content, agents_dir.parent());
         let Ok(parsed) = parse_base(base, &content) else {
             continue;
         };
@@ -221,6 +224,18 @@ pub fn session_agents(
         }
     }
     out
+}
+
+/// `content` with `${CLAUDE_PLUGIN_ROOT}` and `$CLAUDE_PLUGIN_ROOT` replaced
+/// by `root`. Claude Code fills the variable with the directory of the plugin
+/// that holds the file, which for a variant copy has no `skills/`.
+fn pin_plugin_root(content: &str, root: Option<&Path>) -> String {
+    let Some(root) = root.and_then(Path::to_str).filter(|r| !r.is_empty()) else {
+        return content.to_string();
+    };
+    content
+        .replace("${CLAUDE_PLUGIN_ROOT}", root)
+        .replace("$CLAUDE_PLUGIN_ROOT", root)
 }
 
 /// `session_agents` serialized for `--agents`, trimmed to fit
@@ -385,5 +400,21 @@ mod tests {
         assert!(map.contains_key("git-xhigh"), "{:?}", map.keys());
         assert!(!map.contains_key("git-max"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn variant_bodies_point_at_the_real_plugin_root() {
+        let content = "---\nname: g\ndescription: d\ntools: Bash\nmodel: haiku\neffort: low\n---\nRead ${CLAUDE_PLUGIN_ROOT}/skills/a.md and $CLAUDE_PLUGIN_ROOT/skills/b.md\n";
+        let root =
+            std::env::temp_dir().join(format!("pb-variants-root-{}", crate::testing::run_id()));
+        let dir = root.join("agents");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("git.md"), content).unwrap();
+        let map = session_agents(&dir, Mode::Auto, &|_| None);
+        let prompt = map["git-xhigh"]["prompt"].as_str().unwrap();
+        let want = format!("Read {0}/skills/a.md and {0}/skills/b.md", root.display());
+        assert!(prompt.contains(&want), "{prompt}");
+        assert!(!prompt.contains("CLAUDE_PLUGIN_ROOT"), "{prompt}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
