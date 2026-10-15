@@ -3,7 +3,7 @@
 
 //! Self healing after an upgrade (ADR 0034). A version record in the `state`
 //! table says which binary last ran the `Owned` migrations cleanly. The
-//! session hook and `init` compare it with the running binary,
+//! session hook, `doctor --fix` and `init` compare it with the running binary,
 //! run what is safe, and report what needs the user. Nothing here writes a
 //! Claude Code settings file.
 
@@ -91,6 +91,8 @@ fn set_key(root: &Path, key: &str, value: &str) {
 pub enum Trigger {
     /// The `session-init` hook: never waits for the lock, retries once a day.
     Hook,
+    /// `playbook doctor --fix`: waits for the lock, retries at once.
+    Fix,
     /// `playbook init`, after it ran every migration itself. `statusline` is
     /// false when the user declined the status line, so its item is dropped.
     Init { failed: bool, statusline: bool },
@@ -103,6 +105,17 @@ pub enum Skip {
     Downgrade,
     WaitingAfterFailure,
     LockBusy,
+}
+
+impl Skip {
+    fn reason(self) -> &'static str {
+        match self {
+            Skip::StateUnreadable => "the state table could not be read",
+            Skip::Downgrade => "a newer playbook ran here; nothing runs after a downgrade",
+            Skip::WaitingAfterFailure => "the last run failed; the hook retries once a day",
+            Skip::LockBusy => "another playbook process holds the migration lock",
+        }
+    }
 }
 
 /// What a heal did and what is left for the user.
@@ -130,6 +143,13 @@ impl Outcome {
         }
     }
 
+    /// The `doctor --fix` exit code: 1 when a migration failed or could not
+    /// run, so `playbook update` reports it.
+    pub fn exit_code(&self) -> i32 {
+        let blocked = matches!(self.skipped, Some(Skip::StateUnreadable | Skip::LockBusy));
+        i32::from(blocked || !self.failed.is_empty())
+    }
+
     /// One line for the session message, or `None` when there is nothing to say.
     pub fn line(&self) -> Option<String> {
         let mut parts = Vec::new();
@@ -141,7 +161,7 @@ impl Outcome {
         }
         if !self.failed.is_empty() {
             parts.push(format!(
-                "{} migration(s) failed and run again tomorrow",
+                "{} migration(s) failed: run `playbook doctor --fix`",
                 self.failed.len()
             ));
         }
@@ -169,6 +189,36 @@ impl Outcome {
     }
 }
 
+/// The `doctor --fix` report: what changed, what failed, then one line per
+/// open item with the command that fixes it.
+pub fn render_fix(out: &Outcome) -> String {
+    let mut text = String::new();
+    if let Some(skip) = out.skipped {
+        text.push_str(&format!("nothing ran: {}\n", skip.reason()));
+    }
+    for step in &out.changed {
+        text.push_str(&format!("fixed: {}: {}\n", step.name, step.detail));
+    }
+    for step in &out.failed {
+        text.push_str(&format!("failed: {}: {}\n", step.name, step.detail));
+    }
+    for warning in &out.warnings {
+        text.push_str(&format!("note: {warning}\n"));
+    }
+    for item in &out.open {
+        match item.command {
+            Some(command) => {
+                text.push_str(&format!("needs you: {} (run `{command}`)\n", item.message))
+            }
+            None => text.push_str(&format!("needs you: {}\n", item.message)),
+        }
+    }
+    if text.is_empty() {
+        text.push_str("nothing to fix\n");
+    }
+    text
+}
+
 /// Runs the heal for `trigger` at `now` (epoch seconds).
 pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
     let root = crate::common::paths::playbook_root_from(&ctx.home);
@@ -192,6 +242,11 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
                 };
             }
             heal_now(ctx, &root, 0, now)
+        }
+        Trigger::Fix => {
+            let mut out = heal_now(ctx, &root, migrate::LOCK_RETRIES, now);
+            out.warnings.extend(migrate::owned_notes(ctx));
+            out
         }
         Trigger::Init { failed, statusline } => {
             let mut open = migrate::open_items(ctx, None);
@@ -459,6 +514,7 @@ mod tests {
 
         // Assert
         assert_eq!(out.skipped, Some(Skip::LockBusy));
+        assert_eq!(out.exit_code(), 1);
         assert_eq!(Record::read(&root(&home)).unwrap().binary, None);
     }
 
@@ -532,9 +588,28 @@ mod tests {
         assert!(!out.recorded);
         assert_eq!(out.failed.len(), 1);
         assert!(out.changed.is_empty());
+        assert_eq!(out.exit_code(), 1);
         assert!(out.line().unwrap().contains("1 migration(s) failed"));
         let rec = Record::read(&root(&home)).unwrap();
         assert_eq!(rec.binary.as_deref(), Some("0.25.0"));
         assert_eq!(rec.failed_at, Some(5000));
+    }
+
+    #[test]
+    fn doctor_fix_retries_at_once_and_names_the_command_per_item() {
+        // Arrange: a recent failure and a pending status line change.
+        let home = scratch_dir("heal-fix");
+        seed(&home, "0.25.0", 0, Some(1000));
+        legacy_statusline(&home);
+
+        // Act
+        let out = run(&ctx(&home), Trigger::Fix, 1060);
+
+        // Assert
+        assert_eq!(out.skipped, None);
+        assert!(out.recorded);
+        assert_eq!(out.exit_code(), 0);
+        assert_eq!(Record::read(&root(&home)).unwrap().failed_at, None);
+        assert!(render_fix(&out).contains("(run `playbook init --statusline`)"));
     }
 }

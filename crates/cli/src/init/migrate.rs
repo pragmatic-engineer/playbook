@@ -558,6 +558,20 @@ pub fn run_owned(ctx: &Ctx, retries: u32) -> Report {
     report
 }
 
+/// The notes of the `Manual` migrations scoped `Owned`, which check files
+/// playbook placed and the user may have edited. `init` and `doctor --fix`
+/// show them; the session hook does not repeat them.
+pub fn owned_notes(ctx: &Ctx) -> Vec<String> {
+    registry()
+        .iter()
+        .filter(|m| matches!(m.kind, Kind::Manual) && matches!(m.scope, Scope::Owned))
+        .filter_map(|m| match (m.run)(ctx) {
+            Outcome::Warn(msg) => Some(format!("{}: {msg}", m.id)),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The highest migration number in the registry, from the id prefix.
 pub fn schema() -> u32 {
     registry()
@@ -1054,10 +1068,12 @@ mod tests {
 
         // Act
         let run = run_owned(&ctx(&h), 0);
+        let notes = owned_notes(&ctx(&h));
         let open = open_items(&ctx(&h), None);
 
         // Assert
         assert!(!run.lock_busy && !run.failed);
+        assert!(notes.is_empty(), "{notes:?}");
         assert_eq!(outside(&h), before);
         let command = |id: &str| open.iter().find(|i| i.id == id).and_then(|i| i.command);
         assert_eq!(
