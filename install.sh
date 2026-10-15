@@ -5,7 +5,8 @@
 # Installer for the playbook binary. It fetches the release binary, verifies it
 # (SHA256, the build attestation when gh can check it, then a --version smoke
 # test), installs it into PLAYBOOK_BIN_DIR (default $HOME/.local/bin) and puts
-# that directory on PATH. It touches nothing else. The skills are a separate
+# that directory on PATH. Then it runs `playbook migrate`, which updates only
+# playbook's own files. It touches nothing else. The skills are a separate
 # Claude Code plugin that works without this binary, and this script never
 # installs or removes a plugin.
 #
@@ -540,10 +541,25 @@ else
     install_release_binary
 fi
 
+# --- playbook migrate --------------------------------------------------------
+
+# Brings playbook's own files up to the installed version (ADR 0034). It never
+# writes Claude Code's settings; items that need `playbook init` are only
+# printed. It runs with a terminal or --yes, never with --no-init (binary
+# only), and is skipped on a binary too old to have the command. A failure
+# here does not stop the install: the binary retries on its next run.
+if [ "$NO_INIT" -eq 0 ] && { [ "$ASSUME_YES" -eq 1 ] || have_tty; } \
+    && "$PLAYBOOK_BIN_DIR/playbook" migrate --help >/dev/null 2>&1; then
+    log "Running playbook migrate"
+    "$PLAYBOOK_BIN_DIR/playbook" migrate || \
+        warn "playbook migrate did not finish; run \`playbook migrate\` to retry"
+fi
+
 # --- playbook init -----------------------------------------------------------
 
-# Everything above changed nothing outside the binary folder and the shell
-# start-up files that put it on PATH. `playbook init` changes Claude Code's own
+# Everything above changed nothing outside the binary folder, the shell
+# start-up files that put it on PATH, and playbook's own files under
+# ~/.config/playbook. `playbook init` changes Claude Code's own
 # settings, so it runs only after a yes: --yes, or an answer typed at the
 # prompt. With no terminal and no --yes it is skipped and the command is
 # printed.
