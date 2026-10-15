@@ -13,6 +13,7 @@ pub mod checks;
 pub mod comment;
 pub mod lens;
 pub mod size;
+pub mod suggest;
 
 /// Which review command is asking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

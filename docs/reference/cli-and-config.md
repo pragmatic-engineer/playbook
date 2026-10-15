@@ -46,6 +46,11 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `fix.maxLines` | `500` | a number, see the config keys guide for the range |
 | `review.stackMaxPrs` | `6` | a number, see the config keys guide for the range |
 | `review.stackMaxLines` | `3000` | a number, see the config keys guide for the range |
+| `review.suggest.deepLines` | `400` | a number, see the config keys guide for the range |
+| `review.suggest.quickLines` | `60` | a number, see the config keys guide for the range |
+| `review.suggest.deepFiles` | `25` | a number, see the config keys guide for the range |
+| `review.suggest.packageSpan` | `3` | a number, see the config keys guide for the range |
+| `review.suggest.untestedLines` | `150` | a number, see the config keys guide for the range |
 | `security.defaults` | `false` | `true`, `false` |
 | `usage.theme` | `default` | `default`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
@@ -1126,7 +1131,7 @@ Prints `path:line: finding` for each problem. Fenced code, inline code, URLs, fi
 
 Setup for the review commands
 
-Subcommands: `checks`, `prepare`, `size`, `triage-merge`
+Subcommands: `checks`, `prepare`, `size`, `suggest`, `triage-merge`
 
 ### `playbook review checks`
 
@@ -1160,6 +1165,19 @@ Example: `playbook review size --base main`
 - `--head <HEAD>`: The ref the diff ends at
 - `--all-lenses`: Always take the swarm path
 - `--dir <DIR>`: The repository to measure in; defaults to the current directory
+
+### `playbook review suggest`
+
+Recommend a quick or a deep review from the diff
+
+Reads the changed files from git (the branch against the default branch, no network) or from `gh` when a PR number is given, and applies a fixed rule list: size, files, packages touched, risky paths (auth, crypto, secrets, CI, release, hooks, guards, migrations, dependencies, the command surface), a security label, the test ratio, and changes that cannot alter behavior (docs, lock files, renames, tests). Prints `recommendation=quick|deep`, `confidence=high|low`, up to four `reason:` lines and a `signals:` line. Low confidence means no rule was decisive. The cuts are the `review.suggest.*` config keys.
+
+Example: `playbook review suggest 4265 --json`
+
+- `<PR>`: PR number (default: the current branch against its base)
+- `--base <BASE>`: Base branch when no PR number is given (default: the repo's default branch)
+- `--dir <DIR>`: Work in this directory instead of the current one
+- `--json`: Print JSON instead of text lines
 
 ### `playbook review triage-merge`
 

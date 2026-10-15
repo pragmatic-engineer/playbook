@@ -1535,6 +1535,32 @@ pub enum ReviewCommand {
         #[arg(long)]
         auto: bool,
     },
+    /// Recommend a quick or a deep review from the diff
+    ///
+    /// Reads the changed files from git (the branch against the default
+    /// branch, no network) or from `gh` when a PR number is given, and applies
+    /// a fixed rule list: size, files, packages touched, risky paths (auth,
+    /// crypto, secrets, CI, release, hooks, guards, migrations, dependencies,
+    /// the command surface), a security label, the test ratio, and changes
+    /// that cannot alter behavior (docs, lock files, renames, tests). Prints
+    /// `recommendation=quick|deep`, `confidence=high|low`, up to four
+    /// `reason:` lines and a `signals:` line. Low confidence means no rule
+    /// was decisive. The cuts are the `review.suggest.*` config keys.
+    ///
+    /// Example: `playbook review suggest 4265 --json`
+    Suggest {
+        /// PR number (default: the current branch against its base)
+        pr: Option<String>,
+        /// Base branch when no PR number is given (default: the repo's default branch)
+        #[arg(long)]
+        base: Option<String>,
+        /// Work in this directory instead of the current one
+        #[arg(long)]
+        dir: Option<String>,
+        /// Print JSON instead of text lines
+        #[arg(long)]
+        json: bool,
+    },
     /// Run a project's own type check, lint and tests in a directory
     ///
     /// Prints their output. A failing check is output, not an error.

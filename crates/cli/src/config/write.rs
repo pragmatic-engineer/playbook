@@ -201,9 +201,15 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
             whole.is_some_and(|n| n >= 10_000),
             "a whole number of at least 10000",
         ),
-        "fix.maxFiles" | "fix.maxLines" | "review.stackMaxPrs" | "review.stackMaxLines" => {
-            (whole.is_some_and(|n| n >= 1), "a positive integer")
-        }
+        "fix.maxFiles"
+        | "fix.maxLines"
+        | "review.stackMaxPrs"
+        | "review.stackMaxLines"
+        | "review.suggest.deepLines"
+        | "review.suggest.quickLines"
+        | "review.suggest.deepFiles"
+        | "review.suggest.packageSpan"
+        | "review.suggest.untestedLines" => (whole.is_some_and(|n| n >= 1), "a positive integer"),
         "pr.bodyMaxChars"
         | "docs.maxBytes"
         | "docs.timeoutSeconds"
