@@ -1,0 +1,833 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+
+//! `playbook review suggest`: recommend a quick or a deep review from facts
+//! git and `gh` already hold. The rules are const data, each with a plain
+//! reason, so the same list can be applied by hand without the binary. No
+//! model runs here. When no rule is decisive the confidence is `low` and the
+//! caller may ask a small model for a second opinion.
+//!
+//! A local diff (the branch against the default branch) needs no network. `gh`
+//! is only used when a PR number is given.
+
+use crate::common::re::static_regex;
+use crate::pr::shared::{gh, git, reject_option_like};
+use crate::pr::triage::Review;
+use regex::Regex;
+use serde::Serialize;
+use std::collections::BTreeSet;
+use std::sync::LazyLock;
+
+/// The cuts the rules compare against. Each one is a `review.suggest.*`
+/// config key, so a team can move them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cfg {
+    /// More changed lines than this is a large change (`deepLines`).
+    pub deep_lines: u64,
+    /// At most this many changed lines is a small change (`quickLines`).
+    pub quick_lines: u64,
+    /// More files than this is a wide change (`deepFiles`).
+    pub deep_files: u64,
+    /// This many packages or crates touched is a cross-cutting change (`packageSpan`).
+    pub package_span: u64,
+    /// Code lines at which a change with almost no tests is a risk (`untestedLines`).
+    pub untested_lines: u64,
+}
+
+impl Cfg {
+    pub const DEFAULT: Cfg = Cfg {
+        deep_lines: 400,
+        quick_lines: 60,
+        deep_files: 25,
+        package_span: 3,
+        untested_lines: 150,
+    };
+
+    /// The defaults, with any `review.suggest.*` key a config tier sets.
+    pub fn load() -> Cfg {
+        let home = crate::common::home_dir();
+        let slug = crate::common::repo_slug();
+        let slug = (!slug.is_empty()).then_some(slug.as_str());
+        let read = |key: &str, default: u64| {
+            crate::config::resolve(key, &home, slug)
+                .ok()
+                .and_then(|(v, _)| v.as_u64())
+                .filter(|n| *n >= 1)
+                .unwrap_or(default)
+        };
+        let d = Cfg::DEFAULT;
+        Cfg {
+            deep_lines: read("review.suggest.deepLines", d.deep_lines),
+            quick_lines: read("review.suggest.quickLines", d.quick_lines),
+            deep_files: read("review.suggest.deepFiles", d.deep_files),
+            package_span: read("review.suggest.packageSpan", d.package_span),
+            untested_lines: read("review.suggest.untestedLines", d.untested_lines),
+        }
+    }
+}
+
+/// One changed file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct File {
+    pub path: String,
+    pub added: u64,
+    pub removed: u64,
+    pub renamed: bool,
+}
+
+/// What git and `gh` report about the change.
+#[derive(Debug, Clone, Default)]
+pub struct Facts {
+    pub files: Vec<File>,
+    pub labels: Vec<String>,
+    /// `Some(true)` when the PR or branch is yours, `None` when unknown.
+    pub own: Option<bool>,
+}
+
+/// The measurements the rules read. Plain data, so a rule test builds one by
+/// hand.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct Signals {
+    pub lines: u64,
+    pub files: u64,
+    /// Changed lines outside docs, tests, lock files and the plugin payload.
+    pub code_lines: u64,
+    pub test_lines: u64,
+    pub payload_lines: u64,
+    /// Changed lines of code outside Rust files, which hold their tests inline.
+    pub untested_lines: u64,
+    /// Changed lines of code, tests and plugin files: everything but docs and lock files.
+    pub review_lines: u64,
+    /// Test lines over test plus code lines, two decimals.
+    pub test_ratio: f64,
+    pub packages: Vec<String>,
+    pub areas: Vec<String>,
+    pub labels: Vec<String>,
+    pub own: Option<bool>,
+    pub docs_only: bool,
+    pub lock_only: bool,
+    pub tests_only: bool,
+    pub renames_only: bool,
+}
+
+impl Signals {
+    fn has(&self, area: &str) -> bool {
+        self.areas.iter().any(|a| a == area)
+    }
+}
+
+struct Pats {
+    payload: Regex,
+    test: Regex,
+    workflows: Regex,
+    release: Regex,
+    hooks: Regex,
+    migrations: Regex,
+    security: Regex,
+    cli: Regex,
+    package: Regex,
+    braces: Regex,
+}
+
+static PATS: LazyLock<Pats> = LazyLock::new(|| Pats {
+    payload: static_regex(r"^(plugins/[^/]+/(commands|skills|agents|hooks)/|prompts/)"),
+    test: static_regex(
+        r"(^|/)(tests?|__tests__|spec|fixtures)/|(_test|_spec)\.[a-z]+$|\.(test|spec)\.[a-z]+$",
+    ),
+    workflows: static_regex(r"^\.github/(workflows|actions)/"),
+    release: static_regex(r"(?i)(^|/)([^/]*release[^/]*|\.goreleaser[^/]*|dist-workspace\.toml)$"),
+    hooks: static_regex(r"(?i)(^|/)(hooks?|guards?)/|(^|/)[^/]*guard[^/]*\.[a-z]+$"),
+    migrations: static_regex(
+        r"(?i)(^|/)(migrations?|schemas?|prisma)/|\.sql$|(^|/)schema\.[a-z]+$",
+    ),
+    security: static_regex(
+        r"(?i)(^|/)([^/]*[-_.])?(auth|authn|authz|authentication|authorization|oauth|jwt|crypto|secrets?|credentials?|passwords?|permissions?|rbac|acl)([-_.][^/]*)?(/|$)|(^|/)\.env|\.(pem|key)$",
+    ),
+    cli: static_regex(
+        r"(^|/)(main\.(rs|go|py|ts)|cli\.(rs|py|ts)|cmd|bin|command\.rs|intents\.json|openapi[^/]*|[^/]+\.proto)(/|$)",
+    ),
+    package: static_regex(r"^(crates|packages|apps|services|libs|plugins)/([^/]+)/"),
+    braces: static_regex(r"\{[^}]* => ([^}]*)\}"),
+});
+
+#[rustfmt::skip]
+const LOCKS: &[&str] = &[
+    "Cargo.lock", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock",
+    "Gemfile.lock", "go.sum", "uv.lock", "composer.lock", "bun.lockb", "Pipfile.lock",
+];
+
+#[rustfmt::skip]
+const MANIFESTS: &[&str] = &[
+    "Cargo.toml", "package.json", "go.mod", "pyproject.toml", "Gemfile", "pom.xml",
+    "build.gradle", "build.gradle.kts", "Pipfile",
+];
+
+fn file_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+fn is_lock(path: &str) -> bool {
+    LOCKS.contains(&file_name(path))
+}
+
+fn is_manifest(path: &str) -> bool {
+    let name = file_name(path);
+    MANIFESTS.contains(&name) || (name.starts_with("requirements") && name.ends_with(".txt"))
+}
+
+fn is_payload(path: &str) -> bool {
+    PATS.payload.is_match(path)
+}
+
+fn is_test(path: &str) -> bool {
+    PATS.test.is_match(path)
+}
+
+fn is_doc(path: &str) -> bool {
+    if is_payload(path) || is_manifest(path) {
+        return false;
+    }
+    let name = file_name(path);
+    let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+    path.starts_with("docs/")
+        || ["md", "mdx", "txt", "rst"].contains(&ext)
+        || ["LICENSE", "NOTICE", "CODEOWNERS"].contains(&name)
+}
+
+/// The risky areas a path belongs to. Docs, tests and lock files hold none.
+fn areas_of(path: &str) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if is_manifest(path) {
+        out.push("dependencies");
+    }
+    if is_doc(path) || is_test(path) || is_lock(path) {
+        return out;
+    }
+    let checks: [(&Regex, &'static str); 6] = [
+        (&PATS.workflows, "workflows"),
+        (&PATS.release, "release"),
+        (&PATS.hooks, "hooks"),
+        (&PATS.migrations, "migrations"),
+        (&PATS.security, "security-paths"),
+        (&PATS.cli, "cli-surface"),
+    ];
+    for (re, name) in checks {
+        if re.is_match(path) {
+            out.push(name);
+        }
+    }
+    if is_payload(path) {
+        out.push("plugin-payload");
+    }
+    out
+}
+
+fn package_of(path: &str) -> String {
+    PATS.package
+        .captures(path)
+        .and_then(|c| c.get(2))
+        .map_or_else(|| "root".to_string(), |m| m.as_str().to_string())
+}
+
+/// The new path of a `git diff --numstat -M` row: `a/{b => c}/d` and
+/// `a => b` both give the path after the rename.
+fn new_path(raw: &str) -> String {
+    if !raw.contains(" => ") {
+        return raw.to_string();
+    }
+    if raw.contains('{') {
+        return PATS.braces.replace_all(raw, "$1").replace("//", "/");
+    }
+    raw.rsplit(" => ").next().unwrap_or(raw).to_string()
+}
+
+/// Files from `git diff -M --numstat` output. A binary row (`-` counts) has
+/// zero lines.
+pub fn parse_numstat(text: &str) -> Vec<File> {
+    text.lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|row| {
+            let mut cols = row.splitn(3, '\t');
+            let added = cols.next().unwrap_or("-").parse().unwrap_or(0);
+            let removed = cols.next().unwrap_or("-").parse().unwrap_or(0);
+            let raw = cols.next().unwrap_or("");
+            File {
+                path: new_path(raw),
+                added,
+                removed,
+                renamed: raw.contains(" => "),
+            }
+        })
+        .collect()
+}
+
+/// Measure the change.
+pub fn measure(facts: &Facts) -> Signals {
+    let mut s = Signals {
+        files: facts.files.len() as u64,
+        labels: facts.labels.clone(),
+        own: facts.own,
+        ..Signals::default()
+    };
+    let mut packages = BTreeSet::new();
+    let mut areas = BTreeSet::new();
+    for f in &facts.files {
+        let n = f.added + f.removed;
+        s.lines += n;
+        if is_test(&f.path) {
+            s.test_lines += n;
+        } else if is_payload(&f.path) {
+            s.payload_lines += n;
+        } else if !is_doc(&f.path) && !is_lock(&f.path) {
+            s.code_lines += n;
+            if !f.path.ends_with(".rs") {
+                s.untested_lines += n;
+            }
+        }
+        if !is_doc(&f.path) && !is_lock(&f.path) {
+            s.review_lines += n;
+            packages.insert(package_of(&f.path));
+        }
+        areas.extend(areas_of(&f.path).into_iter().map(str::to_string));
+    }
+    let all = |pred: fn(&str) -> bool| {
+        !facts.files.is_empty() && facts.files.iter().all(|f| pred(&f.path))
+    };
+    s.docs_only = all(is_doc);
+    s.lock_only = all(is_lock);
+    s.tests_only = all(is_test);
+    s.renames_only =
+        !facts.files.is_empty() && s.lines == 0 && facts.files.iter().all(|f| f.renamed);
+    let code_and_tests = s.code_lines + s.test_lines;
+    if code_and_tests > 0 {
+        s.test_ratio = (s.test_lines as f64 / code_and_tests as f64 * 100.0).round() / 100.0;
+    }
+    s.packages = packages.into_iter().collect();
+    s.areas = areas.into_iter().collect();
+    s
+}
+
+/// How a rule weighs in. The first class with a hit decides, in this order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Class {
+    /// A label that asks for care: deep, whatever else is true.
+    Label,
+    /// A change that cannot alter behavior: quick.
+    Downgrade,
+    /// A risk: deep.
+    Risk,
+    /// A small change with no risk: quick.
+    Small,
+}
+
+/// One row of the rule table.
+pub struct Rule {
+    pub id: &'static str,
+    pub class: Class,
+    /// Plain English. `{review_lines}`, `{payload_lines}`, `{untested_lines}`, `{files}` and `{packages}` fill in.
+    pub reason: &'static str,
+    pub hit: fn(&Signals, &Cfg) -> bool,
+}
+
+impl Rule {
+    const fn new(
+        id: &'static str,
+        class: Class,
+        reason: &'static str,
+        hit: fn(&Signals, &Cfg) -> bool,
+    ) -> Rule {
+        Rule {
+            id,
+            class,
+            reason,
+            hit,
+        }
+    }
+}
+
+/// Every rule, in the order reasons are reported.
+#[rustfmt::skip]
+pub const RULES: &[Rule] = &[
+    Rule::new("security-label", Class::Label, "The PR has a security label.",
+        |s, _| s.labels.iter().any(|l| l.to_lowercase().contains("security"))),
+    Rule::new("lock-only", Class::Downgrade, "Only lock files changed.", |s, _| s.lock_only),
+    Rule::new("docs-only", Class::Downgrade, "Only docs changed.", |s, _| s.docs_only),
+    Rule::new("renames-only", Class::Downgrade, "Files were only renamed or moved.",
+        |s, _| s.renames_only && s.areas.is_empty()),
+    Rule::new("tests-only", Class::Downgrade, "Only tests changed.", |s, _| s.tests_only),
+    Rule::new("no-code", Class::Downgrade, "Only docs, tests and lock files changed.",
+        |s, _| s.files > 0 && s.code_lines == 0 && s.payload_lines == 0 && s.areas.is_empty()),
+    Rule::new("big-diff", Class::Risk, "Large change: {review_lines} changed lines.",
+        |s, c| s.review_lines > c.deep_lines),
+    Rule::new("many-files", Class::Risk, "Wide change: {files} files.",
+        |s, c| s.files > c.deep_files),
+    Rule::new("many-packages", Class::Risk, "Cuts across {packages} packages.",
+        |s, c| s.packages.len() as u64 >= c.package_span),
+    Rule::new("security-paths", Class::Risk, "Touches auth, crypto, secrets or permissions code.",
+        |s, _| s.has("security-paths")),
+    Rule::new("workflows", Class::Risk, "Changes CI workflows.", |s, _| s.has("workflows")),
+    Rule::new("release", Class::Risk, "Changes release files.", |s, _| s.has("release")),
+    Rule::new("hooks-guards", Class::Risk, "Changes hooks or guards.", |s, _| s.has("hooks")),
+    Rule::new("migrations", Class::Risk, "Changes a migration or a schema.",
+        |s, _| s.has("migrations")),
+    Rule::new("dependencies", Class::Risk, "Changes a dependency manifest.",
+        |s, _| s.has("dependencies")),
+    Rule::new("cli-surface", Class::Risk, "Changes the public command or API surface.",
+        |s, _| s.has("cli-surface")),
+    Rule::new("plugin-payload", Class::Risk,
+        "Changes plugin commands, skills or agents ({payload_lines} lines).",
+        |s, c| s.has("plugin-payload") && s.payload_lines > c.quick_lines),
+    Rule::new("untested-code", Class::Risk, "{untested_lines} changed lines of code with almost no tests.",
+        |s, c| s.untested_lines >= c.untested_lines && s.test_lines * 10 < s.untested_lines + s.test_lines),
+    Rule::new("small", Class::Small, "Small change: {review_lines} lines in {files} files.",
+        |s, c| s.review_lines <= c.quick_lines),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Confidence {
+    High,
+    Low,
+}
+
+impl Confidence {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Confidence::High => "high",
+            Confidence::Low => "low",
+        }
+    }
+}
+
+/// The answer.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Suggestion {
+    pub recommendation: Review,
+    pub confidence: Confidence,
+    /// At most four short lines.
+    pub reasons: Vec<String>,
+    /// The ids of the rules that decided.
+    pub rules: Vec<&'static str>,
+    pub signals: Signals,
+}
+
+const MAX_REASONS: usize = 4;
+
+fn fill(template: &str, s: &Signals) -> String {
+    template
+        .replace("{review_lines}", &s.review_lines.to_string())
+        .replace("{payload_lines}", &s.payload_lines.to_string())
+        .replace("{untested_lines}", &s.untested_lines.to_string())
+        .replace("{files}", &s.files.to_string())
+        .replace("{packages}", &s.packages.len().to_string())
+}
+
+/// Apply the rule table. The first class with a hit decides; a change that
+/// no class decides is a close call, `low` confidence, leaning deep unless
+/// the change is yours.
+pub fn decide(s: Signals, cfg: &Cfg) -> Suggestion {
+    let fired: Vec<&Rule> = RULES.iter().filter(|r| (r.hit)(&s, cfg)).collect();
+    let in_class =
+        |c: Class| -> Vec<&Rule> { fired.iter().copied().filter(|r| r.class == c).collect() };
+    let (recommendation, confidence, picked) = [
+        (Class::Label, Review::Deep),
+        (Class::Downgrade, Review::Quick),
+        (Class::Risk, Review::Deep),
+        (Class::Small, Review::Quick),
+    ]
+    .into_iter()
+    .find_map(|(class, review)| {
+        let rules = in_class(class);
+        (!rules.is_empty()).then_some((review, Confidence::High, rules))
+    })
+    .unwrap_or_else(|| {
+        let review = if s.own == Some(true) {
+            Review::Quick
+        } else {
+            Review::Deep
+        };
+        (review, Confidence::Low, Vec::new())
+    });
+    let mut reasons: Vec<String> = picked.iter().map(|r| fill(r.reason, &s)).collect();
+    if picked.is_empty() {
+        reasons.push(format!(
+            "{} changed lines in {} files, between the small and large cut, with no risky path.",
+            s.review_lines, s.files
+        ));
+    }
+    reasons.truncate(MAX_REASONS);
+    Suggestion {
+        recommendation,
+        confidence,
+        reasons,
+        rules: picked.iter().map(|r| r.id).collect(),
+        signals: s,
+    }
+}
+
+/// `recommendation=`, `confidence=`, one `reason:` line each, then the
+/// signals on one line.
+pub fn render(sug: &Suggestion) -> String {
+    let mut out = vec![
+        format!("recommendation={}", sug.recommendation.as_str()),
+        format!("confidence={}", sug.confidence.as_str()),
+    ];
+    out.extend(sug.reasons.iter().map(|r| format!("reason: {r}")));
+    let s = &sug.signals;
+    out.push(format!(
+        "signals: lines={} files={} packages={} test_ratio={} areas={}",
+        s.lines,
+        s.files,
+        s.packages.len(),
+        s.test_ratio,
+        if s.areas.is_empty() {
+            "none".to_string()
+        } else {
+            s.areas.join(",")
+        }
+    ));
+    out.join("\n")
+}
+
+fn ref_exists(name: &str) -> bool {
+    git(&["rev-parse", "--verify", "--quiet", name]).is_ok()
+}
+
+/// The comparison ref for a local diff: the base the caller named, else
+/// `origin/HEAD`, else `main` or `master`. Prefers the `origin/` copy. No
+/// network call.
+fn local_base(base: Option<&str>) -> Result<String, String> {
+    let name = match base.filter(|b| !b.is_empty()) {
+        Some(b) => b.to_string(),
+        None => git(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+            .ok()
+            .and_then(|r| r.strip_prefix("origin/").map(str::to_string))
+            .or_else(|| {
+                ["main", "master"]
+                    .into_iter()
+                    .find(|b| ref_exists(&format!("origin/{b}")) || ref_exists(b))
+                    .map(str::to_string)
+            })
+            .ok_or("no default branch found; pass --base")?,
+    };
+    reject_option_like("base branch", &name)?;
+    let remote = format!("origin/{name}");
+    if ref_exists(&remote) {
+        Ok(remote)
+    } else if ref_exists(&name) {
+        Ok(name)
+    } else {
+        Err(format!("base branch `{name}` not found"))
+    }
+}
+
+fn local_facts(base: Option<&str>) -> Result<Facts, String> {
+    let base = local_base(base)?;
+    let text = git(&[
+        "-c",
+        "core.quotePath=false",
+        "diff",
+        "-M",
+        "--numstat",
+        &format!("{base}...HEAD"),
+    ])?;
+    Ok(Facts {
+        files: parse_numstat(&text),
+        labels: Vec::new(),
+        own: Some(true),
+    })
+}
+
+fn pr_facts(number: &str) -> Result<Facts, String> {
+    let files_jq =
+        ".[] | {path:.filename,added:.additions,removed:.deletions,renamed:(.status==\"renamed\")}";
+    let endpoint = format!("repos/{{owner}}/{{repo}}/pulls/{number}/files?per_page=100");
+    let calls: [Vec<&str>; 3] = [
+        vec!["api", "--paginate", &endpoint, "--jq", files_jq],
+        vec!["pr", "view", number, "--json", "labels,author"],
+        vec!["api", "/user", "-q", ".login"],
+    ];
+    let mut results =
+        crate::common::par::map(&calls, crate::common::par::MAX_CONCURRENT, |a| gh(a)).into_iter();
+    let (Some(files), Some(meta), Some(me)) = (results.next(), results.next(), results.next())
+    else {
+        return Err("gh returned fewer results than calls".to_string());
+    };
+    parse_pr(&files?, &meta?, me.ok().as_deref())
+}
+
+#[derive(serde::Deserialize)]
+struct PrFile {
+    path: String,
+    added: u64,
+    removed: u64,
+    renamed: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct PrMeta {
+    labels: Vec<PrLabel>,
+    author: PrAuthor,
+}
+
+#[derive(serde::Deserialize)]
+struct PrLabel {
+    name: String,
+}
+
+#[derive(serde::Deserialize)]
+struct PrAuthor {
+    login: String,
+}
+
+/// The facts from the three `gh` outputs: one JSON object per file line, the
+/// `pr view` JSON, and the caller's login (`None` when it could not be read).
+/// A missing field is an error, never a silent zero.
+fn parse_pr(files: &str, meta: &str, me: Option<&str>) -> Result<Facts, String> {
+    let files = files
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            let f: PrFile =
+                serde_json::from_str(l).map_err(|e| format!("gh returned bad file JSON: {e}"))?;
+            Ok(File {
+                path: f.path,
+                added: f.added,
+                removed: f.removed,
+                renamed: f.renamed,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let meta: PrMeta =
+        serde_json::from_str(meta).map_err(|e| format!("gh pr view returned bad JSON: {e}"))?;
+    Ok(Facts {
+        files,
+        labels: meta.labels.into_iter().map(|l| l.name).collect(),
+        own: me.map(|m| m == meta.author.login),
+    })
+}
+
+/// Collect the facts for PR `pr`, or for the branch against its base when
+/// `pr` is `None`, and decide.
+pub fn run(pr: Option<&str>, base: Option<&str>) -> Result<Suggestion, String> {
+    let facts = match pr.map(|p| p.trim_start_matches('#')) {
+        Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => pr_facts(n)?,
+        Some(other) => return Err(format!("`{other}` is not a PR number")),
+        None => local_facts(base)?,
+    };
+    if facts.files.is_empty() {
+        return Err("no changed files found; nothing to review".to_string());
+    }
+    Ok(decide(measure(&facts), &Cfg::load()))
+}
+
+#[cfg(test)]
+#[rustfmt::skip]
+mod tests {
+    use super::*;
+
+    const C: Cfg = Cfg::DEFAULT;
+
+    fn file(path: &str, lines: u64) -> File {
+        File { path: path.into(), added: lines, removed: 0, renamed: false }
+    }
+
+    fn sug_with(files: Vec<File>, labels: &[&str], own: Option<bool>) -> Suggestion {
+        let labels = labels.iter().map(|l| l.to_string()).collect();
+        decide(measure(&Facts { files, labels, own }), &C)
+    }
+
+    fn sug(files: Vec<File>) -> Suggestion {
+        sug_with(files, &[], Some(false))
+    }
+
+    /// One case per rule: the files that make it fire and the answer.
+    fn cases() -> Vec<(&'static str, Vec<File>, Review)> {
+        let many = (0..26).map(|i| file(&format!("src/f{i}.rs"), 1)).collect();
+        let renamed = File { renamed: true, ..file("b.rs", 0) };
+        vec![
+            ("lock-only", vec![file("Cargo.lock", 900)], Review::Quick),
+            ("docs-only", vec![file("docs/guide.md", 500), file("README.md", 5)], Review::Quick),
+            ("renames-only", vec![renamed], Review::Quick),
+            ("tests-only", vec![file("crates/a/tests/x.rs", 300), file("src/foo_test.go", 20)], Review::Quick),
+            ("big-diff", vec![file("src/a.rs", 401), file("tests/a.rs", 100)], Review::Deep),
+            ("many-files", many, Review::Deep),
+            ("many-packages", vec![file("crates/a/x.rs", 5), file("crates/b/x.rs", 5), file("plugins/p/x.json", 5)], Review::Deep),
+            ("security-paths", vec![file("src/auth/login.rs", 5)], Review::Deep),
+            ("workflows", vec![file(".github/workflows/ci.yml", 3)], Review::Deep),
+            ("release", vec![file("scripts/release.sh", 3)], Review::Deep),
+            ("hooks-guards", vec![file("src/rm_guard.rs", 3)], Review::Deep),
+            ("migrations", vec![file("db/migrations/001.sql", 3)], Review::Deep),
+            ("dependencies", vec![file("requirements-dev.txt", 3)], Review::Deep),
+            ("cli-surface", vec![file("crates/cli/src/main.rs", 3)], Review::Deep),
+            ("plugin-payload", vec![file("plugins/p/skills/x/SKILL.md", 61)], Review::Deep),
+            ("untested-code", vec![file("src/a.py", 150)], Review::Deep),
+            ("no-code", vec![file("README.md", 500), file("Cargo.lock", 500), file("tests/a.rs", 90)], Review::Quick),
+            ("small", vec![file("src/a.rs", 40), file("tests/a.rs", 20)], Review::Quick),
+        ]
+    }
+
+    #[test]
+    fn every_rule_has_a_case_that_makes_it_fire_with_high_confidence() {
+        let cases = cases();
+        for rule in RULES.iter().filter(|r| r.id != "security-label") {
+            let (_, files, want) = cases.iter().find(|c| c.0 == rule.id).unwrap_or_else(|| panic!("no case for {}", rule.id));
+            let s = sug(files.clone());
+            assert!(s.rules.contains(&rule.id), "{}: {:?}", rule.id, s.rules);
+            assert_eq!((s.recommendation, s.confidence), (*want, Confidence::High), "{}", rule.id);
+        }
+    }
+
+    #[test]
+    fn the_security_label_forces_deep_even_for_docs() {
+        let s = sug_with(vec![file("README.md", 2)], &["Security"], None);
+        assert_eq!((s.recommendation, s.confidence), (Review::Deep, Confidence::High));
+        assert_eq!(s.rules, ["security-label"]);
+    }
+
+    #[test]
+    fn each_cut_is_exclusive_at_its_default() {
+        let none = |files| sug(files).rules;
+        assert!(!none(vec![file("src/a.rs", 300), file("tests/a.rs", 100)]).contains(&"big-diff"));
+        let files = (0..25).map(|i| file(&format!("src/f{i}.rs"), 1)).collect();
+        assert!(!none(files).contains(&"many-files"));
+        assert!(!none(vec![file("crates/a/x.rs", 5), file("crates/b/x.rs", 5)]).contains(&"many-packages"));
+        assert!(!none(vec![file("plugins/p/skills/x/SKILL.md", 60)]).contains(&"plugin-payload"));
+        assert!(!none(vec![file("src/a.py", 149)]).contains(&"untested-code"));
+        assert!(!none(vec![file("src/a.py", 150), file("tests/a.py", 30)]).contains(&"untested-code"));
+        assert!(!none(vec![file("src/a.rs", 300)]).contains(&"untested-code"));
+        assert!(none(vec![file("src/a.py", 226), file("tests/a.py", 24)]).contains(&"untested-code"));
+        assert!(!none(vec![File { added: 3, ..File { renamed: true, ..file("b.rs", 0) } }]).contains(&"renames-only"));
+    }
+
+    #[test]
+    fn plugin_markdown_is_not_docs_and_manifests_are_not_docs() {
+        assert!(!sug(vec![file("plugins/p/commands/x.md", 200)]).rules.contains(&"docs-only"));
+        assert!(!sug(vec![file("requirements.txt", 2)]).rules.contains(&"docs-only"));
+    }
+
+    #[test]
+    fn security_paths_match_words_not_substrings() {
+        for p in ["src/crypto.rs", "config/secrets.yml", ".env.prod", "src/oauth_client.py", "app/authentication.rs", "middleware/Authorization.py"] {
+            assert!(sug(vec![file(p, 5)]).rules.contains(&"security-paths"), "{p}");
+        }
+        for p in ["src/author.rs", "src/tokens.rs", "src/authority.rs"] {
+            assert!(!sug(vec![file(p, 5)]).rules.contains(&"security-paths"), "{p}");
+        }
+    }
+
+    #[test]
+    fn docs_tests_and_locks_hold_no_risky_area() {
+        let s = sug(vec![file("docs/auth.md", 5), file("tests/auth/login.rs", 5), file("Cargo.lock", 5)]);
+        assert!(s.signals.areas.is_empty(), "{:?}", s.signals.areas);
+    }
+
+    #[test]
+    fn a_risk_beats_a_small_diff_and_reasons_stop_at_four() {
+        let s = sug(vec![
+            file(".github/workflows/ci.yml", 2), file("scripts/release.sh", 2), file("src/hooks/a.rs", 2),
+            file("db/migrations/1.sql", 2), file("src/auth/a.rs", 2), file("Cargo.toml", 2),
+        ]);
+        assert!(!s.rules.contains(&"small") && s.rules.len() > 4);
+        assert_eq!((s.recommendation, s.reasons.len()), (Review::Deep, 4));
+    }
+
+    #[test]
+    fn a_close_call_is_low_confidence_and_leans_by_owner() {
+        let files = vec![file("src/a.rs", 100), file("tests/a.rs", 50)];
+        let theirs = sug_with(files.clone(), &[], Some(false));
+        assert_eq!((theirs.recommendation, theirs.confidence), (Review::Deep, Confidence::Low));
+        assert!(theirs.rules.is_empty());
+        let mine = sug_with(files, &[], Some(true));
+        assert_eq!((mine.recommendation, mine.confidence), (Review::Quick, Confidence::Low));
+    }
+
+    #[test]
+    fn thresholds_come_from_the_config() {
+        let cfg = Cfg { deep_lines: 10, ..C };
+        let facts = Facts { files: vec![file("src/a.rs", 11), file("tests/a.rs", 5)], ..Facts::default() };
+        assert!(decide(measure(&facts), &cfg).rules.contains(&"big-diff"));
+    }
+
+    #[test]
+    fn numstat_reads_renames_with_and_without_braces() {
+        let files = parse_numstat("3\t1\tsrc/a.rs\n0\t0\tsrc/{old => new}/b.rs\n0\t0\tx.rs => y.rs\n-\t-\timg.png\n");
+        let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["src/a.rs", "src/new/b.rs", "y.rs", "img.png"]);
+        assert_eq!(files.iter().map(|f| f.renamed).collect::<Vec<_>>(), [false, true, true, false]);
+        assert_eq!(files[0].added + files[0].removed, 4);
+        assert_eq!(new_path("{ => sub}/f.rs"), "sub/f.rs");
+    }
+
+    #[test]
+    fn render_and_json_carry_the_answer() {
+        let s = sug(vec![file("src/a.rs", 10)]);
+        let text = render(&s);
+        assert!(text.starts_with("recommendation=quick\nconfidence=high\nreason: Small change: 10 lines in 1 files."));
+        assert!(text.contains("signals: lines=10 files=1 packages=1 test_ratio=0 areas=none"));
+        let v = serde_json::to_value(s).unwrap();
+        assert_eq!((v["recommendation"].as_str(), v["confidence"].as_str()), (Some("quick"), Some("high")));
+        assert!(v["reasons"].is_array() && v["signals"]["lines"] == 10);
+    }
+
+    #[test]
+    fn the_command_surface_covers_cmd_bin_and_command_files() {
+        for p in ["cmd/root.go", "src/bin/tool.rs", "crates/telemetry/src/command.rs"] {
+            assert!(sug(vec![file(p, 5)]).rules.contains(&"cli-surface"), "{p}");
+        }
+    }
+
+    #[test]
+    fn a_renamed_workflow_is_not_a_quiet_rename() {
+        let mv = File { renamed: true, ..file(".github/workflows/ci.yml", 0) };
+        let s = sug(vec![mv]);
+        assert_eq!(s.recommendation, Review::Deep);
+        assert!(!s.rules.contains(&"renames-only") && !s.rules.contains(&"no-code"));
+    }
+
+    #[test]
+    fn docs_and_lock_lines_do_not_make_a_change_large_or_wide() {
+        let s = sug(vec![file("crates/a/src/x.py", 10), file("README.md", 900), file("Cargo.lock", 900)]);
+        assert!(!s.rules.contains(&"big-diff"));
+        assert_eq!(s.signals.packages, ["a"]);
+        assert!(s.rules.contains(&"small"));
+    }
+
+    #[test]
+    fn reasons_name_the_lines_each_rule_checked() {
+        let s = sug(vec![file("src/a.py", 150), file("docs/a.md", 500)]);
+        assert!(s.reasons.iter().any(|r| r == "150 changed lines of code with almost no tests."), "{:?}", s.reasons);
+    }
+
+    #[test]
+    fn the_built_in_cuts_match_the_config_key_defaults() {
+        let d = Cfg::DEFAULT;
+        for (key, want) in [
+            ("review.suggest.deepLines", d.deep_lines),
+            ("review.suggest.quickLines", d.quick_lines),
+            ("review.suggest.deepFiles", d.deep_files),
+            ("review.suggest.packageSpan", d.package_span),
+            ("review.suggest.untestedLines", d.untested_lines),
+        ] {
+            assert_eq!(crate::config::keys::default_value(key).and_then(|v| v.as_u64()), Some(want), "{key}");
+        }
+    }
+
+    #[test]
+    fn gh_output_becomes_facts_and_a_missing_field_is_an_error() {
+        let files = "{\"path\":\"a.rs\",\"added\":3,\"removed\":1,\"renamed\":false}\n\n{\"path\":\"b.rs\",\"added\":0,\"removed\":0,\"renamed\":true}\n";
+        let meta = r#"{"labels":[{"name":"security"}],"author":{"login":"ann"}}"#;
+        let f = parse_pr(files, meta, Some("ann")).unwrap();
+        assert_eq!((f.files.len(), f.files[1].renamed), (2, true));
+        assert_eq!((f.labels, f.own), (vec!["security".to_string()], Some(true)));
+        assert_eq!(parse_pr(files, meta, Some("bob")).unwrap().own, Some(false));
+        assert_eq!(parse_pr(files, meta, None).unwrap().own, None);
+        assert!(parse_pr("{\"path\":\"a.rs\"}", meta, None).unwrap_err().contains("bad file JSON"));
+        assert!(parse_pr(files, "{}", None).unwrap_err().contains("bad JSON"));
+    }
+
+    #[test]
+    fn a_branch_name_is_refused_as_a_pr_number() {
+        assert!(run(Some("feat/x"), None).unwrap_err().contains("not a PR number"));
+    }
+}

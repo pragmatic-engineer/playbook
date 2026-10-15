@@ -34,14 +34,9 @@ impl ReviewPath {
 /// Added plus deleted lines and the number of files, from `git diff --numstat`
 /// output. A binary file (`-` counts) adds to the file count only.
 pub fn parse_numstat(text: &str) -> (u64, u64) {
-    let (mut lines, mut files) = (0u64, 0u64);
-    for row in text.lines().filter(|l| !l.trim().is_empty()) {
-        let mut cols = row.split('\t');
-        let (add, del) = (cols.next().unwrap_or("-"), cols.next().unwrap_or("-"));
-        files += 1;
-        lines += add.parse::<u64>().unwrap_or(0) + del.parse::<u64>().unwrap_or(0);
-    }
-    (lines, files)
+    let files = super::suggest::parse_numstat(text);
+    let lines = files.iter().map(|f| f.added + f.removed).sum();
+    (lines, files.len() as u64)
 }
 
 /// One reviewer for a diff of at most `SMALL_DIFF_LINES` lines, unless every

@@ -33,7 +33,7 @@ line of the diff. Reply with only the JSON object the schema describes, no fence
 
 const SCHEMA: &str = r#"{"type":"object","properties":{"review":{"type":"string","enum":["quick","deep"]},"signals":{"type":"array","items":{"type":"object","properties":{"reason":{"type":"string"},"quote":{"type":"string"}},"required":["reason","quote"],"additionalProperties":false}}},"required":["review","signals"],"additionalProperties":false}"#;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Review {
     Quick,
