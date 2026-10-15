@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The plan and the cached usage numbers Claude Code keeps in its own
-//! `~/.claude.json`, read without printing or keeping anything that names a
-//! person or an organization. Only the plan tier, the usage windows and the
-//! spend limit are taken. Nothing here is documented by Anthropic, so every
-//! read can come back empty and every caller treats empty as "unknown".
+//! `~/.claude.json`. [`read`] takes only the plan tier, the usage windows and
+//! the spend limit, and keeps nothing that names a person or an organization.
+//! [`report`] also lists the names of the account fields and, behind `raw`,
+//! the values of six plan fields that hold no identity. Nothing here is
+//! documented by Anthropic, so every read can come back empty and every
+//! caller treats empty as "unknown".
 //!
 //! The plan is a guess from the rate limit tier names. Only the two tiers seen
 //! on real Max accounts are recognized. Any other value, including every
@@ -15,6 +17,7 @@
 use crate::claude_code::parse_iso8601_utc;
 use crate::limits::LimitPeriod;
 use crate::limits_source::{self, Window};
+use crate::period::elapsed_text;
 use serde_json::Value;
 use std::path::Path;
 
@@ -28,6 +31,9 @@ const PLAN_FIELDS: [&str; 6] = [
     "userRateLimitTier",
     "hasExtraUsageEnabled",
 ];
+
+/// How far ahead of this clock a fetch time may be before it is not believed.
+const CLOCK_SKEW_SECONDS: i64 = 300;
 
 /// What the account looks like from the tier names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,8 +94,14 @@ impl UsageCache {
         (now - self.fetched_at).max(0)
     }
 
+    /// Whether the fetch time is later than `now` by more than a clock can
+    /// drift. Such a time is wrong, so the numbers are never called fresh.
+    pub fn is_from_the_future(&self, now: i64) -> bool {
+        self.fetched_at > now + CLOCK_SKEW_SECONDS
+    }
+
     pub fn is_fresh(&self, now: i64) -> bool {
-        self.age(now) <= limits_source::STALE_SECONDS
+        !self.is_from_the_future(now) && self.age(now) <= limits_source::STALE_SECONDS
     }
 }
 
@@ -113,10 +125,29 @@ fn load(path: &Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
+/// An ISO 8601 time with an optional fraction and an optional `Z` or
+/// `+hh:mm` / `-hh:mm` offset, as UTC seconds. Claude Code writes
+/// `2026-09-03T05:00:00.123456+00:00`.
+fn parse_time(text: &str) -> Option<i64> {
+    let (date, time) = text.split_once('T')?;
+    let cut = time.find(['.', 'Z', '+', '-']).unwrap_or(time.len());
+    let base = parse_iso8601_utc(&format!("{date}T{}Z", &time[..cut]))?;
+    let rest = &time[cut..];
+    let offset = match rest.find(['+', '-']) {
+        None => 0,
+        Some(i) => {
+            let sign = if rest[i..].starts_with('-') { -1 } else { 1 };
+            let (h, m) = rest[i + 1..].split_once(':')?;
+            sign * (h.parse::<i64>().ok()? * 3600 + m.parse::<i64>().ok()? * 60)
+        }
+    };
+    Some(base - offset)
+}
+
 fn window(v: Option<&Value>) -> Option<Window> {
     let v = v?;
     let pct = v.get("utilization")?.as_f64()?;
-    let at = parse_iso8601_utc(v.get("resets_at")?.as_str()?)?;
+    let at = parse_time(v.get("resets_at")?.as_str()?)?;
     (pct.is_finite() && pct >= 0.0).then_some(Window {
         used_percentage: pct,
         resets_at: at,
@@ -156,12 +187,7 @@ fn cache(root: &Value) -> Option<UsageCache> {
     })
 }
 
-/// Reads the plan and the usage cache from the config file at `path`. A
-/// missing, unreadable or odd file gives the default: unknown plan, no cache.
-pub fn read(path: &Path) -> Account {
-    let Some(root) = load(path) else {
-        return Account::default();
-    };
+fn account(root: &Value) -> Account {
     let tier = |k: &str| root.pointer(&format!("/oauthAccount/{k}"))?.as_str();
     let tiers: Vec<&str> = ["organizationRateLimitTier", "userRateLimitTier"]
         .iter()
@@ -169,22 +195,37 @@ pub fn read(path: &Path) -> Account {
         .collect();
     Account {
         plan: Plan::from_tiers(&tiers),
-        cache: cache(&root),
+        cache: cache(root),
     }
 }
 
-fn age_text(seconds: i64) -> String {
-    match seconds {
-        s if s < 3600 => format!("{}m", s / 60),
-        s if s < 48 * 3600 => format!("{}h", s / 3600),
-        s => format!("{}d", s / 86_400),
-    }
+/// Reads the plan and the usage cache from the config file at `path`. A
+/// missing, unreadable or odd file gives the default: unknown plan, no cache.
+pub fn read(path: &Path) -> Account {
+    load(path).map_or_else(Account::default, |root| account(&root))
 }
 
 fn names(v: Option<&Value>) -> Vec<String> {
     v.and_then(Value::as_object)
         .map(|o| o.keys().cloned().collect())
         .unwrap_or_default()
+}
+
+/// A plan field value that is safe to print: a flag, a number or a short
+/// lowercase tier name. Anything else could hold a name or an id.
+fn plain_value(v: &Value) -> String {
+    match v {
+        Value::Bool(_) | Value::Number(_) => v.to_string(),
+        Value::String(t)
+            if !t.is_empty()
+                && t.len() <= 40
+                && t.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') =>
+        {
+            v.to_string()
+        }
+        _ => "<other value>".to_string(),
+    }
 }
 
 fn list(items: &[String]) -> String {
@@ -195,35 +236,64 @@ fn list(items: &[String]) -> String {
     }
 }
 
-fn window_line(name: &str, w: Option<&Window>, now: i64) -> String {
+/// One window of the cache. `raw` is the field as stored: a value that is
+/// there but did not parse is reported as such and not as absent.
+fn window_line(name: &str, w: Option<&Window>, raw: Option<&Value>, now: i64) -> String {
     match w {
+        None if raw.is_some_and(|v| !v.is_null()) => {
+            format!("    {name}: present but not readable")
+        }
         None => format!("    {name}: absent"),
         Some(w) if w.resets_at > now => format!(
             "    {name}: present, {:.0}% used, resets in {}",
             w.used_percentage,
-            age_text(w.resets_at - now)
+            elapsed_text(w.resets_at - now)
         ),
         Some(w) => format!(
             "    {name}: present, its reset was {} ago, so it no longer applies",
-            age_text(now - w.resets_at)
+            elapsed_text(now - w.resets_at)
         ),
     }
 }
 
 fn cache_lines(root: &Value, now: i64, raw: bool) -> Vec<String> {
     let mut out = Vec::new();
+    let key = "  Usage cache (cachedUsageUtilization):";
     let Some(c) = cache(root) else {
-        out.push("  Usage cache (cachedUsageUtilization): not found".to_string());
+        out.push(match root.get("cachedUsageUtilization") {
+            None | Some(Value::Null) => format!("{key} not found"),
+            Some(v) => format!(
+                "{key} found but not readable (fields: {})",
+                list(&names(Some(v)))
+            ),
+        });
         return out;
     };
-    let state = if c.is_fresh(now) { "fresh" } else { "stale" };
+    let state = if c.is_from_the_future(now) {
+        "its time is in the future, so it is not trusted".to_string()
+    } else if c.is_fresh(now) {
+        "fresh".to_string()
+    } else {
+        "stale".to_string()
+    };
     out.push(format!(
-        "  Usage cache (cachedUsageUtilization): found, {} old ({state})",
-        age_text(c.age(now))
+        "{key} found, {} old ({state})",
+        elapsed_text(c.age(now))
     ));
-    out.push(window_line("five_hour", c.five_hour.as_ref(), now));
-    out.push(window_line("seven_day", c.seven_day.as_ref(), now));
-    let s = root.pointer("/cachedUsageUtilization/utilization/spend");
+    let u = |k: &str| root.pointer(&format!("/cachedUsageUtilization/utilization/{k}"));
+    out.push(window_line(
+        "five_hour",
+        c.five_hour.as_ref(),
+        u("five_hour"),
+        now,
+    ));
+    out.push(window_line(
+        "seven_day",
+        c.seven_day.as_ref(),
+        u("seven_day"),
+        now,
+    ));
+    let s = u("spend").filter(|v| !v.is_null());
     out.push(match (&c.spend, s) {
         (Some(_), _) => "    monthly spend limit: present, in dollars".to_string(),
         (None, Some(s)) if s.get("enabled").and_then(Value::as_bool) == Some(false) => {
@@ -272,7 +342,7 @@ fn statusline_lines(usage_dir: &Path, now: i64) -> Vec<String> {
     vec![
         format!(
             "  Statusline reading (rate_limits.json): found, {} old ({state})",
-            age_text(age)
+            elapsed_text(age)
         ),
         format!("    five_hour: {}", yes(s.five_hour.is_some())),
         format!("    seven_day: {}", yes(s.seven_day.is_some())),
@@ -281,7 +351,8 @@ fn statusline_lines(usage_dir: &Path, now: i64) -> Vec<String> {
 }
 
 /// The text of `playbook usage doctor`: which sources of limits exist on this
-/// machine. It lists field names and ages. Values of the plan fields appear
+/// machine. It lists field names, ages, the plan label, window percentages and
+/// manual budgets. Values of the plan fields and the cached spend limit appear
 /// only with `raw`. Emails, names, ids and organization names are never read
 /// into the text.
 pub fn report(
@@ -296,17 +367,17 @@ pub fn report(
         None => out.push("  Claude config file: not found or not readable".to_string()),
         Some(root) => {
             out.push("  Claude config file: found".to_string());
-            let account = root.get("oauthAccount");
+            let fields = root.get("oauthAccount");
             out.push(format!(
                 "    account fields present (names only): {}",
-                list(&names(account))
+                list(&names(fields))
             ));
-            out.push(format!("    plan: {}", read(claude_json).plan.label()));
+            out.push(format!("    plan: {}", account(&root).plan.label()));
             if raw {
                 for key in PLAN_FIELDS {
-                    let value = account
+                    let value = fields
                         .and_then(|a| a.get(key))
-                        .map_or("absent".to_string(), |v| v.to_string());
+                        .map_or("absent".to_string(), plain_value);
                     out.push(format!("    raw: {key} = {value}"));
                 }
             }
@@ -324,7 +395,7 @@ pub fn report(
     if !raw {
         out.push(String::new());
         out.push(
-            "Add --raw to also print the plan field values (no email, name or id).".to_string(),
+            "Add --raw to also print the plan field values and the cached spend limit (no email, name or id).".to_string(),
         );
     }
     out.join("\n")
@@ -333,26 +404,49 @@ pub fn report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::limits_source::Snapshot;
     use std::path::PathBuf;
 
     const NOW: i64 = 1_788_400_000;
+    // 2026-09-03T05:00:00Z, 3h 13m after NOW.
+    const RESET: &str = "2026-09-03T05:00:00.123456+00:00";
 
-    fn file(name: &str, body: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("pb-plan-{}-{name}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(".claude.json");
-        std::fs::write(&path, body).unwrap();
-        path
+    /// A folder holding one `.claude.json`, removed when it goes out of scope.
+    struct Home(PathBuf);
+
+    impl Home {
+        fn new(name: &str, body: &str) -> Home {
+            let dir = std::env::temp_dir().join(format!("pb-plan-{}-{name}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(".claude.json"), body).unwrap();
+            Home(dir)
+        }
+
+        fn json(&self) -> PathBuf {
+            self.0.join(".claude.json")
+        }
+    }
+
+    impl Drop for Home {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     fn cache_body(fetched_ms: i64, spend: &str) -> String {
         format!(
-            r#"{{"oauthAccount":{{"organizationRateLimitTier":"default_claude_max_5x","emailAddress":"a@b.c"}},
+            r#"{{"oauthAccount":{{"organizationRateLimitTier":"default_claude_max_5x",
+              "emailAddress":"a@b.c","displayName":"Sentinel Name","accountUuid":"sentinel-uuid-1",
+              "organizationName":"Sentinel Org","organizationUuid":"sentinel-uuid-2"}},
             "cachedUsageUtilization":{{"fetchedAtMs":{fetched_ms},"utilization":{{
-              "five_hour":{{"utilization":40,"resets_at":"2026-09-03T05:00:00Z"}},
+              "five_hour":{{"utilization":40,"resets_at":"{RESET}"}},
               "seven_day":null,
               "spend":{spend}}}}}}}"#
         )
+    }
+
+    fn report_of(home: &Home, now: i64, raw: bool) -> String {
+        report(&home.json(), &home.0, &[], now, raw)
     }
 
     #[test]
@@ -382,22 +476,24 @@ mod tests {
 
     #[test]
     fn a_file_that_is_not_json_reads_as_unknown() {
-        let path = file("garbage", "not json {");
+        let home = Home::new("garbage", "not json {");
 
-        assert_eq!(read(&path), Account::default());
+        assert_eq!(read(&home.json()), Account::default());
     }
 
     #[test]
     fn the_cache_gives_windows_and_a_dollar_spend_limit() {
         let spend = r#"{"enabled":true,"limit":{"amount_minor":50000,"currency":"USD","exponent":2},"used":{"amount_minor":1234,"currency":"USD","exponent":2}}"#;
-        let path = file("full", &cache_body(NOW * 1000, spend));
+        let home = Home::new("full", &cache_body(NOW * 1000, spend));
 
-        let account = read(&path);
+        let account = read(&home.json());
 
         let c = account.cache.unwrap();
         assert_eq!(account.plan, Plan::Max5x);
         assert_eq!(c.fetched_at, NOW);
-        assert_eq!(c.five_hour.unwrap().used_percentage, 40.0);
+        let w = c.five_hour.unwrap();
+        assert_eq!(w.used_percentage, 40.0);
+        assert_eq!(w.resets_at, 1_788_411_600);
         assert!(c.seven_day.is_none());
         assert_eq!(
             c.spend,
@@ -417,9 +513,50 @@ mod tests {
         let zero = r#"{"enabled":true,"limit":{"amount_minor":0,"currency":"USD","exponent":2}}"#;
 
         for (name, body) in [("off", off), ("eur", eur), ("zero", zero)] {
-            let path = file(name, &cache_body(NOW * 1000, body));
+            let home = Home::new(name, &cache_body(NOW * 1000, body));
 
-            assert!(read(&path).cache.unwrap().spend.is_none(), "{name}");
+            assert!(read(&home.json()).cache.unwrap().spend.is_none(), "{name}");
+        }
+    }
+
+    #[test]
+    fn times_with_a_fraction_an_offset_or_a_z_all_parse() {
+        let z = parse_time("2026-09-03T05:00:00Z");
+        let fraction = parse_time("2026-09-03T05:00:00.5Z");
+        let zero_offset = parse_time("2026-09-03T05:00:00+00:00");
+        let plus = parse_time("2026-09-03T07:00:00+02:00");
+        let minus = parse_time("2026-09-03T00:00:00-05:00");
+
+        for t in [fraction, zero_offset, plus, minus] {
+            assert_eq!(t, z);
+        }
+        assert_eq!(z, Some(1_788_411_600));
+        assert_eq!(parse_time("soon"), None);
+    }
+
+    #[test]
+    fn malformed_windows_and_amounts_are_none() {
+        let windows = [
+            r#"{"utilization":-1,"resets_at":"2026-09-03T05:00:00Z"}"#,
+            r#"{"utilization":"40","resets_at":"2026-09-03T05:00:00Z"}"#,
+            r#"{"utilization":40,"resets_at":"tomorrow"}"#,
+            r#"{"utilization":40,"resets_at":1788411600}"#,
+        ];
+        let amounts = [
+            r#"{"amount_minor":-5,"currency":"USD","exponent":2}"#,
+            r#"{"amount_minor":5,"currency":"USD","exponent":9}"#,
+            r#"{"amount_minor":5,"currency":"USD","exponent":-1}"#,
+            r#"{"amount_minor":"5","currency":"USD","exponent":2}"#,
+        ];
+
+        for w in windows {
+            assert!(
+                window(serde_json::from_str(w).ok().as_ref()).is_none(),
+                "{w}"
+            );
+        }
+        for a in amounts {
+            assert!(usd(serde_json::from_str(a).ok().as_ref()).is_none(), "{a}");
         }
     }
 
@@ -435,34 +572,199 @@ mod tests {
     }
 
     #[test]
-    fn the_report_lists_field_names_and_ages_but_no_values() {
-        let path = file("report", &cache_body((NOW - 7200) * 1000, "null"));
-        let dir = path.parent().unwrap();
+    fn a_fetch_time_in_the_future_is_never_fresh() {
+        let c = UsageCache {
+            fetched_at: NOW + 3600,
+            ..UsageCache::default()
+        };
 
-        let text = report(&path, dir, &[], NOW, false);
-
-        assert!(text.contains("organizationRateLimitTier"), "{text}");
-        assert!(text.contains("plan: Max 5x"), "{text}");
-        assert!(text.contains("found, 2h old (fresh)"), "{text}");
-        assert!(text.contains("five_hour: present, 40% used"), "{text}");
-        assert!(!text.contains("a@b.c"), "{text}");
-        assert!(!text.contains("default_claude_max_5x"), "{text}");
+        assert!(c.is_from_the_future(NOW));
+        assert!(!c.is_fresh(NOW));
     }
 
     #[test]
-    fn the_raw_report_adds_plan_field_values_and_still_no_email() {
-        let path = file("raw", &cache_body(NOW * 1000, "null"));
-        let dir = path.parent().unwrap();
+    fn the_report_lists_field_names_and_ages_but_no_values() {
+        let home = Home::new("report", &cache_body((NOW - 7200) * 1000, "null"));
 
-        let text = report(&path, dir, &[(LimitPeriod::Monthly, 100.0)], NOW, true);
+        let text = report_of(&home, NOW, false);
+
+        assert!(text.contains("organizationRateLimitTier"), "{text}");
+        assert!(text.contains("plan: Max 5x"), "{text}");
+        assert!(text.contains("found, 2h 0m old (fresh)"), "{text}");
+        assert!(
+            text.contains("five_hour: present, 40% used, resets in 3h 13m"),
+            "{text}"
+        );
+        assert!(text.contains("seven_day: absent"), "{text}");
+        assert!(text.contains("monthly spend limit: absent"), "{text}");
+        assert!(!text.contains("default_claude_max_5x"), "{text}");
+        assert!(!text.contains("raw:"), "{text}");
+    }
+
+    #[test]
+    fn neither_report_prints_an_email_name_id_or_organization() {
+        let home = Home::new("privacy", &cache_body(NOW * 1000, "null"));
+
+        for raw in [false, true] {
+            let text = report_of(&home, NOW, raw);
+
+            for secret in [
+                "a@b.c",
+                "Sentinel Name",
+                "sentinel-uuid-1",
+                "Sentinel Org",
+                "sentinel-uuid-2",
+            ] {
+                assert!(!text.contains(secret), "raw={raw} {secret}: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_raw_report_adds_plan_field_values_and_the_spend_limit() {
+        let spend = r#"{"enabled":true,"limit":{"amount_minor":50000,"currency":"USD","exponent":2},"used":{"amount_minor":1234,"currency":"USD","exponent":2}}"#;
+        let home = Home::new("raw", &cache_body(NOW * 1000, spend));
+
+        let text = report(
+            &home.json(),
+            &home.0,
+            &[(LimitPeriod::Monthly, 100.0)],
+            NOW,
+            true,
+        );
 
         assert!(
             text.contains(r#"organizationRateLimitTier = "default_claude_max_5x""#),
             "{text}"
         );
         assert!(text.contains("billingType = absent"), "{text}");
+        assert!(
+            text.contains("raw: spend limit 500.00 USD, used 12.34 USD"),
+            "{text}"
+        );
         assert!(text.contains("monthly: $100.00"), "{text}");
-        assert!(!text.contains("a@b.c"), "{text}");
+    }
+
+    #[test]
+    fn a_raw_plan_value_that_is_not_a_plain_tier_name_is_hidden() {
+        let body = r#"{"oauthAccount":{"organizationType":"Acme Corp (id 7)","seatTier":{"name":"x"},"billingType":"stripe_subscription"}}"#;
+        let home = Home::new("odd", body);
+
+        let text = report_of(&home, NOW, true);
+
+        assert!(text.contains("organizationType = <other value>"), "{text}");
+        assert!(text.contains("seatTier = <other value>"), "{text}");
+        assert!(
+            text.contains(r#"billingType = "stripe_subscription""#),
+            "{text}"
+        );
+        assert!(!text.contains("Acme"), "{text}");
+    }
+
+    #[test]
+    fn a_window_past_its_reset_says_so() {
+        let home = Home::new("past", &cache_body(NOW * 1000, "null"));
+
+        let text = report_of(&home, NOW + 5 * 3600, false);
+
+        assert!(
+            text.contains("five_hour: present, its reset was 1h 46m ago"),
+            "{text}"
+        );
+        assert!(!text.contains("% used"), "{text}");
+    }
+
+    #[test]
+    fn a_window_that_does_not_parse_is_present_but_not_readable() {
+        let body = r#"{"cachedUsageUtilization":{"fetchedAtMs":1788400000000,"utilization":{"five_hour":{"utilization":"lots"}}}}"#;
+        let home = Home::new("unreadable-window", body);
+
+        let text = report_of(&home, NOW, false);
+
+        assert!(
+            text.contains("five_hour: present but not readable"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_cache_without_a_fetch_time_is_found_but_not_readable() {
+        let body = r#"{"cachedUsageUtilization":{"utilization":{"five_hour":null}}}"#;
+        let home = Home::new("no-time", body);
+
+        let text = report_of(&home, NOW, false);
+
+        assert!(
+            text.contains("found but not readable (fields: utilization)"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_fetch_time_in_the_future_is_called_out() {
+        let home = Home::new("future", &cache_body((NOW + 7200) * 1000, "null"));
+
+        let text = report_of(&home, NOW, false);
+
+        assert!(
+            text.contains("its time is in the future, so it is not trusted"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn each_spend_state_has_its_own_line() {
+        let cases = [
+            (
+                "on",
+                r#"{"enabled":true,"limit":{"amount_minor":100,"currency":"USD","exponent":2}}"#,
+                "present, in dollars",
+            ),
+            (
+                "off",
+                r#"{"enabled":false,"limit":{"amount_minor":100,"currency":"USD","exponent":2}}"#,
+                "the cache says it is off",
+            ),
+            (
+                "eur",
+                r#"{"enabled":true,"limit":{"amount_minor":100,"currency":"EUR","exponent":2}}"#,
+                "present but not usable",
+            ),
+        ];
+
+        for (name, spend, expected) in cases {
+            let home = Home::new(&format!("spend-{name}"), &cache_body(NOW * 1000, spend));
+
+            let text = report_of(&home, NOW, false);
+
+            assert!(
+                text.contains(&format!("monthly spend limit: {expected}")),
+                "{name}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_statusline_reading_is_listed_with_its_age_and_windows() {
+        let home = Home::new("statusline", &cache_body(NOW * 1000, "null"));
+        let snap = Snapshot {
+            captured_at: NOW - 600,
+            five_hour: Some(Window {
+                used_percentage: 10.0,
+                resets_at: NOW + 3600,
+            }),
+            ..Snapshot::default()
+        };
+        limits_source::save(&home.0, &snap);
+
+        let text = report_of(&home, NOW, false);
+
+        assert!(
+            text.contains("Statusline reading (rate_limits.json): found, 10m old (fresh)"),
+            "{text}"
+        );
+        assert!(text.contains("five_hour: present"), "{text}");
+        assert!(text.contains("spend_limit: absent"), "{text}");
     }
 
     #[test]

@@ -57,18 +57,20 @@ pub enum UsageCommand {
     },
     /// Show where pbtop can read your usage limits on this machine
     ///
-    /// Lists which sources exist: the plan fields and the cached usage numbers
+    /// Lists which sources exist: the plan fields and cached usage numbers
     /// in the Claude Code config file (`~/.claude.json`), the statusline
-    /// reading and the manual `usage.budget.*` keys. It prints field names
-    /// and ages, never an email, name, id, organization or token. Run it on
-    /// a machine where the limits look wrong and share the output. Add
-    /// `--raw` to also print the values of the plan fields (billing type,
-    /// organization type, seat tier and rate limit tiers). It reads files
-    /// only and writes nothing.
+    /// reading and the manual `usage.budget.*` keys. It prints field names,
+    /// ages, the plan label, the window percentages and the manual budget
+    /// amounts, and never an email, name, id, organization or token. Run it
+    /// on a machine where the limits look wrong and share the output. Add
+    /// `--raw` to also print the values of six plan fields (billing type,
+    /// organization type, seat tier, the two rate limit tiers and the extra
+    /// usage flag) and the cached monthly spend limit and amount used, in
+    /// dollars. It only reads files and creates nothing.
     ///
     /// Example: `playbook usage doctor --raw`
     Doctor {
-        /// Also print the values of the plan fields
+        /// Also print the plan field values and the cached spend limit
         #[arg(long)]
         raw: bool,
     },

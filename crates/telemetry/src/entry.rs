@@ -72,8 +72,25 @@ pub fn run(
     // with older data moved in first), so no command errors on a fresh home.
     // This runs before the terminal view takes over the screen.
     super::tz::ensure_init();
+    // The doctor only reads files, so it runs before the data file is created.
+    if let Some(UsageCommand::Doctor { raw }) = sub {
+        let usage_dir = paths
+            .db
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let budgets = super::limits_source::manual_budgets(&super::host::home_dir());
+        return Ok(super::plan::report(
+            &paths.claude_json,
+            usage_dir,
+            &budgets,
+            crate::util::time::now_secs(),
+            raw,
+        ));
+    }
     super::db::open_db(&paths.db).map(drop)?;
     match sub {
+        // Answered above, before the data file is created.
+        Some(UsageCommand::Doctor { .. }) => Ok(String::new()),
         Some(UsageCommand::Ingest) => Err(INGEST_REMOVED.to_string()),
         Some(UsageCommand::Warm) => super::warm::run_warm(paths).map(|()| String::new()),
         Some(UsageCommand::Collect { port, idle_seconds }) => {
@@ -89,20 +106,6 @@ pub fn run(
             } else {
                 Ok(status.text(crate::util::time::now_secs()))
             }
-        }
-        Some(UsageCommand::Doctor { raw }) => {
-            let usage_dir = paths
-                .db
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new("."));
-            let budgets = super::limits_source::manual_budgets(&super::host::home_dir());
-            Ok(super::plan::report(
-                &paths.claude_json,
-                usage_dir,
-                &budgets,
-                crate::util::time::now_secs(),
-                raw,
-            ))
         }
         None if opts.summary => {
             let range = opts.range.as_deref().map(parse_range).transpose()?;
