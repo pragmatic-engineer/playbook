@@ -1,6 +1,6 @@
 # Review and PR Flow
 
-Four commands take a ready branch to a merged PR: `/playbook:commit-and-push`, `/playbook:create-pull-request`, `/playbook:quick-review` or `/playbook:deep-review`, and `/playbook:address-pr-comments`.
+Four commands take a ready branch to a merged PR: `/playbook:commit-and-push`, `/playbook:create-pull-request`, `/playbook:review`, and `/playbook:address-pr-comments`.
 
 ## Commit and push
 
@@ -19,6 +19,22 @@ Flags combine (`-Au`). After a rebase or amend it pushes with `--force-with-leas
 ## Create a pull request
 
 `/playbook:create-pull-request` runs pre-flight checks, drafts a conventional-commit title and the team template body, then opens the PR. It opens a draft unless `pr.draft` is `false`.
+
+## Review
+
+`/playbook:review` is the one command to use. It reads the diff, recommends a quick or a deep review, and asks which you want. The recommendation comes first and is marked `(Recommended)`, with the reasons in one line. In ask mode you always decide.
+
+```bash
+/playbook:review                # the PR for the current branch
+/playbook:review 4265           # PR #4265
+/playbook:review 4265 --deep    # no question, deep review
+/playbook:review --quick --self # no question, local quick review
+playbook review suggest 4265    # the recommendation alone, with its reasons
+```
+
+The recommendation is a fixed rule list, so the same diff gets the same answer. The full list is in the [review routing reference](../../plugins/playbook/skills/grounding-review/references/review-routing.md). `review.suggest.*` config keys move the cuts, see [config keys](04-config-keys.md). When no rule is decisive the answer has low confidence and one cheap Haiku pass gives a second opinion. In auto mode the command takes the recommendation.
+
+`/playbook:quick-review` and `/playbook:deep-review` do the work and stay available as direct entry points. The two sections below describe them.
 
 ## Quick review
 
@@ -99,7 +115,7 @@ For each comment you choose `[F]ix`, `[R]eply`, `[B]oth`, `[S]kip`, `[Q]uit` or 
 In `ask` mode, the default, nothing changes. Pass `--auto` or `--ask` to override the mode for one run. See [Auto mode](../guides/05-auto-mode.md).
 
 - `/playbook:commit-and-push` commits and pushes without asking. It never force-pushes. A push that would need a force is left on the local branch and reported, so you decide how to publish it.
-- `/playbook:quick-review` and `/playbook:deep-review` run as `--self`. They report locally and never post a review to GitHub, because a posted review speaks as you.
+- `/playbook:review`, `/playbook:quick-review` and `/playbook:deep-review` take the recommended depth without asking. A review still asks what to post unless you pass `--self` or `--no-post`, because a posted review speaks as you.
 - `/playbook:address-pr-comments` refuses to run. It replies on GitHub in your name, so each reply needs your approval.
 
 ## PR and commit settings
@@ -139,7 +155,7 @@ A stacked PR whose base is another open PR is not merged before its base. In aut
 ```bash
 /playbook:commit-and-push -A          # commit and push
 /playbook:create-pull-request         # open the PR
-/playbook:quick-review                # self-review; or deep-review for a bigger change
+/playbook:review --self               # self-review; it picks quick or deep
 /playbook:address-pr-comments         # after a reviewer leaves comments
 ```
 

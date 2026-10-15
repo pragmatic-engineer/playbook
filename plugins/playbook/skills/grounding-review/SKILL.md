@@ -7,6 +7,8 @@ description: Evidence and labeling rules for reviewing a PR or diff. Use for any
 
 Discipline for reviewing pull requests: how to ground, label, and report findings.
 
+`/playbook:review` reads `references/review-routing.md` in this skill's folder to pick a quick or a deep review. No other reader needs it.
+
 The session that runs the review also reads `references/orchestrator.md` in this skill's folder for the report skeleton, the verification sweep and the subject line examples. A lens reviewer or `cheap-checker` skips it: the orchestrator sweeps your findings, you do not.
 
 Load the `playbook:writing-style` skill when writing text a person will read (a posted review comment, a PR or issue body), not to produce or check findings. Findings stay plain: label first, one or two sentences, no hedging, no em or en dashes. The posting step of the review command drafts the comment bodies from the swept findings and loads `playbook:writing-style` for that.

@@ -587,3 +587,83 @@ fn commands_that_never_ask_carry_no_mode_block() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn review_picks_an_engine_and_takes_its_own_recommendation_in_auto() {
+    // Arrange
+    let post_words = Regex::new(r"gh pr (review|comment)|--method POST").expect("post words");
+    let skip_rule = Regex::new(r"(?is)does not skip[^.]*post question[^.]*--self").expect("rule");
+    let implies = Regex::new(r"(?i)auto[^.]*implies[^.]*--self").expect("old pattern");
+    let mut failures = Vec::new();
+
+    for spec in rows(Auto::PicksAnEngine) {
+        let file = load(spec.name);
+        let hint = file
+            .frontmatter_value("argument-hint")
+            .expect("argument-hint");
+
+        // Act
+        let auto_text = file.text_of(&file.auto_path().expect("an `Auto path` section"));
+        let step = |n: &str| file.step(n).map(|s| file.text_of(&s)).unwrap_or_default();
+        let (step1, step4, step5) = (step("1"), step("4"), step("5"));
+
+        // Assert
+        for flag in ["--quick", "--deep", "--auto", "--self"] {
+            if !hint.contains(flag) {
+                failures.push(format!("{}: argument-hint lacks {flag}", spec.name));
+            }
+        }
+        for stop in [
+            "--quick and --deep conflict",
+            "--all and --preset belong to the deep review",
+        ] {
+            if !step1.contains(stop) {
+                failures.push(format!("{}: Step 1 lacks the stop `{stop}`", spec.name));
+            }
+        }
+        if !step4.contains("Ask in ask mode only") {
+            failures.push(format!(
+                "{}: Step 4 must limit the question to ask mode",
+                spec.name
+            ));
+        }
+        if !auto_text.contains("take the recommendation without asking")
+            || !auto_text.contains("--auto")
+        {
+            failures.push(format!(
+                "{}: the auto path must take the recommendation and pass --auto on",
+                spec.name
+            ));
+        }
+        if !skip_rule.is_match(&auto_text) || implies.is_match(&auto_text) {
+            failures.push(format!(
+                "{}: the auto path must say auto does not skip the post question",
+                spec.name
+            ));
+        }
+        let engine = |label: &str| {
+            step5
+                .lines()
+                .find(|l| l.trim_start().starts_with(label))
+                .unwrap_or_default()
+                .to_owned()
+        };
+        if !engine("- Quick:").contains("/playbook:quick-review")
+            || !engine("- Deep:").contains("/playbook:deep-review")
+        {
+            failures.push(format!(
+                "{}: Step 5 must map quick to quick-review and deep to deep-review",
+                spec.name
+            ));
+        }
+        if let Some(line) = file
+            .lines
+            .iter()
+            .find(|l| is_post_call(l) || post_words.is_match(l))
+        {
+            failures.push(format!("{}: posts to GitHub itself: {line}", spec.name));
+        }
+    }
+
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
