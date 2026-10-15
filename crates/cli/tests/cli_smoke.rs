@@ -557,7 +557,7 @@ fn table() -> Vec<Case> {
         case("pr prepare", &["pr", "prepare"]).plain().code(1).err("not a git repository"),
         case( "pr create", &["pr", "create", "--title", "t", "--body-file", "{ROOT}/b.md"], ).file("b.md", "body").code(1).err("on the base branch"),
         case("pr review-triage", &["pr", "review-triage"]).out("review="),
-        case("pr rules", &["pr", "rules"]).code(1).err("SKILL.md not found"),
+        case("pr rules", &["pr", "rules"]).writes().grows().out("extracted and verified").err("embedded"),
         case("pr comments", &["pr", "comments"]).code(1).err("no PR"),
         case( "pr reply", &[ "pr", "reply", "--pr", "1", "--body-file", "{ROOT}/b.md", "--thread", "1", ], ).file("b.md", "body").code(1).err("gh repo view"),
         case("pr stack", &["pr", "stack"]).code(1).err("gh repo view"),
@@ -635,6 +635,7 @@ fn table() -> Vec<Case> {
     for kind in ["plans", "implement", "worktrees", "handoff", "data"] {
         t.push(case(&format!("path {kind}"), &["path", kind]).out("/.config/playbook/"));
     }
+    t.push(case("path plugin-root", &["path", "plugin-root"]).code(1).err("playbook plugin not found"));
     t.extend(hook_cases());
     t
 }

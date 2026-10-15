@@ -1146,8 +1146,21 @@ fn main() {
                     plugin_root,
                     commit,
                 } => {
+                    let home = common::home_dir();
                     let root = plugin_root
-                        .or_else(playbook::plugin_root::find_here)
+                        .or_else(|| {
+                            let (root, source) = playbook::plugin_root::rules_root(
+                                playbook::plugin_root::find_here(),
+                                &home,
+                            )?;
+                            if source == playbook::plugin_root::Source::Embedded {
+                                eprintln!(
+                                    "pr rules: the plugin files were not found, so the copies embedded in playbook {} are used",
+                                    env!("CARGO_PKG_VERSION")
+                                );
+                            }
+                            Some(root)
+                        })
                         .unwrap_or_default();
                     let dir = std::env::temp_dir()
                         .join(format!("create-pr-step0-{}", std::process::id()));
@@ -1860,6 +1873,21 @@ fn main() {
             }
         }
         Command::Path { kind, create } => {
+            if matches!(kind, playbook::PathKind::PluginRoot) {
+                match playbook::plugin_root::resolve_here() {
+                    Ok(found) => {
+                        for note in &found.skipped {
+                            eprintln!("playbook path: skipped {note}");
+                        }
+                        println!("{}", found.root.display());
+                    }
+                    Err(err) => {
+                        eprintln!("playbook path: {err}");
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
             if matches!(kind, playbook::PathKind::Data) {
                 let dir = common::data::data_dir();
                 if create {
@@ -1886,7 +1914,9 @@ fn main() {
                 playbook::PathKind::Plans => Some(storage::Kind::Plans),
                 playbook::PathKind::Implement => Some(storage::Kind::Implement),
                 playbook::PathKind::Worktrees => Some(storage::Kind::Worktrees),
-                playbook::PathKind::Handoff | playbook::PathKind::Data => None,
+                playbook::PathKind::Handoff
+                | playbook::PathKind::Data
+                | playbook::PathKind::PluginRoot => None,
             };
             let resolved = if matches!(kind, playbook::PathKind::Handoff) {
                 // Outside a repo this is the old shared folder, the same one

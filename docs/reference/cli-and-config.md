@@ -936,11 +936,11 @@ Show the current mode and where it came from
 
 ### `playbook path`
 
-Print the path of one of this repo's playbook storage folders
+Print the path of one of this repo's playbook storage folders, or of the plugin
 
-First moves any legacy folders from the old repo-local location.
+First moves any legacy folders from the old repo-local location. `plugin-root` prints the installed playbook plugin folder instead. It looks at `PLAYBOOK_PLUGIN_DIR`, then the `installPath` Claude Code recorded, then `CLAUDE_PLUGIN_ROOT`, then the newest plugin cache folder. When none is usable it prints one line naming each place tried and exits 1. `--create` does not apply to it.
 
-- `<KIND>`: Which folder to print (one of `plans`, `implement`, `worktrees`, `handoff`, `data`)
+- `<KIND>`: Which folder to print (one of `plans`, `implement`, `worktrees`, `handoff`, `data`, `plugin-root`)
 - `--create`: Create the folder when it does not exist
 
 ### `playbook plan`
@@ -1099,7 +1099,7 @@ Asks a small model three times. Anything but a unanimous `quick` becomes `deep`.
 
 Cut the skill rules a PR title and body need
 
-Reads the writing-style and engineering-standards skills from the plugin root (`CLAUDE_PLUGIN_ROOT` when it holds the skills, else the installed playbook skills plugin), writes four files under `/tmp`, checks each, and prints their paths. A failed check prints `ERROR: ...` and exits 1. With `--commit` it writes only the commit-message slice of writing-style.
+Reads the writing-style and engineering-standards skills from the plugin root (`playbook path plugin-root` prints it), writes four files under `/tmp`, checks each, and prints their paths. A failed check prints `ERROR: ...` and exits 1. With `--commit` it writes only the commit-message slice of writing-style.
 
 - `--plugin-root <PLUGIN_ROOT>`: Plugin root (default: the installed skills plugin)
 - `--commit`: Write only the slice a commit message needs

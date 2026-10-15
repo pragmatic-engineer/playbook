@@ -25,6 +25,7 @@ pub enum Source {
     InstallPath,
     Env,
     Cache,
+    Embedded,
 }
 
 impl Source {
@@ -34,6 +35,7 @@ impl Source {
             Source::InstallPath => "installPath in installed_plugins.json",
             Source::Env => "CLAUDE_PLUGIN_ROOT",
             Source::Cache => "the plugin cache",
+            Source::Embedded => "the copies inside the playbook binary",
         }
     }
 }
@@ -202,6 +204,34 @@ pub fn plugin_version(root: &Path) -> Option<String> {
     manifest_field(root, "version")
 }
 
+/// The oldest binary the plugin at `root` works with, from
+/// `metadata.minBinaryVersion` in its manifest.
+pub fn min_binary_version(root: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(root.join(".claude-plugin/plugin.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value
+        .pointer("/metadata/minBinaryVersion")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// One line telling the user to upgrade when `binary` is older than the
+/// plugin at `root` needs, else `None`. `homebrew` picks the upgrade command.
+pub fn binary_too_old(root: &Path, binary: &str, homebrew: bool) -> Option<String> {
+    let min = min_binary_version(root)?;
+    if crate::update::resolve::compare(binary, &min) != std::cmp::Ordering::Less {
+        return None;
+    }
+    let command = if homebrew {
+        "brew upgrade playbook"
+    } else {
+        "playbook update"
+    };
+    Some(format!(
+        "playbook binary {binary} is older than this plugin needs ({min}). Run: {command}"
+    ))
+}
+
 fn manifest_name(dir: &Path) -> Option<String> {
     manifest_field(dir, "name")
 }
@@ -271,6 +301,60 @@ fn version_key(name: &str) -> Option<(u64, u64, u64, bool)> {
     let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
     let key = (parts.next()??, parts.next()??, parts.next()??, !pre);
     parts.next().is_none().then_some(key)
+}
+
+const EMBEDDED_RULES: [(&str, &str); 4] = [
+    (
+        "skills/writing-style/SKILL.md",
+        include_str!("../../../plugins/playbook/skills/writing-style/SKILL.md"),
+    ),
+    (
+        "skills/writing-style/references/commits-and-prs.md",
+        include_str!(
+            "../../../plugins/playbook/skills/writing-style/references/commits-and-prs.md"
+        ),
+    ),
+    (
+        "skills/writing-style/references/github-prohibited.md",
+        include_str!(
+            "../../../plugins/playbook/skills/writing-style/references/github-prohibited.md"
+        ),
+    ),
+    (
+        "skills/engineering-standards/SKILL.md",
+        include_str!("../../../plugins/playbook/skills/engineering-standards/SKILL.md"),
+    ),
+];
+
+/// The root `playbook pr rules` reads: the resolved plugin when it holds every
+/// file the rules need, else the copies compiled into this binary, written
+/// under `~/.config/playbook/embedded/<version>/plugin`.
+pub fn rules_root(resolved: Option<PathBuf>, home: &Path) -> Option<(PathBuf, Source)> {
+    match resolved.filter(|root| {
+        EMBEDDED_RULES
+            .iter()
+            .all(|(rel, _)| root.join(rel).is_file())
+    }) {
+        Some(root) => Some((root, Source::InstallPath)),
+        None => write_embedded_rules(home)
+            .ok()
+            .map(|root| (root, Source::Embedded)),
+    }
+}
+
+fn write_embedded_rules(home: &Path) -> std::io::Result<PathBuf> {
+    let root = crate::common::paths::playbook_root_from(home)
+        .join("embedded")
+        .join(env!("CARGO_PKG_VERSION"))
+        .join("plugin");
+    for (rel, body) in EMBEDDED_RULES {
+        let path = root.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, body)?;
+    }
+    Ok(root)
 }
 
 #[cfg(test)]
@@ -510,6 +594,32 @@ mod tests {
     }
 
     #[test]
+    fn the_rules_root_uses_the_plugin_when_complete_else_the_embedded_copy() {
+        // Arrange
+        let home = scratch_dir("plugin-root-rules");
+        let partial = plugin_at(&home.join("partial"), "playbook", "0.25.0");
+        let full = plugin_at(&home.join("full"), "playbook", "0.30.0");
+        for (rel, body) in EMBEDDED_RULES {
+            fs::create_dir_all(full.join(rel).parent().unwrap()).unwrap();
+            fs::write(full.join(rel), body).unwrap();
+        }
+
+        // Act
+        let from_full = rules_root(Some(full.clone()), &home).unwrap();
+        let (from_partial, partial_source) = rules_root(Some(partial), &home).unwrap();
+        let (from_none, _) = rules_root(None, &home).unwrap();
+
+        // Assert
+        assert_eq!(from_full.0, full);
+        assert_eq!(partial_source, Source::Embedded);
+        assert!(from_partial.starts_with(home.join(".config/playbook/embedded")));
+        assert_eq!(from_partial, from_none);
+        for (rel, _) in EMBEDDED_RULES {
+            assert!(from_none.join(rel).is_file(), "{rel}");
+        }
+    }
+
+    #[test]
     fn the_plugin_version_comes_from_the_manifest() {
         let home = scratch_dir("plugin-root-version");
         let root = plugin_at(&home.join("p"), "playbook", "0.30.1");
@@ -593,5 +703,42 @@ mod tests {
         fs::create_dir_all(no_manifest.join("skills")).unwrap();
         assert!(!is_plugin_dir(&broken));
         assert!(is_plugin_dir(&no_manifest));
+    }
+
+    fn with_min(dir: &Path, min: &str) {
+        fs::write(
+            dir.join(".claude-plugin/plugin.json"),
+            format!(r#"{{"name":"playbook","version":"0.31.0","metadata":{{"minBinaryVersion":"{min}"}}}}"#),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn an_older_binary_gets_one_upgrade_line_naming_the_right_command() {
+        // Arrange
+        let home = scratch_dir("plugin-root-min-binary");
+        let root = plugin_at(&home.join("p"), "playbook", "0.31.0");
+        with_min(&root, "0.27.0");
+
+        // Act
+        let brew = binary_too_old(&root, "0.26.0", true).unwrap();
+        let other = binary_too_old(&root, "0.26.0", false).unwrap();
+
+        // Assert
+        assert_eq!(
+            brew,
+            "playbook binary 0.26.0 is older than this plugin needs (0.27.0). Run: brew upgrade playbook"
+        );
+        assert!(other.ends_with("Run: playbook update"), "{other}");
+    }
+
+    #[test]
+    fn a_binary_at_or_above_the_minimum_or_no_minimum_says_nothing() {
+        let home = scratch_dir("plugin-root-min-ok");
+        let root = plugin_at(&home.join("p"), "playbook", "0.31.0");
+        assert_eq!(binary_too_old(&root, "0.26.0", false), None);
+        with_min(&root, "0.27.0");
+        assert_eq!(binary_too_old(&root, "0.27.0", false), None);
+        assert_eq!(binary_too_old(&root, "0.28.1", false), None);
     }
 }

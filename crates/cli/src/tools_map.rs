@@ -71,6 +71,7 @@ pub const TOOLS: &[Tool] = &[
         "--create",
         "path worktrees --create",
     ),
+    t("plugin-root", "path", "plugin-root", "", "path plugin-root"),
     t(
         "run-mode",
         "run-context",

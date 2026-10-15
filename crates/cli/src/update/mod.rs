@@ -70,7 +70,7 @@ pub struct Outcome {
     pub warnings: Vec<String>,
 }
 
-fn is_homebrew(exe: &Path) -> bool {
+pub fn is_homebrew(exe: &Path) -> bool {
     let text = exe.to_string_lossy();
     ["/Cellar/", "/opt/homebrew/", "/.linuxbrew/"]
         .iter()

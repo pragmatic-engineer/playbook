@@ -101,7 +101,13 @@ pub fn run(payload: &Payload) {
         maybe_sweep_worktrees(&home, &repo_root);
     }
 
-    let (system_message, mut extra_context) = check_config_drift(payload, &dir, &home);
+    let (mut system_message, mut extra_context) = check_config_drift(payload, &dir, &home);
+    if let Some(line) = binary_too_old_line() {
+        if !system_message.is_empty() {
+            system_message.push('\n');
+        }
+        system_message.push_str(&line);
+    }
     append_auto_mode_note(&mut extra_context);
     // Always on, headless included: skills ask for a task by name, and this map
     // is how the session learns which tasks this binary can do mechanically.
@@ -126,6 +132,18 @@ pub fn run(payload: &Payload) {
     );
 
     emit(&system_message, &extra_context);
+}
+
+/// The upgrade line when the installed plugin needs a newer binary than this
+/// one (ADR 0034). Fails open: any error says nothing.
+fn binary_too_old_line() -> Option<String> {
+    let root = crate::plugin_root::resolve_here().ok()?.root;
+    let exe = std::env::current_exe().unwrap_or_default();
+    crate::plugin_root::binary_too_old(
+        &root,
+        env!("CARGO_PKG_VERSION"),
+        crate::update::is_homebrew(&exe),
+    )
 }
 
 /// Starts the telemetry collector when Claude Code's settings point at it and
