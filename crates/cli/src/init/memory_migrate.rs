@@ -14,7 +14,7 @@
 //! the rename would strand the old filename at the new location), not a
 //! separate migration a caller should reason about. The new-root self-heal
 //! is likewise folded in here rather than left to each caller: this is the
-//! one place every entry point (`playbook init`, SessionStart, Stop) gets
+//! one place every entry point (`playbook setup`, SessionStart, Stop) gets
 //! the full set of legacy-filename fixes, not just the ones a particular
 //! caller happened to add.
 
@@ -39,7 +39,7 @@ const SENTINEL_NAME: &str = ".migration-complete";
 /// first (a fast no-op once already renamed), then moves the tree to its
 /// final location (a fast no-op once the sentinel is present), then
 /// self-heals a stray legacy filename left at the new root. Safe to call
-/// repeatedly and from any entry point (`playbook init`, SessionStart, or
+/// repeatedly and from any entry point (`playbook setup`, SessionStart, or
 /// Stop): every call after the first is a cheap check, not a re-copy.
 ///
 /// A failed rename does not abort the move: the move copies whatever

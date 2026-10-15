@@ -150,7 +150,7 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: statusline_rust_command_pending,
-                command: "playbook init --statusline",
+                command: "playbook setup --statusline",
             },
             run: statusline_rust_command,
         },
@@ -159,7 +159,7 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: shell_init_rc_line_pending,
-                command: "playbook init",
+                command: "playbook setup",
             },
             run: shell_init_rc_line,
         },
@@ -186,7 +186,7 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: dead_hook_scripts_pending,
-                command: "playbook init --hooks",
+                command: "playbook setup --hooks",
             },
             run: dead_hook_scripts,
         },
@@ -429,7 +429,7 @@ fn system_prompt_edited(ctx: &Ctx) -> Outcome {
     let path = system_prompt_path(&ctx.home);
     if user_edited(&ctx.home, SYSTEM_PROMPT_KEY, &path) {
         Outcome::Warn(format!(
-            "{} was edited after playbook installed it, so init leaves it in place; to take the shipped copy, delete it and run `playbook init --system-prompt`",
+            "{} was edited after playbook installed it, so setup leaves it in place; to take the shipped copy, delete it and run `playbook setup --system-prompt`",
             path.display()
         ))
     } else {
@@ -441,7 +441,7 @@ fn statusline_edited(ctx: &Ctx) -> Outcome {
     let path = crate::init::statusline::playbook_statusline_path(&ctx.home);
     if user_edited(&ctx.home, STATUSLINE_KEY, &path) {
         Outcome::Warn(format!(
-            "{} was edited after playbook installed it, so init leaves it in place; init no longer ships this script, so delete it once nothing runs it",
+            "{} was edited after playbook installed it, so setup leaves it in place; setup no longer ships this script, so delete it once nothing runs it",
             path.display()
         ))
     } else {
@@ -951,7 +951,7 @@ fn run_with_retries(migrations: &[Migration], ctx: &Ctx, retries: u32) -> Report
         report.lock_busy = true;
         report.steps.push(StepReport::skipped(
             "migrations",
-            "could not take the migration lock; will retry next init",
+            "could not take the migration lock; will retry on the next run",
         ));
     }
     report
@@ -1436,10 +1436,13 @@ mod tests {
         let command = |id: &str| open.iter().find(|i| i.id == id).and_then(|i| i.command);
         assert_eq!(
             command("0006-statusline-rust-command"),
-            Some("playbook init --statusline")
+            Some("playbook setup --statusline")
         );
-        assert_eq!(command("0007-shell-init-rc-line"), Some("playbook init"));
-        assert_eq!(command(DEAD_HOOKS_MIGRATION), Some("playbook init --hooks"));
+        assert_eq!(command("0007-shell-init-rc-line"), Some("playbook setup"));
+        assert_eq!(
+            command(DEAD_HOOKS_MIGRATION),
+            Some("playbook setup --hooks")
+        );
         assert!(open
             .iter()
             .any(|i| i.id == "0012-other-playbook-plugins" && i.command.is_none()));

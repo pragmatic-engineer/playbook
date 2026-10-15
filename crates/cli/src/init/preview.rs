@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook init --dry-run`: what a run would change, part by part, with
+//! `playbook setup --dry-run`: what a run would change, part by part, with
 //! nothing written to the real files. It copies the few small files the parts
 //! edit into a scratch home, runs the same step code against that copy and
 //! reports the difference. The scratch home is removed afterwards.
@@ -173,7 +173,7 @@ fn make_scratch(home: &Path) -> std::io::Result<Scratch> {
 /// The report for `--dry-run`. Writes nothing outside a scratch directory it
 /// removes before returning.
 pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
-    let mut out = String::from("playbook init --dry-run: nothing is changed on this run.\n\n");
+    let mut out = String::from("playbook setup --dry-run: nothing is changed on this run.\n\n");
     let scratch = match make_scratch(&paths.home) {
         Ok(s) => s,
         Err(err) => return format!("{out}could not prepare a scratch copy: {err}\n"),

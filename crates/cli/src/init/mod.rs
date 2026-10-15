@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Installer/repair modules for the local Claude Code configuration, backing
-//! the `playbook init` subcommand:
+//! the `playbook setup` subcommand:
 //!
 //! - `merge` is the three-way settings merge (the retired shell original).
 //! - `wire` writes the ported hook entries into `settings.json`, backing it up
@@ -24,7 +24,7 @@
 //! roughly 110 silent errors over 28 hours).
 //!
 //! `settings.shared.json` is in binary-invoked form. `wire` changes what a user's own `settings.json` looks like after
-//! they choose to run `playbook init`.
+//! they choose to run `playbook setup`.
 
 pub mod catalog;
 pub mod choices;

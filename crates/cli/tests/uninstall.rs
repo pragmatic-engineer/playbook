@@ -45,7 +45,7 @@ impl Sandbox {
 
     fn init(&self) {
         let out = self.run(&[
-            "init",
+            "setup",
             "--yes",
             "--no-telemetry",
             "--aliases",
@@ -525,7 +525,7 @@ fn init_telemetry_then_uninstall_removes_exactly_the_variables_init_wrote() {
         cmd.output().expect("playbook should spawn")
     };
     let init = run(&[
-        "init",
+        "setup",
         "--telemetry",
         "--no-hooks",
         "--no-statusline",

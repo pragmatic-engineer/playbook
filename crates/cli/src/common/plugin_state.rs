@@ -4,7 +4,7 @@
 //! Whether the user switched the playbook skills plugin off in Claude Code,
 //! and whether Claude Code lists it as installed.
 //!
-//! `playbook init` writes user-level hook entries and a status line into
+//! `playbook setup` writes user-level hook entries and a status line into
 //! `~/.claude/settings.json`. Disabling the plugin in Claude Code sets
 //! `enabledPlugins["playbook@pragmatic-engineer"]` to `false` and leaves those
 //! entries in place, so every hook entry point and the status line ask here

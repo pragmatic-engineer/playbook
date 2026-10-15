@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! What `playbook init` is made of, in words a person reads before saying yes.
+//! What `playbook setup` is made of, in words a person reads before saying yes.
 //! One table of parts lives here. The plan, the questions, `--explain` and
 //! the summary after a run all draw from it, so a description is written once.
 //! The hooks live in one table too, in `init::wire`.
@@ -30,7 +30,7 @@ pub struct Part {
 }
 
 const SETTINGS_UNDO: &str =
-    "`playbook uninstall` removes what init wrote. Backups of settings.json are saved next to it.";
+    "`playbook uninstall` removes what setup wrote. Backups of settings.json are saved next to it.";
 
 /// Every part, in the order `init` shows and runs them.
 pub const PARTS: &[Part] = &[
@@ -62,7 +62,7 @@ pub const PARTS: &[Part] = &[
         question: "",
         does: "Adds permission rules (allow, ask, deny). Off unless you pass --security or set `security.defaults`. It is never asked about. Update control stays with you, `playbook update` and Homebrew.",
         changes: "~/.claude/settings.json (the permissions block)",
-        undo: "Run `playbook init --no-security`, then delete the permissions entries from settings.json by hand. Init never removes a value you have.",
+        undo: "Run `playbook setup --no-security`, then delete the permissions entries from settings.json by hand. Setup never removes a value you have.",
     },
     Part {
         id: "path",
@@ -99,10 +99,10 @@ pub const PARTS: &[Part] = &[
         asked: true,
         default_on: true,
         flags: "--telemetry, --no-telemetry",
-        question: "Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting init will not change)",
-        does: "Points Claude Code at a collector on 127.0.0.1 (`playbook usage collect`). Prompt text, tool content, emails and tokens are never sent. Asked only when a yes can act: telemetry not set, or switched off by a lone off switch in ~/.claude/settings.json. Otherwise init says why in one line and asks nothing. On by default: Y is the default answer, and `--yes` counts as a yes, except that `--yes` alone never replaces an off switch you set (answer the question or run `playbook init --only telemetry` for that). Without a terminal and without `--yes` nothing is written and init prints the command to run. Written only on a yes, and only when you have no telemetry variable in your environment or any Claude Code settings file, except a lone off switch in ~/.claude/settings.json, which a yes replaces (uninstall puts the old value back). Without it, `cc` still does this for its own sessions and `playbook usage` reads transcripts.",
+        question: "Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting setup will not change)",
+        does: "Points Claude Code at a collector on 127.0.0.1 (`playbook usage collect`). Prompt text, tool content, emails and tokens are never sent. Asked only when a yes can act: telemetry not set, or switched off by a lone off switch in ~/.claude/settings.json. Otherwise setup says why in one line and asks nothing. On by default: Y is the default answer, and `--yes` counts as a yes, except that `--yes` alone never replaces an off switch you set (answer the question or run `playbook setup --only telemetry` for that). Without a terminal and without `--yes` nothing is written and setup prints the command to run. Written only on a yes, and only when you have no telemetry variable in your environment or any Claude Code settings file, except a lone off switch in ~/.claude/settings.json, which a yes replaces (uninstall puts the old value back). Without it, `cc` still does this for its own sessions and `playbook usage` reads transcripts.",
         changes: "~/.claude/settings.json (the env block) and ~/.config/playbook/telemetry-env.json (a record of what was written)",
-        undo: "`playbook uninstall` removes exactly the keys init wrote, unless you changed them.",
+        undo: "`playbook uninstall` removes exactly the keys setup wrote, unless you changed them.",
     },
     Part {
         id: "claude-override",
@@ -120,7 +120,7 @@ pub const PARTS: &[Part] = &[
         default_on: false,
         flags: "--short-name, --no-short-name",
         question: "Add `pb` as a short name for `playbook`? It is added only when `pb` is not already a command, alias or function on your machine. This sets `launcher.shortName` in ~/.config/playbook.",
-        does: "Turns on `launcher.shortName`, so `playbook shell-init` also defines `pb` as `playbook`. Init checks your PATH and writes nothing when `pb` is already a command. `shell-init` checks again each time your shell starts, and skips `pb` when a command, alias, function or builtin of that name exists. It never overwrites one. It takes effect once the launcher line from the aliases part is in your rc file.",
+        does: "Turns on `launcher.shortName`, so `playbook shell-init` also defines `pb` as `playbook`. Setup checks your PATH and writes nothing when `pb` is already a command. `shell-init` checks again each time your shell starts, and skips `pb` when a command, alias, function or builtin of that name exists. It never overwrites one. It takes effect once the launcher line from the aliases part is in your rc file.",
         changes: "~/.config/playbook (the playbook config store, key `launcher.shortName`)",
         undo: "Run `playbook config set launcher.shortName false`.",
     },
@@ -173,7 +173,7 @@ pub fn ids() -> Vec<&'static str> {
 
 /// The short plan printed before the first question.
 pub fn plan() -> String {
-    let mut out = String::from("playbook init can do the following. You choose each part.\n\n");
+    let mut out = String::from("playbook setup can do the following. You choose each part.\n\n");
     for p in PARTS.iter().filter(|p| p.asked) {
         let default = if p.default_on { "on" } else { "off" };
         let _ = writeln!(
@@ -193,7 +193,7 @@ pub fn plan() -> String {
             .join(", ")
     );
     out.push_str(
-        "See the details with `playbook init --explain`, or the changes for your machine with `playbook init --dry-run`.\n\n",
+        "See the details with `playbook setup --explain`, or the changes for your machine with `playbook setup --dry-run`.\n\n",
     );
     out
 }

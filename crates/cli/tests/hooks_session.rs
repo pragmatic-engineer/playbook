@@ -2454,7 +2454,7 @@ fn session_init_names_the_init_command_for_a_pending_settings_change() {
     let value: serde_json::Value = serde_json::from_str(&out.stdout).expect("json payload");
     let message = value["systemMessage"].as_str().unwrap_or_default();
     assert!(
-        message.contains("need `playbook init --statusline`"),
+        message.contains("need `playbook setup --statusline`"),
         "{message}"
     );
     assert_eq!(fs::read(&settings).unwrap(), before);

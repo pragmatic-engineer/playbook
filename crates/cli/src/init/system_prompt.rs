@@ -17,7 +17,7 @@
 //! quietly hand a system prompt to every existing user who had chosen not to
 //! have one, which is a behaviour change well outside a port. So:
 //!
-//! - `opt_in` true (the user passed `playbook init --system-prompt`): install
+//! - `opt_in` true (the user passed `playbook setup --system-prompt`): install
 //!   or refresh.
 //! - `opt_in` false but the file is already there: refresh it. A user who
 //!   opted in once should not silently drift onto a stale copy just because

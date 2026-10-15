@@ -727,7 +727,7 @@ fn telemetry_off(app: &App) -> String {
             None if mode == crate::telemetry_status::Mode::OffOwnSetup => mode.text().to_string(),
             None => format!("{} but no rows in this range yet.", mode.text()),
         },
-        None => "Telemetry off. Run `playbook init --telemetry`, or start sessions with `cc`."
+        None => "Telemetry off. Run `playbook setup --telemetry` (older versions: `playbook init --telemetry`), or start sessions with `cc`."
             .to_string(),
     }
 }

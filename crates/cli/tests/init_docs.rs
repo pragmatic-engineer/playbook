@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The hook reference and the "What init installs" guide must cover every hook
-//! `playbook init` wires. The test wires a scratch settings file with the real
+//! `playbook setup` wires. The test wires a scratch settings file with the real
 //! code and checks each entry against the page, so a new hook cannot ship
 //! without a row.
 

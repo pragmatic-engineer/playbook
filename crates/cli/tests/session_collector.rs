@@ -59,7 +59,7 @@ impl Home {
         .unwrap();
         let out = self
             .cmd()
-            .args(["init", "--only", "telemetry"])
+            .args(["setup", "--only", "telemetry"])
             .output()
             .unwrap();
         assert_eq!(

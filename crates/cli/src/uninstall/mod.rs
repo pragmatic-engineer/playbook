@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook uninstall`: the inverse of `playbook init` and `install.sh`.
+//! `playbook uninstall`: the inverse of `playbook setup` and `install.sh`.
 //!
 //! It removes only what playbook placed: the hook entries and status line
 //! `init` wrote into `settings.json`, the managed launcher block in the rc
@@ -180,7 +180,7 @@ fn settings_step(
     match crate::init::telemetry::remove(&opts.home, &path, stamp, opts.dry_run) {
         Ok(out) if out.keys > 0 => {
             report.lines.push(format!(
-                "{verb} {} telemetry variables init wrote from {}",
+                "{verb} {} telemetry variables setup wrote from {}",
                 out.keys,
                 path.display()
             ));

@@ -16,7 +16,7 @@
 //! function with no way for a caller to intervene. `merge` below returns
 //! `Result` instead, and returns any N4 warning as data rather than printing
 //! it, leaving turning either into a process exit or a stderr line to the
-//! caller (`playbook init`, wired in WU-8). The validation OUTCOME this
+//! caller (`playbook setup`, wired in WU-8). The validation OUTCOME this
 //! preserves exactly: TEMPLATE or USER that is not a JSON object fails the
 //! whole merge before anything is computed or written (N2); a write failure
 //! never lets a partially written file replace the original, since every
@@ -272,7 +272,7 @@ fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
     crate::common::atomic::write_atomic(path, content)
 }
 
-/// What a caller (eventually `playbook init`, wired in WU-8) does with a
+/// What a caller (eventually `playbook setup`, wired in WU-8) does with a
 /// successful merge: print `stdout` where the retired shell original would
 /// have printed it (its own trailing newline not included here, matching
 /// how `src/common/emit.rs`'s emitters hand back an unterminated string for

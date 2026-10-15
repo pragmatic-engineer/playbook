@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `install.sh --yes` seeds `settings.json` from the shipped template through
-//! the real `playbook init`: a fresh install, and a user hook that survives.
+//! the real `playbook setup`: a fresh install, and a user hook that survives.
 
 #[path = "support/shell_fixture.rs"]
 mod fx;

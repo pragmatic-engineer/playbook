@@ -238,7 +238,7 @@ mod tests {
                 "consent",
                 State::Open {
                     message: "old command".into(),
-                    command: Some("playbook init --statusline"),
+                    command: Some("playbook setup --statusline"),
                 },
                 false,
             ),
@@ -269,7 +269,7 @@ mod tests {
 
         // Assert
         assert!(old.starts_with("would run: 0001-a\n"), "{old}");
-        assert!(old.contains("needs you: old command (run `playbook init --statusline`)"));
+        assert!(old.contains("needs you: old command (run `playbook setup --statusline`)"));
         assert!(old.contains("note: 0014-d: old folders\n"), "{old}");
         assert!(old.ends_with("dry run: nothing was written\n"));
         assert!(same.starts_with("would run: 0001-a\n"), "{same}");
@@ -281,7 +281,7 @@ mod tests {
         assert_eq!(value["would_run"], json!([]));
         assert_eq!(value["skipped"], "downgrade");
         assert_eq!(value["notes"], json!(["0014-d: old folders"]));
-        assert_eq!(value["open"][0]["command"], "playbook init --statusline");
+        assert_eq!(value["open"][0]["command"], "playbook setup --statusline");
     }
 
     #[test]

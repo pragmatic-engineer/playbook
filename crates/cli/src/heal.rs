@@ -116,7 +116,7 @@ pub enum Trigger {
     /// The first-run step before a command: never waits for the lock, starts
     /// no migration after `deadline`, and retries after a failure once a day.
     Start { deadline: Instant },
-    /// `playbook init`, after it ran every migration itself. `statusline` is
+    /// `playbook setup`, after it ran every migration itself. `statusline` is
     /// false when the user declined the status line, so its item is dropped.
     /// The dead hook item stays even when hooks were left off, because those
     /// entries fail on every event.
@@ -742,7 +742,7 @@ mod tests {
             assert!(
                 out.line()
                     .unwrap()
-                    .contains("need `playbook init --statusline`"),
+                    .contains("need `playbook setup --statusline`"),
                 "{:?}",
                 out.line()
             );
@@ -888,7 +888,7 @@ mod tests {
         assert!(out.recorded);
         assert_eq!(out.exit_code(), 0);
         assert_eq!(Record::read(&root(&home)).unwrap().failed_at, None);
-        assert!(render_fix(&out).contains("(run `playbook init --statusline`)"));
+        assert!(render_fix(&out).contains("(run `playbook setup --statusline`)"));
     }
 
     #[test]

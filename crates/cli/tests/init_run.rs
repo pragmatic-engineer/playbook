@@ -884,7 +884,7 @@ fn unrecognised_shell_skips_shim_only() {
 }
 
 /// `aliases: false` (the default, absent `--aliases`) must skip the `shim`
-/// step entirely, so a caller like `/playbook:setup` can call `playbook init`
+/// step entirely, so a caller like `/playbook:setup` can call `playbook setup`
 /// for guards and settings without silently installing a shell launcher the
 /// user did not opt into this run.
 #[test]
@@ -983,7 +983,7 @@ fn binary_malformed_settings_json_exits_non_zero() {
 
     // Act
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .args(["init", "--yes"])
+        .args(["setup", "--yes"])
         .env("HOME", &home)
         .env("CLAUDE_PLUGIN_ROOT", self_root())
         .env("SHELL", "/bin/bash")
@@ -1006,14 +1006,14 @@ fn binary_malformed_settings_json_exits_non_zero() {
 
 /// The other half of the "fully wired" and "idempotent" library-level tests,
 /// proven through the real binary: a clean scratch `$HOME` wires everything
-/// on the first `playbook init` and exits 0 unchanged on the second.
+/// on the first `playbook setup` and exits 0 unchanged on the second.
 #[test]
 fn binary_clean_init_exits_zero_and_is_idempotent() {
     // Arrange
     let home = scratch_home("binary-clean");
     let run_init = || {
         Command::new(env!("CARGO_BIN_EXE_playbook"))
-            .args(["init", "--yes"])
+            .args(["setup", "--yes"])
             .env("HOME", &home)
             .env("CLAUDE_PLUGIN_ROOT", self_root())
             .env("SHELL", "/bin/bash")
@@ -1106,7 +1106,7 @@ fn memory_step_actually_migrates_real_content_to_the_new_root() {
 }
 
 /// Before this fix, only the SessionStart hook's own private fallback
-/// repaired a stray `graph.json` left at the NEW root; `playbook init` had
+/// repaired a stray `graph.json` left at the NEW root; `playbook setup` had
 /// no equivalent, so this scenario would have left the stray file in place.
 /// `migrate_memory` now folds that self-heal in for every caller, `run()`
 /// included, closing that gap.
@@ -1137,7 +1137,7 @@ fn memory_step_repairs_a_stray_graph_file_at_the_new_root() {
     );
     assert!(
         !new_root.join("graph.json").exists(),
-        "playbook init should now repair a stray new-root graph.json, not just SessionStart"
+        "playbook setup should now repair a stray new-root graph.json, not just SessionStart"
     );
     assert_eq!(
         std::fs::read_to_string(new_root.join("memory.graph.json")).unwrap(),

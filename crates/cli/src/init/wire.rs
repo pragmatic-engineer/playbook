@@ -28,7 +28,7 @@
 //! PATH for a hand-written hook entry, so `playbook`, installed the same
 //! way, resolves the same way. An absolute path would go stale when Homebrew
 //! replaces the binary or the user moves it. The known cost is a Claude Code
-//! started from a launcher or an IDE with a minimal PATH: `playbook init` puts
+//! started from a launcher or an IDE with a minimal PATH: `playbook setup` puts
 //! the binary's directory on PATH for every shell start (`init/path.rs`), and
 //! `playbook doctor` probes a minimal-PATH login shell to catch the case.
 //! `tests/init_wire.rs` asserts only that the command is the bare form and
@@ -77,7 +77,7 @@ impl Group {
 /// belongs to (`None` for events with no matcher, such as `SessionStart`), the
 /// hook name to invoke, any `if` guard or `timeout` it carries, its group and
 /// one plain sentence of purpose. This table is the single source for `wire`,
-/// `playbook init --explain`, `playbook hooks list` and the hook reference
+/// `playbook setup --explain`, `playbook hooks list` and the hook reference
 /// page, whose "What it does" column a test keeps equal to `purpose`.
 pub struct HookSpec {
     pub event: &'static str,
@@ -755,7 +755,7 @@ fn is_managed_entry(entry: &Value, managed: &[String]) -> bool {
 /// Reads `path` as a JSON object, returning it alongside the exact bytes
 /// read so `wire` can compare its own re-serialization against them to
 /// decide whether anything actually changed. A missing file starts from an
-/// empty object and an empty baseline, matching a fresh `playbook init` run
+/// empty object and an empty baseline, matching a fresh `playbook setup` run
 /// before any `settings.json` exists yet.
 fn load_settings(path: &Path) -> Result<(Map<String, Value>, String), WireError> {
     if !path.is_file() {

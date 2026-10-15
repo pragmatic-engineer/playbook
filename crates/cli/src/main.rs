@@ -409,7 +409,7 @@ fn main() {
                 match text {
                     Ok(text) => print!("{text}"),
                     Err(err) => {
-                        eprintln!("init: {err}");
+                        eprintln!("setup: {err}");
                         std::process::exit(2);
                     }
                 }
@@ -422,7 +422,7 @@ fn main() {
             let only = match init::choices::only_choices(&flags) {
                 Ok(only) => only,
                 Err(err) => {
-                    eprintln!("init: {err}");
+                    eprintln!("setup: {err}");
                     std::process::exit(2);
                 }
             };
@@ -488,7 +488,7 @@ fn main() {
                         std::process::exit(1);
                     }
                     Err(err) => {
-                        eprintln!("init: {err}");
+                        eprintln!("setup: {err}");
                         std::process::exit(1);
                     }
                 }
@@ -507,7 +507,7 @@ fn main() {
             });
             let only_run = only.is_some();
             if only_run && choices.telemetry {
-                println!("playbook init --only: this run changes only the parts you named.");
+                println!("playbook setup --only: this run changes only the parts you named.");
                 if let Some(line) = skip_telemetry_question {
                     println!("  {line}");
                 } else {
@@ -530,13 +530,13 @@ fn main() {
                     && skip_telemetry_question.is_none()
                 {
                     eprintln!(
-                        "init: no terminal and no --yes, so telemetry was not turned on. To turn it on, run: playbook init --only telemetry"
+                        "setup: no terminal and no --yes, so telemetry was not turned on. To turn it on, run: playbook setup --only telemetry"
                     );
                 }
                 if !left_off.is_empty() {
                     eprintln!(
-                        "init: no terminal and no --yes, so these were left out of your Claude Code \
-                         settings: {}. To add them, run: playbook init --yes",
+                        "setup: no terminal and no --yes, so these were left out of your Claude Code \
+                         settings: {}. To add them, run: playbook setup --yes",
                         left_off.join(" and ")
                     );
                 }
@@ -600,7 +600,7 @@ fn main() {
             let outcome = init::run::run(&paths);
             print!("{}", init::wizard::progress(&caps, &outcome.steps));
             for warning in &outcome.warnings {
-                eprintln!("init: warning: {warning}");
+                eprintln!("setup: warning: {warning}");
             }
             let changed: Vec<&str> = outcome
                 .steps
@@ -635,7 +635,7 @@ fn main() {
                     .iter()
                     .filter(|s| s.status == StepStatus::Failed)
                     .count();
-                eprintln!("init: {failed} step(s) failed; see above");
+                eprintln!("setup: {failed} step(s) failed; see above");
                 std::process::exit(1);
             }
         }

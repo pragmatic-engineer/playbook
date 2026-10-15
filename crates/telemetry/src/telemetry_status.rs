@@ -60,14 +60,14 @@ impl Mode {
         match self {
             Mode::OnReceiving | Mode::OnRunning | Mode::OffOwnSetup => None,
             Mode::OffNoEndpoint => Some(
-                "run `playbook init --telemetry` to add the OTEL_* variables to ~/.claude/settings.json, and keep `playbook usage collect` running",
+                "run `playbook setup --telemetry` (older versions: `playbook init --telemetry`) to add the OTEL_* variables to ~/.claude/settings.json, and keep `playbook usage collect` running",
             ),
             Mode::OnCollectorDown => Some("start it with `playbook usage collect`; `cc` starts it for you"),
             Mode::OffByConfig => Some("run `playbook config set usage.telemetry auto`"),
             Mode::OffDisabled => Some(
-                "to turn it on, run `playbook init --telemetry` (it replaces an off switch that stands alone in ~/.claude/settings.json), or remove CLAUDE_CODE_ENABLE_TELEMETRY from the env block of your Claude Code settings yourself",
+                "to turn it on, run `playbook setup --telemetry` (older versions: `playbook init --telemetry`; it replaces an off switch that stands alone in ~/.claude/settings.json), or remove CLAUDE_CODE_ENABLE_TELEMETRY from the env block of your Claude Code settings yourself",
             ),
-            Mode::OffNotConfigured => Some("run `playbook init --telemetry`, or start sessions with `cc`"),
+            Mode::OffNotConfigured => Some("run `playbook setup --telemetry` (older versions: `playbook init --telemetry`), or start sessions with `cc`"),
         }
     }
 
@@ -211,7 +211,7 @@ mod tests {
     fn nothing_configured_says_off_not_configured_with_the_fix() {
         let mode = decide(true, Configured::Nothing, false, Signals::default());
         assert_eq!(mode.text(), "telemetry: off (not configured)");
-        assert!(mode.fix().unwrap().contains("playbook init --telemetry"));
+        assert!(mode.fix().unwrap().contains("playbook setup --telemetry"));
     }
 
     #[test]
@@ -273,7 +273,7 @@ mod tests {
 
         assert_eq!(mode, Mode::OffNoEndpoint);
         assert!(mode.text().contains("OTEL_EXPORTER_OTLP_ENDPOINT"));
-        assert!(mode.fix().unwrap().contains("playbook init --telemetry"));
+        assert!(mode.fix().unwrap().contains("playbook setup --telemetry"));
     }
 
     #[test]

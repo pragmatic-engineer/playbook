@@ -121,7 +121,7 @@ fn system_prompt_false_and_no_existing_file_leaves_nothing_installed_and_reports
 
 #[test]
 fn system_prompt_true_installs_it() {
-    // Arrange: a fresh machine, `playbook init --system-prompt`.
+    // Arrange: a fresh machine, `playbook setup --system-prompt`.
     let home = scratch_home("opt-in-fresh");
     let paths = base_paths(&home, true);
 

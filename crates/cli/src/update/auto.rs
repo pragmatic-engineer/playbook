@@ -530,7 +530,7 @@ mod tests {
         with_record(
             &mut fetcher,
             r#"{"version":"0.17.0","component":"playbook",
-                "summary":"The hook layout changed","action":"playbook init"}"#,
+                "summary":"The hook layout changed","action":"playbook setup"}"#,
         );
 
         // Act

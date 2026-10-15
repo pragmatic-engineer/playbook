@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The `telemetry` part of `playbook init`: with consent, writes the
+//! The `telemetry` part of `playbook setup`: with consent, writes the
 //! OpenTelemetry variables that point Claude Code at the local usage
 //! collector into the `env` block of `settings.json`, so plain `claude`, the
 //! IDE and the desktop app send telemetry too, not only `cc`.
@@ -146,7 +146,7 @@ pub const SET_UP_LINE: &str =
 /// The line when telemetry is off and init cannot turn it on without
 /// overriding a setting of yours.
 pub const OFF_ELSEWHERE_LINE: &str =
-    "telemetry: switched off by a setting init will not change (`playbook usage status` shows where), so nothing to ask";
+    "telemetry: switched off by a setting setup will not change (`playbook usage status` shows where), so nothing to ask";
 
 /// The line init prints before the telemetry question is skipped, or `None`
 /// when the question should be asked.
@@ -212,7 +212,7 @@ fn only_an_off_switch(settings_path: &Path) -> bool {
 /// Whether the process environment names a telemetry variable that the user's
 /// own settings.json does not also name with the same value. Claude Code puts
 /// the `env` block of its settings into the environment of the commands it
-/// runs, so `playbook init` run from inside a session sees a copy of the
+/// runs, so `playbook setup` run from inside a session sees a copy of the
 /// settings it is about to read, and that copy is not a second setup.
 pub fn process_configured_beyond_settings(claude_home: &Path) -> bool {
     let user_env = load(&claude_home.join("settings.json"))
@@ -314,7 +314,7 @@ pub fn apply(
         if holds_all(&settings_path, &crate::cc::telemetry::env_for(&current)) {
             return StepReport::already_correct(
                 "telemetry",
-                "the variables init wrote are still in place",
+                "the variables setup wrote are still in place",
             );
         }
     }
@@ -324,7 +324,7 @@ pub fn apply(
     if switch_off_here && !replace_off_ok && !ours {
         return StepReport::skipped(
             "telemetry",
-            "CLAUDE_CODE_ENABLE_TELEMETRY is 0 in your settings and --yes does not change a value you set; to turn it on, run: playbook init --only telemetry",
+            "CLAUDE_CODE_ENABLE_TELEMETRY is 0 in your settings and --yes does not change a value you set; to turn it on, run: playbook setup --only telemetry",
         );
     }
     if !ours
@@ -865,7 +865,7 @@ mod tests {
         let step = apply(&home, &claude, &cwd, 3, false, false);
 
         assert_eq!(step.status, crate::init::run::StepStatus::Skipped);
-        assert!(step.detail.contains("playbook init --only telemetry"));
+        assert!(step.detail.contains("playbook setup --only telemetry"));
         assert_eq!(
             fs::read_to_string(claude.join("settings.json")).unwrap(),
             original

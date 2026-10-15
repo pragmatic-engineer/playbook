@@ -60,14 +60,14 @@ mod tests {
             row(
                 Level::Warn,
                 "status line differs",
-                Some("run playbook init"),
+                Some("run playbook setup"),
             ),
             row(Level::Fail, "binary missing", Some("install it")),
         ];
         let got = render(&Caps::plain(80), &rows);
         assert!(got.contains("[ok] plugin installed\n"), "{got}");
         assert!(
-            got.contains("[warn] status line differs\n      Fix: run playbook init\n"),
+            got.contains("[warn] status line differs\n      Fix: run playbook setup\n"),
             "{got}"
         );
         assert!(got.contains("[fail] binary missing"));
