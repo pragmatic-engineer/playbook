@@ -2304,6 +2304,11 @@ fn main() {
                     &update::swap::run_version,
                 )?;
                 update::finish_with_heal(&mut outcome, &env.exe);
+                if opts.check {
+                    outcome
+                        .out
+                        .push(update::check::status_at(&common::home_dir()).line);
+                }
                 Ok(outcome)
             });
             // Shown again after the swap and the heal, also when the heal
