@@ -115,6 +115,8 @@ pub struct LimitsView {
     pub period: Period,
     pub burn: Burn,
     pub previous: Burn,
+    /// Spend of the last 24 hours, all projects, for the recent pace.
+    pub recent_cost_24h: f64,
 }
 
 impl Default for LimitsView {
@@ -125,6 +127,7 @@ impl Default for LimitsView {
             period: Period::Week(WeekStart::default()),
             burn: Burn::new(0.0, 0),
             previous: Burn::new(0.0, 0),
+            recent_cost_24h: 0.0,
         }
     }
 }
@@ -159,6 +162,14 @@ impl LimitsView {
             period,
             burn,
             previous,
+            recent_cost_24h: events
+                .iter()
+                .filter(|e| {
+                    e.timestamp > now - super::projection::RECENT_SECONDS && e.timestamp <= now
+                })
+                .map(|e| e.cost_usd)
+                .sum::<f64>()
+                + 0.0,
         }
     }
 }

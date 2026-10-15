@@ -18,6 +18,7 @@ pub mod notice;
 pub mod panels;
 #[cfg(test)]
 mod parity;
+pub mod projection;
 pub mod scale;
 pub mod sessions_view;
 #[cfg(test)]

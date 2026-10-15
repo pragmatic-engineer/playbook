@@ -16,7 +16,7 @@ It is part of the [playbook](https://github.com/pragmatic-engineer/playbook) too
 - Cost and tokens per day, model, repo, branch and session, with a week over week comparison.
 - Cache read and write tokens, split into the five minute and one hour tiers.
 - Tool, skill and agent breakdowns and latency, when Claude Code telemetry is on (see the receiver below).
-- Budget and rate limit panels, when you set budgets or provide limits.
+- Budget, rate limit and projection panels (when each limit is reached at the current pace), when you set budgets or provide limits.
 - Codex session history, read the same way.
 
 ## Install

@@ -13,6 +13,7 @@ use super::keys::{self, HelpLine};
 use super::layout::PanelId;
 use super::notice::{self, Notice};
 use super::panels;
+use super::projection;
 use super::theme::Palette;
 use crate::aggregate::date_key;
 use crate::period::{elapsed_text, Comparison, Span as TimeSpan};
@@ -232,6 +233,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                     PanelId::Breakdown => panels::projects(frame, *rect, app, data, &pal),
                     PanelId::Live => panels::live(frame, *rect, app, data, &pal),
                     PanelId::Sessions => panels::sessions(frame, *rect, app, data, &pal),
+                    PanelId::Projection => projection::render(frame, *rect, data, &pal),
                     PanelId::Budget => {}
                 }
             }
@@ -267,7 +269,9 @@ pub fn render(frame: &mut Frame, app: &App) {
 /// The layout editor window, centered over the panels.
 fn render_editor(frame: &mut Frame, area: Rect, ed: &super::editor::Editor, pal: &Palette) {
     let width = area.width.saturating_sub(2).min(78);
-    let height = 14u16.min(area.height.saturating_sub(2));
+    // Tab line, rename line, one line per panel, a message line, two key lines and the border.
+    let wanted = super::layout::ALL.len() as u16 + 7;
+    let height = wanted.min(area.height.saturating_sub(2));
     let rect = Rect::new(
         area.x + (area.width - width) / 2,
         area.y + (area.height - height) / 2,
@@ -1388,9 +1392,9 @@ mod tests {
             let area = Rect::new(0, 0, w, h);
             let old = layout(area);
 
-            let placed = place(area, &ALL, false);
+            let placed = place(area, &ALL[..7], false);
 
-            let rect = |id| panel_rect(area, &ALL, false, id).unwrap();
+            let rect = |id| panel_rect(area, &ALL[..7], false, id).unwrap();
             assert_eq!(rect(PanelId::Spend), old.spend, "{w}x{h}");
             assert_eq!(rect(PanelId::Tokens), old.tokens, "{w}x{h}");
             assert_eq!(rect(PanelId::Models), old.models, "{w}x{h}");
@@ -1624,7 +1628,7 @@ mod tests {
         assert_eq!(
             effect,
             crate::tui::app::Effect::SaveLayout(
-                "Numbers=models,breakdown,budget;Sessions=live,sessions".into()
+                "Numbers=models,breakdown,budget,projection;Sessions=live,sessions".into()
             )
         );
         assert_eq!(app.layout.tabs.len(), 2);
