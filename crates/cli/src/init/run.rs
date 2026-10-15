@@ -188,7 +188,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         },
         crate::common::time::now_epoch_secs(),
     );
-    // The breaking changes this upgrade crossed (ADR 0035), on stderr.
+    // The line that names the release notes of this upgrade (ADR 0037), on
+    // stderr.
     eprint!("{}", healed.notices.render());
 
     let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);

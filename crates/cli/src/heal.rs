@@ -168,8 +168,8 @@ pub struct Outcome {
     pub recorded: bool,
     /// Whether the deadline stopped the run before every migration started.
     pub timed_out: bool,
-    /// The breaking changes not shown yet (ADR 0035), already recorded as
-    /// shown. The caller shows them.
+    /// The line that names the release notes after an upgrade (ADR 0037),
+    /// already recorded as shown. The caller shows it.
     pub notices: crate::notices::Notices,
     /// Why nothing ran, when nothing did.
     pub skipped: Option<Skip>,
@@ -285,13 +285,7 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
     }
     // Read before the heal moves the record, and recorded as shown once the
     // heal returns, whether it succeeded or not.
-    let pending = crate::notices::prepare(
-        &root,
-        &ctx.claude_home,
-        record.binary.as_deref(),
-        record.plugin.as_deref(),
-        older,
-    );
+    let pending = crate::notices::prepare(&root, record.binary.as_deref(), older);
     let out = heal_for(ctx, trigger, now, &root, &record, order);
     Outcome {
         notices: pending.commit(&root),
@@ -438,8 +432,8 @@ pub fn session_line(home: &Path) -> Option<String> {
     .ok()?
 }
 
-/// `line` and the breaking changes block, in that order, or `None` when
-/// both are empty.
+/// `line` and the release notes line, in that order, or `None` when both
+/// are empty.
 fn notice(line: Option<String>, notices: &crate::notices::Notices) -> Option<String> {
     let block = notices.render();
     let parts: Vec<&str> = line
@@ -644,7 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn breaking_changes_are_recorded_as_shown_when_the_heal_fails() {
+    fn the_release_notes_line_is_recorded_as_shown_when_the_heal_fails() {
         use std::os::unix::fs::PermissionsExt;
         // Arrange: an older record, and a migration that cannot write.
         let home = scratch_dir("heal-notice-fail");
@@ -665,11 +659,13 @@ mod tests {
         // Assert
         assert!(!first.failed.is_empty() && !second.failed.is_empty());
         assert_eq!(
-            first.notices.entries,
-            crate::breaking::entries_between("0.25.0", env!("CARGO_PKG_VERSION"))
+            first.notices.line,
+            Some(crate::release_notes::updated_line(
+                Some("0.25.0"),
+                env!("CARGO_PKG_VERSION")
+            ))
         );
-        assert!(!first.notices.entries.is_empty());
-        assert!(second.notices.entries.is_empty());
+        assert_eq!(second.notices.line, None);
     }
 
     #[test]

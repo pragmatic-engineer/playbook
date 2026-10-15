@@ -1,57 +1,45 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Breaking change notices on the first run after an upgrade (ADR 0035
-//! decisions 4.3 and 4.6). The `state` table keeps `notices/binary` and
-//! `notices/plugin`, the last versions whose block was shown, so each step
-//! that runs the ADR 0034 migrations shows the block once.
+//! The line that names the release notes on the first run after an upgrade
+//! (ADR 0037 decision 5.3). The `state` table keeps `notices/binary`, the
+//! last version whose line was shown, so each step that runs the ADR 0034
+//! migrations shows the line once.
 //!
 //! A step reads what to show with `prepare`, runs the heal, then calls
-//! `Pending::commit`, which moves each key in one transaction and keeps only
-//! the entries whose key this process moved. Two processes that start
-//! together show the block once between them.
+//! `Pending::commit`, which moves the key in one transaction and returns the
+//! line only when this process moved it. Two processes that start together
+//! show the line once between them.
 
-use crate::breaking::{self, Entry};
 use crate::update::resolve::compare;
 use std::cmp::Ordering;
 use std::path::Path;
 
 const BINARY_KEY: &str = "notices/binary";
-const PLUGIN_KEY: &str = "notices/plugin";
 
-/// What a step shows: the block, and a line when the plugin lists an entry
-/// this binary cannot read.
+/// What a step shows: the line, or nothing.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Notices {
-    pub entries: Vec<Entry>,
-    pub error: Option<String>,
+    pub line: Option<String>,
 }
 
 impl Notices {
-    /// The block and the error line, or an empty string.
+    /// The line with its newline, or an empty string.
     pub fn render(&self) -> String {
-        let mut text = breaking::render(&self.entries);
-        if let Some(err) = &self.error {
-            text.push_str(&format!("playbook: {err}\n"));
-        }
-        text
+        self.line
+            .as_deref()
+            .map(|l| format!("{l}\n"))
+            .unwrap_or_default()
     }
 }
 
-/// One key to move from `before` to `to`, and the entries it unlocks.
-#[derive(Debug)]
-struct Move {
-    key: &'static str,
-    before: Option<String>,
-    to: String,
-    entries: Vec<Entry>,
-}
-
-/// The notices one step will show, read before its heal moves the record.
+/// The key move one step will make, read before its heal moves the record.
 #[derive(Debug, Default)]
 pub struct Pending {
-    moves: Vec<Move>,
-    error: Option<String>,
+    /// The key before the step, and the version to move it to.
+    change: Option<(Option<String>, String)>,
+    /// The line to show when this process moves the key.
+    line: Option<String>,
 }
 
 /// The value of `key`. `Err` when the store cannot be read, so the caller
@@ -74,120 +62,58 @@ pub fn older_binary_ran(root: &Path) -> bool {
 
 /// What the step will show, read without writing.
 ///
-/// The playbook entries start at `notices/binary`, else `binary`
-/// (`versions/binary`), else `0.0.0` when `older` says an older binary ran.
-/// A fresh install starts at this binary and shows nothing.
-///
-/// The plugin entries come from the resolved plugin's
-/// `metadata.breakingChanges`, starting at `notices/plugin`, else `plugin`
-/// (`versions/plugin`). The first plugin seen shows nothing. An entry this
-/// binary cannot read is an error that says to update the binary, and moves
-/// nothing, so it shows again.
-pub fn prepare(
-    root: &Path,
-    claude_home: &Path,
-    binary: Option<&str>,
-    plugin: Option<&str>,
-    older: bool,
-) -> Pending {
-    let mut pending = Pending::default();
+/// The start is `notices/binary`, else `binary` (`versions/binary`). With
+/// neither, a home where `older` says an older binary ran shows the line
+/// without a start, and a fresh install records this binary and shows
+/// nothing. A start at or above this binary shows nothing.
+pub fn prepare(root: &Path, binary: Option<&str>, older: bool) -> Pending {
     let running = env!("CARGO_PKG_VERSION");
-    if let Ok(before) = shown(root, BINARY_KEY) {
-        let from = match before.as_deref().or(binary) {
-            Some(v) => v,
-            None if older => "0.0.0",
-            None => running,
+    let Ok(before) = shown(root, BINARY_KEY) else {
+        return Pending::default();
+    };
+    if before.as_deref() == Some(running) {
+        return Pending::default();
+    }
+    let line = match before.as_deref().or(binary) {
+        Some(from) => match compare(from, running) {
+            Ordering::Less => Some(crate::release_notes::updated_line(Some(from), running)),
+            Ordering::Equal => None,
+            Ordering::Greater => return Pending::default(),
+        },
+        None if older => Some(crate::release_notes::updated_line(None, running)),
+        None => None,
+    };
+    Pending {
+        change: Some((before, running.to_string())),
+        line,
+    }
+}
+
+impl Pending {
+    /// Moves the key in one transaction, if no other process moved it
+    /// first, and returns the line when this process moved it.
+    pub fn commit(self, root: &Path) -> Notices {
+        let Some((before, to)) = self.change else {
+            return Notices::default();
         };
-        if before.as_deref() != Some(running) && compare(from, running) != Ordering::Greater {
-            pending.moves.push(Move {
-                key: BINARY_KEY,
-                before: before.clone(),
-                to: running.to_string(),
-                entries: breaking::entries_between(from, running),
-            });
-        }
-    }
-    let env = std::env::var("CLAUDE_PLUGIN_ROOT").ok();
-    let manifest = crate::plugin_root::find(env.as_deref(), claude_home)
-        .and_then(|dir| crate::plugin_root::manifest(&dir));
-    let to = manifest
-        .as_ref()
-        .and_then(|m| m["version"].as_str())
-        .filter(|v| crate::plugin_root::is_plain_version(v));
-    if let (Some(manifest), Some(to), Ok(before)) = (&manifest, to, shown(root, PLUGIN_KEY)) {
-        let from = before.as_deref().or(plugin).unwrap_or(to);
-        if before.as_deref() != Some(to) && compare(from, to) != Ordering::Greater {
-            match breaking::plugin_entries(manifest, from, to) {
-                Ok(entries) => pending.moves.push(Move {
-                    key: PLUGIN_KEY,
-                    before,
-                    to: to.to_string(),
-                    entries,
-                }),
-                Err(err) => pending.error = Some(err),
+        let moved = crate::state::transaction(root, |tx| {
+            if tx.get(BINARY_KEY)?.filter(|v| !v.is_empty()) == before {
+                tx.set(BINARY_KEY, &to)?;
+                return Ok(true);
             }
+            Ok(false)
+        })
+        .unwrap_or(false);
+        Notices {
+            line: self.line.filter(|_| moved),
         }
     }
-    pending
 }
 
 /// Records `version` as shown, for a caller that printed the notes of that
 /// release itself (ADR 0037): `playbook update`. Best effort.
 pub fn record(root: &Path, version: &str) {
     let _ = crate::state::set(root, BINARY_KEY, version);
-}
-
-impl Pending {
-    /// Moves each key in one transaction, if no other process moved it
-    /// first, and returns the entries of the keys this process moved.
-    ///
-    /// A caller that already printed the playbook block, such as the install
-    /// script or `playbook update`, sets `breaking::SHOWN_ENV` to the version
-    /// that block started from. Only the playbook entries at or below it are
-    /// returned then, since the caller showed the rest. An empty or unset
-    /// value means nothing was shown.
-    pub fn commit(self, root: &Path) -> Notices {
-        let since = std::env::var(breaking::SHOWN_ENV).ok();
-        self.commit_shown(root, since.as_deref())
-    }
-
-    fn commit_shown(self, root: &Path, shown_since: Option<&str>) -> Notices {
-        // The same rule `playbook breaking --since` reads its version with.
-        let shown_since = shown_since
-            .map(|v| v.trim_start_matches('v'))
-            .filter(|v| breaking::is_version(v));
-        let mut notices = Notices {
-            entries: Vec::new(),
-            error: self.error,
-        };
-        if self.moves.is_empty() {
-            return notices;
-        }
-        let moved = crate::state::transaction(root, |tx| {
-            let mut moved = Vec::new();
-            for m in &self.moves {
-                if tx.get(m.key)?.filter(|v| !v.is_empty()) == m.before {
-                    tx.set(m.key, &m.to)?;
-                    moved.push(m.key);
-                }
-            }
-            Ok(moved)
-        })
-        .unwrap_or_default();
-        for m in self.moves {
-            if !moved.contains(&m.key) {
-                continue;
-            }
-            let shown = |e: &Entry| {
-                m.key == BINARY_KEY
-                    && shown_since.is_some_and(|v| compare(&e.version, v) == Ordering::Greater)
-            };
-            notices
-                .entries
-                .extend(m.entries.into_iter().filter(|e| !shown(e)));
-        }
-        notices
-    }
 }
 
 #[cfg(test)]
@@ -199,190 +125,103 @@ mod tests {
 
     const RUNNING: &str = env!("CARGO_PKG_VERSION");
 
-    fn home(tag: &str) -> (PathBuf, PathBuf) {
+    fn root(tag: &str) -> PathBuf {
         let home = scratch_dir(tag);
         let root = crate::common::paths::playbook_root_from(&home);
         fs::create_dir_all(&root).unwrap();
-        (home.join(".claude"), root)
+        root
     }
 
-    fn binary(root: &Path, claude: &Path, recorded: Option<&str>, older: bool) -> Vec<Entry> {
-        prepare(root, claude, recorded, None, older)
-            .commit(root)
-            .entries
+    fn line(root: &Path, recorded: Option<&str>, older: bool) -> Option<String> {
+        prepare(root, recorded, older).commit(root).line
     }
 
     #[test]
     fn a_fresh_install_shows_nothing_and_records_this_binary() {
         // Arrange
-        let (claude, root) = home("notices-fresh");
+        let root = root("notices-fresh");
 
         // Act
-        let first = binary(&root, &claude, None, false);
+        let first = line(&root, None, false);
 
         // Assert
-        assert!(first.is_empty());
+        assert_eq!(first, None);
         assert_eq!(shown(&root, BINARY_KEY), Ok(Some(RUNNING.into())));
     }
 
     #[test]
-    fn the_recorded_version_or_an_older_binary_sets_the_start_once() {
+    fn an_upgrade_shows_the_line_once() {
         // Arrange
-        let (claude, root) = home("notices-start");
-        let (claude_old, root_old) = home("notices-old");
+        let root = root("notices-upgrade");
 
         // Act
-        let upgraded = binary(&root, &claude, Some("0.25.0"), false);
-        let again = binary(&root, &claude, Some("0.25.0"), false);
-        let old = binary(&root_old, &claude_old, None, true);
+        let first = line(&root, Some("0.25.0"), false);
+        let again = line(&root, Some("0.25.0"), false);
 
         // Assert
-        assert_eq!(upgraded, breaking::entries_between("0.25.0", RUNNING));
-        assert!(!upgraded.is_empty());
-        assert!(again.is_empty());
-        assert_eq!(old, breaking::entries_between("0.0.0", RUNNING));
+        assert_eq!(
+            first,
+            Some(crate::release_notes::updated_line(Some("0.25.0"), RUNNING))
+        );
+        assert_eq!(again, None);
         assert_eq!(shown(&root, BINARY_KEY), Ok(Some(RUNNING.into())));
+    }
+
+    #[test]
+    fn a_home_of_an_older_binary_without_a_record_shows_the_line_without_a_start() {
+        // Arrange
+        let root = root("notices-old");
+
+        // Act
+        let first = line(&root, None, true);
+
+        // Assert
+        assert_eq!(
+            first,
+            Some(crate::release_notes::updated_line(None, RUNNING))
+        );
     }
 
     #[test]
     fn the_shown_version_wins_and_a_downgrade_shows_and_writes_nothing() {
         // Arrange
-        let (claude, root) = home("notices-order");
+        let root = root("notices-order");
         crate::state::set(&root, BINARY_KEY, "999.0.0").unwrap();
 
         // Act
-        let entries = binary(&root, &claude, Some("0.0.1"), true);
+        let shown_line = line(&root, Some("0.0.1"), true);
 
         // Assert
-        assert!(entries.is_empty());
+        assert_eq!(shown_line, None);
         assert_eq!(shown(&root, BINARY_KEY), Ok(Some("999.0.0".into())));
     }
 
     #[test]
-    fn a_caller_that_showed_the_block_leaves_only_the_entries_at_or_below_its_start() {
-        // Arrange: each case moves both keys in its own home. The playbook
-        // block spans 0.20.0 and 0.30.0; the plugin entry is above both.
-        let entry = |version: &str, component| Entry {
-            version: version.into(),
-            component,
-            summary: format!("change in {version}"),
-            action: "run something".into(),
-            migration: None,
-        };
-        let older = entry("0.20.0", breaking::Component::Playbook);
-        let newer = entry("0.30.0", breaking::Component::Playbook);
-        let plugin = entry("0.40.0", breaking::Component::Plugin);
-        let commit_with = |tag: &str, shown_since: Option<&str>| {
-            let (_, root) = home(tag);
-            let pending = Pending {
-                moves: vec![
-                    Move {
-                        key: BINARY_KEY,
-                        before: None,
-                        to: RUNNING.into(),
-                        entries: vec![older.clone(), newer.clone()],
-                    },
-                    Move {
-                        key: PLUGIN_KEY,
-                        before: None,
-                        to: "0.40.0".into(),
-                        entries: vec![plugin.clone()],
-                    },
-                ],
-                error: None,
-            };
-            let notices = pending.commit_shown(&root, shown_since).entries;
-            (notices, shown(&root, BINARY_KEY))
-        };
+    fn a_caller_that_recorded_the_version_leaves_nothing_to_show() {
+        // Arrange
+        let root = root("notices-recorded");
 
         // Act
-        let shown_from_zero = commit_with("notices-shown-zero", Some("0.0.0"));
-        let shown_from_older = commit_with("notices-shown-older", Some("0.20.0"));
-        let with_a_v = commit_with("notices-shown-v", Some("v0.20.0"));
-        let nothing_shown = commit_with("notices-shown-empty", Some(""));
-        let not_a_version = commit_with("notices-shown-bad", Some("1"));
+        record(&root, RUNNING);
+        let after = line(&root, Some("0.25.0"), true);
 
-        // Assert: the caller's start keeps only the playbook entries at or
-        // below it, and the plugin entry always shows.
-        assert_eq!(shown_from_zero.0, std::slice::from_ref(&plugin));
-        assert_eq!(shown_from_older.0, [older.clone(), plugin.clone()]);
-        assert_eq!(with_a_v.0, shown_from_older.0);
-        let everything = [older, newer, plugin];
-        assert_eq!(nothing_shown.0, everything);
-        assert_eq!(not_a_version.0, everything);
-        for (_, recorded) in [
-            shown_from_zero,
-            shown_from_older,
-            with_a_v,
-            nothing_shown,
-            not_a_version,
-        ] {
-            assert_eq!(recorded, Ok(Some(RUNNING.into())));
-        }
+        // Assert
+        assert_eq!(after, None);
     }
 
     #[test]
-    fn only_the_process_that_moves_the_key_shows_the_block() {
+    fn only_the_process_that_moves_the_key_shows_the_line() {
         // Arrange: two steps read the same start before either commits.
-        let (claude, root) = home("notices-race");
-        let first = prepare(&root, &claude, Some("0.25.0"), None, false);
-        let second = prepare(&root, &claude, Some("0.25.0"), None, false);
+        let root = root("notices-race");
+        let first = prepare(&root, Some("0.25.0"), false);
+        let second = prepare(&root, Some("0.25.0"), false);
 
         // Act
         let shown_first = first.commit(&root);
         let shown_second = second.commit(&root);
 
         // Assert
-        assert!(!shown_first.entries.is_empty());
-        assert!(shown_second.entries.is_empty());
-    }
-
-    #[test]
-    fn plugin_entries_come_from_the_manifest_above_the_shown_version() {
-        // Arrange
-        let (claude, root) = home("notices-plugin");
-        let dir = claude.join("plugins/cache/pragmatic-engineer/playbook/0.40.0");
-        fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
-        fs::create_dir_all(dir.join("skills")).unwrap();
-        let mut manifest = serde_json::json!({
-            "name": "playbook",
-            "version": "0.40.0",
-            "metadata": {"breakingChanges": [
-                {"version": "0.35.0", "component": "plugin", "summary": "old", "action": "x"},
-                {"version": "0.40.0", "component": "plugin", "summary": "new", "action": "y"},
-                {"version": "0.40.0", "component": "future", "summary": "skip", "action": "z"}
-            ]}
-        });
-        let write = |m: &serde_json::Value| {
-            fs::write(dir.join(".claude-plugin/plugin.json"), m.to_string()).unwrap();
-        };
-        write(&manifest);
-        let plugin =
-            |recorded: Option<&str>| prepare(&root, &claude, None, recorded, false).commit(&root);
-
-        // Act
-        let first_sight = plugin(None);
-        crate::state::delete(&root, PLUGIN_KEY).unwrap();
-        let upgraded = plugin(Some("0.36.0"));
-        let again = plugin(Some("0.36.0"));
-        manifest["version"] = "0.41.0".into();
-        manifest["metadata"]["breakingChanges"][1]["summary"] = serde_json::Value::Null;
-        write(&manifest);
-        let unreadable = plugin(None);
-
-        // Assert
-        assert!(first_sight.entries.is_empty());
-        let summaries: Vec<&str> = upgraded
-            .entries
-            .iter()
-            .map(|e| e.summary.as_str())
-            .collect();
-        assert_eq!(summaries, ["new"]);
-        assert!(again.entries.is_empty());
-        assert!(
-            unreadable.render().contains("run playbook update"),
-            "{unreadable:?}"
-        );
-        assert_eq!(shown(&root, PLUGIN_KEY), Ok(Some("0.40.0".into())));
+        assert!(shown_first.line.is_some());
+        assert_eq!(shown_second.line, None);
     }
 }
