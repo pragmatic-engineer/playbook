@@ -19,10 +19,6 @@ use std::path::Path;
 const BINARY_KEY: &str = "notices/binary";
 const PLUGIN_KEY: &str = "notices/plugin";
 
-/// Set by the install script for the commands it runs after it printed the
-/// block itself.
-const SHOWN_ENV: &str = "PLAYBOOK_BREAKING_SHOWN";
-
 /// What a step shows: the block, and a line when the plugin lists an entry
 /// this binary cannot read.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -137,11 +133,20 @@ pub fn prepare(
 
 impl Pending {
     /// Moves each key in one transaction, if no other process moved it
-    /// first, and returns the entries of the keys this process moved. The
-    /// playbook entries are recorded but not returned when the install
-    /// script already showed them.
+    /// first, and returns the entries of the keys this process moved.
+    ///
+    /// A caller that already printed the playbook block, such as the install
+    /// script or `playbook update`, sets `breaking::SHOWN_ENV` to the version
+    /// that block started from. Only the playbook entries at or below it are
+    /// returned then, since the caller showed the rest. An empty or unset
+    /// value means nothing was shown.
     pub fn commit(self, root: &Path) -> Notices {
-        let shown_by_installer = std::env::var(SHOWN_ENV).is_ok_and(|v| v == "1");
+        let since = std::env::var(breaking::SHOWN_ENV).ok();
+        self.commit_shown(root, since.as_deref())
+    }
+
+    fn commit_shown(self, root: &Path, shown_since: Option<&str>) -> Notices {
+        let shown_since = shown_since.filter(|v| crate::plugin_root::is_plain_version(v));
         let mut notices = Notices {
             entries: Vec::new(),
             error: self.error,
@@ -161,10 +166,16 @@ impl Pending {
         })
         .unwrap_or_default();
         for m in self.moves {
-            let hidden = m.key == BINARY_KEY && shown_by_installer;
-            if moved.contains(&m.key) && !hidden {
-                notices.entries.extend(m.entries);
+            if !moved.contains(&m.key) {
+                continue;
             }
+            let shown = |e: &Entry| {
+                m.key == BINARY_KEY
+                    && shown_since.is_some_and(|v| compare(&e.version, v) == Ordering::Greater)
+            };
+            notices
+                .entries
+                .extend(m.entries.iter().filter(|e| !shown(e)).cloned());
         }
         notices
     }
@@ -236,6 +247,47 @@ mod tests {
         // Assert
         assert!(entries.is_empty());
         assert_eq!(shown(&root, BINARY_KEY), Ok(Some("999.0.0".into())));
+    }
+
+    #[test]
+    fn a_caller_that_showed_the_block_leaves_only_the_entries_at_or_below_its_start() {
+        // Arrange: each case starts from 0.0.0 in its own home.
+        let commit_with = |tag: &str, shown_since: Option<&str>| {
+            let (claude, root) = home(tag);
+            let notices = prepare(&root, &claude, None, None, true)
+                .commit_shown(&root, shown_since)
+                .entries;
+            (notices, shown(&root, BINARY_KEY))
+        };
+        let all = breaking::entries_between("0.0.0", RUNNING);
+        let first = all.first().expect("the embedded file lists an entry");
+        let at_or_below = |v: &str| -> Vec<Entry> {
+            all.iter()
+                .filter(|e| compare(&e.version, v) != Ordering::Greater)
+                .cloned()
+                .collect()
+        };
+
+        // Act
+        let shown_from_zero = commit_with("notices-shown-zero", Some("0.0.0"));
+        let shown_from_first = commit_with("notices-shown-first", Some(&first.version));
+        let nothing_shown = commit_with("notices-shown-empty", Some(""));
+        let not_a_version = commit_with("notices-shown-bad", Some("1"));
+
+        // Assert
+        assert!(shown_from_zero.0.is_empty());
+        assert_eq!(shown_from_first.0, at_or_below(&first.version));
+        assert!(shown_from_first.0.contains(first));
+        assert_eq!(nothing_shown.0, all);
+        assert_eq!(not_a_version.0, all);
+        for (_, recorded) in [
+            shown_from_zero,
+            shown_from_first,
+            nothing_shown,
+            not_a_version,
+        ] {
+            assert_eq!(recorded, Ok(Some(RUNNING.into())));
+        }
     }
 
     #[test]

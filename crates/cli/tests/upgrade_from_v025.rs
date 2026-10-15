@@ -547,7 +547,7 @@ fn the_breaking_changes_block_shows_once_in_the_session_and_on_stderr() {
     let second = session.session_message();
     let run = migrate.playbook(&["migrate"], "");
     let again = migrate.playbook(&["migrate"], "");
-    let quiet = shown.playbook_env(&["migrate"], "", &[("PLAYBOOK_BREAKING_SHOWN", "1")]);
+    let quiet = shown.playbook_env(&["migrate"], "", &[("PLAYBOOK_BREAKING_SHOWN", "0.0.0")]);
     let after = shown.playbook(&["migrate"], "");
     let first_run = start.playbook(&["mode", "status"], "");
     let later = start.playbook(&["mode", "status"], "");
