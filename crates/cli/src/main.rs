@@ -2309,7 +2309,7 @@ fn main() {
                     &update::verify::GhAttest,
                     &update::swap::run_version,
                 )?;
-                update::finish_with_heal(&mut outcome, &env.exe);
+                update::finish_with_heal(&mut outcome, &env);
                 if opts.check {
                     outcome
                         .out
@@ -2318,9 +2318,9 @@ fn main() {
                 Ok(outcome)
             });
             // Shown again after the swap and the heal, also when the heal
-            // failed (ADR 0035).
+            // failed (ADR 0037).
             if let Ok(outcome) = &result {
-                eprint!("{}", outcome.breaking);
+                eprint!("{}", outcome.notes);
             }
             match result {
                 Ok(outcome) if std::io::stdout().is_terminal() => {
