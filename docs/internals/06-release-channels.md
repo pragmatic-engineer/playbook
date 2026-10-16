@@ -100,7 +100,9 @@ the line in the `body` mode of `scripts/release-notes.sh` that prints it.
 `breaking-changes.json` is still attached, since the Homebrew tap and the
 automatic update read it until the binary reads `release-notes.json`
 (ADR 0037). No check fails a release for a breaking change: the notes list
-the commits marked breaking first.
+the commits marked breaking first. Until the binary reads
+`release-notes.json`, a breaking change to playbook also gets an entry in
+`breaking-changes.json`, so automatic updates hold the release.
 
 ## Credentials
 

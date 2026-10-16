@@ -39,7 +39,7 @@ jobs:
             echo "The title is not marked breaking."
             exit 0
           fi
-          if grep -Eq '^BREAKING[ -]CHANGE: *[^[:space:]]' <<<"$PR_BODY"; then
+          if grep -Eq '^BREAKING[ -]CHANGE: +[^[:space:]]' <<<"$PR_BODY"; then
             echo "The body has a BREAKING CHANGE footer."
             exit 0
           fi
