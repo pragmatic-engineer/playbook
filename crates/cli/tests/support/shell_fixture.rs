@@ -111,6 +111,7 @@ case "$url" in
     fi
     exit 0 ;;
   *raw.githubusercontent.com/*/install.sh)
+    [ -n "${STUB_INSTALLER_FILE:-}" ] || exit 22
     if [ -n "$out" ]; then cp "$STUB_INSTALLER_FILE" "$out"; else cat "$STUB_INSTALLER_FILE"; fi
     exit 0 ;;
   */releases/download/*/SHA256SUMS)

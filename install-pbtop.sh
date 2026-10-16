@@ -11,17 +11,21 @@
 # attestation when gh can check it, and `pbtop --version`, then installs pbtop
 # into PLAYBOOK_BIN_DIR (default $HOME/.local/bin) and puts that folder on
 # PATH. Nothing else runs. Run from a checkout, it uses the install.sh next
-# to it, else the one on main. Homebrew has the same binary as the `pbtop`
+# to it when that is playbook's and knows the pbtop mode, else the one on
+# main. Homebrew has the same binary as the `pbtop`
 # formula of pragmatic-engineer/tap.
 set -eu
 
 command -v bash >/dev/null 2>&1 || { echo "error: bash is required" >&2; exit 1; }
 
 case "$0" in
-    */install-pbtop.sh)
+    install-pbtop.sh | */install-pbtop.sh)
         here="$(cd "$(dirname "$0")" && pwd)"
-        if [ -f "$here/install.sh" ]; then
-            PLAYBOOK_INSTALL_ONLY=pbtop exec bash "$here/install.sh" "$@"
+        local_sh="$here/install.sh"
+        if [ -f "$local_sh" ] &&
+            grep -q '^RELEASE_REPO="pragmatic-engineer/playbook"$' "$local_sh" &&
+            grep -q PLAYBOOK_INSTALL_ONLY "$local_sh"; then
+            PLAYBOOK_INSTALL_ONLY=pbtop exec bash "$local_sh" "$@"
         fi
         ;;
 esac

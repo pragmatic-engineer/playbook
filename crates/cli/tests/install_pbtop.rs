@@ -55,11 +55,15 @@ struct Run {
 /// How the installer is started.
 #[derive(Clone, Copy)]
 enum Entry {
-    /// `sh install-pbtop.sh` in the checkout, next to install.sh.
+    /// `sh <checkout>/install-pbtop.sh`, next to install.sh.
     Script,
+    /// `sh install-pbtop.sh` run from the checkout folder.
+    ScriptHere,
     /// `sh` reading install-pbtop.sh on stdin, as `curl ... | sh` does, so it
     /// downloads install.sh.
     Piped,
+    /// As Piped, with the download of install.sh failing.
+    PipedFails,
     /// The old `install.sh --pbtop`.
     Flag,
 }
@@ -81,9 +85,17 @@ fn install_from(work: &Work, tarball: &Path, sums: &str, release: &str, entry: E
             c.arg(repo_root().join("install-pbtop.sh"));
             c
         }
-        Entry::Piped => {
+        Entry::ScriptHere => {
             let mut c = Command::new("sh");
-            c.stdin(fs::File::open(repo_root().join("install-pbtop.sh")).expect("script"));
+            c.arg("install-pbtop.sh").current_dir(repo_root());
+            c
+        }
+        Entry::Piped | Entry::PipedFails => {
+            let mut c = Command::new("sh");
+            let script = repo_root().join("install-pbtop.sh");
+            let file = fs::File::open(&script)
+                .unwrap_or_else(|e| panic!("open {}: {e}", script.display()));
+            c.stdin(file);
             c
         }
         Entry::Flag => {
@@ -92,6 +104,11 @@ fn install_from(work: &Work, tarball: &Path, sums: &str, release: &str, entry: E
             c
         }
     };
+    if matches!(entry, Entry::Piped) {
+        cmd.env("STUB_INSTALLER_FILE", repo_root().join("install.sh"));
+    } else {
+        cmd.env_remove("STUB_INSTALLER_FILE");
+    }
     let out = cmd
         .env(
             "PATH",
@@ -112,7 +129,6 @@ fn install_from(work: &Work, tarball: &Path, sums: &str, release: &str, entry: E
         .env("STUB_GH", "pass")
         .env("GH_LOG", &gh_log)
         .env("CURL_LOG", &curl_log)
-        .env("STUB_INSTALLER_FILE", repo_root().join("install.sh"))
         .env_remove("PLAYBOOK_REF")
         .env_remove("PLAYBOOK_INSTALL_ONLY")
         .output()
@@ -160,6 +176,11 @@ fn pbtop_alone_is_installed_from_its_own_verified_asset() {
     );
     assert!(!text.contains("playbook setup"), "{text}");
     assert!(text.contains("pbtop is installed to"), "{text}");
+    assert!(
+        !run.curl_log.contains("raw.githubusercontent.com"),
+        "a checkout run uses its own install.sh: {}",
+        run.curl_log
+    );
     let bashrc = fs::read_to_string(work.path("home/.bashrc")).unwrap_or_default();
     assert!(
         bashrc.contains(&run.bindir.display().to_string()),
@@ -296,4 +317,40 @@ fn the_old_pbtop_flag_still_works_and_names_the_new_script() {
     assert!(run.out.status.success(), "{text}");
     assert!(text.contains("use install-pbtop.sh"), "{text}");
     assert!(run.bindir.join("pbtop").exists());
+}
+
+#[test]
+fn a_run_from_the_checkout_folder_uses_the_install_sh_next_to_it() {
+    // Arrange
+    let work = Work::new("pbtop-here");
+    let (tarball, sums) = asset(&work, "1.2.3");
+
+    // Act
+    let run = install_from(&work, &tarball, &sums, RELEASE_BODY, Entry::ScriptHere);
+
+    // Assert
+    let text = both(&run.out);
+    assert!(run.out.status.success(), "{text}");
+    assert!(
+        !run.curl_log.contains("raw.githubusercontent.com"),
+        "{}",
+        run.curl_log
+    );
+    assert!(run.bindir.join("pbtop").exists());
+}
+
+#[test]
+fn a_piped_run_that_cannot_download_install_sh_fails_and_installs_nothing() {
+    // Arrange
+    let work = Work::new("pbtop-nodl");
+    let (tarball, sums) = asset(&work, "1.2.3");
+
+    // Act
+    let run = install_from(&work, &tarball, &sums, RELEASE_BODY, Entry::PipedFails);
+
+    // Assert
+    let text = both(&run.out);
+    assert!(!run.out.status.success(), "{text}");
+    assert!(text.contains("error: could not download"), "{text}");
+    assert!(!run.bindir.join("pbtop").exists());
 }
