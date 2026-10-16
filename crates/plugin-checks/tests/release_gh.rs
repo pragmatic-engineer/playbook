@@ -689,3 +689,39 @@ fn a_tag_or_release_that_is_not_a_version_is_refused_before_any_call() {
     );
     assert_eq!(gh.log(), "", "nothing is called");
 }
+
+#[test]
+fn the_release_state_is_none_only_when_github_says_not_found() {
+    // Arrange
+    let draft = FakeGh::new(&[("release view v1.0.0 --repo o/r *", 0, r#"{"isDraft":true}"#)]);
+    let public = FakeGh::new(&[(
+        "release view v1.0.0 --repo o/r *",
+        0,
+        r#"{"isDraft":false}"#,
+    )]);
+    let missing = FakeGh::new(&[("release view v1.0.0 --repo o/r *", 1, "release not found")]);
+    let broken = FakeGh::new(&[("release view v1.0.0 --repo o/r *", 1, "HTTP 502")]);
+    let args = ["state", "o/r", "v1.0.0"];
+
+    // Act
+    let d = draft.run(&draft.dir, &args);
+    let p = public.run(&public.dir, &args);
+    let m = missing.run(&missing.dir, &args);
+    let b = broken.run(&broken.dir, &args);
+
+    // Assert
+    assert_eq!(String::from_utf8_lossy(&d.stdout), "release=draft\n");
+    assert_eq!(String::from_utf8_lossy(&p.stdout), "release=published\n");
+    assert_eq!(String::from_utf8_lossy(&m.stdout), "release=none\n");
+    assert!(!b.status.success());
+    assert!(
+        text_of(&b).contains("could not read the release v1.0.0 in o/r: HTTP 502"),
+        "{}",
+        text_of(&b)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&b.stdout),
+        "",
+        "no state on a failed read"
+    );
+}

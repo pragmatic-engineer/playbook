@@ -1,6 +1,6 @@
 # ADR-0037: Release Notes Built from Conventional Commits
 
-- **Status:** Accepted. Decisions 1.1, 1.3, 2, 3 and 5.6 are amended by [ADR 0038](0038-one-release-line.md): the plugin ships in the `vX.Y.Z` release, so it has no component, release page, notes or version bump of its own, and its paths count for playbook.
+- **Status:** Accepted. Decisions 1.1, 1.3, 2, 3 and 5.6 are amended by [ADR 0038](0038-one-release-line.md): the plugin ships in the `vX.Y.Z` release, so it has no component, release page, notes or version bump of its own, and its paths count for playbook. Decision 2 is also amended by [ADR 0039](0039-release-workflow.md): the release starts from `workflow_dispatch`, not a pushed tag.
 - **Date created:** 2026-10-16
 - **Date modified:** 2026-10-16
 - **Supersedes:** [ADR 0035](0035-breaking-change-notices.md).

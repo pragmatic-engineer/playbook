@@ -1,6 +1,6 @@
 # ADR-0029: Keep the Rust Crates in One Cargo Workspace
 
-- **Status:** Accepted, amended by ADR 0030 (the plugin root no longer holds the skills, commands and agents) and by [ADR 0038](0038-one-release-line.md) (decisions 4 and 5: `playbook-telemetry` joins the `v` release line)
+- **Status:** Accepted, amended by ADR 0030 (the plugin root no longer holds the skills, commands and agents) and by [ADR 0038](0038-one-release-line.md) (decisions 4 and 5: `playbook-telemetry` joins the `v` release line), and by [ADR 0039](0039-release-workflow.md) (decision 6: the release opens the tap pull request)
 - **Date created:** 2026-10-13
 - **Date modified:** 2026-10-16
 
