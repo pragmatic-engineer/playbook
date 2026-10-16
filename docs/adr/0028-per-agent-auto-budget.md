@@ -1,8 +1,8 @@
 # ADR-0028: Budget Auto Mode Per Agent, With the Closing Steps Allowed at a Cap
 
-- **Status:** Accepted
+- **Status:** Accepted, amended on 2026-10-17 (new default caps, below)
 - **Date created:** 2026-10-12
-- **Date modified:** 2026-10-12
+- **Date modified:** 2026-10-17
 
 ## Context
 
@@ -37,3 +37,28 @@ Claude Code puts `agent_id` in the hook input of a tool call made inside a subag
 
 - Two config keys are added, and both are locked like the other `auto.*` keys.
 - Skills that change their Bash blocks must keep the closing list in step. A test runs the literal blocks.
+
+## Amendment, 2026-10-17: default caps from measured spend
+
+The default of 5 for both budgets parked normal work. A real user's sessions cost tens to hundreds of dollars a day, so a session in auto mode hit its cap early and stopped.
+
+**What is counted.** The main session's cap is checked against its own transcript only. Two paths still count the whole tree: when the main transcript holds a model missing from the price table, the hook falls back to the status line cost, which covers every agent; and the ceiling, which was ten times 5, so $50 for the tree.
+
+**Measured basis.** 30 days of one heavy user's transcripts (207 sessions, $5,234 in total by `playbook usage --range 30d`), priced with playbook's own price table and the hook's own rule (the largest cost per message id):
+
+| Measure | p50 | p90 | p95 | p99 | max |
+|---|---|---|---|---|---|
+| Main transcript, sessions of $1 or more (30) | $33 | $131 | $199 | $284 | $284 |
+| Whole tree, sessions of $1 or more (30) | $73 | $300 | $462 | $1,358 | $1,358 |
+| One subagent (3,083) | $0.42 | $1.33 | $2.32 | $10.63 | $99 |
+
+**New defaults.**
+
+1. `auto.budgetUsd` is 200, the p95 of the main transcript of a real session, rounded up.
+2. `auto.agentBudgetUsd` is 50. Only 3 of the 3,083 subagents cost more, so the cap stops a runaway agent and leaves normal ones alone.
+3. `auto.sessionCeilingUsd` keeps 0, meaning ten times `auto.budgetUsd`, so $2,000. That is above the largest measured tree.
+4. `playbook config set` refuses a set ceiling below `auto.budgetUsd` or `auto.agentBudgetUsd`, and a budget above a set ceiling, since such a ceiling parks every agent before its own cap. A ceiling of 0 is not checked.
+5. A denial says which cap was hit and gives the exact command to raise it, with double the current cap, for example `playbook config set auto.budgetUsd 400`.
+6. Migration `0017-auto-budget-defaults` (`Auto`, `Owned`, ADR 0034) moves a stored budget of exactly 5, in any tier, to the new default once. It runs on the first use of any command and through `playbook migrate`. Any other stored value stays. A store with no budget gets no write, since the key already resolves to the new default. The config store is playbook's own file, so the migration is `Owned`. A user who chose 5 on purpose before this change gets the new default too; after the migration has run, a value of 5 set again stays.
+
+These numbers come from one user. A team with cheaper sessions can lower the caps with `playbook config set`.

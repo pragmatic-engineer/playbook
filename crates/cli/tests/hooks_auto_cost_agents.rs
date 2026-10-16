@@ -53,10 +53,22 @@ impl Tree {
     /// default), whose baseline call has already run on an empty main
     /// transcript.
     fn new(tag: &str, budget: f64, agent_budget: f64, ceiling: f64) -> Self {
+        Self::with_config(
+            tag,
+            json!({"mode": "auto", "auto": {
+                "budgetUsd": budget, "agentBudgetUsd": agent_budget,
+                "sessionCeilingUsd": ceiling, "warnPct": 70}}),
+        )
+    }
+
+    /// An auto session that stores no `auto.*` key, so every cap is the
+    /// built-in default.
+    fn with_defaults(tag: &str) -> Self {
+        Self::with_config(tag, json!({"mode": "auto"}))
+    }
+
+    fn with_config(tag: &str, config: Value) -> Self {
         let s = scratch(tag);
-        let config = json!({"mode": "auto", "auto": {
-            "budgetUsd": budget, "agentBudgetUsd": agent_budget,
-            "sessionCeilingUsd": ceiling, "warnPct": 70}});
         auto_env::seed_raw_global_config(&s.home, &config.to_string());
         let tree = Tree {
             s,
@@ -390,7 +402,7 @@ fn new_work_is_denied_at_a_cap_and_the_reason_names_the_unblocking_commands() {
             // Assert
             let reason = outcome.reason();
             assert!(
-                reason.contains(&format!("`playbook config set {key} <usd>`")),
+                reason.contains(&format!("`playbook config set {key} 10`")),
                 "{label}: {reason}"
             );
             assert!(reason.contains("`playbook mode ask`"), "{label}: {reason}");
@@ -418,7 +430,7 @@ fn at_the_ceiling_every_caller_is_parked_and_the_closing_steps_continue() {
         for denied in [&spawn, &edit, &build] {
             let reason = denied.reason();
             assert!(
-                reason.contains("`playbook config set auto.sessionCeilingUsd <usd>`"),
+                reason.contains("`playbook config set auto.sessionCeilingUsd 20`"),
                 "{reason}"
             );
             assert!(reason.contains("`playbook mode ask`"), "{reason}");
@@ -533,6 +545,77 @@ fn the_ceiling_defaults_to_ten_times_the_main_cap() {
     // Assert
     assert!(!under.is_denied(), "36.00 is under 50.00: {under:?}");
     assert!(over.reason().contains("$50.00"), "{over:?}");
+}
+
+#[test]
+fn the_default_caps_allow_the_spend_the_old_five_dollar_cap_denied() {
+    // Arrange: no auto key is stored, so the main cap is 200.00, each agent
+    // cap 50.00 and the ceiling 2000.00.
+    let tree = Tree::with_defaults("default-caps");
+    tree.spend_main(20.0);
+    tree.spend_agent("a1", 20.0);
+
+    // Act
+    let main = new_work_call(&tree, None, "Edit", "");
+    let agent = new_work_call(&tree, Some("a1"), "Edit", "");
+
+    // Assert
+    assert!(!main.is_denied(), "20.00 is under the main cap: {main:?}");
+    assert!(
+        !agent.is_denied(),
+        "20.00 is under the agent cap: {agent:?}"
+    );
+}
+
+#[test]
+fn the_default_caps_still_park_a_caller_past_its_new_cap() {
+    // Arrange: rows are (caller, spend, the command the reason names)
+    let rows = [
+        (None, 200.0, "`playbook config set auto.budgetUsd 400`"),
+        (
+            Some("a1"),
+            50.0,
+            "`playbook config set auto.agentBudgetUsd 100`",
+        ),
+    ];
+    for (n, (agent, usd, command)) in rows.into_iter().enumerate() {
+        let tree = Tree::with_defaults(&format!("default-caps-hit-{n}"));
+        match agent {
+            None => tree.spend_main(usd),
+            Some(id) => tree.spend_agent(id, usd),
+        }
+
+        // Act
+        let outcome = new_work_call(&tree, agent, "Edit", "");
+
+        // Assert
+        let reason = outcome.reason();
+        assert!(reason.contains("budget reached"), "{agent:?}: {reason}");
+        assert!(reason.contains(command), "{agent:?}: {reason}");
+    }
+}
+
+#[test]
+fn the_default_ceiling_is_ten_times_the_default_main_cap() {
+    // Arrange: 45 agents at 45.00 each is 2025.00, each under its own cap.
+    let tree = Tree::with_defaults("default-ceiling");
+    for n in 0..44 {
+        tree.spend_agent(&format!("x{n}"), 45.0);
+    }
+    let under = new_work_call(&tree, None, "Agent", "");
+    tree.spend_agent("x44", 45.0);
+
+    // Act
+    let over = new_work_call(&tree, None, "Agent", "");
+
+    // Assert
+    assert!(!under.is_denied(), "1980.00 is under 2000.00: {under:?}");
+    let reason = over.reason();
+    assert!(reason.contains("$2000.00"), "{reason}");
+    assert!(
+        reason.contains("`playbook config set auto.sessionCeilingUsd 4000`"),
+        "{reason}"
+    );
 }
 
 #[test]

@@ -71,6 +71,14 @@ pub enum ConfigError {
         value: String,
         constraint: &'static str,
     },
+    /// A spend cap and the session ceiling would be out of order: a set
+    /// `auto.sessionCeilingUsd` below `auto.budgetUsd` or
+    /// `auto.agentBudgetUsd`. `reason` says which and how to fix it.
+    CapOrder {
+        key: String,
+        value: String,
+        reason: String,
+    },
     /// A write targeted the org or repo tier but no `repo_slug` was
     /// available to build that tier's path from.
     MissingRepoContext,
@@ -122,6 +130,9 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "config key {key} does not accept '{value}', must be {constraint}"
             ),
+            ConfigError::CapOrder { key, value, reason } => {
+                write!(f, "config key {key} does not accept '{value}': {reason}")
+            }
             ConfigError::MissingRepoContext => write!(
                 f,
                 "could not resolve a repo-scoped config location; repo_slug is unresolved, \

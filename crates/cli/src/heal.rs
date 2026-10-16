@@ -294,7 +294,7 @@ fn run_shown(ctx: &Ctx, trigger: Trigger, now: u64, shown: bool) -> Outcome {
     let pending = crate::notices::prepare(&root, record.binary.as_deref(), older);
     let out = heal_for(ctx, trigger, now, &root, &record, order);
     // Every trigger but setup prints the open items, so the one reminder of
-    // migration 0016 counts as shown here. Setup asks the question itself.
+    // migration 0017 counts as shown here. Setup asks the question itself.
     let reminded = out
         .open
         .iter()

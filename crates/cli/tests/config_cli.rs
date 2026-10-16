@@ -502,7 +502,8 @@ fn set_writes_valid_auto_and_fix_values_including_a_fractional_budget() {
         ("auto.budgetUsd", "2.5"),
         ("auto.agentBudgetUsd", "0.5"),
         ("auto.sessionCeilingUsd", "0"),
-        ("auto.sessionCeilingUsd", "40"),
+        ("auto.sessionCeilingUsd", "200"),
+        ("auto.sessionCeilingUsd", "4000"),
         ("auto.warnPct", "100"),
         ("fix.maxFiles", "99"),
         ("fix.maxLines", "1"),
@@ -516,6 +517,79 @@ fn set_writes_valid_auto_and_fix_values_including_a_fractional_budget() {
         // Assert
         assert!(out.status.success(), "{key} {value}: {}", stderr_of(&out));
         assert_eq!(stored(&home)["global"][key].to_string(), value, "{key}");
+    }
+}
+
+#[test]
+fn set_keeps_a_set_session_ceiling_at_or_above_both_budgets() {
+    // Arrange: rows are (stored first, then the set, whether it is accepted,
+    // what a refusal must say). The defaults are 200 and 50.
+    type Row<'a> = (&'a [(&'a str, &'a str)], (&'a str, &'a str), bool, &'a str);
+    let rows: [Row; 7] = [
+        (
+            &[],
+            ("auto.sessionCeilingUsd", "199.99"),
+            false,
+            "below auto.budgetUsd (200)",
+        ),
+        (&[], ("auto.sessionCeilingUsd", "200"), true, ""),
+        (
+            &[("auto.budgetUsd", "10")],
+            ("auto.sessionCeilingUsd", "40"),
+            false,
+            "below auto.agentBudgetUsd (50)",
+        ),
+        (
+            &[("auto.budgetUsd", "10"), ("auto.agentBudgetUsd", "5")],
+            ("auto.sessionCeilingUsd", "40"),
+            true,
+            "",
+        ),
+        (
+            &[("auto.sessionCeilingUsd", "300")],
+            ("auto.budgetUsd", "301"),
+            false,
+            "Raise the ceiling first",
+        ),
+        (
+            &[("auto.sessionCeilingUsd", "300")],
+            ("auto.agentBudgetUsd", "300"),
+            true,
+            "",
+        ),
+        (
+            &[("auto.sessionCeilingUsd", "0")],
+            ("auto.budgetUsd", "5000"),
+            true,
+            "",
+        ),
+    ];
+    for (n, (before, (key, value), accepted, message)) in rows.into_iter().enumerate() {
+        let home = scratch_dir(&format!("cap-order-{n}"));
+        for (k, v) in before {
+            assert!(
+                set_global(&home, k, v).status.success(),
+                "{n}: seed {k} {v}"
+            );
+        }
+
+        // Act
+        let out = set_global(&home, key, value);
+
+        // Assert
+        let stderr = stderr_of(&out);
+        assert_eq!(
+            out.status.success(),
+            accepted,
+            "{n}: {key} {value}: {stderr}"
+        );
+        assert!(stderr.contains(message), "{n}: {key} {value}: {stderr}");
+        if !accepted {
+            assert!(
+                stored(&home)["global"].get(key).is_none(),
+                "{n}: nothing may be written"
+            );
+        }
     }
 }
 

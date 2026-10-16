@@ -1477,7 +1477,38 @@ fn auto_cost_alone_allows_ask_user_question_under_the_cap() {
 }
 
 #[test]
-fn an_invalid_budget_in_the_config_falls_back_to_five_with_a_one_time_note() {
+fn the_default_main_cap_allows_five_to_twenty_dollars_and_denies_at_two_hundred() {
+    // Arrange: only the mode is stored, so the default cap of 200 applies
+    let session = Session::auto("default-cap");
+    session.baseline_then_report("5.00");
+
+    // Act and Assert: the old cap of 5 and up to 20 deny nothing
+    for usd in ["5.00", "12.50", "20.00"] {
+        session.append_telemetry(usd);
+        assert_eq!(session.bash("npm test"), Outcome::Silent, "{usd}");
+    }
+
+    // Act and Assert: one cent under the new cap only warns
+    session.append_telemetry("199.99");
+    assert!(
+        !session.bash("npm test").is_denied(),
+        "199.99 denies nothing"
+    );
+
+    // Act and Assert: the new cap denies new work and says how to raise it
+    session.append_telemetry("200.00");
+    let denied = session.bash("npm test");
+    let reason = denied.reason("200.00 reaches the cap");
+    assert!(reason.contains("$200.00"), "reason: {reason}");
+    assert!(reason.contains("`auto.budgetUsd`"), "reason: {reason}");
+    assert!(
+        reason.contains("`playbook config set auto.budgetUsd 400`"),
+        "reason: {reason}"
+    );
+}
+
+#[test]
+fn an_invalid_budget_in_the_config_falls_back_to_the_default_with_a_one_time_note() {
     // Arrange: rows are the invalid values a hand-edited file can hold
     let rows = [json!(0), json!("banana"), json!(-3), json!(0.004)];
     for (n, invalid) in rows.into_iter().enumerate() {
@@ -1489,7 +1520,9 @@ fn an_invalid_budget_in_the_config_falls_back_to_five_with_a_one_time_note() {
         let first = session.bash("npm test");
         session.append_telemetry("1.00");
         let second = session.bash("npm test");
-        session.append_telemetry("5.00");
+        session.append_telemetry("20.00");
+        let past_the_old_cap = session.bash("npm test");
+        session.append_telemetry("200.00");
         let at_default_cap = session.bash("npm test");
 
         // Assert
@@ -1498,9 +1531,10 @@ fn an_invalid_budget_in_the_config_falls_back_to_five_with_a_one_time_note() {
         };
         assert!(note.contains("auto.budgetUsd"), "{invalid}: {note}");
         assert!(note.contains("0.01"), "{invalid}: {note}");
-        assert!(note.contains("$5"), "{invalid}: {note}");
+        assert!(note.contains("$200.00"), "{invalid}: {note}");
         assert_eq!(second, Outcome::Silent, "{invalid}: the note is one-time");
-        at_default_cap.reason(&format!("{invalid}: the default cap of 5 applies"));
+        assert!(!past_the_old_cap.is_denied(), "{invalid}: 20.00 is allowed");
+        at_default_cap.reason(&format!("{invalid}: the default cap of 200 applies"));
     }
 }
 
@@ -1746,9 +1780,11 @@ fn an_unpriced_model_is_tolerated_when_telemetry_reports_the_cost() {
 
 #[test]
 fn a_config_that_turns_unreadable_mid_session_keeps_the_cap_on() {
-    // Arrange: a session at its cap whose config file then becomes garbage
+    // Arrange: a session at its cap whose config file then becomes garbage,
+    // so the default cap of 200 applies, and the spend reaches it
     let session = Session::at_budget("config-broken", AutoFrom::Config);
     auto_env::seed_raw_global_config(&session.s.home, "{not json");
+    session.append_telemetry("200.00");
 
     // Act
     let bash = session.bash("npm test");

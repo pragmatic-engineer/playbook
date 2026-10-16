@@ -31,6 +31,7 @@ pub fn set(
 ) -> Result<(), ConfigError> {
     validate_key_and_value(key, &value)?;
     require_global_for_user_key(key, tier == Tier::Global)?;
+    check_cap_order(key, &value, home, repo_slug)?;
     let root = crate::common::paths::playbook_root_from(home);
     super::store::put(&root, tier, repo_slug, key, &value)
 }
@@ -170,6 +171,58 @@ fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
     Ok(())
 }
 
+const CEILING_KEY: &str = "auto.sessionCeilingUsd";
+const BUDGET_KEYS: [&str; 2] = ["auto.budgetUsd", "auto.agentBudgetUsd"];
+
+/// Keep a set `auto.sessionCeilingUsd` at least as large as `auto.budgetUsd`
+/// and `auto.agentBudgetUsd`, since a lower ceiling parks every agent before
+/// its own cap is reached. A ceiling of 0 means ten times `auto.budgetUsd`
+/// and is not checked. The other keys are read as they resolve for
+/// `repo_slug`, and a value that cannot be read leaves the write alone.
+fn check_cap_order(
+    key: &str,
+    value: &Value,
+    home: &Path,
+    repo_slug: Option<&str>,
+) -> Result<(), ConfigError> {
+    if key != CEILING_KEY && !BUDGET_KEYS.contains(&key) {
+        return Ok(());
+    }
+    let usd = |other: &str| {
+        if other == key {
+            value.as_f64()
+        } else {
+            super::resolve(other, home, repo_slug)
+                .ok()
+                .and_then(|(value, _)| value.as_f64())
+        }
+    };
+    let Some(ceiling) = usd(CEILING_KEY).filter(|ceiling| *ceiling > 0.0) else {
+        return Ok(());
+    };
+    let Some((budget_key, budget)) = BUDGET_KEYS
+        .iter()
+        .filter_map(|budget_key| Some((*budget_key, usd(budget_key)?)))
+        .find(|(_, budget)| *budget > ceiling)
+    else {
+        return Ok(());
+    };
+    let reason = if key == CEILING_KEY {
+        format!(
+            "it is below {budget_key} ({budget}). Set it to 0 (ten times auto.budgetUsd) or to at least {budget}"
+        )
+    } else {
+        format!(
+            "it is above auto.sessionCeilingUsd ({ceiling}). Raise the ceiling first with `playbook config set auto.sessionCeilingUsd <usd>`, or set it to 0 (ten times auto.budgetUsd)"
+        )
+    };
+    Err(ConfigError::CapOrder {
+        key: key.to_string(),
+        value: value.to_string(),
+        reason,
+    })
+}
+
 /// `auto.budgetUsd` and `auto.agentBudgetUsd` take any number of at least one cent, since the spend cap
 /// is held in whole cents, so a fractional budget works.
 /// `usage.budget.*Usd` takes any number from 0 (no budget).
@@ -187,7 +240,7 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
             value
                 .as_f64()
                 .is_some_and(|n| n.is_finite() && (n == 0.0 || n >= 0.01)),
-            "0 (ten times auto.budgetUsd) or a number of at least 0.01",
+            "0 (ten times auto.budgetUsd) or a number of at least 0.01 that is not below auto.budgetUsd or auto.agentBudgetUsd",
         ),
         "usage.budget.monthlyUsd" | "usage.budget.weeklyUsd" => (
             value
