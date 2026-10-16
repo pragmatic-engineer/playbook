@@ -37,9 +37,14 @@ gh workflow run release.yml -f bump=patch                   # or minor, major, o
 
 It opens the release pull request with `scripts/bump-version.sh` and the changelog section, waits for the merge queue, tags the merged commit, builds and attests the assets, publishes the release as the latest and checks it. When a run fails, run it again with `-f version=X.Y.Z`: it goes on from where it stopped. [Release channels](docs/internals/06-release-channels.md) has the details and the rollback steps.
 
-### Compatibility policy
+### Breaking changes before 1.0
 
-Every release is backward compatible, or ships a migration that runs on first use ([ADR-0034](docs/adr/0034-self-healing-upgrades.md)). A release that still changes what a user sees or does is a breaking change. Mark its commit with `!` after the type or a `BREAKING CHANGE:` footer, and add an entry to `breaking-changes.json` at the repository root with the version, the component (`playbook`, `plugin` or `telemetry`), a one line summary, the action the user takes (or `none, migrated automatically`) and the migration id or `null`. A unit test checks the format of the file. The `breaking-changes` pull request check and the `plan` job of the release workflow fail when a marked change has no entry, and `scripts/check-breaking.sh` runs the same checks locally. A `plugin` entry also needs a copy under `metadata.breakingChanges` in `plugins/playbook/.claude-plugin/plugin.json`, which `scripts/check-breaking.sh mirror` checks. A `plugin` entry uses the version of the `vX.Y.Z` release that ships it. [ADR-0035](docs/adr/0035-breaking-change-notices.md) says how each update channel shows the entries.
+Playbook is before 1.0, so a breaking change can ship in any release. A change is breaking when a user who upgrades has to do something, or when something they use stops working or works in a new way.
+
+- Mark it with `!` after the type or scope in the pull request title, as in `feat(cli)!: drop the old flag`, or with a `BREAKING CHANGE:` footer at the end of the body. The title and body become the squash commit.
+- Give the footer one line that says what breaks and what to do, as in `BREAKING CHANGE: the config moved; run playbook setup`. The `breaking-changes` check warns when the title is marked and the body has no footer.
+- The release notes list breaking changes first ([ADR-0037](docs/adr/0037-release-notes-from-conventional-commits.md)). `scripts/release-notes.sh` builds them from the commits.
+- A change to playbook's own config, its data files, the entries it writes into Claude Code settings, or the contract between the binary and the plugin keeps working after an upgrade or ships a migration that runs on first use ([ADR-0034](docs/adr/0034-self-healing-upgrades.md)).
 
 Renaming a command is a deprecation. Keep the old name as a hidden alias that runs the same code, prints one line on stderr in a terminal that names the new command, and keeps its exit codes. Since the old name keeps working, the commit is not marked breaking. Remove the alias no earlier than the next major release, and mark that removal as breaking. The rename to `playbook setup` is the example ([ADR-0040](docs/adr/0040-rename-init-to-setup.md)).
 
@@ -50,7 +55,7 @@ The skills, commands, agents and output style live in `plugins/playbook` and shi
 - Keep the folder to markdown and `plugin.json`. The `payload-guard` check fails on anything else.
 - Do not bump the plugin version. The plugin ships with the next `vX.Y.Z` release, which sets one version for the binary and the plugin ([ADR-0038](docs/adr/0038-one-release-line.md)). Claude Code updates an installed plugin only when that version rises, so a plugin fix reaches users with the next release.
 - When prose needs a task from the binary, name the task in plain words and list its intent in `intents.json`. Do not write a subcommand into the prose. The `intents-contract` check compares the list with `playbook tools map`.
-- Run `cargo test -p playbook-plugin-checks` for the prose and structure checks, `scripts/check-plugin.sh payload` for the payload, and `scripts/check-breaking.sh mirror` for the breaking changes copy in `plugin.json`.
+- Run `cargo test -p playbook-plugin-checks` for the prose and structure checks, and `scripts/check-plugin.sh payload` for the payload.
 
 ### Editing agents
 
