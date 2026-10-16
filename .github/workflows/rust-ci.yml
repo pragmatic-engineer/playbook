@@ -173,6 +173,10 @@ jobs:
       # macOS condition matches runs-on above and reads only the event, and
       # a missing docs_only output counts as not docs-only, so it fails open.
       LANE: ${{ needs.changes.outputs.docs_only != 'true' && (matrix.os != 'macos-latest' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v') || (inputs.ref || '') != '') }}
+      # Whether this leg saves the cargo cache: Linux after a push to main,
+      # macOS after a daily or manual run on main, the runs that build it
+      # there. A release gate never saves, so it does not slow the release.
+      SAVE_CACHE: ${{ (github.event_name == 'push' && matrix.os == 'ubuntu-latest') || (matrix.os == 'macos-latest' && github.ref == 'refs/heads/main' && (inputs.ref || '') == '' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) }}
       # Single source of truth for the cache key and the install command
       # below, so they can't drift apart. Bump deliberately, not implicitly.
       CARGO_AUDIT_VERSION: "0.22.2"
@@ -207,6 +211,7 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" | tee -a "$GITHUB_OUTPUT"
 
       - name: Cache cargo registry and build output (build-test)
+        id: cargo
         if: env.LANE == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -257,9 +262,10 @@ jobs:
         if: env.LANE == 'true'
         run: cargo nextest run ${{ needs.changes.outputs.pkgs || '--workspace' }} --no-tests=pass --config-file .github/nextest.toml --profile ci
 
-      # nextest does not run doctests. Only selected crates with a fenced
-      # block in a doc comment, or docs read from a file, can have one, and
-      # `cargo test --doc` builds every selected crate again to find out.
+      # nextest does not run doctests, and `cargo test --doc` builds every
+      # selected crate again to look for them. This runs it only for crates
+      # with a ``` or ~~~ fence in a /// or //! comment, a /** or /*! block,
+      # or a doc attribute. An indented code block alone is not detected.
       - name: cargo test --doc (crates with doctests)
         if: env.LANE == 'true'
         env:
@@ -270,7 +276,7 @@ jobs:
           for toml in crates/*/Cargo.toml; do
             dir="${toml%/Cargo.toml}"
             [ -d "$dir/src" ] || continue
-            grep -rqE '^[[:space:]]*(//[/!].*```|#!?\[doc[^]]*include_str)' "$dir/src" || continue
+            grep -rqE '^[[:space:]]*(//[/!].*(```|~~~)|/\*[*!]|#!?\[(cfg_attr\(.*)?doc *=)' "$dir/src" || continue
             name="$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$toml" | head -1)"
             case " $PKGS " in *" --workspace "*|*" -p $name "*) sel="$sel -p $name" ;; esac
           done
@@ -349,27 +355,27 @@ jobs:
       # The key changes only with Cargo.lock and the toolchain, and almost
       # every change rebuilds the workspace crates, so the cache keeps only
       # what dependencies need: their compiled output and the downloaded
-      # crate files. The workspace outputs, the test and bin executables and
-      # the unpacked sources (cargo unpacks them again from the downloads)
-      # only made the restore slower.
+      # crate files. Every output of a workspace unit (named by the hash in
+      # its .fingerprint folder), the incremental data and the unpacked
+      # sources (cargo unpacks them again from the downloads) go. Outputs of
+      # dependency versions Cargo.lock no longer uses stay until the key
+      # version is bumped.
       - name: Trim the cargo cache before saving
         id: trim
-        if: env.LANE == 'true' && success() && ((github.event_name == 'push' && runner.os == 'Linux') || (runner.os == 'macOS' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')))
+        if: env.SAVE_CACHE == 'true' && success() && steps.cargo.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           du -sh target ~/.cargo/registry
           rm -rf ~/.cargo/registry/src target/debug/incremental target/debug/examples
           find target/debug -maxdepth 1 -type f -delete
-          find target/debug/deps -maxdepth 1 -type f ! -name '*.*' -delete
-          for d in target/debug/deps target/debug/.fingerprint target/debug/build; do
-            find "$d" -maxdepth 1 \( -name 'playbook*' -o -name 'libplaybook*' -o -name 'pbtop*' \) -exec rm -rf {} +
+          for f in target/debug/.fingerprint/playbook*-* target/debug/.fingerprint/pbtop*-*; do
+            [ -e "$f" ] || continue
+            find target/debug/deps -maxdepth 1 -name "*-${f##*-}*" -delete
+            rm -rf "$f"
           done
+          rm -rf target/debug/build/playbook*-* target/debug/build/pbtop*-*
           du -sh target ~/.cargo/registry
 
-      # Linux saves after a push to main. macOS saves after a daily or manual
-      # run on main, the runs that build it there. Every other run restores
-      # the main cache and skips the save. A key that exists is not saved
-      # again.
       - name: Save cargo registry and build output (build-test)
         if: steps.trim.outcome == 'success'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -378,7 +384,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-build-test-v3-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: ${{ steps.cargo.outputs.cache-primary-key }}
 
   # Cheap lane for docs-only changes: the only cargo tests that read docs
   # (generated reference page drift, config-key coverage, README and index
@@ -406,8 +412,8 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Saved only by a push to main, like the other lanes, so a pull
-      # request does not store a copy only its own runs can read.
+      # Saved only by a push to main, so a pull request does not store a
+      # copy only its own runs can read. v2: built without debug info.
       - name: Restore cargo registry and build output (docs-checks)
         id: cargo
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -416,9 +422,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-docs-checks-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: cargo-docs-checks-v2-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
-            cargo-docs-checks-${{ runner.os }}-
+            cargo-docs-checks-v2-${{ runner.os }}-
 
       - name: cargo test (doc-reading tests only)
         run: cargo test -p playbook --test reference_docs
@@ -461,7 +467,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Saved only by a push to main, so a pull request does not store a
-      # copy (about 350 MB) only its own runs can read.
+      # copy (about 350 MB) only its own runs can read. v2: built without
+      # debug info.
       - name: Restore cargo registry and build output (windows-check)
         id: cargo
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -470,9 +477,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-windows-check-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: cargo-windows-check-v2-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
-            cargo-windows-check-${{ runner.os }}-
+            cargo-windows-check-v2-${{ runner.os }}-
 
       - name: cargo check (lib and bin)
         run: cargo check --workspace --bins --lib
