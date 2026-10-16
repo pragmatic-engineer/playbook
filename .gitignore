@@ -14,6 +14,7 @@
 !/SECURITY.md
 !/Brewfile
 !/install.sh
+!/install-pbtop.sh
 !/justfile
 !/prompts/
 !/plugins/

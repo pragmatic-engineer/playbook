@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 18] = [
+const ALLOW_FILES: [&str; 19] = [
     ".gitignore",
     "CHANGELOG.md",
     "intents.json",
@@ -28,6 +28,7 @@ const ALLOW_FILES: [&str; 18] = [
     "Brewfile",
     "justfile",
     "install.sh",
+    "install-pbtop.sh",
     "settings.shared.json",
     "permissions.shared.json",
     "CODE_OF_CONDUCT.md",
