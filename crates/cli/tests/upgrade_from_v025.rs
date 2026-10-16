@@ -542,6 +542,7 @@ fn the_release_notes_line_shows_once_in_the_session_and_on_stderr() {
     let line = notes_line();
     let session = ran_before("notice-hook");
     let migrate = ran_before("notice-migrate");
+    let shown = ran_before("notice-shown");
     let start = ran_before("notice-start");
 
     // Act
