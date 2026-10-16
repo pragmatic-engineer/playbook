@@ -930,7 +930,9 @@ mod tests {
         old_db(&r, "mode", "\"auto\"", 10);
         fs::create_dir_all(r.join("data").join("config.db.migrate.lock")).unwrap();
 
-        assert_eq!(global(&r, "mode"), Some(json!("auto")));
+        let mode = playbook_data::migrate::with_test_lock_retries(2, || global(&r, "mode"));
+
+        assert_eq!(mode, Some(json!("auto")));
 
         assert!(!db_path(&r).exists(), "no empty config.db was created");
         assert!(legacy_db_path(&r).exists());

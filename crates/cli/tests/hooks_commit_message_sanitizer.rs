@@ -150,17 +150,23 @@ fn every_commit_message_form_is_stored_clean() {
             ),
         ),
     ];
-    for (name, command) in cases {
-        let lab = Lab::new("commit-forms");
-        let head = lab.commit_through_hook(&command);
-        assert_no_attribution(&head);
-        assert!(head.starts_with("feat: x"), "{name}: header lost: {head:?}");
-        assert!(
-            head.contains("Refs: 1"),
-            "{name}: human trailer lost: {head:?}"
-        );
-        assert!(head.contains("body line"), "{name}: body lost: {head:?}");
-    }
+    // One thread per form: each one makes a repository and runs the hook and
+    // git, and one after another they took 10 s on a macOS runner.
+    std::thread::scope(|s| {
+        for (name, command) in &cases {
+            s.spawn(move || {
+                let lab = Lab::new("commit-forms");
+                let head = lab.commit_through_hook(command);
+                assert_no_attribution(&head);
+                assert!(head.starts_with("feat: x"), "{name}: header lost: {head:?}");
+                assert!(
+                    head.contains("Refs: 1"),
+                    "{name}: human trailer lost: {head:?}"
+                );
+                assert!(head.contains("body line"), "{name}: body lost: {head:?}");
+            });
+        }
+    });
 }
 
 #[test]

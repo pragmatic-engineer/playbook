@@ -744,20 +744,36 @@ fn every_command_has_a_smoke_entry() {
 fn every_command_prints_help_and_exits_zero_with_no_stderr() {
     let paths = all_paths();
     let top = vec!["--help".to_string()];
-    let env = Env::new(true);
-    let mut failures = Vec::new();
     let mut runs = vec![top];
     for p in &paths {
         let mut args = p.clone();
         args.push("--help".to_string());
         runs.push(args);
     }
-    for args in &runs {
-        let r = env.run(args, "");
-        if r.code != 0 || r.stdout.trim().is_empty() || !r.stderr.is_empty() {
-            failures.push(format!("{args:?}: {r:?}"));
-        }
-    }
+    // Eight threads, each with its own home: one after another the runs took
+    // 11 s on a macOS runner.
+    let failures: Vec<String> = std::thread::scope(|s| {
+        let workers: Vec<_> = runs
+            .chunks(runs.len().div_ceil(8))
+            .map(|chunk| {
+                s.spawn(move || {
+                    let env = Env::new(true);
+                    let mut bad = Vec::new();
+                    for args in chunk {
+                        let r = env.run(args, "");
+                        if r.code != 0 || r.stdout.trim().is_empty() || !r.stderr.is_empty() {
+                            bad.push(format!("{args:?}: {r:?}"));
+                        }
+                    }
+                    bad
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().expect("help thread"))
+            .collect()
+    });
     assert!(
         failures.is_empty(),
         "help failures:\n{}",
