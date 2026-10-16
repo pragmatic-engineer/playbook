@@ -35,6 +35,11 @@
 #     Creates the published GitHub release for <tag> as the latest release,
 #     unless a release for <tag> exists. For the downstream repositories,
 #     whose release has no assets. Prints url=<release page>.
+#
+#   release-gh.sh state <repo> <tag>
+#     Prints release=none, draft or published for the release of <tag>.
+#     Only "release not found" means none. Any other error fails, so a
+#     failed read is never taken for a missing release.
 set -euo pipefail
 
 fail() { echo "FAIL $*" >&2; exit 1; }
@@ -43,7 +48,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 usage() {
-  echo "usage: release-gh.sh pr <repo> <branch> <title> <body-file> <dir> <file>... | wait <repo> <pr> <seconds> | tag <repo> <tag> <sha> | release <repo> <tag> <title> <notes-file>" >&2
+  echo "usage: release-gh.sh pr <repo> <branch> <title> <body-file> <dir> <file>... | wait <repo> <pr> <seconds> | tag <repo> <tag> <sha> | release <repo> <tag> <title> <notes-file> | state <repo> <tag>" >&2
   exit 2
 }
 
@@ -230,6 +235,23 @@ release() {
   printf 'url=%s\n' "$url"
 }
 
+state() {
+  [ "$#" -eq 2 ] || usage
+  local repo="$1" tag="$2" out
+  [[ "$tag" =~ $TAG ]] || fail "'$tag' is not a release tag vX.Y.Z"
+  if out="$(gh release view "$tag" --repo "$repo" --json isDraft --jq .isDraft 2>"$TMP/err")"; then
+    case "$out" in
+      true) echo "release=draft" ;;
+      false) echo "release=published" ;;
+      *) fail "could not read the release $tag in $repo: $out" ;;
+    esac
+  elif grep -qx 'release not found' "$TMP/err"; then
+    echo "release=none"
+  else
+    fail "could not read the release $tag in $repo: $(tr '\n' ' ' < "$TMP/err")"
+  fi
+}
+
 cmd="${1:-}"
 [ "$#" -gt 0 ] && shift
 case "$cmd" in
@@ -237,5 +259,6 @@ case "$cmd" in
   wait) wait_merged "$@" ;;
   tag) tag "$@" ;;
   release) release "$@" ;;
+  state) state "$@" ;;
   *) usage ;;
 esac

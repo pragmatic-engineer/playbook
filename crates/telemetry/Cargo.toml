@@ -3,7 +3,7 @@
 
 [package]
 name = "playbook-telemetry"
-version = "0.2.0"
+version.workspace = true
 edition.workspace = true
 description = "Token and cost usage dashboard for Claude Code sessions: a terminal view, reports and an optional telemetry receiver"
 license.workspace = true
