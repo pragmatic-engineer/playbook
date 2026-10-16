@@ -801,7 +801,7 @@ mod tests {
         Cache::update(&held_root, |c| {
             c.held = Some(Held {
                 version: "0.27.0".into(),
-                reason: "this release has breaking changes that need you".into(),
+                reason: "this release has breaking changes; run playbook update to see them".into(),
                 until: u64::MAX,
             })
         })
@@ -826,7 +826,7 @@ mod tests {
         );
         assert!(
             held_lines[0].ends_with(
-                "(auto update skipped: this release has breaking changes that need you)"
+                "(auto update skipped: this release has breaking changes; run playbook update to see them)"
             ),
             "{held_lines:?}"
         );

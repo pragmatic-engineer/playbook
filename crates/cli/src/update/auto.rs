@@ -11,7 +11,6 @@ use super::check::{stamp, Cache, Held, Settings, UpdateMode};
 use super::download::Fetcher;
 use super::verify::Attest;
 use super::{Env, Options, Outcome};
-use crate::breaking::{self, Component, Entry};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -33,9 +32,6 @@ const BUSY_RETRY_SECS: u64 = 3600;
 /// How long a hold lasts when its cause can go away on its own, such as a
 /// network error or a missing `gh`.
 const DAY_HOLD_SECS: u64 = 24 * 3600;
-
-/// The release asset that lists breaking changes (ADR 0035).
-const BREAKING_ASSET: &str = "breaking-changes.json";
 
 /// The facts about this install that decide whether auto may run.
 #[derive(Debug, Clone)]
@@ -146,59 +142,13 @@ pub fn try_lock(root: &Path) -> Result<UpdateLock, LockError> {
     }
 }
 
-/// Whether a fetch error is a plain not found, which for this asset means
-/// a release from before ADR 0035 attached it.
-fn is_not_found(err: &str) -> bool {
-    err.contains("404")
-}
-
-/// The playbook entries between `from` and `to` from the release's own
-/// `breaking-changes.json`, checked against its SHA256SUMS. The running
-/// binary cannot know about later releases, so the record comes from the
-/// target release. Only a release without the asset has no known entries;
-/// any other failure, a playbook entry this binary cannot read included, is
-/// an error so auto holds the release.
-pub fn breaking_entries(
-    fetcher: &dyn Fetcher,
-    download_base: &str,
-    from: &str,
-    to: &str,
-) -> Result<Vec<Entry>, String> {
-    let base = format!("{download_base}/v{to}");
-    let body = match fetcher.get(&format!("{base}/{BREAKING_ASSET}")) {
-        Ok(body) => body,
-        Err(err) if is_not_found(&err) => return Ok(Vec::new()),
-        Err(err) => return Err(err),
-    };
-    let sums = fetcher.get(&format!("{base}/SHA256SUMS"))?;
-    super::verify::verify_checksum(&body, &String::from_utf8_lossy(&sums), BREAKING_ASSET)?;
-    let doc: serde_json::Value =
-        serde_json::from_slice(&body).map_err(|e| format!("{BREAKING_ASSET}: {e}"))?;
-    let raw = doc["entries"]
-        .as_array()
-        .ok_or_else(|| format!("{BREAKING_ASSET} has no entries list"))?;
-    let entries = breaking::lenient(raw);
-    let playbook = |c: &serde_json::Value| c.as_str() == Some(Component::Playbook.name());
-    let raw_playbook = raw.iter().filter(|v| playbook(&v["component"])).count();
-    let read_playbook = entries
-        .iter()
-        .filter(|e| e.component == Component::Playbook)
-        .count();
-    if read_playbook != raw_playbook {
-        return Err(format!(
-            "{BREAKING_ASSET} has a playbook entry this version cannot read"
-        ));
-    }
-    Ok(breaking::select(&entries, Component::Playbook, from, to))
-}
-
 /// What the detached process uses to install. Tests pass fakes.
 pub struct Deps<'a> {
     pub env: &'a Env,
     pub fetcher: &'a dyn Fetcher,
     pub attest: &'a dyn Attest,
     pub smoke: &'a dyn Fn(&Path) -> Result<String, String>,
-    pub heal: &'a dyn Fn(&mut Outcome, &Path),
+    pub heal: &'a dyn Fn(&mut Outcome, &Env),
     pub install: Install,
     pub now: u64,
 }
@@ -272,19 +222,34 @@ pub fn apply(root: &Path, settings: Settings, deps: &Deps) {
     if claimed != Ok(true) {
         return;
     }
-    let entries = match breaking_entries(deps.fetcher, &deps.env.download_base, current, &latest) {
-        Ok(entries) => entries,
+    // The release's own notes (ADR 0037 decision 5.2). A release without
+    // them has no known breaking change.
+    let base = format!("{}/v{latest}", deps.env.download_base);
+    let notes = match crate::release_notes::fetch(deps.fetcher, &base, &latest, None) {
+        Ok(notes) => notes,
         Err(err) => {
             hold(
-                &format!("its breaking changes could not be read ({err})"),
+                &format!("its release notes could not be read ({err})"),
                 deps.now + DAY_HOLD_SECS,
             );
             return;
         }
     };
-    if entries.iter().any(Entry::needs_user) {
-        hold("this release has breaking changes that need you", u64::MAX);
-        return;
+    if let Some(notes) = &notes {
+        if notes.breaking().next().is_some() {
+            hold(
+                "this release has breaking changes; run playbook update to see them",
+                u64::MAX,
+            );
+            return;
+        }
+        if notes.skips_releases_after(current) {
+            hold(
+                "it crosses releases whose notes were not checked; run playbook update",
+                u64::MAX,
+            );
+            return;
+        }
     }
     let opts = Options {
         version: Some(latest.clone()),
@@ -297,8 +262,11 @@ pub fn apply(root: &Path, settings: Settings, deps: &Deps) {
     };
     let report = match super::run(&opts, deps.env, deps.fetcher, &attest, deps.smoke) {
         Ok(mut outcome) if outcome.installed.is_some() => {
-            (deps.heal)(&mut outcome, &deps.env.exe);
-            success_report(current, &latest, &entries, &outcome)
+            // Nobody saw the notes of a detached run, so the heal and the
+            // first run still show the release.
+            outcome.notes_shown = false;
+            (deps.heal)(&mut outcome, deps.env);
+            success_report(current, &latest, &outcome)
         }
         Ok(_) => return,
         Err(_) if attest.gap.borrow().is_some() => {
@@ -340,9 +308,8 @@ pub fn run_detached(root: &Path, settings: Settings) {
     apply(root, settings, &deps);
 }
 
-fn success_report(from: &str, to: &str, entries: &[Entry], outcome: &Outcome) -> Vec<String> {
-    let mut lines = vec![format!("playbook updated from {from} to {to}")];
-    lines.extend(breaking::render(entries).lines().map(str::to_string));
+fn success_report(from: &str, to: &str, outcome: &Outcome) -> Vec<String> {
+    let mut lines = vec![crate::release_notes::updated_line(Some(from), to)];
     lines.extend(outcome.warnings.iter().map(|w| format!("warning: {w}")));
     lines
 }
@@ -414,6 +381,7 @@ mod tests {
             current_version: "0.16.0".into(),
             api_base: API.into(),
             download_base: DL.into(),
+            root: dir.join("root"),
             announce: |_| {},
         };
         let bin = script("0.17.0");
@@ -436,17 +404,31 @@ mod tests {
         (root, env, f)
     }
 
-    /// Attaches a breaking changes record to the fake 0.17.0 release, with
+    const NOTES_ASSET: &str = crate::release_notes::ASSET;
+
+    /// Release notes for the fake 0.17.0 release with `previous` and the
+    /// items of the breaking section.
+    fn notes(previous: &str, breaking: &str) -> String {
+        format!(
+            r#"{{"format":1,"component":"playbook","version":"0.17.0","tag":"v0.17.0",
+            "previous":"{previous}","date":"2026-10-16","sections":[
+            {{"name":"breaking","title":"Breaking changes","items":[{breaking}]}}]}}"#
+        )
+    }
+
+    /// Attaches `body` as the release notes of the fake 0.17.0 release, with
     /// its line in SHA256SUMS.
-    fn with_record(f: &mut FakeFetcher, entry: &str) {
-        let record = format!(r#"{{"entries":[{entry}]}}"#).into_bytes();
+    fn with_notes(f: &mut FakeFetcher, body: &str) {
         let bin = script("0.17.0");
         let sums = format!(
-            "{}  {ASSET}\n{}  {BREAKING_ASSET}\n",
+            "{}  {ASSET}\n{}  {NOTES_ASSET}\n",
             verify::sha256_hex(&bin),
-            verify::sha256_hex(&record)
+            verify::sha256_hex(body.as_bytes())
         );
-        f.0.insert(format!("{DL}/v0.17.0/{BREAKING_ASSET}"), record);
+        f.0.insert(
+            format!("{DL}/v0.17.0/{NOTES_ASSET}"),
+            body.as_bytes().to_vec(),
+        );
         f.0.insert(format!("{DL}/v0.17.0/SHA256SUMS"), sums.into_bytes());
     }
 
@@ -508,7 +490,10 @@ mod tests {
         // Assert
         assert_eq!(installed(&env), "playbook 0.17.0");
         let cache = Cache::read(&root).unwrap();
-        assert_eq!(cache.report, vec!["playbook updated from 0.16.0 to 0.17.0"]);
+        assert_eq!(
+            cache.report,
+            vec![crate::release_notes::updated_line(Some("0.16.0"), "0.17.0")]
+        );
         assert!(cache.tried.unwrap().starts_with("0.17.0@"));
     }
 
@@ -519,18 +504,23 @@ mod tests {
         run_apply(&root, &env, &fetcher);
         assert_eq!(
             Cache::read(&root).unwrap().report,
-            vec!["earlier", "playbook updated from 0.16.0 to 0.17.0"]
+            vec![
+                "earlier".to_string(),
+                crate::release_notes::updated_line(Some("0.16.0"), "0.17.0")
+            ]
         );
     }
 
     #[test]
-    fn breaking_changes_that_need_the_user_hold_the_update() {
+    fn a_release_with_breaking_changes_waits_for_the_user() {
         // Arrange
         let (root, env, mut fetcher) = setup("auto-breaking");
-        with_record(
+        with_notes(
             &mut fetcher,
-            r#"{"version":"0.17.0","component":"playbook",
-                "summary":"The hook layout changed","action":"playbook setup"}"#,
+            &notes(
+                "0.16.0",
+                r#"{"text":"The hook layout changed; run playbook setup","pr":3}"#,
+            ),
         );
 
         // Act
@@ -540,48 +530,61 @@ mod tests {
         assert_eq!(installed(&env), "playbook 0.16.0");
         let cache = Cache::read(&root).unwrap();
         assert!(cache
-            .held_reason("0.17.0", LATER)
+            .held_reason("0.17.0", u64::MAX - 1)
             .unwrap()
-            .contains("breaking changes that need you"));
+            .contains("breaking changes"));
         assert!(cache.report.is_empty());
     }
 
     #[test]
-    fn automatic_breaking_changes_install_and_show_in_the_report() {
-        let (root, env, mut fetcher) = setup("auto-breaking-ok");
-        with_record(
-            &mut fetcher,
-            r#"{"version":"0.17.0","component":"playbook",
-                "summary":"The state moved to config.db","action":"none, migrated automatically",
-                "migration":"0099-state"}"#,
-        );
+    fn a_release_after_one_this_binary_did_not_see_waits_for_the_user() {
+        // Arrange: the notes start at 0.16.5, so 0.16.5 itself was skipped.
+        let (root, env, mut fetcher) = setup("auto-skipped");
+        with_notes(&mut fetcher, &notes("0.16.5", ""));
+
+        // Act
         run_apply(&root, &env, &fetcher);
-        let report = Cache::read(&root).unwrap().report.join("\n");
-        assert!(report.contains("updated from 0.16.0 to 0.17.0"), "{report}");
-        assert!(report.contains("The state moved to config.db"), "{report}");
+
+        // Assert
+        assert_eq!(installed(&env), "playbook 0.16.0");
+        let reason = Cache::read(&root)
+            .unwrap()
+            .held_reason("0.17.0", u64::MAX - 1)
+            .map(str::to_string);
+        assert!(reason.is_some_and(|r| r.contains("not checked")));
     }
 
     #[test]
-    fn a_record_that_cannot_be_trusted_holds_the_update() {
+    fn notes_without_breaking_changes_install_and_name_the_notes_in_the_report() {
+        let (root, env, mut fetcher) = setup("auto-notes-ok");
+        with_notes(&mut fetcher, &notes("0.16.0", ""));
+        run_apply(&root, &env, &fetcher);
+        assert_eq!(installed(&env), "playbook 0.17.0");
+        let report = Cache::read(&root).unwrap().report.join("\n");
+        assert!(
+            report.contains("updated from 0.16.0 to 0.17.0. Release notes: https://"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn notes_that_cannot_be_trusted_hold_the_update_for_a_day() {
         for (tag, change) in [
-            ("auto-record-sum", 0),
-            ("auto-record-entry", 1),
-            ("auto-record-net", 2),
+            ("auto-notes-sum", 0),
+            ("auto-notes-format", 1),
+            ("auto-notes-net", 2),
         ] {
             // Arrange
             let (root, env, mut fetcher) = setup(tag);
-            with_record(
-                &mut fetcher,
-                r#"{"version":"0.17.0","component":"playbook","summary":"x","action":"none, migrated automatically","migration":"m"}"#,
-            );
-            let url = format!("{DL}/v0.17.0/{BREAKING_ASSET}");
+            with_notes(&mut fetcher, &notes("0.16.0", ""));
+            let url = format!("{DL}/v0.17.0/{NOTES_ASSET}");
             match change {
                 0 => {
-                    fetcher.0.insert(url, br#"{"entries":[]}"#.to_vec());
+                    fetcher.0.insert(url, b"{}".to_vec());
                 }
-                1 => with_record(
+                1 => with_notes(
                     &mut fetcher,
-                    r#"{"version":"0.17.0","component":"playbook","summary":"x","action":"none, migrated automatically"}"#,
+                    &notes("0.16.0", "").replace(r#""format":1"#, r#""format":2"#),
                 ),
                 _ => {
                     fetcher.0.remove(&format!("{DL}/v0.17.0/SHA256SUMS"));
@@ -593,15 +596,17 @@ mod tests {
 
             // Assert
             assert_eq!(installed(&env), "playbook 0.16.0", "{tag}");
-            let reason = Cache::read(&root)
-                .unwrap()
-                .held_reason("0.17.0", LATER)
-                .map(str::to_string);
+            let cache = Cache::read(&root).unwrap();
+            let reason = cache.held_reason("0.17.0", LATER).map(str::to_string);
             assert!(
                 reason
                     .as_deref()
                     .is_some_and(|r| r.contains("could not be read")),
                 "{tag}: {reason:?}"
+            );
+            assert!(
+                cache.held_reason("0.17.0", LATER + DAY_HOLD_SECS).is_none(),
+                "{tag}"
             );
         }
     }
