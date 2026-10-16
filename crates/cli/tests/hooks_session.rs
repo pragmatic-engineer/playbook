@@ -2439,7 +2439,7 @@ fn session_init_names_the_setup_command_for_a_pending_settings_change() {
     fs::write(
         &settings,
         format!(
-            r#"{{"statusLine":{{"type":"command","command":"bash {}"}}}}"#,
+            r#"{{"attribution":{{"commit":"","pr":"","sessionUrl":false}},"statusLine":{{"type":"command","command":"bash {}"}}}}"#,
             script.display()
         ),
     )

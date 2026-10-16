@@ -1,7 +1,7 @@
 ---
 description: Use on first install or to repair the local setup. Wires safety guards, settings.json, launchers and system prompt.
 allowed-tools: Bash, Read, AskUserQuestion
-argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--aliases|--no-aliases] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--claude-override|--no-claude-override] [--short-name|--no-short-name] [--help] [--auto] [--ask]"
+argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--aliases|--no-aliases] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--claude-override|--no-claude-override] [--short-name|--no-short-name] [--attribution-off|--no-attribution-off] [--help] [--auto] [--ask]"
 model: haiku
 effort: low
 ---
@@ -44,13 +44,13 @@ Take `$ARGUMENTS` word by word:
 - Replace the old names this command used, keeping what they meant: `--install-aliases` becomes `--yes --aliases`, and `--use-system-prompt` becomes `--yes --aliases --system-prompt`. Say so in one line.
 - Every other word must be a flag from the Flags table below, or the value after `--only` or `--explain`. A value is part names from the Questions table or `security`, joined by commas. When a word is neither, stop with one line that names it and points to `/playbook:setup --help`. Ask nothing and run nothing.
 
-The rest of this file calls the kept words the arguments. A part flag is any flag in the Flags table from `--hooks` to `--no-short-name`. When you build a command, put each argument in single quotes.
+The rest of this file calls the kept words the arguments. A part flag is any flag in the Flags table from `--hooks` to `--no-attribution-off`. When you build a command, put each argument in single quotes.
 
 ## Step 3: Runs that ask nothing
 
 These runs ask no question in a terminal either, so pass the arguments straight to the binary:
 
-- The arguments hold `--dry-run` or `--explain`: run `playbook setup` with the arguments, print the output verbatim, and stop. Neither changes any part. When the arguments hold `--dry-run` and none of `--yes`, `-y`, `--defaults` or `--only`, add one line after the output: "This session has no terminal, so this preview shows the hooks, the status line and telemetry off unless a flag turns them on. Answering the questions with the defaults turns them on."
+- The arguments hold `--dry-run` or `--explain`: run `playbook setup` with the arguments, print the output verbatim, and stop. Neither changes any part. When the arguments hold `--dry-run` and none of `--yes`, `-y`, `--defaults` or `--only`, add one line after the output: "This session has no terminal, so this preview shows the hooks, the status line, telemetry and the attribution setting off unless a flag turns them on. Answering the questions with the defaults turns them on."
 - The arguments hold `--yes`, `-y`, `--defaults` or `--only`, or `--telemetry` with no other part flag (a bare `--telemetry` means `--only telemetry`): the user already chose. Go to Step 6 with the arguments as they are.
 
 Otherwise go on to Step 4.
@@ -137,7 +137,9 @@ The same flags as `playbook setup`, with the same text as `playbook setup --help
 | `--no-claude-override` | Do not turn on the `claude` shell function |
 | `--short-name` | Add `pb` as a short name for `playbook`, only when `pb` is free (recorded in playbook own config) |
 | `--no-short-name` | Do not add the `pb` short name |
-| `--only <PART>...` | Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on |
+| `--attribution-off` | Turn off the commit, PR and session link attribution Claude Code adds (sets `attribution` in settings.json) |
+| `--no-attribution-off` | Do not set or change attribution in settings.json |
+| `--only <PART>...` | Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on |
 | `-y`, `--yes`, `--defaults` | Never ask: use the default for every part you did not answer with a flag |
 | `--dry-run` | Print what would change for each part and change nothing |
 | `--explain [<PART>]` | Describe a part, or every part when none is named, and change nothing |
@@ -159,5 +161,6 @@ The questions `playbook setup` asks in a terminal, in its order, with its defaul
 | 6 | `telemetry` | Telemetry | Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting that `playbook setup` will not change) | Yes | No variables are written. `playbook usage` reads transcripts instead. |
 | 7 | `claude-override` | claude | Make a plain `claude` load the playbook system prompt every time (it replaces Claude Code's built-in prompt), and pass calls that use their own flags straight to Claude Code? This sets `launcher.claudeOverride` in ~/.config/playbook. No Claude Code setting or memory is changed. | No | `claude` stays the plain Claude Code command. |
 | 8 | `short-name` | Short name | Add `pb` as a short name for `playbook`? It is added only when `pb` is not already a command, alias or function on your machine. This sets `launcher.shortName` in ~/.config/playbook. | No | `pb` is not defined. Use `playbook` in full. |
+| 9 | `attribution-off` | Attribution | Turn off the attribution Claude Code adds to commits and pull requests (the Co-Authored-By trailer, the generated-by line and the claude.ai session link) by setting `attribution` in ~/.claude/settings.json? | Yes | Claude Code keeps adding its attribution. The commit-message-sanitizer hook still strips it from commits and PRs when the hooks are on. |
 
 The security part is never asked about, in a terminal or here. It runs only with `--security` or when `security.defaults` is true.

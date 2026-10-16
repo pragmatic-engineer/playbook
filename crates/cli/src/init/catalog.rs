@@ -125,6 +125,16 @@ pub const PARTS: &[Part] = &[
         undo: "Run `playbook config set launcher.shortName false`.",
     },
     Part {
+        id: "attribution-off",
+        asked: true,
+        default_on: true,
+        flags: "--attribution-off, --no-attribution-off",
+        question: "Turn off the attribution Claude Code adds to commits and pull requests (the Co-Authored-By trailer, the generated-by line and the claude.ai session link) by setting `attribution` in ~/.claude/settings.json?",
+        does: "Sets `attribution` to `{\"commit\": \"\", \"pr\": \"\", \"sessionUrl\": false}` in ~/.claude/settings.json. Only missing keys are added. A key that holds your own value is replaced only on a yes to this question or `--attribution-off`; `--yes` and `--only attribution-off` keep it. A no is remembered, so playbook stops reminding you. A project or managed settings file can still set its own value.",
+        changes: "~/.claude/settings.json (the attribution key)",
+        undo: "Delete the attribution key from ~/.claude/settings.json. A backup of settings.json is saved next to it.",
+    },
+    Part {
         id: "memory-migration",
         asked: false,
         default_on: true,

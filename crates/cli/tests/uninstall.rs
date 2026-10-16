@@ -153,6 +153,12 @@ fn removes_everything_init_placed_and_keeps_the_users_own_content() {
     assert_eq!(settings["theme"], "dark");
     assert_eq!(hook_commands(&settings), vec!["my-own".to_string()]);
     assert!(settings.get("statusLine").is_none());
+    assert_eq!(settings["attribution"]["sessionUrl"], false);
+    assert!(
+        text(&out).contains("kept the attribution key"),
+        "{}",
+        text(&out)
+    );
     for gone in [
         ".config/playbook/statusline.sh",
         ".config/playbook/prompts/SYSTEM_PROMPT.md",

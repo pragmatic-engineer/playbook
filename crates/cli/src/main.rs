@@ -524,6 +524,9 @@ fn main() {
                 if !choices.statusline && !flags.statusline && !flags.no_statusline {
                     left_off.push("status line");
                 }
+                if !choices.attribution_off && !flags.attribution_off && !flags.no_attribution_off {
+                    left_off.push("attribution-off");
+                }
                 if !choices.telemetry
                     && !flags.telemetry
                     && !flags.no_telemetry
@@ -533,11 +536,15 @@ fn main() {
                         "setup: no terminal and no --yes, so telemetry was not turned on. To turn it on, run: playbook setup --only telemetry"
                     );
                 }
-                if !left_off.is_empty() {
+                if let Some((last, rest)) = left_off.split_last() {
+                    let list = if rest.is_empty() {
+                        (*last).to_string()
+                    } else {
+                        format!("{} and {last}", rest.join(", "))
+                    };
                     eprintln!(
                         "setup: no terminal and no --yes, so these were left out of your Claude Code \
-                         settings: {}. To add them, run: playbook setup --yes",
-                        left_off.join(" and ")
+                         settings: {list}. To add them, run: playbook setup --yes"
                     );
                 }
             }
@@ -592,6 +599,11 @@ fn main() {
                 only: only_run,
                 claude_override: choices.claude_override,
                 short_name: choices.short_name,
+                attribution: init::choices::attribution_choice(
+                    &flags,
+                    choices.attribution_off,
+                    asking,
+                ),
             };
             if flags.dry_run {
                 print!("{}", init::preview::dry_run(&paths, &choices));
@@ -2049,11 +2061,31 @@ fn main() {
         Command::Doctor {
             fix: true,
             sub: None,
-        } => std::process::exit(playbook::migrate_cli::run(
-            &common::home_dir(),
-            playbook::migrate_cli::Mode::Run,
-            false,
-        )),
+        } => {
+            let home = common::home_dir();
+            // The one settings change doctor --fix makes, and only after a yes
+            // at a terminal (ADR 0042). It runs first, so the heal report and
+            // record below see the answer.
+            let fixed = init::attribution::fix_with_consent(
+                &home,
+                &home.join(".claude").join("settings.json"),
+                init::choices::stdio_is_interactive(),
+                &mut init::attribution::ask_on_terminal,
+            );
+            let failed = match fixed {
+                Ok(Some(step)) => {
+                    println!("{}", step.render());
+                    false
+                }
+                Ok(None) => false,
+                Err(err) => {
+                    eprintln!("doctor --fix: {err}");
+                    true
+                }
+            };
+            let code = playbook::migrate_cli::run(&home, playbook::migrate_cli::Mode::Run, false);
+            std::process::exit(if failed { 1 } else { code });
+        }
         Command::Migrate {
             status,
             dry_run,

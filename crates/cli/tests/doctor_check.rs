@@ -1338,3 +1338,56 @@ fn doctor_says_when_no_release_check_has_run() {
     );
     assert!(!rows.contains("WARN"), "{rows}");
 }
+
+fn attribution_row(rows: &[Value]) -> &Value {
+    rows.iter()
+        .find(|r| r["message"].as_str().unwrap().starts_with("attribution"))
+        .expect("an attribution row")
+}
+
+#[test]
+fn doctor_reports_the_attribution_key_ok_missing_or_your_own() {
+    // Arrange
+    let off = Box::new("attr-off");
+    off.settings(r#"{"attribution":{"commit":"","pr":"","sessionUrl":false}}"#);
+    let missing = Box::new("attr-missing");
+    missing.settings(r#"{"attribution":{"commit":""}}"#);
+    let custom = Box::new("attr-custom");
+    custom.settings(r#"{"attribution":{"commit":"mine","pr":"","sessionUrl":false}}"#);
+    let mixed = Box::new("attr-mixed");
+    mixed.settings(r#"{"attribution":{"commit":"mine"}}"#);
+
+    // Act
+    let off = off.run_with_env(&[]);
+    let missing = missing.run_with_env(&[]);
+    let custom = custom.run_with_env(&[]);
+    let mixed = mixed.run_with_env(&[]);
+
+    // Assert
+    assert_eq!(attribution_row(&off)["level"], "PASS");
+    let row = attribution_row(&missing);
+    assert_eq!(row["level"], "WARN");
+    assert!(
+        row["message"].as_str().unwrap().contains("pr, sessionUrl"),
+        "{row}"
+    );
+    assert!(row["hint"]
+        .as_str()
+        .unwrap()
+        .contains("playbook setup --only attribution-off"));
+    let row = attribution_row(&custom);
+    assert_eq!(row["level"], "INFO");
+    assert!(row["hint"]
+        .as_str()
+        .unwrap()
+        .contains("--only attribution-off --attribution-off"));
+    let row = attribution_row(&mixed);
+    assert_eq!(row["level"], "WARN");
+    assert!(
+        row["hint"]
+            .as_str()
+            .unwrap()
+            .contains("your own values stay"),
+        "{row}"
+    );
+}
