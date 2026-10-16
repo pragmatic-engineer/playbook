@@ -6,6 +6,13 @@
       "summary": "Plugin 0.28 and later need playbook 0.26 or later, because an older binary cannot find the plugin files and skills fail with 'could not find the plugin root folder'.",
       "action": "brew upgrade playbook or playbook update",
       "migration": null
+    },
+    {
+      "version": "0.35.0",
+      "component": "plugin",
+      "summary": "/playbook:setup now takes the flags of playbook setup with the same meaning, so a bare --yes no longer adds the launcher and the system prompt.",
+      "action": "/playbook:setup --yes --aliases --system-prompt",
+      "migration": null
     }
   ]
 }

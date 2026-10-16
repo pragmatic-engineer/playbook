@@ -69,8 +69,9 @@ fn extra_lines(id: &str) -> Vec<String> {
     }
 }
 
-/// What happens when the part is declined.
-fn decline_line(id: &str) -> &'static str {
+/// What happens when the part is declined. `/playbook:setup` shows the same
+/// line, and a test keeps the two in step.
+pub fn decline_line(id: &str) -> &'static str {
     match id {
         "hooks" => "No hooks are added. The safety guards, session helpers and usage warm-up do not run.",
         "statusline" => "Your status line stays as it is.",
@@ -165,14 +166,13 @@ pub fn summary_detail(item: &Item, on: bool) -> String {
     }
 }
 
+/// The text that opens the guided run, also shown by `/playbook:setup`.
+pub const WELCOME: &str = "This walks through each change playbook can make to your machine. Nothing is written until you confirm at the end. playbook never changes Claude Code's memory, and it edits settings.json only for the parts you accept.";
+
 /// What opens the guided run.
 pub fn welcome(caps: &Caps) -> String {
     let mut out = render::heading(caps, "playbook setup");
-    out.push_str(&render::wrap(
-        "This walks through each change playbook can make to your machine. Nothing is written until you confirm at the end. playbook never changes Claude Code's memory, and it edits settings.json only for the parts you accept.",
-        caps.width,
-        0,
-    ));
+    out.push_str(&render::wrap(WELCOME, caps.width, 0));
     out.push_str("\n\nPress Enter to take the answer in capitals. Keys: y, n, b (back), s (default), q (quit).\n");
     out
 }
