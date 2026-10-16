@@ -109,7 +109,7 @@ fn seed_skeleton(dir: &Path) {
     add_file(dir, "LICENSE");
     add_file(dir, "settings.shared.json");
     add_file(dir, "permissions.shared.json");
-    add_file(dir, "shell/worktree.zsh");
+    add_file(dir, "scripts/check-links.sh");
     add_file(dir, "prompts/system.md");
     add_file(dir, "docs/index.md");
     add_file(dir, ".github/workflows/ci.yml");
@@ -204,14 +204,14 @@ fn new_disallowed_top_level_directory_fails() {
 }
 
 /// The other half of the same check: an allowlisted top-level directory
-/// (`skills/`, not exercised by `seed_skeleton`) must still pass.
+/// (`crates/`, not exercised by `seed_skeleton`) must still pass.
 #[test]
 fn allowlisted_top_level_directory_passes() {
     with_isolated_git_env(|| {
         let repo = scratch("allowed-dir");
         init_repo(&repo);
         seed_skeleton(&repo);
-        add_file(&repo, "skills/example/SKILL.md");
+        add_file(&repo, "crates/example/src/lib.rs");
         commit_repo(&repo);
 
         let out = run(&repo);

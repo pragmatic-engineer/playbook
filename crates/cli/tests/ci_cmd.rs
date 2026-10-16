@@ -57,25 +57,26 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(out.status.success(), "git {args:?} failed");
 }
 
-/// A tiny checkout: the plugin marker and a copy of the real `agents/`, with
-/// one agent given a model the validator rejects.
+/// A tiny checkout: the plugin marker and a copy of the fixture agents under
+/// `plugins/playbook`, with one agent given a model the validator rejects.
 fn failing_checkout(tag: &str) -> PathBuf {
     let dir = scratch(tag);
     git(&dir, &["init", "-q"]);
-    fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
+    let plugin = dir.join("plugins/playbook");
+    fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
     fs::copy(
         fixture_plugin().join(".claude-plugin/plugin.json"),
-        dir.join(".claude-plugin/plugin.json"),
+        plugin.join(".claude-plugin/plugin.json"),
     )
     .unwrap();
-    fs::create_dir_all(dir.join("agents")).unwrap();
+    fs::create_dir_all(plugin.join("agents")).unwrap();
     for entry in fs::read_dir(fixture_plugin().join("agents"))
         .unwrap()
         .flatten()
     {
-        fs::copy(entry.path(), dir.join("agents").join(entry.file_name())).unwrap();
+        fs::copy(entry.path(), plugin.join("agents").join(entry.file_name())).unwrap();
     }
-    let critic = dir.join("agents/critic.md");
+    let critic = plugin.join("agents/critic.md");
     let text = fs::read_to_string(&critic).unwrap();
     assert!(text.contains("model: sonnet"), "fixture assumption");
     fs::write(&critic, text.replace("model: sonnet", "model: gpt")).unwrap();
@@ -98,6 +99,22 @@ fn one_failing_check_exits_one_and_names_the_problem() {
         .stdout
         .contains("SKIP settings: no shared settings templates"));
     assert_eq!(*lines.last().unwrap(), "ci: 1 passed, 1 failed, 1 skipped");
+}
+
+#[test]
+fn this_repository_passes_every_check() {
+    let run = ci(
+        Path::new(env!("PLAYBOOK_REPO_ROOT")),
+        &scratch("home-repo"),
+        &["--strict"],
+    );
+
+    assert_eq!(run.code, 0, "{}", run.stdout);
+    assert!(
+        run.stdout.ends_with("ci: 3 passed, 0 failed, 0 skipped"),
+        "{}",
+        run.stdout
+    );
 }
 
 #[test]
