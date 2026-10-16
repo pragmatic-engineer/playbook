@@ -19,6 +19,20 @@ const CACHE_DIR: &str = "plugins/cache/pragmatic-engineer/playbook";
 const ORPHAN_MARKER: &str = ".orphaned_at";
 const PLUGIN_NAME: &str = "playbook";
 
+/// Where the plugin files sit inside the playbook source checkout.
+const CHECKOUT_PLUGIN_DIR: &str = "plugins/playbook";
+
+/// The plugin folder inside the checkout at `root`: `plugins/playbook` when
+/// it exists, else `root` itself, for a checkout that holds only the plugin.
+pub fn in_checkout(root: &Path) -> PathBuf {
+    let nested = root.join(CHECKOUT_PLUGIN_DIR);
+    if nested.is_dir() {
+        nested
+    } else {
+        root.to_path_buf()
+    }
+}
+
 /// Where a resolved directory came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
@@ -473,6 +487,20 @@ mod tests {
             env,
             cwd: Path::new("/nowhere"),
         })
+    }
+
+    #[test]
+    fn in_checkout_finds_the_nested_plugin_folder() {
+        let root = scratch_dir("in-checkout-nested");
+        fs::create_dir_all(root.join("plugins/playbook/agents")).unwrap();
+        assert_eq!(in_checkout(&root), root.join("plugins/playbook"));
+    }
+
+    #[test]
+    fn in_checkout_falls_back_to_the_root_for_a_plugin_only_checkout() {
+        let root = scratch_dir("in-checkout-flat");
+        fs::create_dir_all(root.join("agents")).unwrap();
+        assert_eq!(in_checkout(&root), root);
     }
 
     #[test]
