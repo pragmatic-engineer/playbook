@@ -40,20 +40,8 @@ const ALLOW_FILES: [&str; 19] = [
 ];
 
 /// Top-level directories any tracked file may live under.
-const ALLOW_DIRS: [&str; 13] = [
-    "prompts",
-    "plugins",
-    "scripts",
-    "skills",
-    "commands",
-    "agents",
-    "shell",
-    "docs",
-    "output-styles",
-    ".github",
-    ".claude-plugin",
-    "crates",
-    ".cargo",
+const ALLOW_DIRS: [&str; 7] = [
+    "prompts", "plugins", "scripts", "docs", ".github", "crates", ".cargo",
 ];
 
 /// Belt-and-suspenders: the owner's personal settings.json must never track,
@@ -169,6 +157,21 @@ mod tests {
     }
 
     #[test]
+    fn the_retired_top_level_plugin_and_shell_directories_are_offenders() {
+        let tracked: Vec<String> = [
+            "skills/a/SKILL.md",
+            "commands/a.md",
+            "agents/a.md",
+            "shell/worktree.zsh",
+            "output-styles/a.md",
+            ".claude-plugin/plugin.json",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(violations(&tracked), tracked);
+    }
+
+    #[test]
     fn the_retired_bin_directory_is_an_offender() {
         let tracked = vec!["bin/playbook".to_string()];
         assert_eq!(violations(&tracked).len(), 1);
@@ -176,7 +179,7 @@ mod tests {
 
     #[test]
     fn allowlisted_top_level_directory_passes() {
-        let tracked = vec!["shell/worktree.zsh".to_string()];
+        let tracked = vec!["scripts/check-links.sh".to_string()];
         assert!(violations(&tracked).is_empty());
     }
 
@@ -214,7 +217,7 @@ mod tests {
             "LICENSE".to_string(),
             "settings.shared.json".to_string(),
             "permissions.shared.json".to_string(),
-            "shell/worktree.zsh".to_string(),
+            "scripts/check-links.sh".to_string(),
             "prompts/system.md".to_string(),
             "docs/index.md".to_string(),
             ".github/workflows/ci.yml".to_string(),
