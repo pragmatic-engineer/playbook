@@ -56,6 +56,6 @@ Playbook does not overwrite a file you edited. It leaves it, prints a warning, a
 2. Pick the kind: Auto for a one-time move, Idempotent for a self-healing repair, Manual for something only you can resolve.
 3. Pick the scope: `Owned` when it writes only playbook's own files, `Consent` with a check and a `setup` command when it writes a file the user owns, `Report` when it only reports.
 4. Add a test next to the existing ones in that file.
-5. A change that needs the user also gets an entry in `breaking-changes.json` ([ADR 0035](../adr/0035-breaking-change-notices.md)).
+5. A change that needs the user is a breaking change: mark its commit with `!` or a `BREAKING CHANGE:` footer that says what to do ([ADR 0037](../adr/0037-release-notes-from-conventional-commits.md)).
 
 See also: [Launcher and hooks](01-launcher-and-hooks.md), [Docs index](../index.md).

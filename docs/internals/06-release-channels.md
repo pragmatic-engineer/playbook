@@ -117,11 +117,12 @@ body starts with the upgrade note in `.github/release-notes-upgrade.md`. When
 most users have upgraded from the `playbook-hooks` plugin, delete the file and
 the line in the `body` mode of `scripts/release-notes.sh` that prints it.
 
-`breaking-changes.json` is still attached for the Homebrew tap, and `plan`
-still fails when a commit since the previous `v` tag is marked breaking and
-that file has no entry for the version (ADR 0035). Run
-`scripts/check-breaking.sh release playbook <version>` and
-`scripts/check-breaking.sh release plugin <version>` to check before a run.
+`breaking-changes.json` is still attached, since the Homebrew tap and the
+automatic update read it until the binary reads `release-notes.json`
+(ADR 0037). No check fails a release for a breaking change: the notes list
+the commits marked breaking first. Until the binary reads
+`release-notes.json`, a breaking change to playbook also gets an entry in
+`breaking-changes.json`, so automatic updates hold the release.
 
 ## Credentials
 

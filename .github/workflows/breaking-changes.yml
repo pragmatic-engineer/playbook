@@ -1,13 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: Apache-2.0
 #
-# A light check for breaking changes (ADR 0035). A pull request whose title
-# has `!` after the type, or whose body has a BREAKING CHANGE footer, needs an
-# entry in breaking-changes.json for a component it touches, with a version
-# above that component's latest tag. The pull request title and body become
-# the squash commit, so this is where the marker first appears. Before a
-# release, the plan job of release.yml checks the commits again for the
-# exact version.
+# A reminder for breaking changes (ADR 0037). The pull request title and body
+# become the squash commit, and the release notes list a commit marked
+# breaking first, with the text of its BREAKING CHANGE footer. When the title
+# has `!` after the type or scope and the body has no such footer, this job
+# warns. It does not fail the pull request.
 
 name: breaking-changes
 
@@ -22,28 +20,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  entry:
+  footer:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: read
+    permissions: {}
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            github.com:443
 
-      # A shallow checkout. The script fetches the history and the tags only
-      # when the pull request is marked breaking.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: A breaking pull request needs an entry
+      - name: A breaking pull request says what breaks
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: scripts/check-breaking.sh pr "$BASE_SHA"
+        run: |
+          set -euo pipefail
+          if ! grep -Eq '^[a-z]+(\([^)]*\))?!: ' <<<"$PR_TITLE"; then
+            echo "The title is not marked breaking."
+            exit 0
+          fi
+          if grep -Eq '^BREAKING[ -]CHANGE: +[^[:space:]]' <<<"$PR_BODY"; then
+            echo "The body has a BREAKING CHANGE footer."
+            exit 0
+          fi
+          echo "::warning title=breaking-changes::the title is marked breaking. Add a line 'BREAKING CHANGE: <what breaks and what to do>' at the end of the body, so the release notes show it."

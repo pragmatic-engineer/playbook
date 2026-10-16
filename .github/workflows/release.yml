@@ -148,20 +148,6 @@ jobs:
             echo "| $version | $previous | $state | $release | $DRY_RUN |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # A commit since the previous v tag with `!` after its type or a
-      # BREAKING CHANGE footer needs an entry in breaking-changes.json
-      # (ADR 0035). The plugin ships in the same release (ADR 0038). It reads
-      # main up to its head, so it runs only before the release pull request:
-      # a resumed run must not stop on a commit that came after the release.
-      - name: A breaking change needs an entry
-        if: steps.plan.outputs.state == 'prepare'
-        env:
-          VERSION: ${{ steps.plan.outputs.version }}
-        run: |
-          set -euo pipefail
-          scripts/check-breaking.sh release playbook "$VERSION"
-          scripts/check-breaking.sh release plugin "$VERSION"
-
   # Opens the release pull request and waits for the merge queue to land it.
   # A pull request that is already open or merged is reused.
   prepare:
