@@ -215,10 +215,16 @@ fn the_bump_script_sets_one_version_everywhere() {
         cargo.contains("[workspace.dependencies]\nversion = \"9.9.9\""),
         "{cargo}"
     );
+    let lock = r.read("Cargo.lock");
     assert_eq!(
-        r.read("Cargo.lock").matches("version = \"1.1.3\"").count(),
+        lock.matches("version = \"1.1.3\"").count(),
         3,
         "only the playbook, playbook-code and playbook-telemetry entries move"
+    );
+    assert!(
+        lock.contains("name = \"playbook-telemetry\"\nversion = \"1.1.3\"")
+            && lock.contains("name = \"other\"\nversion = \"1.0.0\""),
+        "{lock}"
     );
     let manifest = r.read("plugins/playbook/.claude-plugin/plugin.json");
     assert!(manifest.contains("\"version\": \"1.1.3\""), "{manifest}");

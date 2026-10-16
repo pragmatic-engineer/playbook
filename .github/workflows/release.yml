@@ -63,9 +63,11 @@ on:
 
 permissions: {}
 
-# One release at a time, and a running release is never cancelled.
+# One release at a time, and a running release is never cancelled. GitHub
+# keeps one pending run per group and cancels an older pending one, so dry
+# runs have a group of their own and never replace a pending release.
 concurrency:
-  group: release
+  group: ${{ inputs.dry_run && 'release-dry-run' || 'release' }}
   cancel-in-progress: false
 
 jobs:
@@ -120,13 +122,12 @@ jobs:
           cat "$RUNNER_TEMP/plan"
           # shellcheck disable=SC1091
           . "$RUNNER_TEMP/plan"
+          # Only "release not found" counts as no release. Any other error
+          # fails the plan, so a published release is never rebuilt.
           release=none
           if [ "$state" = publish ]; then
-            draft="$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null || true)"
-            case "$draft" in
-              true) release=draft ;;
-              false) release=published ;;
-            esac
+            release="$(scripts/release-gh.sh state "$GH_REPO" "$tag" | sed -n 's/^release=//p')"
+            [ -n "$release" ] || { echo "::error::could not read the release $tag." >&2; exit 1; }
           fi
           build=true
           if [ "$release" = published ] && [ "$DRY_RUN" != "true" ]; then build=false; fi
@@ -146,8 +147,11 @@ jobs:
 
       # A commit since the previous v tag with `!` after its type or a
       # BREAKING CHANGE footer needs an entry in breaking-changes.json
-      # (ADR 0035). The plugin ships in the same release (ADR 0038).
+      # (ADR 0035). The plugin ships in the same release (ADR 0038). It reads
+      # main up to its head, so it runs only before the release pull request:
+      # a resumed run must not stop on a commit that came after the release.
       - name: A breaking change needs an entry
+        if: steps.plan.outputs.state == 'prepare'
         env:
           VERSION: ${{ steps.plan.outputs.version }}
         run: |
@@ -164,6 +168,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       sha: ${{ steps.land.outputs.sha }}
     steps:
@@ -207,9 +212,9 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - name: Open the release pull request and wait for it to merge
+      - name: Open the release pull request
         if: needs.plan.outputs.dry_run != 'true'
-        id: land
+        id: open
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REPO: ${{ github.repository }}
@@ -221,8 +226,20 @@ jobs:
             "$RUNNER_TEMP/body.md" . "${files[@]}" > "$RUNNER_TEMP/pr"
           cat "$RUNNER_TEMP/pr"
           pr="$(sed -n 's/^pr=//p' "$RUNNER_TEMP/pr")"
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
           echo "Release pull request: https://github.com/$REPO/pull/$pr" >> "$GITHUB_STEP_SUMMARY"
-          scripts/release-gh.sh wait "$REPO" "$pr" 4800 | tee -a "$GITHUB_OUTPUT"
+
+      # GITHUB_TOKEN lasts for the whole job, and the app token only an hour.
+      - name: Wait for the release pull request to merge
+        if: needs.plan.outputs.dry_run != 'true'
+        id: land
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.open.outputs.pr }}
+        run: |
+          set -euo pipefail
+          scripts/release-gh.sh wait "$REPO" "$PR" 4800 | tee -a "$GITHUB_OUTPUT"
 
   # Creates vX.Y.Z on the commit that carries the version. When GitHub
   # refuses, the run stops with the command a maintainer runs instead.
@@ -337,9 +354,12 @@ jobs:
         run: |
           set -euo pipefail
           scripts/release-notes.sh body playbook "$VERSION" release-notes.json > "$RUNNER_TEMP/notes.md"
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --verify-tag --title "playbook $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
-          fi
+          case "$(scripts/release-gh.sh state "$GH_REPO" "$TAG")" in
+            release=none)
+              gh release create "$TAG" --draft --verify-tag --title "playbook $VERSION" --notes-file "$RUNNER_TEMP/notes.md" ;;
+            release=draft) echo "Reusing the draft $TAG." ;;
+            *) echo "::error::$TAG is already published. Nothing is uploaded." >&2; exit 1 ;;
+          esac
           gh release upload "$TAG" release-notes.json breaking-changes.json --clobber
 
   build:
@@ -368,6 +388,8 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         # Linux-only action; it skips itself elsewhere.
@@ -379,12 +401,18 @@ jobs:
             archive.ubuntu.com:443
             azure.archive.ubuntu.com:80
             crates.io:443
+            fulcio.githubapp.com:443
+            fulcio.sigstore.dev:443
             github.com:443
             index.crates.io:443
             objects.githubusercontent.com:443
+            rekor.sigstore.dev:443
             security.ubuntu.com:443
             static.crates.io:443
             static.rust-lang.org:443
+            timestamp.githubapp.com:443
+            tuf-repo-cdn.sigstore.dev:443
+            tuf-repo.github.com:443
             uploads.github.com:443
 
       # The tag, or main on a dry run.
@@ -443,17 +471,39 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.plan.outputs.version }}
+          DRY_RUN: ${{ needs.plan.outputs.dry_run }}
           TARGET: ${{ matrix.target }}
           EXT: ${{ matrix.ext }}
         run: |
           set -euo pipefail
           dir="target/$TARGET/release"
           mkdir -p dist
+          # Each binary must run and report the version, before anything is
+          # uploaded. A dry run builds main, which still has the version
+          # before the release. The x86_64 macOS binary is cross built and
+          # cannot run on the arm64 runner.
+          want="$VERSION"
+          if [ "$DRY_RUN" = true ]; then want="$(scripts/check-plugin.sh cargo-version)"; fi
+          if [ "$TARGET" != x86_64-apple-darwin ]; then
+            for b in playbook playbook-telemetry pbtop; do
+              out="$("$dir/$b$EXT" --version)"
+              [ "${out##* }" = "$want" ] \
+                || { echo "::error::$b --version says '$out', not $want." >&2; exit 1; }
+            done
+          fi
           cp "$dir/playbook$EXT" "dist/playbook-$VERSION-$TARGET$EXT"
           tar -czf "dist/playbook-telemetry-$VERSION-$TARGET.tar.gz" -C "$dir" "playbook-telemetry$EXT" "pbtop$EXT"
           tar -czf "dist/pbtop-$VERSION-$TARGET.tar.gz" -C "$dir" "pbtop$EXT"
           cd dist
           if command -v shasum >/dev/null 2>&1; then shasum -a 256 ./*; else sha256sum ./*; fi
+
+      # The attestation covers the bytes this leg built. Publish checks each
+      # draft asset against it, so an asset changed in the draft is caught.
+      - name: Attest the assets
+        if: needs.plan.outputs.dry_run != 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
 
       - name: Upload the assets to the draft
         if: needs.plan.outputs.dry_run != 'true'
@@ -462,7 +512,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.plan.outputs.tag }}
-        run: gh release upload "$TAG" dist/* --clobber
+        run: |
+          set -euo pipefail
+          [ "$(scripts/release-gh.sh state "$GH_REPO" "$TAG")" = release=draft ] \
+            || { echo "::error::$TAG is not a draft. Nothing is uploaded." >&2; exit 1; }
+          gh release upload "$TAG" dist/* --clobber
 
   # SHA256SUMS, attestation and publish. The sums list every asset of the
   # release, and the release turns public only after they are attached.
@@ -492,14 +546,22 @@ jobs:
             release-assets.githubusercontent.com:443
             uploads.github.com:443
 
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.plan.outputs.tag }}
+          persist-credentials: false
+
       - name: Build SHA256SUMS from the draft assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.plan.outputs.tag }}
           VERSION: ${{ needs.plan.outputs.version }}
+          SOURCE_REF: refs/heads/${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
+          [ "$(scripts/release-gh.sh state "$GH_REPO" "$TAG")" = release=draft ] \
+            || { echo "::error::$TAG is not a draft. Nothing is published." >&2; exit 1; }
           mkdir -p dist && cd dist
           for p in "playbook-$VERSION-*" "playbook-telemetry-$VERSION-*" "pbtop-$VERSION-*"; do
             gh release download "$TAG" --pattern "$p" --clobber
@@ -510,6 +572,12 @@ jobs:
             find . -type f
             exit 1
           fi
+          # Each asset must carry the attestation its build leg made.
+          for f in playbook-* pbtop-*; do
+            gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
+              --signer-workflow "$GH_REPO/.github/workflows/release.yml" >/dev/null \
+              || { echo "::error::$f does not match the attestation of its build. Nothing is published." >&2; exit 1; }
+          done
           gh release download "$TAG" --pattern release-notes.json --clobber
           gh release download "$TAG" --pattern breaking-changes.json --clobber
           shasum -a 256 playbook-* pbtop-* release-notes.json breaking-changes.json > SHA256SUMS
@@ -520,8 +588,6 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
-            dist/playbook-*
-            dist/pbtop-*
             dist/release-notes.json
             dist/breaking-changes.json
             dist/SHA256SUMS
@@ -539,7 +605,7 @@ jobs:
   # Downloads the published release the way users do and checks it.
   verify:
     needs: [plan, publish]
-    if: ${{ !cancelled() && !failure() && needs.plan.outputs.dry_run != 'true' && (needs.plan.outputs.build == 'true' || needs.plan.outputs.release == 'published') }}
+    if: ${{ !cancelled() && !failure() && needs.plan.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -563,6 +629,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.plan.outputs.tag }}
           VERSION: ${{ needs.plan.outputs.version }}
+          SOURCE_REF: refs/heads/${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = false ] \
@@ -572,8 +639,8 @@ jobs:
           mkdir -p check && cd check
           gh release download "$TAG"
           sha256sum -c SHA256SUMS
-          for f in playbook-* pbtop-* release-notes.json; do
-            gh attestation verify "$f" --repo "$GH_REPO" \
+          for f in playbook-* pbtop-* release-notes.json breaking-changes.json SHA256SUMS; do
+            gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
               --signer-workflow "$GH_REPO/.github/workflows/release.yml" >/dev/null
           done
           t=x86_64-unknown-linux-musl
@@ -583,9 +650,8 @@ jobs:
           tar -xzf "pbtop-$VERSION-$t.tar.gz" -C pb
           for bin in "./playbook-$VERSION-$t" tel/playbook-telemetry tel/pbtop pb/pbtop; do
             out="$("$bin" --version)"
-            case "$out" in
-              *"$VERSION"*) echo "$bin: $out" ;;
-              *) echo "::error::$bin --version says '$out', not $VERSION." >&2; exit 1 ;;
-            esac
+            [ "${out##* }" = "$VERSION" ] \
+              || { echo "::error::$bin --version says '$out', not $VERSION." >&2; exit 1; }
+            echo "$bin: $out"
           done
           echo "Checked $(wc -l < SHA256SUMS) assets, their attestations and the versions." >> "$GITHUB_STEP_SUMMARY"

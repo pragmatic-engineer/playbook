@@ -67,10 +67,14 @@ After the tag, `draft` creates a draft release with the notes and attaches
 `release-notes.json` and `breaking-changes.json`. `build` compiles the five
 targets with `--locked` and attaches three assets per target: the `playbook`
 binary, `playbook-telemetry-X.Y.Z-<target>.tar.gz` with `playbook-telemetry`
-and `pbtop`, and `pbtop-X.Y.Z-<target>.tar.gz` with `pbtop` alone. `publish`
-writes `SHA256SUMS` over every asset, attests them, and makes the release
-public and the latest. `verify` downloads the published release, checks the
-sums and the attestations, and runs `--version` on each Linux binary.
+and `pbtop`, and `pbtop-X.Y.Z-<target>.tar.gz` with `pbtop` alone. Each
+build job first runs its binaries with `--version` (all but the cross built
+x86_64 macOS one) and attests the assets it built. `publish` checks every
+draft asset against that attestation, writes `SHA256SUMS` over every asset,
+attests it and the notes, and makes the release public and the latest.
+`verify` downloads the published release, checks the sums and the
+attestations of a run from `main`, and runs `--version` on the x86_64 Linux
+binaries.
 
 Every step can run again. A pull request, a tag or a release that exists is
 reused, a tag is never moved, and a published release is never rebuilt or
@@ -118,9 +122,14 @@ installs and the tap may already point at them. To pull a bad release:
    `gh release edit vX.Y.Z --prerelease --latest=false`, then mark the
    previous release as the latest with `gh release edit vA.B.C --latest`.
    `install.sh` and `playbook update` read the latest release.
-2. Add a warning at the top of its notes with `gh release edit vX.Y.Z
-   --notes-file <file>`, saying what is wrong and which version to use.
-3. Ship the fix as the next patch release.
+2. Add a warning at the top of its notes, saying what is wrong and which
+   version to use. `--notes-file` replaces the whole body, so start from the
+   current notes: `gh release view vX.Y.Z --json body --jq .body > notes.md`,
+   add the warning at the top of `notes.md`, then
+   `gh release edit vX.Y.Z --notes-file notes.md`.
+3. Ship the fix as the next patch release. The plugin only moves forward:
+   Claude Code never installs a lower plugin version, so a bad plugin is
+   fixed by that patch too.
 
 ## Internal tool crates
 
