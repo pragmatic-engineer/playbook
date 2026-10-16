@@ -139,3 +139,50 @@ fn no_prose_says_a_lowercase_bash_call_or_step() {
         }
     }
 }
+
+/// Claude Code tool names that no longer exist. Text that names one sends an
+/// agent to a tool it cannot call.
+const RETIRED_TOOLS: [&str; 4] = [
+    "TaskOutput",
+    "KillShell",
+    "MCPSearch",
+    "ListMcpResourceTool",
+];
+
+fn markdown_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+    for entry in fs::read_dir(dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            markdown_files(&path, out);
+        } else if path.extension().is_some_and(|e| e == "md") {
+            out.push(path);
+        }
+    }
+}
+
+#[test]
+fn no_plugin_or_docs_text_names_a_retired_tool() {
+    let mut files = Vec::new();
+    markdown_files(Path::new(env!("PLAYBOOK_PLUGIN_ROOT")), &mut files);
+    markdown_files(
+        &Path::new(env!("PLAYBOOK_REPO_ROOT")).join("docs"),
+        &mut files,
+    );
+    assert!(!files.is_empty(), "no markdown files found");
+    for file in files {
+        let text = fs::read_to_string(&file).unwrap();
+        for (i, line) in text.lines().enumerate() {
+            for tool in RETIRED_TOOLS {
+                let named = line.match_indices(tool).any(|(at, _)| {
+                    !line[at + tool.len()..].starts_with(|c: char| c.is_ascii_alphanumeric())
+                });
+                assert!(
+                    !named,
+                    "{}:{}: names `{tool}`, which Claude Code no longer ships",
+                    file.display(),
+                    i + 1
+                );
+            }
+        }
+    }
+}

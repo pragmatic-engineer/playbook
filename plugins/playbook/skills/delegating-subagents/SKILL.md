@@ -50,7 +50,7 @@ Effort variants such as `reviewer-low` and `reviewer-xhigh` are not files and no
 - **Delegate them.** Reviews, critiques and fact-checks run in their own context. For purely mechanical checks (path existence, line counts, graph acyclicity) a few shell commands you run yourself are cheaper and re-runnable.
 - **Treat silence as NOT RUN.** Never as "reviewed clean" or PASS. Name the missing lens or phase in the report and to the user.
 
-When you need a result inline and cannot poll a file, prefer a forked skill (`context: fork` with a prefixed `agent: playbook:<name>` in the command's frontmatter, since a bare name falls back to a general purpose agent on the session model) over an Agent-tool spawn. It has been reliable in every measurement.
+When you need a result inline and cannot wait for an output file, prefer a forked skill (`context: fork` with a prefixed `agent: playbook:<name>` in the command's frontmatter, since a bare name falls back to a general purpose agent on the session model) over an Agent-tool spawn. It has been reliable in every measurement.
 
 ## Fresh, not forked
 
@@ -64,7 +64,7 @@ Constraints: <scope, files not to touch, read-only or not>
 Return: status, findings as file:line, output path; at most about 300 words
 ```
 
-The `Return` line caps the message, not the work: the full report goes in the output file, uncapped. Every agent's prompt carries the same cap. To keep the parent context small, read a finished agent's output file instead of calling `TaskOutput`, and when you must call it, ask once for the compact result rather than polling.
+The `Return` line caps the message, not the work: the full report goes in the output file, uncapped. Every agent's prompt carries the same cap. To keep the parent context small, rely on the capped return. Read a finished agent's output file only when the return is not enough, and only the parts you need. Do not poll it while the agent runs.
 
 Fork only when the child needs the decisions and corrections made earlier in this session and writing them down would cost more than the inheritance. That is rare: the measured forks were research, review, edits and commit text, all of which a brief covers. Classification of every playbook spawn site is in [references/briefs.md](references/briefs.md).
 
