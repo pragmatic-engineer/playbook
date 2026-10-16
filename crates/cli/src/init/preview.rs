@@ -196,8 +196,11 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         only: paths.only,
         claude_override: paths.claude_override,
         short_name: paths.short_name,
-        attribution_off: paths.attribution_off,
-        attribution_replace: paths.attribution_replace,
+        // A no is previewed as nothing to do, so the dry run records nothing.
+        attribution: match paths.attribution {
+            crate::init::attribution::Choice::Declined => crate::init::attribution::Choice::Skip,
+            other => other,
+        },
         path_setup: paths.path_setup.as_ref().map(|s| path::Setup {
             bin_dir: s.bin_dir.clone(),
             shell: s.shell,
@@ -280,19 +283,8 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
                     mine
                 }
             }
-            "telemetry" | "attribution-off" => {
-                let mine = grouped(&changes, id, &settings_file);
-                let step = if id == "telemetry" {
-                    &telemetry_step
-                } else {
-                    &attribution_step
-                };
-                if mine.is_empty() {
-                    vec![format!("{settings_file}: {}", step.detail)]
-                } else {
-                    mine
-                }
-            }
+            "telemetry" => own_key_lines(&changes, id, &settings_file, &telemetry_step),
+            "attribution-off" => own_key_lines(&changes, id, &settings_file, &attribution_step),
             "claude-override" => vec![format!(
                 "~/.config/playbook config: {}",
                 override_step.detail
@@ -322,6 +314,22 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         );
     }
     out
+}
+
+/// The settings.json lines for a part that writes its own key: what changed,
+/// else the step's own detail.
+fn own_key_lines(
+    changes: &[(&'static str, String)],
+    id: &str,
+    file: &str,
+    step: &StepReport,
+) -> Vec<String> {
+    let mine = grouped(changes, id, file);
+    if mine.is_empty() {
+        vec![format!("{file}: {}", step.detail)]
+    } else {
+        mine
+    }
 }
 
 /// The contents of every tracked shell file that exists, by relative path.

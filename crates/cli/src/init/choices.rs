@@ -4,7 +4,7 @@
 //! The optional parts of `playbook setup` and how each one gets decided: a flag
 //! wins, else a question in a terminal, else the default.
 
-use crate::init::catalog;
+use crate::init::{attribution, catalog};
 use clap::Args;
 use std::io::{self, IsTerminal};
 
@@ -193,10 +193,21 @@ pub fn replace_off_ok(flags: &Flags, telemetry: bool, only_run: bool) -> bool {
     telemetry && (flags.telemetry || only_run || !flags.yes)
 }
 
-/// Whether the attribution part may replace a value the user set: the same
-/// rule as [`replace_off_ok`], with `--attribution-off` as the explicit flag.
-pub fn replace_attribution_ok(flags: &Flags, on: bool, only_run: bool) -> bool {
-    on && (flags.attribution_off || only_run || !flags.yes)
+/// What the attribution part does. `on` is the resolved choice and `asked`
+/// whether the user answered the question. A yes or `--attribution-off` may
+/// replace a value the user set; `--yes` and `--only` only add missing keys.
+/// A no or `--no-attribution-off` is recorded, a run that asked nothing is not.
+pub fn attribution_choice(flags: &Flags, on: bool, asked: bool) -> attribution::Choice {
+    match (
+        on,
+        flags.attribution_off || asked,
+        flags.no_attribution_off || asked,
+    ) {
+        (true, true, _) => attribution::Choice::Replace,
+        (true, false, _) => attribution::Choice::AddMissing,
+        (false, _, true) => attribution::Choice::Declined,
+        (false, _, false) => attribution::Choice::Skip,
+    }
 }
 
 /// True when there is no terminal to ask on and the user did not pass `--yes`.
@@ -426,22 +437,27 @@ mod tests {
 
     #[test]
     fn yes_turns_attribution_off_but_replaces_a_user_value_only_with_the_flag() {
-        let yes = Flags {
-            yes: true,
+        use attribution::Choice::*;
+        let flags = |yes, on, off| Flags {
+            yes,
+            attribution_off: on,
+            no_attribution_off: off,
             ..Flags::default()
         };
-        let explicit = Flags {
-            yes: true,
-            attribution_off: true,
-            ..Flags::default()
-        };
-
-        assert!(resolve(&yes, false, false, &mut never).attribution_off);
+        assert!(resolve(&flags(true, false, false), false, false, &mut never).attribution_off);
         assert!(!resolve(&Flags::default(), false, false, &mut never).attribution_off);
-        assert!(!replace_attribution_ok(&yes, true, false));
-        assert!(replace_attribution_ok(&explicit, true, false));
-        assert!(replace_attribution_ok(&Flags::default(), true, false));
-        assert!(replace_attribution_ok(&yes, true, true));
+        // (yes, --attribution-off, --no-attribution-off, on, asked) -> choice
+        for (yes, on_flag, off_flag, on, asked, want) in [
+            (true, false, false, true, false, AddMissing),
+            (true, true, false, true, false, Replace),
+            (false, false, false, true, true, Replace),
+            (false, false, false, false, true, Declined),
+            (false, false, true, false, false, Declined),
+            (false, false, false, false, false, Skip),
+        ] {
+            let got = attribution_choice(&flags(yes, on_flag, off_flag), on, asked);
+            assert_eq!(got, want, "{yes} {on_flag} {off_flag} {on} {asked}");
+        }
     }
 
     #[test]

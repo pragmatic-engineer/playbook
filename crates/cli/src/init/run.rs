@@ -69,12 +69,9 @@ pub struct InitPaths {
     /// Whether the user consented to the `pb` short name: writes
     /// `launcher.shortName` to playbook's own config, only when `pb` is free.
     pub short_name: bool,
-    /// Whether to set `attribution` in settings.json so Claude Code adds no
-    /// attribution to commits and pull requests. Only missing keys are added.
-    pub attribution_off: bool,
-    /// Whether the attribution part may replace a value the user set. True
-    /// only for an answer to the question, `--attribution-off` or `--only`.
-    pub attribution_replace: bool,
+    /// What the attribution-off part does: skip, record a no, add the missing
+    /// `attribution` keys, or also replace values the user set.
+    pub attribution: crate::init::attribution::Choice,
     /// Where the binary lives and the shell to wire it for. `None` skips the
     /// `path` step.
     pub path_setup: Option<path::Setup>,
@@ -183,6 +180,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         repo: paths.repo.clone(),
         epoch,
     };
+    // Before the heal, so the record it writes sees the attribution answer.
+    let attribution_step = attribution_step(paths, epoch);
     let migrated = migrate::run_pending_for(&ctx, paths.statusline, paths.hooks);
     // Record this binary in the version record, so the session hook does not
     // run the same migrations again (ADR 0034).
@@ -191,7 +190,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         crate::heal::Trigger::Init {
             failed: migrated.failed || migrated.lock_busy,
             statusline: paths.statusline,
-            attribution: paths.attribution_off,
         },
         crate::common::time::now_epoch_secs(),
     );
@@ -210,7 +208,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let (settings_step, hooks_step) = settings_and_hooks_steps(paths, epoch);
 
     let telemetry_step = telemetry_step(paths, epoch);
-    let attribution_step = attribution_step(paths, epoch);
     let override_step = claude_override_step(&paths.home, paths.claude_override);
     let short_name_step = short_name_step(
         &paths.home,
@@ -265,7 +262,7 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     if paths.telemetry {
         steps.push(telemetry_step(paths, epoch));
     }
-    if paths.attribution_off {
+    if paths.attribution != crate::init::attribution::Choice::Skip {
         steps.push(attribution_step(paths, epoch));
     }
     if paths.claude_override {
@@ -330,19 +327,13 @@ pub(crate) fn settings_and_hooks_steps(paths: &InitPaths, epoch: u64) -> (StepRe
     (settings_step, hooks_step)
 }
 
-/// The attribution-off part: sets the missing `attribution` keys in
-/// settings.json, and a value the user set only with `attribution_replace`.
+/// The attribution-off part, as `paths.attribution` says.
 pub(crate) fn attribution_step(paths: &InitPaths, epoch: u64) -> StepReport {
-    if !paths.attribution_off {
-        return StepReport::skipped(
-            crate::init::attribution::PART,
-            "not requested; pass --attribution-off to opt in",
-        );
-    }
-    crate::init::attribution::apply(
+    crate::init::attribution::step(
+        &paths.home,
         &paths.claude_home.join("settings.json"),
         epoch,
-        paths.attribution_replace,
+        paths.attribution,
     )
 }
 

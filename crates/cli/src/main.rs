@@ -599,11 +599,10 @@ fn main() {
                 only: only_run,
                 claude_override: choices.claude_override,
                 short_name: choices.short_name,
-                attribution_off: choices.attribution_off,
-                attribution_replace: init::choices::replace_attribution_ok(
+                attribution: init::choices::attribution_choice(
                     &flags,
                     choices.attribution_off,
-                    only_run,
+                    asking,
                 ),
             };
             if flags.dry_run {
@@ -2064,23 +2063,28 @@ fn main() {
             sub: None,
         } => {
             let home = common::home_dir();
-            let code = playbook::migrate_cli::run(&home, playbook::migrate_cli::Mode::Run, false);
             // The one settings change doctor --fix makes, and only after a yes
-            // at a terminal (ADR 0042).
+            // at a terminal (ADR 0042). It runs first, so the heal report and
+            // record below see the answer.
             let fixed = init::attribution::fix_with_consent(
+                &home,
                 &home.join(".claude").join("settings.json"),
                 init::choices::stdio_is_interactive(),
                 &mut init::attribution::ask_on_terminal,
             );
-            match fixed {
-                Ok(Some(step)) => println!("{}", step.render()),
-                Ok(None) => {}
+            let failed = match fixed {
+                Ok(Some(step)) => {
+                    println!("{}", step.render());
+                    false
+                }
+                Ok(None) => false,
                 Err(err) => {
                     eprintln!("doctor --fix: {err}");
-                    std::process::exit(1);
+                    true
                 }
-            }
-            std::process::exit(code);
+            };
+            let code = playbook::migrate_cli::run(&home, playbook::migrate_cli::Mode::Run, false);
+            std::process::exit(if failed { 1 } else { code });
         }
         Command::Migrate {
             status,

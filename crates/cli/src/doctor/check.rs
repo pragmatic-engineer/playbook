@@ -744,8 +744,9 @@ fn attribution_row(env: &Env) -> Row {
             Level::Info,
             format!("attribution has your own value for {}", custom.join(", ")),
         )
-        .hint(format!("to turn it off, run: {}", attribution::COMMAND)),
-        State::Unusable(why) => Row::new("-", Level::Info, format!("attribution: {why}")),
+        .hint(format!("to turn it off, run: {}", attribution::REPLACE_COMMAND)),
+        State::OtherShape => Row::new("-", Level::Info, attribution::OTHER_SHAPE),
+        State::Unreadable(why) => Row::new("-", Level::Warn, format!("attribution: {why}")),
     }
 }
 

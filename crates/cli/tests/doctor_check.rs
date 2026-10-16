@@ -1354,11 +1354,14 @@ fn doctor_reports_the_attribution_key_ok_missing_or_your_own() {
     missing.settings(r#"{"attribution":{"commit":""}}"#);
     let custom = Box::new("attr-custom");
     custom.settings(r#"{"attribution":{"commit":"mine","pr":"","sessionUrl":false}}"#);
+    let mixed = Box::new("attr-mixed");
+    mixed.settings(r#"{"attribution":{"commit":"mine"}}"#);
 
     // Act
     let off = off.run_with_env(&[]);
     let missing = missing.run_with_env(&[]);
     let custom = custom.run_with_env(&[]);
+    let mixed = mixed.run_with_env(&[]);
 
     // Assert
     assert_eq!(attribution_row(&off)["level"], "PASS");
@@ -1372,5 +1375,19 @@ fn doctor_reports_the_attribution_key_ok_missing_or_your_own() {
         .as_str()
         .unwrap()
         .contains("playbook setup --only attribution-off"));
-    assert_eq!(attribution_row(&custom)["level"], "INFO");
+    let row = attribution_row(&custom);
+    assert_eq!(row["level"], "INFO");
+    assert!(row["hint"]
+        .as_str()
+        .unwrap()
+        .contains("--only attribution-off --attribution-off"));
+    let row = attribution_row(&mixed);
+    assert_eq!(row["level"], "WARN");
+    assert!(
+        row["hint"]
+            .as_str()
+            .unwrap()
+            .contains("your own values stay"),
+        "{row}"
+    );
 }

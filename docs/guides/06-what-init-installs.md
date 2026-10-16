@@ -134,7 +134,7 @@ Setup adds a block that starts with `# playbook binary` to your shell startup fi
 
 ### Attribution off
 
-`--attribution-off` (on by default; `--yes` is a yes) sets `attribution` to `{"commit": "", "pr": "", "sessionUrl": false}` in `~/.claude/settings.json`. Claude Code then adds no `Co-Authored-By` trailer to commits, no generated-by line to pull requests, and no `Claude-Session` trailer or claude.ai link. Setup adds only the keys that are missing. A key that holds your own value stays, unless you answer yes to the question, pass `--attribution-off` or run `playbook setup --only attribution-off`. `playbook doctor` shows the key as ok or missing, and `playbook doctor --fix` asks before it adds it. A project or managed settings file can still set its own value. Undo it by deleting the key. See [ADR 0042](../adr/0042-attribution-off-in-setup.md).
+`--attribution-off` (on by default; `--yes` is a yes) sets `attribution` to `{"commit": "", "pr": "", "sessionUrl": false}` in `~/.claude/settings.json`. Claude Code then adds no `Co-Authored-By` trailer to commits, no generated-by line to pull requests, and no `Claude-Session` trailer or claude.ai link. Setup adds only the keys that are missing. A key that holds your own value stays, unless you answer yes to the question or pass `--attribution-off`; `--yes` and `--only attribution-off` keep it. A no is remembered, so the session reminder stops. `playbook doctor` shows the key as ok, missing, or set to your own value, and `playbook doctor --fix` asks before it adds the missing keys. A project or managed settings file can still set its own value. Undo it by deleting the key. See [ADR 0042](../adr/0042-attribution-off-in-setup.md).
 
 ### Memory migration
 

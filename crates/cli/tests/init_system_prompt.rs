@@ -78,8 +78,7 @@ fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
         telemetry_replace_off: false,
         only: false,
         short_name: false,
-        attribution_off: false,
-        attribution_replace: false,
+        attribution: playbook::init::attribution::Choice::Skip,
         path_setup: None,
         repo: None,
     }

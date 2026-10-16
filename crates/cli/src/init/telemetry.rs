@@ -67,6 +67,23 @@ pub(crate) fn write_with_backup(
     written.map_err(|e| format!("could not write {}: {e}", path.display()))
 }
 
+/// Writes `root` as [`write_with_backup`] does, sorting its keys first when
+/// `was_sorted`: the settings merge writes them sorted, and a file that is
+/// sorted stays sorted, so the next merge finds nothing to reorder.
+pub(crate) fn write_keeping_order(
+    path: &Path,
+    mut root: Map<String, Value>,
+    was_sorted: bool,
+    epoch: u64,
+) -> Result<(), String> {
+    if was_sorted {
+        let mut entries: Vec<(String, Value)> = std::mem::take(&mut root).into_iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        root.extend(entries);
+    }
+    write_with_backup(path, root, epoch)
+}
+
 /// Whether the record exists and settings.json still holds every value in it.
 fn already_written(home: &Path, settings_path: &Path) -> bool {
     let Ok(written) = load(&marker_path(home)) else {
@@ -381,12 +398,7 @@ pub fn apply(
     if !replaced.is_empty() {
         written.insert(REPLACED.to_string(), Value::Object(replaced));
     }
-    if was_sorted {
-        let mut entries: Vec<(String, Value)> = std::mem::take(&mut root).into_iter().collect();
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
-        root.extend(entries);
-    }
-    if let Err(e) = write_with_backup(&settings_path, root, epoch) {
+    if let Err(e) = write_keeping_order(&settings_path, root, was_sorted, epoch) {
         return StepReport::failed("telemetry", e);
     }
     let marker = marker_path(home);

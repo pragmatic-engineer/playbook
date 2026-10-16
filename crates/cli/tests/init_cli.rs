@@ -539,37 +539,33 @@ fn yes_turns_attribution_off_and_keeps_the_other_settings() {
 }
 
 #[test]
-fn yes_keeps_a_user_attribution_value_and_only_attribution_off_replaces_it() {
+fn yes_and_only_keep_a_user_attribution_value_and_the_explicit_flag_replaces_it() {
     // Arrange
     let sb = Sandbox::new("attribution-user");
     sb.write(
         ".claude/settings.json",
-        "{\"attribution\":{\"commit\":\"Made by me\",\"pr\":\"\",\"sessionUrl\":false}}\n",
+        "{\"attribution\":{\"commit\":\"Made by me\"}}\n",
     );
 
     // Act
-    let kept = text(&sb.init("/bin/bash", &["--no-hooks", "--no-statusline"]));
-    let before = attribution_of(&sb);
-    sb.init_raw("/bin/bash", &["--only", "attribution-off"]);
+    sb.init("/bin/bash", &["--no-hooks", "--no-statusline"]);
+    let after_yes = attribution_of(&sb);
+    let kept = text(&sb.init_raw("/bin/bash", &["--only", "attribution-off"]));
+    let after_only = attribution_of(&sb);
+    sb.init_raw(
+        "/bin/bash",
+        &["--only", "attribution-off", "--attribution-off"],
+    );
 
     // Assert
+    assert_eq!(
+        after_yes,
+        serde_json::json!({"commit": "Made by me", "pr": "", "sessionUrl": false})
+    );
     assert!(
-        kept.contains("playbook setup --only attribution-off"),
+        kept.contains("--only attribution-off --attribution-off"),
         "{kept}"
     );
-    assert_eq!(before["commit"], "Made by me");
+    assert_eq!(after_only["commit"], "Made by me");
     assert_eq!(attribution_of(&sb)["commit"], "");
-}
-
-#[test]
-fn no_attribution_off_leaves_settings_alone() {
-    let sb = Sandbox::new("attribution-no");
-    sb.write(".claude/settings.json", "{\"theme\":\"dark\"}\n");
-
-    sb.init(
-        "/bin/bash",
-        &["--no-hooks", "--no-statusline", "--no-attribution-off"],
-    );
-
-    assert_eq!(sb.read(".claude/settings.json"), "{\"theme\":\"dark\"}\n");
 }

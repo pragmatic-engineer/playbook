@@ -11,7 +11,7 @@ Each migration also has a scope: `Owned` writes only playbook's own files, `Cons
 - The `session-init` hook runs them once per session when the binary is newer than the record, and adds one line to the session message.
 - `playbook update` runs the new binary's `migrate` after the swap. The install script runs it after an install when it has a terminal or `--yes`, and not with `--no-init`.
 
-`playbook setup` runs every migration, `Consent` ones included, because it asks first. Nothing else writes Claude Code settings or your shell files. The version record in the `state` table says which binary last ran the `Owned` migrations cleanly, so the first-run step and the session hook run once per version. `migrate` and `doctor --fix` run every time you call them.
+`playbook setup` runs every migration, `Consent` ones included, because it asks first. Nothing else writes Claude Code settings or your shell files, with one exception: `playbook doctor --fix` adds the missing `attribution` keys after a yes at a terminal ([ADR 0042](../adr/0042-attribution-off-in-setup.md)). The version record in the `state` table says which binary last ran the `Owned` migrations cleanly, so the first-run step and the session hook run once per version. `migrate` and `doctor --fix` run every time you call them.
 
 ## The three kinds
 

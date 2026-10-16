@@ -153,8 +153,7 @@ impl V025Home {
             telemetry_replace_off: false,
             only: false,
             short_name: false,
-            attribution_off: false,
-            attribution_replace: false,
+            attribution: playbook::init::attribution::Choice::AddMissing,
             path_setup: None,
             repo: None,
         });

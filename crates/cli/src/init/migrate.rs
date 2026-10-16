@@ -21,7 +21,7 @@ const SKILL_KEY_PREFIX: &str = "skill:";
 pub const STATUSLINE_MIGRATION: &str = "0006-statusline-rust-command";
 /// The `Consent` migration `init` skips when the user declines the hooks.
 pub const DEAD_HOOKS_MIGRATION: &str = "0011-dead-hook-scripts";
-/// The `Consent` item `init` drops when the user declines attribution-off.
+/// The `Consent` item for the attribution-off part (ADR 0042).
 pub const ATTRIBUTION_MIGRATION: &str = "0015-attribution-off";
 
 /// What a migration needs to find the state it moves.
@@ -222,14 +222,14 @@ pub fn registry() -> Vec<Migration> {
     ]
 }
 
-/// `attribution` keys missing from settings.json (ADR 0042). Only reported:
-/// the hook and the first run step name the command, and the setup part
-/// writes the key after its question.
+/// `attribution` keys missing from settings.json (ADR 0042), unless the user
+/// said no. Only reported: the hook and the first run step name the command,
+/// and the setup part writes the key after its question.
 fn attribution_pending(ctx: &Ctx) -> Option<String> {
     let settings = ctx.claude_home.join("settings.json");
     settings
         .is_file()
-        .then(|| crate::init::attribution::pending(&settings))
+        .then(|| crate::init::attribution::pending(&ctx.home, &settings))
         .flatten()
 }
 
