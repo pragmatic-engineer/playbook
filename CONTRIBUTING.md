@@ -28,7 +28,7 @@ Run `just test` for everything, or `cargo nextest run -p playbook-code --config-
 
 ### Releases
 
-`vX.Y.Z` releases the `playbook` binary, the plugin, `playbook-telemetry` and `pbtop` together, with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). The `release` workflow does every step ([ADR-0039](docs/adr/0039-release-workflow.md)):
+`vX.Y.Z` releases the `playbook` binary, the plugin and `pbtop` together, with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). The `release` workflow does every step ([ADR-0039](docs/adr/0039-release-workflow.md)):
 
 ```bash
 gh workflow run release.yml -f bump=patch -f dry_run=true   # rehearse

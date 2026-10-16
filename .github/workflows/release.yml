@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The playbook release (ADR 0038, ADR 0039). One run releases the binary, the
-# plugin, playbook-telemetry and pbtop under one version and one tag:
+# plugin and pbtop under one version and one tag:
 #
 #   gh workflow run release.yml -f bump=patch     (or minor, or major)
 #   gh workflow run release.yml -f version=X.Y.Z
@@ -33,9 +33,9 @@
 #   x86_64-unknown-linux-musl   ubuntu-latest, native musl-gcc + rust-lld
 #   aarch64-unknown-linux-musl  ubuntu-24.04-arm, native musl-gcc + rust-lld
 #   x86_64-pc-windows-msvc      windows-latest
-# Each target gives three assets: the raw `playbook` binary,
-# playbook-telemetry-X.Y.Z-<target>.tar.gz with playbook-telemetry and pbtop,
-# and pbtop-X.Y.Z-<target>.tar.gz with pbtop alone.
+# Each target gives two assets: the raw `playbook` binary and
+# pbtop-X.Y.Z-<target>.tar.gz with pbtop alone. The playbook-telemetry
+# archive is retired (ADR 0041).
 #
 # rusqlite's `bundled` feature compiles SQLite's C source and needs a real C
 # compiler, which is why both musl legs install `musl-tools` and still link
@@ -433,7 +433,7 @@ jobs:
             tc="$(echo "$TARGET" | tr '-' '_')"
             export "CC_${tc}=${RELEASE_CC}"
           fi
-          cargo build --release --locked -p playbook -p playbook-telemetry --target "$TARGET"
+          cargo build --release --locked -p playbook -p playbook-telemetry --bin playbook --bin pbtop --target "$TARGET"
 
       - name: Ad-hoc sign the macOS binaries
         if: runner.os == 'macOS'
@@ -441,7 +441,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          for b in playbook playbook-telemetry pbtop; do
+          for b in playbook pbtop; do
             codesign --sign - --force "target/$TARGET/release/$b"
             codesign -dvv "target/$TARGET/release/$b" 2>&1 | grep -q 'Signature=adhoc'
           done
@@ -452,7 +452,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          for b in playbook playbook-telemetry pbtop; do
+          for b in playbook pbtop; do
             file -b "target/$TARGET/release/$b" | grep -qE 'static-pie linked|statically linked'
           done
 
@@ -474,14 +474,13 @@ jobs:
           want="$VERSION"
           if [ "$DRY_RUN" = true ]; then want="$(scripts/check-plugin.sh cargo-version)"; fi
           if [ "$TARGET" != x86_64-apple-darwin ]; then
-            for b in playbook playbook-telemetry pbtop; do
+            for b in playbook pbtop; do
               out="$("$dir/$b$EXT" --version)"
               [ "${out##* }" = "$want" ] \
                 || { echo "::error::$b --version says '$out', not $want." >&2; exit 1; }
             done
           fi
           cp "$dir/playbook$EXT" "dist/playbook-$VERSION-$TARGET$EXT"
-          tar -czf "dist/playbook-telemetry-$VERSION-$TARGET.tar.gz" -C "$dir" "playbook-telemetry$EXT" "pbtop$EXT"
           tar -czf "dist/pbtop-$VERSION-$TARGET.tar.gz" -C "$dir" "pbtop$EXT"
           cd dist
           if command -v shasum >/dev/null 2>&1; then shasum -a 256 ./*; else sha256sum ./*; fi
@@ -552,12 +551,12 @@ jobs:
           [ "$(scripts/release-gh.sh state "$GH_REPO" "$TAG")" = release=draft ] \
             || { echo "::error::$TAG is not a draft. Nothing is published." >&2; exit 1; }
           mkdir -p dist && cd dist
-          for p in "playbook-$VERSION-*" "playbook-telemetry-$VERSION-*" "pbtop-$VERSION-*"; do
+          for p in "playbook-$VERSION-*" "pbtop-$VERSION-*"; do
             gh release download "$TAG" --pattern "$p" --clobber
           done
           count="$(find . -type f | wc -l | tr -d ' ')"
-          if [ "$count" -ne 15 ]; then
-            echo "::error::expected 15 assets, found $count. Refusing to publish a partial release." >&2
+          if [ "$count" -ne 10 ]; then
+            echo "::error::expected 10 assets, found $count. Refusing to publish a partial release." >&2
             find . -type f
             exit 1
           fi
@@ -634,10 +633,9 @@ jobs:
           done
           t=x86_64-unknown-linux-musl
           chmod +x "playbook-$VERSION-$t"
-          mkdir -p tel pb
-          tar -xzf "playbook-telemetry-$VERSION-$t.tar.gz" -C tel
+          mkdir -p pb
           tar -xzf "pbtop-$VERSION-$t.tar.gz" -C pb
-          for bin in "./playbook-$VERSION-$t" tel/playbook-telemetry tel/pbtop pb/pbtop; do
+          for bin in "./playbook-$VERSION-$t" pb/pbtop; do
             out="$("$bin" --version)"
             [ "${out##* }" = "$VERSION" ] \
               || { echo "::error::$bin --version says '$out', not $VERSION." >&2; exit 1; }
@@ -664,7 +662,6 @@ jobs:
     outputs:
       playbook: ${{ steps.write.outputs.playbook }}
       pbtop: ${{ steps.write.outputs.pbtop }}
-      telemetry: ${{ steps.write.outputs.telemetry }}
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       DRY_RUN: ${{ needs.plan.outputs.dry_run }}
@@ -695,21 +692,20 @@ jobs:
             sums="$RUNNER_TEMP/sums"
             mkdir -p "$sums"
             for t in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
-              for a in "playbook-$VERSION-$t" "playbook-telemetry-$VERSION-$t.tar.gz" "pbtop-$VERSION-$t.tar.gz"; do
+              for a in "playbook-$VERSION-$t" "pbtop-$VERSION-$t.tar.gz"; do
                 printf '%s  %s\n' "$(printf '%s' "$a" | sha256sum | cut -d' ' -f1)" "$a"
               done
             done > "$sums/SHA256SUMS"
             export DOWNLOAD_BASE="file://$sums"
           fi
-          # pbtop first, so playbook-telemetry finds it for conflicts_with.
-          for f in playbook pbtop playbook-telemetry; do
+          # The tap retires playbook-telemetry (ADR 0041), so it is not bumped.
+          for f in playbook pbtop; do
             (cd downstream/tap && SOURCE_REPO=playbook TAG_PREFIX=v \
               .github/scripts/bump-formula.sh "$VERSION" "Formula/$f.rb")
           done
           {
             echo "playbook=$(base64 -w0 < downstream/tap/Formula/playbook.rb)"
             echo "pbtop=$(base64 -w0 < downstream/tap/Formula/pbtop.rb)"
-            echo "telemetry=$(base64 -w0 < downstream/tap/Formula/playbook-telemetry.rb)"
           } >> "$GITHUB_OUTPUT"
 
   # Moves the Homebrew tap and the marketplace to the release (ADR 0039
@@ -766,12 +762,10 @@ jobs:
         env:
           PLAYBOOK_RB: ${{ needs.formulas.outputs.playbook }}
           PBTOP_RB: ${{ needs.formulas.outputs.pbtop }}
-          TELEMETRY_RB: ${{ needs.formulas.outputs.telemetry }}
         run: |
           set -euo pipefail
           base64 -d <<<"$PLAYBOOK_RB" > downstream/tap/Formula/playbook.rb
           base64 -d <<<"$PBTOP_RB" > downstream/tap/Formula/pbtop.rb
-          base64 -d <<<"$TELEMETRY_RB" > downstream/tap/Formula/playbook-telemetry.rb
           git -C downstream/tap add -A
           git -C downstream/tap diff --cached --name-only > "$RUNNER_TEMP/tap-files"
 
@@ -790,7 +784,7 @@ jobs:
 
           title="chore(release): playbook $VERSION"
           url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/$TAG"
-          printf 'Moves playbook, playbook-telemetry and pbtop to %s, with the URLs and checksums from the SHA256SUMS of %s.\n\nOpened by the playbook release workflow. It merges once the checks pass, and the release-tag workflow then tags this repository %s.\n' \
+          printf 'Moves playbook and pbtop to %s, with the URLs and checksums from the SHA256SUMS of %s.\n\nOpened by the playbook release workflow. It merges once the checks pass, and the release-tag workflow then tags this repository %s.\n' \
             "$VERSION" "$url" "$TAG" > "$RUNNER_TEMP/tap-body.md"
           printf 'Pins the playbook plugin to the release %s.\n\nOpened by the playbook release workflow. It merges once the checks pass, and the release workflow then tags this repository %s.\n' \
             "$url" "$TAG" > "$RUNNER_TEMP/marketplace-body.md"
@@ -955,7 +949,7 @@ jobs:
                 if [ "$repo" = "$MARKETPLACE" ]; then
                   marketplace_notes "$sha" > "$RUNNER_TEMP/notes.md"
                 else
-                  printf 'Formula versions for playbook %s: playbook, playbook-telemetry and pbtop at %s.\n' "$TAG" "$VERSION" > "$RUNNER_TEMP/notes.md"
+                  printf 'Formula versions for playbook %s: playbook and pbtop at %s.\n' "$TAG" "$VERSION" > "$RUNNER_TEMP/notes.md"
                 fi
                 scripts/release-gh.sh tag "$repo" "$TAG" "$sha" >/dev/null || return 1
                 scripts/release-gh.sh release "$repo" "$TAG" "$TAG" "$RUNNER_TEMP/notes.md" >/dev/null || return 1 ;;
