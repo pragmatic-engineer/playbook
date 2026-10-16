@@ -193,6 +193,13 @@ fn settings_step(
             .errors
             .push(format!("telemetry variables left unchanged: {err}")),
     }
+    // Setup may have written it, but the user may also want it: say so, keep it.
+    if crate::init::attribution::state(&path) == crate::init::attribution::State::Off {
+        report.lines.push(format!(
+            "kept the attribution key in {}; delete it by hand to get Claude Code's attribution back",
+            path.display()
+        ));
+    }
     match wire::unwire_at(&path, &opts.home, stamp, opts.dry_run) {
         Ok(out) if out.hooks_removed == 0 && !out.statusline_removed => done(false),
         Ok(out) => {

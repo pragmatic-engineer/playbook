@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 17] = [
+const PROBES: [Probe; 18] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -112,6 +112,7 @@ const PROBES: [Probe; 17] = [
     atlassian_rows,
     old_launcher_rows,
     telemetry_rows,
+    |env| vec![attribution_row(env)],
     update_rows,
 ];
 
@@ -714,6 +715,40 @@ fn marker_endpoint(home: &Path) -> Option<String> {
 }
 
 const TELEMETRY_SETUP_FIX: &str = "run: playbook setup --only telemetry";
+
+/// The `attribution` key in the user's settings.json (ADR 0042): ok when every
+/// attribution is off, a warning with the fix when a key is missing.
+fn attribution_row(env: &Env) -> Row {
+    use crate::init::attribution::{self, State};
+    match attribution::state(&env.settings()) {
+        State::Off => Row::new(
+            "-",
+            Level::Pass,
+            "attribution off: commits and PRs get no Claude trailer, footer or session link",
+        ),
+        State::Open { missing, custom } if !missing.is_empty() => Row::new(
+            "-",
+            Level::Warn,
+            format!(
+                "attribution key missing in settings.json ({}), so Claude Code adds its attribution",
+                missing.join(", ")
+            ),
+        )
+        .hint(format!(
+            "run: {} (or playbook doctor --fix){}",
+            attribution::COMMAND,
+            if custom.is_empty() { "" } else { "; your own values stay" }
+        )),
+        State::Open { custom, .. } => Row::new(
+            "-",
+            Level::Info,
+            format!("attribution has your own value for {}", custom.join(", ")),
+        )
+        .hint(format!("to turn it off, run: {}", attribution::REPLACE_COMMAND)),
+        State::OtherShape => Row::new("-", Level::Info, attribution::OTHER_SHAPE),
+        State::Unreadable(why) => Row::new("-", Level::Warn, format!("attribution: {why}")),
+    }
+}
 
 /// The telemetry rows: Claude Code's settings point at the playbook
 /// collector, the collector runs, and rows arrived in the last day. Each

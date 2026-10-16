@@ -50,6 +50,7 @@ fn paths(home: &Path, root: &Path, repo: Option<(PathBuf, PathBuf)>) -> InitPath
         telemetry_replace_off: false,
         only: false,
         short_name: false,
+        attribution: playbook::init::attribution::Choice::Skip,
         path_setup: None,
         repo,
     }

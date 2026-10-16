@@ -544,13 +544,16 @@ mod tests {
         record
     }
 
+    /// Attribution already off, so only the item a test sets up is open.
+    const ATTRIBUTION_OFF: &str = r#""attribution":{"commit":"","pr":"","sessionUrl":false}"#;
+
     fn legacy_statusline(home: &Path) {
         fs::create_dir_all(home.join(".claude")).unwrap();
         let cmd = crate::init::statusline::playbook_statusline_path(home);
         fs::write(
             home.join(".claude/settings.json"),
             format!(
-                r#"{{"statusLine":{{"type":"command","command":"bash {}"}}}}"#,
+                r#"{{{ATTRIBUTION_OFF},"statusLine":{{"type":"command","command":"bash {}"}}}}"#,
                 cmd.display()
             ),
         )
@@ -761,7 +764,9 @@ mod tests {
         run(&ctx(&home), Trigger::Hook, 1000);
         fs::write(
             home.join(".claude/settings.json"),
-            r#"{"statusLine":{"type":"command","command":"playbook statusline"}}"#,
+            format!(
+                r#"{{{ATTRIBUTION_OFF},"statusLine":{{"type":"command","command":"playbook statusline"}}}}"#
+            ),
         )
         .unwrap();
 

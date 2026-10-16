@@ -430,7 +430,9 @@ pub enum Command {
     ///
     /// `playbook doctor --fix` repairs playbook's own files after an upgrade
     /// and prints the command for each change that needs you, the same as
-    /// `playbook migrate`. It never writes Claude Code settings.
+    /// `playbook migrate`. At a terminal it first asks whether to add the
+    /// missing `attribution` keys; that yes is the only Claude Code setting
+    /// it writes.
     #[command(args_conflicts_with_subcommands = true, subcommand_required = false)]
     Doctor {
         /// Run the safe migrations for playbook's own files, then list what needs you

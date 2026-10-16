@@ -198,6 +198,7 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         telemetry_replace_off: false,
         only: false,
         short_name: false,
+        attribution: playbook::init::attribution::Choice::AddMissing,
         path_setup: None,
         repo: None,
     }
@@ -846,6 +847,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         telemetry_replace_off: false,
         only: false,
         short_name: false,
+        attribution: playbook::init::attribution::Choice::Skip,
         path_setup: None,
         repo: None,
     };
@@ -907,6 +909,7 @@ fn aliases_false_skips_shim_entirely() {
         telemetry_replace_off: false,
         only: false,
         short_name: false,
+        attribution: playbook::init::attribution::Choice::Skip,
         path_setup: None,
         repo: None,
     };

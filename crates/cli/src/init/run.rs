@@ -69,6 +69,9 @@ pub struct InitPaths {
     /// Whether the user consented to the `pb` short name: writes
     /// `launcher.shortName` to playbook's own config, only when `pb` is free.
     pub short_name: bool,
+    /// What the attribution-off part does: skip, record a no, add the missing
+    /// `attribution` keys, or also replace values the user set.
+    pub attribution: crate::init::attribution::Choice,
     /// Where the binary lives and the shell to wire it for. `None` skips the
     /// `path` step.
     pub path_setup: Option<path::Setup>,
@@ -177,6 +180,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         repo: paths.repo.clone(),
         epoch,
     };
+    // Before the heal, so the record it writes sees the attribution answer.
+    let attribution_step = attribution_step(paths, epoch);
     let migrated = migrate::run_pending_for(&ctx, paths.statusline, paths.hooks);
     // Record this binary in the version record, so the session hook does not
     // run the same migrations again (ADR 0034).
@@ -219,6 +224,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         settings_step,
         hooks_step,
         telemetry_step,
+        attribution_step,
         override_step,
         short_name_step,
         path_step,
@@ -255,6 +261,9 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     }
     if paths.telemetry {
         steps.push(telemetry_step(paths, epoch));
+    }
+    if paths.attribution != crate::init::attribution::Choice::Skip {
+        steps.push(attribution_step(paths, epoch));
     }
     if paths.claude_override {
         steps.push(claude_override_step(&paths.home, true));
@@ -316,6 +325,16 @@ pub(crate) fn settings_and_hooks_steps(paths: &InitPaths, epoch: u64) -> (StepRe
         StepReport::skipped("hooks", "not requested; pass --hooks to opt in")
     };
     (settings_step, hooks_step)
+}
+
+/// The attribution-off part, as `paths.attribution` says.
+pub(crate) fn attribution_step(paths: &InitPaths, epoch: u64) -> StepReport {
+    crate::init::attribution::step(
+        &paths.home,
+        &paths.claude_home.join("settings.json"),
+        epoch,
+        paths.attribution,
+    )
 }
 
 /// The claude-override part: records the user's consent in playbook's own
