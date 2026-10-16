@@ -36,6 +36,11 @@
 #     unless a release for <tag> exists. For the downstream repositories,
 #     whose release has no assets. Prints url=<release page>.
 #
+#   release-gh.sh find <repo> <branch>
+#     Prints pr=<number> and state=open|merged for the pull request from
+#     <branch> by the app into the default branch of <repo>, or nothing when
+#     there is none.
+#
 #   release-gh.sh state <repo> <tag>
 #     Prints release=none, draft or published for the release of <tag>.
 #     Only "release not found" means none. Any other error fails, so a
@@ -48,7 +53,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 usage() {
-  echo "usage: release-gh.sh pr <repo> <branch> <title> <body-file> <dir> <file>... | wait <repo> <pr> <seconds> | tag <repo> <tag> <sha> | release <repo> <tag> <title> <notes-file> | state <repo> <tag>" >&2
+  echo "usage: release-gh.sh pr <repo> <branch> <title> <body-file> <dir> <file>... | wait <repo> <pr> <seconds> | tag <repo> <tag> <sha> | release <repo> <tag> <title> <notes-file> | find <repo> <branch> | state <repo> <tag>" >&2
   exit 2
 }
 
@@ -235,6 +240,20 @@ release() {
   printf 'url=%s\n' "$url"
 }
 
+find_cmd() {
+  [ "$#" -eq 2 ] || usage
+  local repo="$1" branch="$2" base number state
+  [[ "$branch" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "branch '$branch' is not release/vX.Y.Z"
+  base="$(gh api "repos/$repo" --jq .default_branch)"
+  for state in open merged; do
+    number="$(find_pr "$repo" "$branch" "$base" "$state")"
+    if [ -n "$number" ]; then
+      printf 'pr=%s\nstate=%s\n' "$number" "$state"
+      return 0
+    fi
+  done
+}
+
 state() {
   [ "$#" -eq 2 ] || usage
   local repo="$1" tag="$2" out
@@ -260,5 +279,6 @@ case "$cmd" in
   tag) tag "$@" ;;
   release) release "$@" ;;
   state) state "$@" ;;
+  find) find_cmd "$@" ;;
   *) usage ;;
 esac

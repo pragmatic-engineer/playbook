@@ -18,11 +18,14 @@
 #   publish  build the five targets, attach the assets to a draft release,
 #            write SHA256SUMS, attest, publish the release as the latest,
 #            then download it again and check it.
+# Then `downstream` opens release/vX.Y.Z in pragmatic-engineer/homebrew-tap and
+# pragmatic-engineer/marketplace and waits for their own vX.Y.Z releases.
 # A published release is never built or uploaded again. A tag is never moved.
 #
 # Dry run: `dry_run=true` plans, shows the changes the release pull request
-# would make, and builds the five targets from main. It opens, tags, uploads
-# and publishes nothing.
+# and the downstream pull requests would make, checks the app tokens with
+# read-only calls, and builds the five targets from main. It opens, tags,
+# uploads and publishes nothing.
 #
 # Five targets, built on the host that matches them:
 #   aarch64-apple-darwin        macos-latest, native
@@ -641,3 +644,341 @@ jobs:
             echo "$bin: $out"
           done
           echo "Checked $(wc -l < SHA256SUMS) assets, their attestations and the versions." >> "$GITHUB_STEP_SUMMARY"
+
+  # Writes the tap formulas with the tap's own bump script (ADR 0039 decision
+  # 9). This job has no secrets, so code from the tap never runs next to an
+  # app token. The formulas go to `downstream` as job outputs.
+  formulas:
+    needs: [plan, build, verify]
+    if: >-
+      ${{ !cancelled()
+      && github.event_name == 'workflow_dispatch'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && needs.plan.result == 'success'
+      && (needs.verify.result == 'success'
+          || (needs.plan.outputs.dry_run == 'true' && needs.build.result == 'success')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      playbook: ${{ steps.write.outputs.playbook }}
+      pbtop: ${{ steps.write.outputs.pbtop }}
+      telemetry: ${{ steps.write.outputs.telemetry }}
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: pragmatic-engineer/homebrew-tap
+          path: downstream/tap
+          persist-credentials: false
+
+      # The bump script reads the release's SHA256SUMS. A dry run has no
+      # published release, so it reads a stand-in whose checksums are
+      # placeholders.
+      - name: Write the formulas
+        id: write
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = true ]; then
+            sums="$RUNNER_TEMP/sums"
+            mkdir -p "$sums"
+            for t in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
+              for a in "playbook-$VERSION-$t" "playbook-telemetry-$VERSION-$t.tar.gz" "pbtop-$VERSION-$t.tar.gz"; do
+                printf '%s  %s\n' "$(printf '%s' "$a" | sha256sum | cut -d' ' -f1)" "$a"
+              done
+            done > "$sums/SHA256SUMS"
+            export DOWNLOAD_BASE="file://$sums"
+          fi
+          # pbtop first, so playbook-telemetry finds it for conflicts_with.
+          for f in playbook pbtop playbook-telemetry; do
+            (cd downstream/tap && SOURCE_REPO=playbook TAG_PREFIX=v \
+              .github/scripts/bump-formula.sh "$VERSION" "Formula/$f.rb")
+          done
+          {
+            echo "playbook=$(base64 -w0 < downstream/tap/Formula/playbook.rb)"
+            echo "pbtop=$(base64 -w0 < downstream/tap/Formula/pbtop.rb)"
+            echo "telemetry=$(base64 -w0 < downstream/tap/Formula/playbook-telemetry.rb)"
+          } >> "$GITHUB_OUTPUT"
+
+  # Moves the Homebrew tap and the marketplace to the release (ADR 0039
+  # decision 9). Each gets a release/vX.Y.Z pull request from the app with
+  # auto-merge, and each tags and publishes its own vX.Y.Z when it merges. The
+  # job opens both pull requests, then waits up to 30 minutes for them. When a
+  # repository does not publish its release within five minutes of its merge,
+  # the job tags and releases it through the API. A failure here leaves the
+  # playbook release published: the job fails with the commands to finish by
+  # hand. A dry run prints the changes and opens nothing.
+  downstream:
+    needs: [plan, formulas]
+    if: >-
+      ${{ !cancelled()
+      && github.event_name == 'workflow_dispatch'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && needs.formulas.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      TAP: pragmatic-engineer/homebrew-tap
+      MARKETPLACE: pragmatic-engineer/marketplace
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Only files are read from these checkouts. No code from them runs here.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: pragmatic-engineer/homebrew-tap
+          path: downstream/tap
+          persist-credentials: false
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: pragmatic-engineer/marketplace
+          path: downstream/marketplace
+          persist-credentials: false
+
+      - name: Write the changes
+        env:
+          PLAYBOOK_RB: ${{ needs.formulas.outputs.playbook }}
+          PBTOP_RB: ${{ needs.formulas.outputs.pbtop }}
+          TELEMETRY_RB: ${{ needs.formulas.outputs.telemetry }}
+        run: |
+          set -euo pipefail
+          base64 -d <<<"$PLAYBOOK_RB" > downstream/tap/Formula/playbook.rb
+          base64 -d <<<"$PBTOP_RB" > downstream/tap/Formula/pbtop.rb
+          base64 -d <<<"$TELEMETRY_RB" > downstream/tap/Formula/playbook-telemetry.rb
+          git -C downstream/tap add -A
+          git -C downstream/tap diff --cached --name-only > "$RUNNER_TEMP/tap-files"
+
+          # Exactly one playbook entry with a source object, so the pin cannot
+          # miss and leave the plugin on the default branch.
+          m=downstream/marketplace/.claude-plugin/marketplace.json
+          jq -e '[.plugins[] | select(.name == "playbook" and (.source | type) == "object")] | length == 1' "$m" >/dev/null \
+            || { echo "::error::$m does not have exactly one playbook entry with a source." >&2; exit 1; }
+          jq --arg tag "$TAG" --arg v "$VERSION" \
+            '(.plugins[] | select(.name == "playbook") | .source.ref) = $tag | .metadata.version = $v' \
+            "$m" > "$RUNNER_TEMP/marketplace.json"
+          cp "$RUNNER_TEMP/marketplace.json" "$m"
+          jq -e --arg tag "$TAG" 'any(.plugins[]; .name == "playbook" and .source.ref == $tag)' "$m" >/dev/null
+          git -C downstream/marketplace add -A
+          git -C downstream/marketplace diff --cached --name-only > "$RUNNER_TEMP/marketplace-files"
+
+          title="chore(release): playbook $VERSION"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/$TAG"
+          printf 'Moves playbook, playbook-telemetry and pbtop to %s, with the URLs and checksums from the SHA256SUMS of %s.\n\nOpened by the playbook release workflow. It merges once the checks pass, and the release-tag workflow then tags this repository %s.\n' \
+            "$VERSION" "$url" "$TAG" > "$RUNNER_TEMP/tap-body.md"
+          printf 'Pins the playbook plugin to the release %s.\n\nOpened by the playbook release workflow. It merges once the checks pass, and the release workflow then tags this repository %s.\n' \
+            "$url" "$TAG" > "$RUNNER_TEMP/marketplace-body.md"
+          echo "title=$title" >> "$GITHUB_ENV"
+          {
+            echo "## Downstream changes for $TAG"
+            [ "$DRY_RUN" != true ] || echo "Dry run: the formula checksums are placeholders, and nothing is opened."
+            for repo in tap marketplace; do
+              echo
+              echo "### $repo: \`$title\` on \`release/$TAG\`"
+              echo
+              echo '~~~diff'
+              git -C "downstream/$repo" diff --cached
+              echo '~~~'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Read through env, so the values never appear in the script. Without
+      # the secrets the job stops here with a notice.
+      - name: Check for the app credentials
+        id: bot
+        env:
+          BOT_APP_CLIENT_ID: ${{ secrets.BOT_APP_CLIENT_ID }}
+          BOT_APP_PRIVATE_KEY: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$BOT_APP_CLIENT_ID" ] && [ -n "$BOT_APP_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::BOT_APP_CLIENT_ID or BOT_APP_PRIVATE_KEY is not set, so the tap and the marketplace are not moved to $TAG."
+          {
+            echo "## Downstream skipped"
+            echo
+            echo "The app secrets are not set. Move the tap and the marketplace to $TAG by hand, as the release doc says, or set the secrets and run \`gh workflow run release.yml -f version=$VERSION\` again."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # One token per repository. A dry run asks for read access only and
+      # makes read calls, which checks the secrets and the installation.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        if: steps.bot.outputs.configured == 'true'
+        id: tap-app
+        with:
+          client-id: ${{ secrets.BOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          owner: pragmatic-engineer
+          repositories: homebrew-tap
+          permission-contents: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
+          permission-pull-requests: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
+
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        if: steps.bot.outputs.configured == 'true'
+        id: marketplace-app
+        with:
+          client-id: ${{ secrets.BOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          owner: pragmatic-engineer
+          repositories: marketplace
+          permission-contents: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
+          permission-pull-requests: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
+
+      - name: Check the app tokens
+        if: steps.bot.outputs.configured == 'true' && needs.plan.outputs.dry_run == 'true'
+        env:
+          TAP_TOKEN: ${{ steps.tap-app.outputs.token }}
+          MARKETPLACE_TOKEN: ${{ steps.marketplace-app.outputs.token }}
+        run: |
+          set -euo pipefail
+          GH_TOKEN="$TAP_TOKEN" gh api "repos/$TAP" --jq '"\(.full_name): pull: \(.permissions.pull // false)"'
+          GH_TOKEN="$TAP_TOKEN" scripts/release-gh.sh find "$TAP" "release/$TAG"
+          GH_TOKEN="$MARKETPLACE_TOKEN" gh api "repos/$MARKETPLACE" --jq '"\(.full_name): pull: \(.permissions.pull // false)"'
+          GH_TOKEN="$MARKETPLACE_TOKEN" scripts/release-gh.sh find "$MARKETPLACE" "release/$TAG"
+
+      - name: Open the pull requests and wait for the releases
+        if: steps.bot.outputs.configured == 'true' && needs.plan.outputs.dry_run != 'true'
+        env:
+          TAP_TOKEN: ${{ steps.tap-app.outputs.token }}
+          MARKETPLACE_TOKEN: ${{ steps.marketplace-app.outputs.token }}
+        run: |
+          set -euo pipefail
+          end=$(( $(date +%s) + 1800 ))
+          left() { local s=$(( end - $(date +%s) )); [ "$s" -gt 0 ] && echo "$s" || echo 0; }
+          # Messages go to the log and the summary. Stdout carries results.
+          report() { echo "$1" >&2; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+          failed=0
+          manual() {
+            failed=1
+            echo "::error::$1" >&2
+            {
+              echo
+              echo "$1 Finish it by hand, then check that $2 has the release $TAG:"
+              echo
+              echo '```bash'
+              echo "gh pr list --repo $2 --head release/$TAG --state all"
+              echo "gh workflow run release.yml --repo $GITHUB_REPOSITORY -f version=$VERSION"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          # Opens or reuses release/$TAG in <repo>. Prints pr=<number>, or
+          # sha=<head of the checkout> when the repository already carries
+          # the release and there is no pull request.
+          open_pr() {
+            local repo="$1" dir="$2" files="$3" body="$4" out
+            mapfile -t list < "$files"
+            if [ "${#list[@]}" -gt 0 ]; then
+              scripts/release-gh.sh pr "$repo" "release/$TAG" "$title" "$body" "$dir" "${list[@]}" | grep '^pr='
+              return
+            fi
+            out="$(scripts/release-gh.sh find "$repo" "release/$TAG")" || return 1
+            if grep -q '^pr=' <<<"$out"; then
+              grep '^pr=' <<<"$out"
+            else
+              echo "sha=$(git -C "$dir" rev-parse HEAD)"
+            fi
+          }
+
+          # The previous playbook ref in the marketplace, read from the parent
+          # of <sha>, so a rerun writes the same notes.
+          marketplace_notes() {
+            local sha="$1" parent before
+            parent="$(gh api "repos/$MARKETPLACE/commits/$sha" --jq '.parents[0].sha')"
+            before="$(gh api -H 'Accept: application/vnd.github.raw' \
+              "repos/$MARKETPLACE/contents/.claude-plugin/marketplace.json?ref=$parent" \
+              | jq -r '.plugins[] | select(.name == "playbook") | .source.ref // "the default branch"')"
+            printf 'playbook %s -> %s.\n' "$before" "$TAG"
+          }
+
+          # Waits for the pull request of <repo>, then up to five minutes for
+          # the release the repository publishes itself. When it does not,
+          # this tags the merge commit and publishes the release through the
+          # API, but only when the commit changes nothing outside <allowed>,
+          # the rule of the repository's own workflow.
+          finish() {
+            local repo="$1" opened="$2" allowed="$3" sha st="" stop other
+            case "$opened" in
+              pr=*)
+                report "Pull request: https://github.com/$repo/pull/${opened#pr=}"
+                sha="$(scripts/release-gh.sh wait "$repo" "${opened#pr=}" "$(left)" | sed -n 's/^sha=//p')" || return 1 ;;
+              sha=*)
+                report "$repo already carries $TAG, so it needs no pull request."
+                sha="${opened#sha=}" ;;
+            esac
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+            stop=$(( $(date +%s) + 300 ))
+            while :; do
+              st="$(scripts/release-gh.sh state "$repo" "$TAG")" || return 1
+              [ "$st" = release=none ] || break
+              [ "$(date +%s)" -lt "$stop" ] || break
+              sleep 20
+            done
+            case "$st" in
+              release=published) ;;
+              release=draft) report "$repo has a draft release $TAG. Publish or delete it."; return 1 ;;
+              *)
+                other="$(gh api "repos/$repo/commits/$sha" --jq '.files[].filename' | grep -Ev "$allowed" || true)"
+                if [ -n "$other" ]; then
+                  report "$sha in $repo changes more than the release files (${other//$'\n'/ }), so it is not tagged."
+                  return 1
+                fi
+                report "$repo did not publish $TAG itself, so this run tags $sha and publishes it."
+                if [ "$repo" = "$MARKETPLACE" ]; then
+                  marketplace_notes "$sha" > "$RUNNER_TEMP/notes.md"
+                else
+                  printf 'Formula versions for playbook %s: playbook, playbook-telemetry and pbtop at %s.\n' "$TAG" "$VERSION" > "$RUNNER_TEMP/notes.md"
+                fi
+                scripts/release-gh.sh tag "$repo" "$TAG" "$sha" >/dev/null || return 1
+                scripts/release-gh.sh release "$repo" "$TAG" "$TAG" "$RUNNER_TEMP/notes.md" >/dev/null || return 1 ;;
+            esac
+            report "Release: https://github.com/$repo/releases/tag/$TAG"
+          }
+
+          echo "## Downstream releases" >> "$GITHUB_STEP_SUMMARY"
+          # Both pull requests open first, so their checks run at the same time.
+          tap="" market=""
+          tap="$(GH_TOKEN="$TAP_TOKEN" open_pr "$TAP" downstream/tap "$RUNNER_TEMP/tap-files" "$RUNNER_TEMP/tap-body.md")" \
+            || manual "The tap pull request for $TAG could not be opened. The log says why." "$TAP"
+          market="$(GH_TOKEN="$MARKETPLACE_TOKEN" open_pr "$MARKETPLACE" downstream/marketplace "$RUNNER_TEMP/marketplace-files" "$RUNNER_TEMP/marketplace-body.md")" \
+            || manual "The marketplace pull request for $TAG could not be opened. The log says why." "$MARKETPLACE"
+          if [ -n "$tap" ]; then
+            GH_TOKEN="$TAP_TOKEN" finish "$TAP" "$tap" '^Formula/[a-z-]+\.rb$' \
+              || manual "The tap release $TAG did not finish. The log says why." "$TAP"
+          fi
+          if [ -n "$market" ]; then
+            GH_TOKEN="$MARKETPLACE_TOKEN" finish "$MARKETPLACE" "$market" '^\.claude-plugin/marketplace\.json$' \
+              || manual "The marketplace release $TAG did not finish. The log says why." "$MARKETPLACE"
+          fi
+          if [ "$failed" -ne 0 ]; then
+            report "The playbook release $TAG is published. Only the downstream step failed."
+            exit 1
+          fi

@@ -261,7 +261,7 @@ pub enum EffortCommand {
     },
 }
 
-/// The line `playbook init` prints on stderr in a terminal.
+/// The line the old command name prints on stderr in a terminal.
 pub const INIT_DEPRECATION: &str = "playbook init is deprecated, use: playbook setup";
 
 /// Top-level subcommand groups.
