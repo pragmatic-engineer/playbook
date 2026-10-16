@@ -17,6 +17,10 @@ use std::path::Path;
 
 const BINARY_KEY: &str = "notices/binary";
 
+/// The key of ADR 0035 plugin notices, which nothing reads now. The first
+/// move clears it.
+const OLD_PLUGIN_KEY: &str = "notices/plugin";
+
 /// What a step shows: the line, or nothing.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Notices {
@@ -105,6 +109,7 @@ impl Pending {
         let moved = crate::state::transaction(root, |tx| {
             if tx.get(BINARY_KEY)?.filter(|v| !v.is_empty()) == before {
                 tx.set(BINARY_KEY, &to)?;
+                tx.delete(OLD_PLUGIN_KEY)?;
                 return Ok(true);
             }
             Ok(false)
@@ -165,6 +170,19 @@ mod tests {
         );
         assert_eq!(again, None);
         assert_eq!(shown(&root, BINARY_KEY), Ok(Some(RUNNING.into())));
+    }
+
+    #[test]
+    fn the_first_move_clears_the_old_plugin_key() {
+        // Arrange
+        let root = root("notices-plugin-key");
+        crate::state::set(&root, OLD_PLUGIN_KEY, "0.30.0").unwrap();
+
+        // Act
+        line(&root, Some("0.25.0"), false);
+
+        // Assert
+        assert_eq!(shown(&root, OLD_PLUGIN_KEY), Ok(None));
     }
 
     #[test]
