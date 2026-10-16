@@ -9,8 +9,8 @@ marketplace, as the section on the release workflow describes. The tap also
 checks every 30 minutes for a newer release and bumps a formula itself when the
 `downstream` job has not done it within an hour.
 
-A release attaches fifteen assets (three per target), `release-notes.json`,
-`breaking-changes.json` and `SHA256SUMS`, which lists the other seventeen. It
+A release attaches ten assets (two per target), `release-notes.json`,
+`breaking-changes.json` and `SHA256SUMS`, which lists the other twelve. It
 builds no plugin archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as
 described next.
 
@@ -63,9 +63,10 @@ the `v` tags and picks where the run starts:
 
 After the tag, `draft` creates a draft release with the notes and attaches
 `release-notes.json` and `breaking-changes.json`. `build` compiles the five
-targets with `--locked` and attaches three assets per target: the `playbook`
-binary, `playbook-telemetry-X.Y.Z-<target>.tar.gz` with `playbook-telemetry`
-and `pbtop`, and `pbtop-X.Y.Z-<target>.tar.gz` with `pbtop` alone. Each
+targets with `--locked` and attaches two assets per target: the `playbook`
+binary and `pbtop-X.Y.Z-<target>.tar.gz` with `pbtop` alone. No release
+carries the `playbook-telemetry` archive, which
+[ADR 0041](../adr/0041-retire-playbook-telemetry.md) retires. Each
 build job first runs its binaries with `--version` (all but the cross built
 x86_64 macOS one) and attests the assets it built. `publish` checks every
 draft asset against that attestation, writes `SHA256SUMS` over every asset,
@@ -83,8 +84,8 @@ prints the signed `git tag` command to run by hand, and the next run with
 
 After `verify`, `downstream` moves the tap and the marketplace to the release
 ([ADR 0039](../adr/0039-release-workflow.md) decision 9). It runs the tap's
-`.github/scripts/bump-formula.sh` for `playbook`, `pbtop` and
-`playbook-telemetry`, which reads the release's `SHA256SUMS`, in a
+`.github/scripts/bump-formula.sh` for `playbook` and `pbtop`, which reads
+the release's `SHA256SUMS`, in a
 `formulas` job with no secrets, and sets the marketplace `ref` to `vX.Y.Z`
 and `metadata.version` to `X.Y.Z`. Each change
 goes to a `release/vX.Y.Z` pull request titled `chore(release): playbook X.Y.Z`,
@@ -164,13 +165,14 @@ installs and the tap may already point at them. To pull a bad release:
    so users who already updated keep the bad plugin until the next patch.
 4. Move the formulas back: in `pragmatic-engineer/homebrew-tap`, run
    `SOURCE_REPO=playbook TAG_PREFIX=v .github/scripts/bump-formula.sh A.B.C
-   Formula/<formula>.rb` for `playbook`, `pbtop` and `playbook-telemetry`, and
-   open a pull request with the result. The tap's scheduled check never moves
+   Formula/<formula>.rb` for `playbook` and `pbtop`, and open a pull
+   request with the result. The tap's scheduled check never moves
    a formula back to a lower version, and it skips a pre-release. Before
-   0.34.0, `pbtop` and `playbook-telemetry` had no assets in the `v`
-   releases: for such an A.B.C, move only `playbook` this way, take
-   `playbook-telemetry` back to its last `telemetry-v` tag with
-   `TAG_PREFIX=telemetry-v`, and remove `Formula/pbtop.rb` by hand.
+   0.35.0 the tap had no `pbtop` formula: for such an A.B.C, move only
+   `playbook` this way and remove `Formula/pbtop.rb` by hand. The retired
+   `playbook-telemetry` formula stays on `telemetry-v0.2.0`; when
+   `pbtop.rb` goes, also remove its `disable!` line, since it names `pbtop`
+   as the replacement.
 5. Ship the fix as the next patch release, which moves the tap and the
    marketplace forward again.
 
@@ -178,14 +180,13 @@ installs and the tap may already point at them. To pull a bad release:
 
 `playbook-telemetry` (and later `playbook-code`) are workspace members of this
 repo under `crates/`. `playbook` depends on them by path, so there is one
-`Cargo.lock`. `playbook-telemetry` uses the workspace version and ships in the
-`vX.Y.Z` release (ADR 0038). The `telemetry-v` tags before 0.34.0 stay as
-history.
+`Cargo.lock`. `playbook-telemetry` uses the workspace version, and its
+`pbtop` binary ships in the `vX.Y.Z` release (ADR 0038, ADR 0041). The
+`telemetry-v` tags before 0.34.0 stay as history.
 
 | Tool | Release assets |
 | --- | --- |
 | playbook | `playbook-<version>-<target>`, the raw binary |
-| playbook-telemetry | `playbook-telemetry-<version>-<target>.tar.gz` holding `playbook-telemetry` and `pbtop` |
 | pbtop | `pbtop-<version>-<target>.tar.gz` holding `pbtop` alone |
 
 Every release also carries `release-notes.json`, `breaking-changes.json` and
