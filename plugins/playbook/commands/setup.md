@@ -61,9 +61,10 @@ with these two questions:
 
 ## Step 3: Build the flag list and run
 
-Build the flag list. Note the names differ on purpose: this command takes
-`--install-aliases` and `--use-system-prompt`, while `playbook setup` takes
-`--aliases` and `--system-prompt`. Translate, don't pass through.
+Build the flag list. The names differ on purpose: the `/playbook:setup` slash
+command takes `--install-aliases` and `--use-system-prompt`, and the
+`playbook setup` binary command takes `--aliases` and `--system-prompt`.
+Translate, don't pass through.
 
 `--yes` alone (no `--install-aliases`, no `--use-system-prompt`) means "don't
 ask, take the recommended answer to every question" - the standard meaning of
@@ -79,19 +80,25 @@ non-interactive run would contradict what `--yes` says it does.
   `--yes` was in `$ARGUMENTS`.
 - Add `--system-prompt` if Q2 answer is "Yes (Recommended)" OR
   `--use-system-prompt` or `--yes` was in `$ARGUMENTS`.
+- Always add `--hooks` and `--statusline`.
 
-`playbook setup` always runs. Older binaries call it `playbook init`. This command has no terminal, so setup does not ask its own questions and uses its defaults (hooks, settings and PATH on), plus the launcher and system prompt flags you built above. It also marks `~/.config/playbook` as trusted in an existing `~/.claude.json`, so Claude Code's trust dialog never blocks that folder. Then check the tools the plugin needs and install only the missing ones:
+`playbook setup` always runs. This command has no terminal, so setup asks none of its own questions. Without a terminal and without `--yes`, setup leaves the hooks, the status line and telemetry off unless a flag turns them on, which is why the list always has `--hooks` and `--statusline`. PATH stays on by default. It also marks `~/.config/playbook` as trusted in an existing `~/.claude.json`, so Claude Code's trust dialog never blocks that folder. Then check the tools the plugin needs and install only the missing ones:
 
 ```bash
 playbook setup [flags]
 playbook deps ensure --builtin
 ```
 
-If `playbook setup` fails with "unrecognized subcommand", the binary predates the rename: run `playbook init [flags]` with the same flags instead, and use that name for the rest of this run. The two names run the same code.
-
 The binary carries its own settings template, system prompt and Brewfile, so neither command needs a plugin file.
 
-If setup exits non-zero, still run the second command, then report which setup steps failed. If it fails with "unexpected argument", the installed binary is older than the plugin: run it again without that flag and tell the user to upgrade with `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`. If setup reports the settings step skipped with "no template shipped", the binary is also older than the plugin: give the same upgrade advice, because no guards were wired. If `playbook deps ensure --builtin` fails the same way, skip the second command and say so.
+When the setup command fails, check these cases in order:
+
+1. It fails with "unrecognized subcommand": the binary predates the rename (older versions: `playbook init`). Run `playbook init` with the same flags, and use that name for the rest of this run. The two names run the same code.
+2. It fails with "unexpected argument": the installed binary is older than the plugin. Run the same command again without that flag, and tell the user to upgrade with `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`.
+3. It reports the settings step skipped with "no template shipped": the binary is also older than the plugin. Give the same upgrade advice, because no guards were wired.
+4. Any other non-zero exit: still run the second command, then report which setup steps failed.
+
+If `playbook deps ensure --builtin` fails with "unrecognized subcommand" or "unexpected argument", skip it and say so.
 
 ## Step 4: Report
 

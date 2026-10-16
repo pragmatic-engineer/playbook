@@ -7,7 +7,7 @@ The migration registry carries an existing install across breaking changes. It l
 Each migration also has a scope: `Owned` writes only playbook's own files, `Consent` writes a file you own, and `Report` writes nothing and reports on files Claude Code owns. Only `Owned` migrations run on their own:
 
 - `playbook migrate` runs them and prints the command for each item that needs you. `playbook doctor --fix` is the same step. `--status` and `--dry-run` show what stands and what would run, and write nothing.
-- The first command after an upgrade runs them once, before the command, and prints one notice on stderr. Hot paths skip this so they stay fast: hooks, the status line, `shell-init`, `version` and the hidden `json` helpers. So do `usage`, which the session hooks start in the background, the commands that run their own heal (`migrate`, `doctor --fix`, `setup`), `update`, `uninstall`, and `doctor` and `state`, which show the home as it is.
+- The first command after an upgrade runs them once, before the command, and prints one notice on stderr. Hot paths skip this so they stay fast: hooks, the status line, `shell-init`, `version` and the hidden `json` helpers. So do `usage`, which the session hooks start in the background, the commands that run their own heal (`migrate`, `doctor --fix`, `setup` or its old name `init`), `update`, `uninstall`, and `doctor` and `state`, which show the home as it is.
 - The `session-init` hook runs them once per session when the binary is newer than the record, and adds one line to the session message.
 - `playbook update` runs the new binary's `migrate` after the swap. The install script runs it after an install when it has a terminal or `--yes`, and not with `--no-init`.
 
@@ -42,7 +42,7 @@ No Auto migration ships today. The current entries are:
 
 When playbook places a file (the system prompt, a status line script), it records a hash of what it wrote in the `state` table (see [State store](08-state-store.md)), under a `migrations/shipped/<key>` key. If the file's hash later differs, you edited it. A file with no record is never reported as edited. The hash is FNV-1a 64. It detects edits and does not protect against tampering.
 
-Playbook does not overwrite a file you edited. It leaves it, prints a warning, and tells you how to take the shipped copy (delete the file, then run `playbook setup` again). Skills are checked per plugin version folder, and a dev checkout (a folder with `.git`) is skipped.
+Playbook does not overwrite a file you edited. It leaves it, prints a warning, and names the command that takes the shipped copy: delete the file, then run `playbook setup --system-prompt` for the system prompt. The old status line script has no shipped copy, so the warning only says to delete it once nothing runs it. Skills are checked per plugin version folder, and a dev checkout (a folder with `.git`) is skipped.
 
 ## State and locking
 
@@ -54,7 +54,7 @@ Playbook does not overwrite a file you edited. It leaves it, prints a warning, a
 
 1. Append an entry to `registry()` in `crates/cli/src/init/migrate.rs` with the next id. Never reorder or reuse an id.
 2. Pick the kind: Auto for a one-time move, Idempotent for a self-healing repair, Manual for something only you can resolve.
-3. Pick the scope: `Owned` when it writes only playbook's own files, `Consent` with a check and an `setup` command when it writes a file the user owns, `Report` when it only reports.
+3. Pick the scope: `Owned` when it writes only playbook's own files, `Consent` with a check and a `setup` command when it writes a file the user owns, `Report` when it only reports.
 4. Add a test next to the existing ones in that file.
 5. A change that needs the user also gets an entry in `breaking-changes.json` ([ADR 0035](../adr/0035-breaking-change-notices.md)).
 

@@ -27,7 +27,7 @@ The installer only installs the `playbook` binary (checksum verified) and puts i
 
 To see what `playbook setup` changes before you agree, read [What setup installs](docs/guides/06-what-init-installs.md) and the [hook reference](docs/reference/hooks.md).
 
-Older releases call this command `playbook init`. That name still works and runs the same code.
+Releases up to v0.34.0 have only the old name (older versions: `playbook init`). It takes the same flags, and it still works on newer releases.
 
 ### Homebrew
 

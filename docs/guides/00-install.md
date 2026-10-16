@@ -2,7 +2,7 @@
 
 To see every change `playbook setup` makes before you agree to it, read [What setup installs](06-what-init-installs.md) and the [hook reference](../reference/hooks.md).
 
-Older releases call this command `playbook init`. That name still works and runs the same code ([ADR-0040](../adr/0040-rename-init-to-setup.md)).
+Releases up to v0.34.0 have only the old name (older versions: `playbook init`). It takes the same flags, and it still works on newer releases ([ADR-0040](../adr/0040-rename-init-to-setup.md)).
 
 The recommended route is the install script, one command, and `playbook update` keeps it current. Homebrew is supported too. This page covers every route, requirements, how the binary reaches `PATH`, upgrades, the settings merge and uninstall.
 
