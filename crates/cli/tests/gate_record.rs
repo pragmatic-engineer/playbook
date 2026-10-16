@@ -115,15 +115,20 @@ impl Fixture {
         phase: &str,
         input: &PathBuf,
     ) -> std::process::Output {
-        Command::new(env!("CARGO_BIN_EXE_playbook"))
-            .args(["gate", "record", plan_slug, command, phase])
+        self.command(plan_slug, command, phase, input)
+            .output()
+            .expect("playbook binary should spawn")
+    }
+
+    fn command(&self, plan_slug: &str, command: &str, phase: &str, input: &PathBuf) -> Command {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+        cmd.args(["gate", "record", plan_slug, command, phase])
             .arg(input)
             .arg("--source")
             .arg(input)
             .current_dir(&self.repo)
-            .env("HOME", &self.home)
-            .output()
-            .expect("playbook binary should spawn")
+            .env("HOME", &self.home);
+        cmd
     }
 
     /// Where earlier versions kept the gate database.
@@ -643,8 +648,12 @@ fn a_pending_move_defers_to_the_old_file_and_a_later_call_merges_it() {
     fs::create_dir_all(&lock).unwrap();
     let input = f.write_input("report.md", "VERDICT: PASS");
 
-    // Act
-    let busy = f.run("plan-a", "spec-review", "spec", &input);
+    // Act: a short lock budget, so the busy call gives up in milliseconds.
+    let busy = f
+        .command("plan-a", "spec-review", "spec", &input)
+        .env(playbook_data::migrate::TEST_LOCK_RETRIES_ENV, "2")
+        .output()
+        .expect("playbook binary should spawn");
     fs::remove_dir(&lock).unwrap();
     let later = f.run("plan-b", "spec-review", "spec", &input);
 

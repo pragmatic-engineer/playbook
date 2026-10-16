@@ -1353,13 +1353,15 @@ Example: `playbook setup --no-hooks --aliases`
 - `--no-system-prompt`: Do not install the system prompt
 - `--telemetry`: Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
 - `--no-telemetry`: Do not write telemetry variables into settings.json
+- `--collector-service`: Keep the usage collector running in a per-user background service (launchd agent or systemd user unit), when telemetry points at it
+- `--no-collector-service`: Do not install the background service for the usage collector
 - `--claude-override`: Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config)
 - `--no-claude-override`: Do not turn on the `claude` shell function
 - `--short-name`: Add `pb` as a short name for `playbook`, only when `pb` is free (recorded in playbook own config)
 - `--no-short-name`: Do not add the `pb` short name
 - `--attribution-off`: Turn off the commit, PR and session link attribution Claude Code adds (sets `attribution` in settings.json)
 - `--no-attribution-off`: Do not set or change attribution in settings.json
-- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
+- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, collector-service, claude-override, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing

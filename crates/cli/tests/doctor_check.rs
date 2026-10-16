@@ -1391,3 +1391,97 @@ fn doctor_reports_the_attribution_key_ok_missing_or_your_own() {
         "{row}"
     );
 }
+
+#[test]
+fn doctor_names_the_collector_service_and_the_command_that_adds_it() {
+    use playbook::usage::service::{find, log_path, render, Kind};
+    let Some(kind) = Kind::current() else {
+        return;
+    };
+    // Arrange
+    let none = Box::new("svc-none");
+    point_settings_at_collector(&none, free_port());
+    let installed = Box::new("svc-ok");
+    point_settings_at_collector(&installed, free_port());
+    let gone = Box::new("svc-gone");
+    point_settings_at_collector(&gone, free_port());
+    for (b, program) in [
+        (&installed, PathBuf::from(env!("CARGO_BIN_EXE_playbook"))),
+        (&gone, gone.root.join("no/playbook")),
+    ] {
+        let file = kind.file(&b.home());
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, render(kind, &program, &log_path(&b.home()))).unwrap();
+        assert!(find(&b.home()).is_some());
+    }
+
+    // Act
+    let none = none.run_with_env(&[]);
+    let installed = installed.run_with_env(&[]);
+    let gone = gone.run_with_env(&[]);
+
+    // Assert
+    let none = telemetry_rows(&none);
+    assert!(
+        text(&none).contains("INFO no collector service"),
+        "{}",
+        text(&none)
+    );
+    assert!(
+        hints(&none).contains("playbook usage collect, or keep it running")
+            || hints(&none).contains("`playbook usage collect`, or keep it running"),
+        "{}",
+        hints(&none)
+    );
+    assert!(hints(&none).contains("playbook setup --only collector-service"));
+    let installed = telemetry_rows(&installed);
+    assert!(
+        text(&installed).contains("PASS collector service installed"),
+        "{}",
+        text(&installed)
+    );
+    let gone = telemetry_rows(&gone);
+    assert!(
+        text(&gone).contains("WARN the collector service starts a program that is gone"),
+        "{}",
+        text(&gone)
+    );
+}
+
+#[test]
+fn a_no_to_the_collector_service_shows_in_doctor() {
+    let b = Box::new("svc-declined");
+    point_settings_at_collector(&b, free_port());
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args([
+            "setup",
+            "--no-collector-service",
+            "--no-hooks",
+            "--no-statusline",
+            "--no-path",
+            "--no-telemetry",
+            "--no-attribution-off",
+        ])
+        .env("HOME", b.home())
+        .current_dir(b.home())
+        .env_remove("CLAUDE_CODE_ENABLE_TELEMETRY")
+        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .output()
+        .unwrap();
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("you said no"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    if playbook::usage::service::Kind::current().is_some() {
+        assert!(
+            text(&mine).contains("INFO no collector service (you said no)"),
+            "{}",
+            text(&mine)
+        );
+    }
+}
