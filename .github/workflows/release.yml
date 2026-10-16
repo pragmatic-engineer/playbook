@@ -572,7 +572,7 @@ jobs:
               # matched first.
               if grep -qi 'no attestations found' <<<"$err"; then
                 echo "::error::$f has no attestation. Nothing is published." >&2
-              elif grep -qiE 'failed to fetch|HTTP [0-9]{3}' <<<"$err"; then
+              elif grep -qiE 'failed to fetch|HTTP [0-9]{3}|dial tcp|no such host|i/o timeout|connection (refused|reset)|deadline exceeded' <<<"$err"; then
                 echo "::error::could not fetch the attestation of $f, so it was not checked. Nothing is published." >&2
               else
                 echo "::error::$f does not match the attestation of its build. Nothing is published." >&2

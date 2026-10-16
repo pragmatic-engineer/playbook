@@ -20,11 +20,13 @@ cd "$(dirname "$0")/.."
 # release run.
 NEEDS='api.github.com:443 tuf-repo.github.com:443 tuf-repo-cdn.sigstore.dev:443 tmaproduction.blob.core.windows.net:443'
 
-# Prints "<file>: <job> lacks <host>" for each gap in one workflow file.
+# For one workflow file, prints "checked <file>: <job>" for each job it
+# checks, then one line per missing host.
 gaps() {
   awk -v needs="$NEEDS" -v file="$1" '
     function flush(   n, i, list) {
       if (job != "" && block && verify) {
+        print "checked " file ": " job
         n = split(needs, list, " ")
         for (i = 1; i <= n; i++)
           if (index(hosts, " " list[i] " ") == 0)
@@ -34,7 +36,7 @@ gaps() {
     }
     /^jobs:/ { injobs = 1; next }
     injobs && /^  [A-Za-z0-9_-]+:/ { flush(); job = $1; sub(/:$/, "", job); next }
-    /egress-policy: *block/ { block = 1 }
+    /egress-policy: *["'\'']?block["'\'']? *$/ { block = 1 }
     /gh attestation verify/ { verify = 1 }
     /^ +[a-z0-9.-]+:[0-9]+ *$/ { hosts = hosts $1 " " }
     END { flush() }
@@ -66,8 +68,22 @@ jobs:
             tuf-repo.github.com:443
             tuf-repo-cdn.sigstore.dev:443
       - run: gh attestation verify a --repo r
+  quoted:
+    steps:
+      - uses: step-security/harden-runner
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            api.github.com:443
+            tuf-repo.github.com:443
+            tuf-repo-cdn.sigstore.dev:443
+      - run: gh attestation verify a --repo r
 EOF
-want="$tmp/fixture.yml: gap runs gh attestation verify without tmaproduction.blob.core.windows.net:443"
+want="checked $tmp/fixture.yml: ok
+checked $tmp/fixture.yml: gap
+$tmp/fixture.yml: gap runs gh attestation verify without tmaproduction.blob.core.windows.net:443
+checked $tmp/fixture.yml: quoted
+$tmp/fixture.yml: quoted runs gh attestation verify without tmaproduction.blob.core.windows.net:443"
 got="$(gaps "$tmp/fixture.yml")"
 if [ "$got" != "$want" ]; then
   echo "FAIL: the check missed the fixture gap. Got: '$got'" >&2
@@ -75,12 +91,21 @@ if [ "$got" != "$want" ]; then
 fi
 
 fail=0
+checked=""
 for f in .github/workflows/*.yml; do
   out="$(gaps "$f")"
-  if [ -n "$out" ]; then
-    echo "$out" >&2
+  checked="$checked$(grep '^checked ' <<<"$out" || true)"$'\n'
+  missing="$(grep -v '^checked ' <<<"$out" || true)"
+  if [ -n "$missing" ]; then
+    echo "$missing" >&2
     fail=1
   fi
+done
+# The jobs known to run gh attestation verify. When the call moves out of
+# the workflow text, the check would see nothing, so it fails instead.
+for job in publish verify; do
+  grep -qx "checked .github/workflows/release.yml: $job" <<<"$checked" \
+    || { echo "FAIL: the check did not find release.yml job $job." >&2; fail=1; }
 done
 [ "$fail" -eq 0 ] || { echo "FAIL: add the hosts above to the job's allowed-endpoints." >&2; exit 1; }
 echo "ok: every job that runs gh attestation verify allows its hosts"
