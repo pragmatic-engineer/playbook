@@ -25,9 +25,11 @@
 # PLAYBOOK_REF (a tag such as v1.2.3). A branch or a commit has no published
 # binary, so it is refused.
 #
-# With --pbtop it installs only pbtop, the standalone usage dashboard, from the
+# install-pbtop.sh runs this script with PLAYBOOK_INSTALL_ONLY=pbtop, which
+# installs only pbtop, the standalone usage dashboard, from the
 # pbtop-<version>-<target>.tar.gz asset of the same release, verified the same
-# way. It then stops: no migrate, no setup.
+# way. It then stops: no migrate, no setup. The --pbtop flag does the same
+# for one more release.
 set -euo pipefail
 
 RELEASE_REPO="pragmatic-engineer/playbook"
@@ -47,6 +49,7 @@ ASSUME_YES=0
 BINARY_ONLY=0
 NO_INIT=0
 ONLY_PBTOP=0
+[ "${PLAYBOOK_INSTALL_ONLY:-}" = pbtop ] && ONLY_PBTOP=1
 
 if [ -t 1 ]; then
     C_B=$'\033[1;34m'; C_Y=$'\033[1;33m'; C_R=$'\033[1;31m'; C_0=$'\033[0m'
@@ -159,8 +162,6 @@ Flags:
   --binary-only      still offers `playbook setup`, but skips the wrapper and system
                      prompt questions
   --no-init          install the binary only: never ask about `playbook setup`
-  --pbtop            install only pbtop, the standalone usage dashboard, from the
-                     same release, verified the same way; nothing else runs
   --ref <tag>        same as PLAYBOOK_REF
   -h, --help         show this help
 
@@ -177,7 +178,8 @@ while [ $# -gt 0 ]; do
         --system-prompt) OPT_SYSTEM_PROMPT=1; OPT_ALIASES=1 ;;
         --binary-only)   BINARY_ONLY=1 ;;
         --no-init)       NO_INIT=1 ;;
-        --pbtop)         ONLY_PBTOP=1 ;;
+        --pbtop)         ONLY_PBTOP=1
+                         warn "--pbtop goes away after the next release; use install-pbtop.sh" ;;
         --skills-only)   die "--skills-only is gone: this script installs only the binary. For the skills run: $SKILLS_INSTALL_CMD" ;;
         --ref)           shift; REF="${1:-}" ;;
         --ref=*)         REF="${1#--ref=}" ;;
@@ -501,7 +503,7 @@ install_pbtop() {
     version="${RESOLVED_TAG#v}"
     version="${version%%-*}"
     if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || version_lt "$version" 0.35.0; then
-        die "$RESOLVED_TAG has no pbtop asset; pbtop alone ships from playbook 0.35.0 on. For an older release use: brew install pragmatic-engineer/tap/playbook-telemetry"
+        die "$RESOLVED_TAG has no pbtop asset; pbtop alone ships from playbook 0.35.0 on. Until then, install playbook and run: playbook usage"
     fi
     release_target "$version"
     ASSET="pbtop-${version}-${TARGET}.tar.gz"
@@ -537,7 +539,7 @@ warn_if_shadowed() {
     if [ "$name" = playbook ]; then
         warn "$first runs before the new $PLAYBOOK_BIN_DIR/playbook on PATH, so hooks keep using the old binary; remove it (Homebrew: brew uninstall playbook) or put $PLAYBOOK_BIN_DIR first on PATH"
     else
-        warn "$first runs before the new $PLAYBOOK_BIN_DIR/$name on PATH; remove it (Homebrew: brew uninstall playbook-telemetry) or put $PLAYBOOK_BIN_DIR first on PATH"
+        warn "$first runs before the new $PLAYBOOK_BIN_DIR/$name on PATH; remove it (Homebrew: brew uninstall pbtop, or playbook-telemetry) or put $PLAYBOOK_BIN_DIR first on PATH"
     fi
 }
 
@@ -629,7 +631,7 @@ _cleanup_staging() {
 }
 trap _cleanup_staging EXIT INT TERM
 
-# --pbtop installs pbtop and stops: nothing below runs.
+# The pbtop mode installs pbtop and stops: nothing below runs.
 if [ "$ONLY_PBTOP" -eq 1 ]; then
     resolve_release
     install_pbtop
