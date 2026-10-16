@@ -2,6 +2,35 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.35.0
+
+### Breaking changes
+
+- **plugin**: give /playbook:setup the flags and questions of setup ([#1073](https://github.com/pragmatic-engineer/playbook/pull/1073))
+- /playbook:setup --yes now leaves the launcher and the ([#1077](https://github.com/pragmatic-engineer/playbook/pull/1077))
+- **telemetry**: the playbook-telemetry command is gone. Run pbtop with ([#1082](https://github.com/pragmatic-engineer/playbook/pull/1082))
+
+### Features
+
+- **cli**: add playbook setup and deprecate init ([#1064](https://github.com/pragmatic-engineer/playbook/pull/1064))
+- **plugin**: add Python engineering standards skill ([#1066](https://github.com/pragmatic-engineer/playbook/pull/1066))
+- **plugin**: add the remaining Python standards references ([#1067](https://github.com/pragmatic-engineer/playbook/pull/1067))
+- **cli**: name playbook setup in every message and hint ([#1068](https://github.com/pragmatic-engineer/playbook/pull/1068))
+- **install**: install pbtop alone with --pbtop ([#1072](https://github.com/pragmatic-engineer/playbook/pull/1072))
+- **install**: add install-pbtop.sh as the pbtop entry point ([#1078](https://github.com/pragmatic-engineer/playbook/pull/1078))
+- **cli**: read release-notes.json in playbook update ([#1079](https://github.com/pragmatic-engineer/playbook/pull/1079))
+- **cli**: print release notes line on first run after upgrade ([#1083](https://github.com/pragmatic-engineer/playbook/pull/1083))
+- **install**: print the release notes when replacing a binary ([#1084](https://github.com/pragmatic-engineer/playbook/pull/1084))
+
+### Fixes
+
+- **cli**: finish the review of the setup naming change ([#1076](https://github.com/pragmatic-engineer/playbook/pull/1076))
+
+### Other changes
+
+- docs: finish the init to setup rename ([#1070](https://github.com/pragmatic-engineer/playbook/pull/1070))
+- ci(release): run every release step from one workflow ([#1071](https://github.com/pragmatic-engineer/playbook/pull/1071))
+
 ## playbook 0.34.0
 
 The first release with one version for the binary and the plugin. The binary goes from 0.26 to 0.34.0, so binary versions 0.27 to 0.33 do not exist.
