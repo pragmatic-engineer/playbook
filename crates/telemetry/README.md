@@ -43,7 +43,7 @@ gh attestation verify pbtop-<version>-<target>.tar.gz --repo pragmatic-engineer/
 tar -xzf pbtop-<version>-<target>.tar.gz -C ~/.local/bin
 ```
 
-The `playbook-telemetry` command and formula are retired ([ADR 0041](../../docs/adr/0041-retire-playbook-telemetry.md)). With Homebrew, move with `brew uninstall playbook-telemetry && brew install pbtop`. A script that calls `playbook-telemetry` calls `pbtop` with the same arguments, or `playbook usage` where playbook is installed.
+The `playbook-telemetry` command and formula are retired ([ADR 0041](../../docs/adr/0041-retire-playbook-telemetry.md)). With Homebrew, move with `brew uninstall playbook-telemetry && brew install pbtop`. Change a script that calls `playbook-telemetry` to call `pbtop` with the same arguments, or `playbook usage` where playbook is installed.
 
 Or build from source with the Rust version in `rust-toolchain.toml`:
 

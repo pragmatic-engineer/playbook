@@ -92,7 +92,7 @@ The view is keyboard only, so the terminal's own text selection and scrolling ke
 
 ### Ranges
 
-Every range is a set of whole UTC days, shown in the header with its name and exact dates (`last week Aug 24 to Aug 30, 2026`, with `UTC` in the border). The time zone is UTC everywhere in the view, and the JSON, so there is no daylight saving: a day is always 86,400 seconds and a week is always seven days.
+Every range is a set of whole days in the chosen time zone, shown in the header with its name and exact dates (`last week Aug 24 to Aug 30, 2026`). The zone is local time unless `--utc`, `PLAYBOOK_TELEMETRY_TZ` or `usage.timeZone` picks UTC, and the view, the summary and the JSON name it. In local time a day can be 23 or 25 hours long around a daylight saving change.
 
 | Name (`--range`) | Days |
 |---|---|
