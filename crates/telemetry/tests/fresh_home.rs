@@ -18,7 +18,7 @@ fn fresh_home(tag: &str) -> PathBuf {
 }
 
 fn run(home: &PathBuf, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_playbook-telemetry"))
+    Command::new(env!("CARGO_BIN_EXE_pbtop"))
         .env_remove("PLAYBOOK_TELEMETRY_TZ")
         .args(args)
         .env("HOME", home)
