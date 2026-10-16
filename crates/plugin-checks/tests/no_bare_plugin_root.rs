@@ -5,19 +5,12 @@
 //! A bare `$CLAUDE_PLUGIN_ROOT` reaches the model unresolved, so no plugin
 //! markdown may use it.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+#[path = "support/markdown.rs"]
+mod markdown;
 
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    for e in fs::read_dir(dir).expect("dir").flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            walk(&p, out);
-        } else if p.extension().is_some_and(|x| x == "md") {
-            out.push(p);
-        }
-    }
-}
+use markdown::markdown_files as walk;
+use std::fs;
+use std::path::PathBuf;
 
 #[test]
 fn no_bare_claude_plugin_root_in_plugin_markdown() {

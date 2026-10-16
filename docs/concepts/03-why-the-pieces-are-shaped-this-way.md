@@ -80,9 +80,9 @@ Two more rules sit on top of the ceiling:
 
 `playbook route <kind>` is the shared rule for which model, effort and agent a task goes to, and when to ask you first (`routing.escalate`). `playbook eval bench` measures a role across models and efforts, so the values come from data.
 
-## Why hooks are in Rust and wired by `init`
+## Why hooks are in Rust and wired by `setup`
 
-Hooks are the safety layer, so they must be fast, must not depend on a script on disk that an update could break, and must fail safe. They are subcommands of one binary (`playbook hook <name>`). `playbook init` wires them into `settings.json`, and `playbook doctor` checks they are wired. See [Launcher and hooks](../internals/01-launcher-and-hooks.md).
+Hooks are the safety layer, so they must be fast, must not depend on a script on disk that an update could break, and must fail safe. They are subcommands of one binary (`playbook hook <name>`). `playbook setup` wires them into `settings.json`, and `playbook doctor` checks they are wired. See [Launcher and hooks](../internals/01-launcher-and-hooks.md).
 
 ## Why the docs live in layers
 

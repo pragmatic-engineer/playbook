@@ -37,14 +37,14 @@ and stop.
    `no-slop-guard`, `precommit-check`, `commit-message-sanitizer`,
    `policy-guard`) and for the
    `commit-message-sanitizer` backstop on PostToolUse. A legacy `.sh` command or
-   a near-miss name does not count. Fix: `playbook init`.
+   a near-miss name does not count. Fix: `playbook setup` (older versions: `playbook init`).
 3. **Launcher (opt-in).** The rc file for your shell has the playbook
    shell init line and `playbook` is on PATH. An old `source .../cc.zsh` line
-   reads as outdated (run `playbook init`). Not installed is INFO, never FAIL.
+   reads as outdated (run `playbook setup`; older versions: `playbook init`). Not installed is INFO, never FAIL.
 4. **System prompt (opt-in).** `~/.config/playbook/prompts/SYSTEM_PROMPT.md`
    exists. Absent is INFO.
 5. **Status line command is current.** The binary's status line command passes. The retired
-   `bash ~/.config/playbook/statusline.sh` fails (run `playbook init`). A custom
+   `bash ~/.config/playbook/statusline.sh` fails (run `playbook setup`; older versions: `playbook init`). A custom
    command whose file is missing fails. A custom command that exists, or none at
    all, is INFO.
 6. **Binary resolves.** `settings.json` runs every ported hook as a bare
@@ -84,7 +84,7 @@ and stop.
 7. **No hook command points at a missing file.** A hook that names a path
    which does not exist fails open: it never runs and nothing says so. Bare
    binary hook commands are skipped, as is any path with an
-   unresolved `$VARIABLE`. `playbook init --hooks` removes a dead entry that runs
+   unresolved `$VARIABLE`. `playbook setup --hooks` (older versions: `playbook init --hooks`) removes a dead entry that runs
    a missing script under `~/.claude/hooks` (it makes a backup first). Live
    scripts and commands with shell operators stay, so delete any other stray
    entry from `~/.claude/settings.json` by hand.

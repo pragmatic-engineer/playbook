@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The hook reference and the "What init installs" guide must cover every hook
+//! The hook reference and the "What setup installs" guide must cover every hook
 //! `playbook setup` wires. The test wires a scratch settings file with the real
 //! code and checks each entry against the page, so a new hook cannot ship
 //! without a row.
@@ -128,7 +128,7 @@ fn the_guide_states_the_real_hook_counts() {
     let names: BTreeSet<_> = wired.iter().map(|(_, _, n)| n.clone()).collect();
 
     let claim = format!(
-        "Init adds {} hook entries to `~/.claude/settings.json`. They run {} different",
+        "Setup adds {} hook entries to `~/.claude/settings.json`. They run {} different",
         wired.len(),
         names.len()
     );
