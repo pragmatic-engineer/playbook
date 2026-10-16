@@ -1,6 +1,6 @@
 # ADR-0038: One Release Line for the Binary and the Plugin
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by [ADR 0041](0041-retire-playbook-telemetry.md)
 - **Date created:** 2026-10-16
 - **Date modified:** 2026-10-16
 - **Supersedes:** decisions 3 and 5 of [ADR 0032](0032-plugin-in-the-playbook-repo.md), the plugin's own version line and its own release workflow, and the part of its decision 2 that leaves the marketplace entry without a `ref`.
