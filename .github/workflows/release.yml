@@ -234,10 +234,12 @@ jobs:
           scripts/release-gh.sh wait "$REPO" "$PR" 4800 | tee -a "$GITHUB_OUTPUT"
 
   # macOS build and test of the commit this run releases: the release commit,
-  # the existing tag when the run starts at publish, or the dispatch commit
-  # on a dry run. Pull requests and the merge queue run Linux only, so this
-  # is where macOS must pass before anything is tagged or built. `tag` and
-  # `draft` fail unless it passed on the same commit.
+  # or the existing tag when the run starts at publish. A dry run that starts
+  # at prepare has no release commit and tests the dispatch commit. Pull
+  # requests and the merge queue run Linux only (the release pull request is
+  # the exception), so this is where macOS must pass before anything is
+  # tagged or built. `tag` and `draft` fail unless it passed on the same
+  # commit.
   macos:
     needs: [plan, prepare]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' }}
@@ -280,11 +282,16 @@ jobs:
           MAIN: ${{ github.event.repository.default_branch }}
           MACOS_RESULT: ${{ needs.macos.result }}
           MACOS_SHA: ${{ needs.macos.outputs.sha }}
+          DISPATCH_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           if [ -z "$SHA" ]; then
             [ "$DRY_RUN" = "true" ] || { echo "::error::no commit to tag for $VERSION." >&2; exit 1; }
-            echo "A dry run has no release commit to tag."
+            if [ "$MACOS_RESULT" != success ] || [ "$MACOS_SHA" != "$DISPATCH_SHA" ]; then
+              echo "::error::the macOS gate did not pass on $DISPATCH_SHA (result: ${MACOS_RESULT:-none}, tested: ${MACOS_SHA:-nothing})." >&2
+              exit 1
+            fi
+            echo "A dry run has no release commit to tag. The macOS gate passed on $DISPATCH_SHA."
             exit 0
           fi
           # The release pull request merged after the checkout, so fetch.

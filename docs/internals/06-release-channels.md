@@ -64,8 +64,13 @@ the `v` tags and picks where the run starts:
 Before the tag, `macos` calls `rust-ci.yml` to build and test the release
 commit on macOS. Pull requests and the merge queue test on Linux only, so this
 is the one macOS check every release must pass. It tests the release commit,
-the tag when the run starts at `publish`, or the dispatch commit on a dry run.
-`tag` and `draft` stop the run unless it passed on that same commit.
+or the tag when the run starts at `publish`. A dry run that starts at
+`prepare` tests the dispatch commit. `tag` and `draft` stop the run unless it
+passed on that same commit. The release pull request also builds and tests on
+macOS, so a macOS break stops the bump before it reaches `main`. When the gate
+still fails on the release commit, land the fix, tag `vX.Y.Z` on the fixed
+commit by hand, and run the workflow again with `version=X.Y.Z`: it starts at
+`publish` and tests the tag.
 
 After the tag, `draft` creates a draft release with the notes and attaches
 `release-notes.json` and `breaking-changes.json`. `build` compiles the five

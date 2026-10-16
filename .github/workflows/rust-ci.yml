@@ -3,8 +3,15 @@
 #
 # CI gate for the Rust binary. Pull requests, the merge queue and pushes to
 # main build and test on Linux. macOS builds and tests in the daily run, on a
-# manual run, and in every release: release.yml calls this workflow with the
-# commit it is about to tag, and the release stops when macOS is red.
+# manual run, on the release pull request (branch release/v*), and in every
+# release: release.yml calls this workflow with the commit it is about to tag,
+# and the release stops when macOS is red. Testing the release pull request
+# keeps a macOS break from reaching main inside a version bump, where the
+# release could not move past it.
+#
+# A job added below also runs in every release gate unless its `if` has
+# `!inputs.ref`, and a red one stops the release.
+#
 # Validates:
 #   - cargo fmt --all --check
 #   - cargo clippy --workspace --all-targets -- -D warnings
@@ -40,10 +47,10 @@ on:
 
 permissions: {}
 
-# A release gate gets a group per commit, and the daily run one of its own, so
-# neither waits behind or cancels a push to main.
+# A release gate gets a group per commit, and the daily and manual runs groups
+# of their own, so none of them waits behind or cancels a push to main.
 concurrency:
-  group: rust-ci-${{ inputs.ref && format('gate-{0}', inputs.ref) || (github.event_name == 'schedule' && 'schedule') || github.ref }}
+  group: rust-ci-${{ inputs.ref && format('gate-{0}', inputs.ref) || (github.event_name == 'schedule' && 'schedule') || (github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.ref)) || github.ref }}
   # Only a newer pull request or queue run cancels an older one. A push to
   # main saves the cargo cache, and back-to-back merges were cancelling it
   # before the save step.
@@ -71,10 +78,6 @@ jobs:
       # root manifest, the toolchain, hooks, .github) selects the
       # whole workspace, and so does any error.
       pkgs: ${{ steps.classify.outputs.pkgs }}
-      # Whether the macOS leg builds and tests: the daily run and a manual
-      # run. A release gate is a call from release.yml's workflow_dispatch,
-      # so it counts as a manual run.
-      macos: ${{ steps.classify.outputs.macos }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -137,15 +140,12 @@ jobs:
           fi
           echo "pkgs=$pkgs" | tee -a "$GITHUB_OUTPUT"
 
-          case "$EVENT" in
-            schedule|workflow_dispatch) macos=true ;;
-            *) macos=false ;;
-          esac
-          echo "macos=$macos" | tee -a "$GITHUB_OUTPUT"
-
-  # The macOS leg always starts, because "build-test (macos-latest)" is a
-  # required check, and skips its steps unless `changes` says macOS runs. A
-  # release gate runs the macOS leg alone.
+  # The macOS leg always reports, because "build-test (macos-latest)" is a
+  # required check. It builds and tests on the daily run, a manual run, the
+  # release pull request and a release gate (a call from release.yml, whose
+  # event is workflow_dispatch). Anywhere else it skips its steps on a Linux
+  # runner, so it costs no macOS runner. The check name comes from the matrix
+  # value, never the runner. A release gate runs the macOS leg alone.
   build-test:
     strategy:
       fail-fast: false
@@ -155,15 +155,16 @@ jobs:
     # Run even if `changes` failed (fail open); never let a skipped needs
     # turn a required check into a skipped one.
     if: ${{ !cancelled() }}
-    runs-on: ${{ matrix.os }}
+    # Keep the macOS condition the same as in LANE below.
+    runs-on: ${{ (matrix.os == 'macos-latest' && !(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v') || inputs.ref)) && 'ubuntu-latest' || matrix.os }}
     permissions:
       contents: read
     outputs:
       sha: ${{ steps.head.outputs.sha }}
     env:
-      # Whether this leg builds and tests. Each step below checks it. A
-      # release gate always runs, even when `changes` failed.
-      LANE: ${{ needs.changes.outputs.docs_only != 'true' && (matrix.os != 'macos-latest' || needs.changes.outputs.macos == 'true' || (inputs.ref || '') != '') }}
+      # Whether this leg builds and tests. Each step below checks it. It
+      # reads the event, not the `changes` outputs, so it fails open.
+      LANE: ${{ needs.changes.outputs.docs_only != 'true' && (matrix.os != 'macos-latest' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v') || (inputs.ref || '') != '') }}
       # Single source of truth for the cache key and the install command
       # below, so they can't drift apart. Bump deliberately, not implicitly.
       CARGO_AUDIT_VERSION: "0.22.2"
@@ -193,6 +194,7 @@ jobs:
         with:
           # Set only by a release gate. Empty means the event's commit.
           ref: ${{ inputs.ref }}
+          persist-credentials: false
 
       # The commit under test, which a release gate hands back to release.yml.
       - name: Record the commit under test
