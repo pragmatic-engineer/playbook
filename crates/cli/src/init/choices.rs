@@ -6,7 +6,7 @@
 
 use crate::init::catalog;
 use clap::Args;
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 
 /// The flags, each part as a `--x` and `--no-x` pair. The last one given wins.
 #[derive(Args, Debug, Default, Clone, PartialEq, Eq)]
@@ -303,27 +303,6 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
     )
 }
 
-/// Ask on the terminal. An empty answer or end of input gives `default`.
-pub fn ask_on_terminal(question: &str, default: bool) -> bool {
-    let hint = if default { "[Y/n]" } else { "[y/N]" };
-    print!("{question} {hint} ");
-    let _ = io::stdout().flush();
-    let mut line = String::new();
-    if io::stdin().lock().read_line(&mut line).unwrap_or(0) == 0 {
-        println!();
-        return default;
-    }
-    parse_answer(&line, default)
-}
-
-fn parse_answer(line: &str, default: bool) -> bool {
-    match line.trim().to_ascii_lowercase().as_str() {
-        "y" | "yes" => true,
-        "n" | "no" => false,
-        _ => default,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -493,14 +472,6 @@ mod tests {
             ..Flags::default()
         };
         assert!(!resolve(&off, false, true, &mut never).security);
-    }
-
-    #[test]
-    fn answers_parse_with_a_default_for_anything_else() {
-        assert!(parse_answer("Y\n", false));
-        assert!(!parse_answer("no\n", true));
-        assert!(parse_answer("\n", true));
-        assert!(!parse_answer("maybe", false));
     }
 
     #[test]
