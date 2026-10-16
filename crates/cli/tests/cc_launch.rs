@@ -962,6 +962,23 @@ fn without_a_plugin_root_no_variants_are_passed() {
 }
 
 #[test]
+fn variants_inherited_from_a_parent_session_do_not_reach_the_new_one() {
+    let e = env("variants-inherited");
+    e.launch_with(
+        &["--"],
+        &["fresh"],
+        &[
+            ("PLAYBOOK_AGENT_VARIANTS", "reviewer-low"),
+            ("PLAYBOOK_AGENT_VARIANTS_PLUGIN", "playbook-variants"),
+        ],
+    );
+    let names = fs::read_to_string(e.root.join("claude.log.var")).unwrap();
+    let plugin = fs::read_to_string(e.root.join("claude.log.vplug")).unwrap();
+    assert_eq!(names.trim(), "unset");
+    assert_eq!(plugin.trim(), "unset");
+}
+
+#[test]
 fn at_xhigh_the_fallback_chain_starts_at_the_model_that_accepts_it() {
     let e = env("fallback-xhigh");
     e.launch_with(&["--effort", "xhigh", "--"], &["fresh"], &[]);

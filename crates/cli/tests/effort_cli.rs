@@ -34,6 +34,8 @@ impl Home {
             .env("HOME", &self.0)
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("CLAUDE_PLUGIN_ROOT")
+            .env_remove("PLAYBOOK_AGENT_VARIANTS")
+            .env_remove("PLAYBOOK_AGENT_VARIANTS_PLUGIN")
             .output()
             .expect("playbook should spawn")
     }
@@ -183,6 +185,7 @@ fn run_with_root(h: &Home, root: &std::path::Path, args: &[&str]) -> std::proces
             "PLAYBOOK_AGENT_VARIANTS",
             "reviewer-low,reviewer-medium,reviewer-xhigh",
         )
+        .env_remove("PLAYBOOK_AGENT_VARIANTS_PLUGIN")
         .current_dir(&h.0)
         .output()
         .unwrap()

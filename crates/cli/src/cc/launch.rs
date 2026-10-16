@@ -244,6 +244,10 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         all.extend(flags);
     }
     let mut variants_dir = None;
+    // A session started from inside another one inherits its variants. Clear
+    // them, so only the variants this launch builds reach the new session.
+    std::env::remove_var(crate::effort::component::VARIANTS_ENV);
+    std::env::remove_var(crate::effort::component::VARIANTS_PLUGIN_ENV);
     if let Some(session) = super::agent_variants::session(
         args,
         &home,

@@ -96,9 +96,11 @@ pub const VARIANTS_ENV: &str = "PLAYBOOK_AGENT_VARIANTS";
 /// throwaway plugin, so their `subagent_type` carries that prefix.
 pub const VARIANTS_PLUGIN_ENV: &str = "PLAYBOOK_AGENT_VARIANTS_PLUGIN";
 
-/// The `subagent_type` for variant `file` of the session's variants.
-fn variant_type(file: &str) -> String {
-    prefixed(file, std::env::var(VARIANTS_PLUGIN_ENV).ok().as_deref())
+/// The plugin named in `VARIANTS_PLUGIN_ENV`, when the launcher set one.
+fn variants_plugin() -> Option<String> {
+    std::env::var(VARIANTS_PLUGIN_ENV)
+        .ok()
+        .filter(|plugin| !plugin.is_empty())
 }
 
 fn prefixed(file: &str, plugin: Option<&str>) -> String {
@@ -148,6 +150,9 @@ pub struct Resolution {
     /// False when the ceiling is below every agent the session has, so the
     /// lowest one is returned and still exceeds it.
     pub satisfied: bool,
+    /// The plugin holding the session's variants, which prefixes their
+    /// `subagent_type`. `None` when they are plain agents.
+    pub variants_plugin: Option<String>,
 }
 
 fn level_of(home: &Path, key: &str) -> String {
@@ -187,7 +192,17 @@ pub fn resolve(
     claude: Option<&str>,
     root: Option<&Path>,
 ) -> Resolution {
-    resolve_with(kind, name, home, claude, root, &available_variants())
+    let plugin = variants_plugin();
+    resolve_inner(
+        kind,
+        name,
+        home,
+        claude,
+        root,
+        &available_variants(),
+        plugin.as_deref(),
+        None,
+    )
 }
 
 /// `resolve` with an extra ceiling `cap` from the calling command, such as
@@ -201,11 +216,21 @@ pub fn resolve_capped(
     root: Option<&Path>,
     cap: Option<&str>,
 ) -> Resolution {
-    resolve_inner(kind, name, home, claude, root, &available_variants(), cap)
+    let plugin = variants_plugin();
+    resolve_inner(
+        kind,
+        name,
+        home,
+        claude,
+        root,
+        &available_variants(),
+        plugin.as_deref(),
+        cap,
+    )
 }
 
 /// `resolve` with the session's variants given instead of read from the
-/// environment.
+/// environment. They are plain agents, with no plugin prefix.
 pub fn resolve_with(
     kind: Kind,
     name: &str,
@@ -214,9 +239,10 @@ pub fn resolve_with(
     root: Option<&Path>,
     available: &[String],
 ) -> Resolution {
-    resolve_inner(kind, name, home, claude, root, available, None)
+    resolve_inner(kind, name, home, claude, root, available, None, None)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_inner(
     kind: Kind,
     name: &str,
@@ -224,6 +250,7 @@ fn resolve_inner(
     claude: Option<&str>,
     root: Option<&Path>,
     available: &[String],
+    plugin: Option<&str>,
     cap: Option<&str>,
 ) -> Resolution {
     let path = root.map(|r| kind.file(r, name));
@@ -271,7 +298,7 @@ fn resolve_inner(
                 subagent_type = Some(if f == name {
                     format!("playbook:{f}")
                 } else {
-                    variant_type(f)
+                    prefixed(f, plugin)
                 });
                 file = Some(f.clone());
             }
@@ -297,6 +324,7 @@ fn resolve_inner(
         subagent_type,
         allowed,
         satisfied,
+        variants_plugin: plugin.map(str::to_string),
     }
 }
 
@@ -330,7 +358,7 @@ impl Resolution {
                 if *f == self.name {
                     format!("playbook:{f}")
                 } else {
-                    variant_type(f)
+                    prefixed(f, self.variants_plugin.as_deref())
                 }
             })
             .collect()
@@ -618,6 +646,7 @@ mod tests {
             None,
             Some(&root),
             &have,
+            None,
             Some("medium"),
         );
         assert_eq!(r.subagent_type.as_deref(), Some("reviewer-medium"));
@@ -631,6 +660,7 @@ mod tests {
             None,
             Some(&root),
             &[],
+            None,
             Some("medium"),
         );
         assert_eq!(none.subagent_type.as_deref(), Some("playbook:reviewer"));
@@ -643,6 +673,7 @@ mod tests {
             Some("low"),
             Some(&root),
             &have,
+            None,
             Some("medium"),
         );
         assert_eq!(low.subagent_type.as_deref(), Some("reviewer-low"));
@@ -654,6 +685,7 @@ mod tests {
             None,
             Some(&root),
             &have,
+            None,
             Some("max"),
         );
         assert_eq!(high.subagent_type.as_deref(), Some("playbook:reviewer"));
