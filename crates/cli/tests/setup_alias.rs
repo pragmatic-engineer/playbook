@@ -4,8 +4,9 @@
 //! `playbook init` is the deprecated name for `playbook setup` (ADR-0040).
 //! Each test runs both names in their own scratch `$HOME` and checks they
 //! write the same files, print the same output and exit with the same code.
-//! Without a terminal, `init` prints no deprecation line. The line itself is
-//! covered by the unit tests in `lib.rs`, since it needs a terminal.
+//! Without a terminal, `init` prints no deprecation line. With stderr on a
+//! pseudo terminal it prints the line once, on stderr, and nothing else
+//! changes.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -26,6 +27,12 @@ struct Run {
 /// environment so nothing reaches the real home through `XDG_*` or
 /// `PLAYBOOK_*` variables.
 fn run(name: &str, args: &[&str]) -> Run {
+    run_with(name, args, false)
+}
+
+/// Like [`run`]. With `terminal_stderr`, stderr is a pseudo terminal, so the
+/// binary sees a person at the terminal there while stdout stays a pipe.
+fn run_with(name: &str, args: &[&str], terminal_stderr: bool) -> Run {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let home = std::env::temp_dir().join(format!(
         "playbook-setup-alias-{name}-{}-{n}",
@@ -34,8 +41,8 @@ fn run(name: &str, args: &[&str]) -> Run {
     assert!(home.starts_with(std::env::temp_dir()) && home != std::env::temp_dir());
     let _ = fs::remove_dir_all(&home);
     fs::create_dir_all(home.join(".claude")).expect("scratch home");
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .arg(name)
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+    cmd.arg(name)
         .args(args)
         .env_clear()
         .env("HOME", &home)
@@ -43,9 +50,15 @@ fn run(name: &str, args: &[&str]) -> Run {
         .env("SHELL", "/bin/zsh")
         .env("TMPDIR", &home)
         .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
-        .current_dir(&home)
-        .output()
-        .expect("playbook should spawn");
+        .current_dir(&home);
+    let out = if terminal_stderr {
+        // A terminal on stderr turns on the release check, which would call
+        // the network and write to the scratch home. Headless turns it off.
+        cmd.env("PLAYBOOK_HEADLESS", "1");
+        terminal::output(cmd)
+    } else {
+        cmd.output().expect("playbook should spawn")
+    };
     let scrub = |text: &str| scrub_tokens(&text.replace(&home.display().to_string(), "{HOME}"));
     let mut files = BTreeMap::new();
     collect(&home, &home, &mut files);
@@ -225,4 +238,91 @@ fn a_flag_conflict_exits_two_under_both_names() {
     let init = run("init", &["--dry-run", "--explain"]);
     assert_eq!(setup.code, Some(2));
     assert_eq!(init.code, Some(2));
+}
+
+/// Spawns a command with stderr on a pseudo terminal and stdout on a pipe.
+mod terminal {
+    use std::fs::File;
+    use std::io::Read;
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::process::{Command, Output, Stdio};
+
+    /// Runs `cmd` and returns its output. The text the terminal received is
+    /// returned as stderr, with the `\r` the terminal adds removed.
+    pub fn output(mut cmd: Command) -> Output {
+        let (mut master, mut slave) = (0, 0);
+        // SAFETY: openpty writes two new descriptors into the pointers; the
+        // name, termios and window size arguments may be null.
+        let rc = unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(rc, 0, "openpty failed");
+        for fd in [master, slave] {
+            // SAFETY: fd is a descriptor openpty just opened. Close on exec
+            // keeps it out of processes other tests spawn meanwhile; the
+            // child still gets the slave as its stderr.
+            let rc = unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+            assert_eq!(rc, 0, "fcntl failed");
+        }
+        // SAFETY: both descriptors are new, open and owned only here.
+        let (master, slave) = unsafe { (File::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::from(slave));
+        let child = cmd.spawn().expect("playbook should spawn");
+        // Close the parent's copy of the terminal, so the reader ends once
+        // the child exits.
+        drop(cmd);
+        let reader = std::thread::spawn(move || {
+            let mut master = master;
+            let mut text = Vec::new();
+            let mut buf = [0u8; 4096];
+            // The read fails with EIO once the last writer closes.
+            while let Ok(n) = master.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                text.extend_from_slice(&buf[..n]);
+            }
+            text
+        });
+        let mut out = child.wait_with_output().expect("playbook should finish");
+        out.stderr = reader
+            .join()
+            .expect("reader")
+            .into_iter()
+            .filter(|b| *b != b'\r')
+            .collect();
+        out
+    }
+}
+
+#[test]
+fn init_warns_once_on_a_terminal_and_only_on_stderr() {
+    // Arrange
+    let args = ["--dry-run"];
+
+    // Act
+    let setup = run_with("setup", &args, true);
+    let init = run_with("init", &args, true);
+
+    // Assert
+    let line = format!("{}\n", playbook::INIT_DEPRECATION);
+    assert_eq!(init.code, setup.code);
+    assert_eq!(init.stdout, setup.stdout, "init changed stdout");
+    assert!(!init.stdout.contains("deprecated"), "{}", init.stdout);
+    assert_eq!(
+        init.stderr.matches("deprecated").count(),
+        1,
+        "{}",
+        init.stderr
+    );
+    assert_eq!(init.stderr, format!("{line}{}", setup.stderr));
+    assert!(!setup.stderr.contains("deprecated"), "{}", setup.stderr);
 }
