@@ -2430,7 +2430,7 @@ fn session_init_names_the_upgrade_when_the_plugin_needs_a_newer_binary() {
 }
 
 #[test]
-fn session_init_names_the_init_command_for_a_pending_settings_change() {
+fn session_init_names_the_setup_command_for_a_pending_settings_change() {
     // Arrange: settings.json still runs the old status line script.
     let home = scratch_dir("heal-line");
     let script = playbook::init::statusline::playbook_statusline_path(&home);

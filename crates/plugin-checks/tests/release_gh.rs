@@ -725,3 +725,49 @@ fn the_release_state_is_none_only_when_github_says_not_found() {
         "no state on a failed read"
     );
 }
+
+#[test]
+fn find_reports_an_open_or_merged_pull_request_from_the_app() {
+    // Arrange
+    let open = FakeGh::new(&[
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
+        (
+            "pr list * --state open *",
+            0,
+            r#"[{"number":12,"isCrossRepository":false}]"#,
+        ),
+    ]);
+    let merged = FakeGh::new(&[
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
+        ("pr list * --state open *", 0, "[]"),
+        (
+            "pr list * --state merged *",
+            0,
+            r#"[{"number":7,"isCrossRepository":false}]"#,
+        ),
+    ]);
+    let none = FakeGh::new(&[
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
+        ("pr list *", 0, "[]"),
+    ]);
+    let args = ["find", "o/tap", "release/v1.0.0"];
+
+    // Act
+    let o = open.run(&open.dir, &args);
+    let m = merged.run(&merged.dir, &args);
+    let n = none.run(&none.dir, &args);
+    let bad = none.run(&none.dir, &["find", "o/tap", "main"]);
+
+    // Assert
+    assert_eq!(text_of(&o), "pr=12\nstate=open\n");
+    assert_eq!(text_of(&m), "pr=7\nstate=merged\n");
+    assert!(n.status.success(), "{}", text_of(&n));
+    assert_eq!(text_of(&n), "");
+    assert!(
+        open.log()
+            .contains("--head release/v1.0.0 --base main --state open --app igorjs"),
+        "{}",
+        open.log()
+    );
+    assert!(!bad.status.success());
+}

@@ -180,7 +180,7 @@ fn settings_step(
     match crate::init::telemetry::remove(&opts.home, &path, stamp, opts.dry_run) {
         Ok(out) if out.keys > 0 => {
             report.lines.push(format!(
-                "{verb} {} telemetry variables setup wrote from {}",
+                "{verb} {} telemetry variables that `playbook setup` wrote from {}",
                 out.keys,
                 path.display()
             ));
