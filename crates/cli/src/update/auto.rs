@@ -225,7 +225,7 @@ pub fn apply(root: &Path, settings: Settings, deps: &Deps) {
     // The release's own notes (ADR 0037 decision 5.2). A release without
     // them has no known breaking change.
     let base = format!("{}/v{latest}", deps.env.download_base);
-    let notes = match crate::release_notes::fetch(deps.fetcher, &base, None) {
+    let notes = match crate::release_notes::fetch(deps.fetcher, &base, &latest, None) {
         Ok(notes) => notes,
         Err(err) => {
             hold(
@@ -262,6 +262,9 @@ pub fn apply(root: &Path, settings: Settings, deps: &Deps) {
     };
     let report = match super::run(&opts, deps.env, deps.fetcher, &attest, deps.smoke) {
         Ok(mut outcome) if outcome.installed.is_some() => {
+            // Nobody saw the notes of a detached run, so the heal and the
+            // first run still show the release.
+            outcome.notes_shown = false;
             (deps.heal)(&mut outcome, deps.env);
             success_report(current, &latest, &outcome)
         }
@@ -546,7 +549,7 @@ mod tests {
         assert_eq!(installed(&env), "playbook 0.16.0");
         let reason = Cache::read(&root)
             .unwrap()
-            .held_reason("0.17.0", LATER)
+            .held_reason("0.17.0", u64::MAX - 1)
             .map(str::to_string);
         assert!(reason.is_some_and(|r| r.contains("not checked")));
     }

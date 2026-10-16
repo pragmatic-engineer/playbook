@@ -84,9 +84,13 @@ pub struct Outcome {
     pub warnings: Vec<String>,
     /// The version swapped in, when the update replaced the binary.
     pub installed: Option<String>,
-    /// The release notes of an upgrade (ADR 0037), shown before the swap and
-    /// again after the swap and the heal. Empty for any other run.
+    /// The release notes of an upgrade (ADR 0037), shown before the swap.
+    /// Empty for any other run.
     pub notes: String,
+    /// Whether `notes` held the release's own notes, which the user saw, so
+    /// the heal need not show the release again. False when only the link
+    /// was shown.
+    pub notes_shown: bool,
 }
 
 /// The first release whose binary has `doctor --fix`; `migrate` comes in the
@@ -171,14 +175,14 @@ fn run_fresh(
 }
 
 /// Runs the heal after a swap, when `outcome` names an installed version,
-/// and adds its lines to `outcome`. After an upgrade, whose notes the update
-/// printed, the new version is recorded as shown first, so the heal does not
+/// and adds its lines to `outcome`. After an upgrade whose notes the user
+/// saw, the new version is recorded as shown first, so the heal does not
 /// print the release notes line as well (ADR 0037 decision 5.1).
 pub fn finish_with_heal(outcome: &mut Outcome, env: &Env) {
     let Some(version) = outcome.installed.clone() else {
         return;
     };
-    if !outcome.notes.is_empty() {
+    if outcome.notes_shown {
         crate::notices::record(&env.root, &version);
     }
     match heal_after_swap(&env.exe, &version) {
@@ -324,7 +328,7 @@ pub fn run(
 
     if order.is_gt() {
         // The notes never fail an update: without them, only the link shows.
-        let notes = match crate::release_notes::fetch(fetcher, &base, Some(&sums)) {
+        let notes = match crate::release_notes::fetch(fetcher, &base, &version, Some(&sums)) {
             Ok(notes) => notes,
             Err(err) => {
                 o.warnings
@@ -333,6 +337,7 @@ pub fn run(
             }
         };
         o.notes = crate::release_notes::render(notes.as_ref(), current, &version);
+        o.notes_shown = notes.is_some();
         (env.announce)(&o.notes);
     }
 
@@ -667,6 +672,14 @@ echo ran\n",
         let mut shown = Outcome {
             installed: Some("0.27.0".into()),
             notes: LINK.into(),
+            notes_shown: true,
+            ..Outcome::default()
+        };
+        let other = env_in("heal-link-only");
+        std::fs::copy(&env.exe, &other.exe).unwrap();
+        let mut link_only = Outcome {
+            installed: Some("0.27.0".into()),
+            notes: LINK.into(),
             ..Outcome::default()
         };
         let notices =
@@ -676,6 +689,7 @@ echo ran\n",
         let before = notices(&env.root);
         finish_with_heal(&mut shown, &env);
         let after = notices(&env.root);
+        finish_with_heal(&mut link_only, &other);
 
         // Assert
         assert!(before.is_empty());
@@ -684,6 +698,7 @@ echo ran\n",
             vec![("notices/binary".to_string(), "0.27.0".to_string())]
         );
         assert_eq!(shown.out, vec!["migrate: ran"]);
+        assert!(notices(&other.root).is_empty(), "only the link was shown");
     }
 
     #[test]

@@ -26,6 +26,9 @@ const BREAKING: &str = "breaking";
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Notes {
     pub format: u64,
+    /// The component the notes are for; only `playbook` is read here.
+    #[serde(default)]
+    pub component: Option<String>,
     pub version: String,
     /// The previous release of the component, or `None` for the first one.
     #[serde(default)]
@@ -62,6 +65,9 @@ pub fn parse(bytes: &[u8]) -> Result<Notes, String> {
         return Err(format!(
             "{ASSET} names a version that is not MAJOR.MINOR.PATCH"
         ));
+    }
+    if notes.component.as_deref().is_some_and(|c| c != "playbook") {
+        return Err(format!("{ASSET} is not for playbook"));
     }
     Ok(notes)
 }
@@ -117,9 +123,18 @@ pub fn updated_line(from: Option<&str>, to: &str) -> String {
 }
 
 /// Text from a release as one safe terminal line: control characters,
-/// escape sequences included, are removed.
+/// escape sequences included, line and paragraph separators and the marks
+/// that reorder text are removed.
 fn plain(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).collect()
+    text.chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(
+                    c,
+                    '\u{200e}' | '\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+                )
+        })
+        .collect()
 }
 
 /// What an update from `from` to `to` prints: the breaking changes, a line
@@ -147,19 +162,23 @@ pub fn render(notes: Option<&Notes>, from: &str, to: &str) -> String {
     out
 }
 
-/// The notes at `base/release-notes.json`, checked against the release's
-/// SHA256SUMS: `sums` when the caller has it, else the file next to the
-/// asset. `Ok(None)` when the release has no such asset, which a release
-/// from before ADR 0037 lacks. Any other failure is an error, a file this
-/// binary cannot read included.
+/// The notes of release `version` at `base/release-notes.json`, checked
+/// against the release's SHA256SUMS: `sums` when the caller has it, else the
+/// file next to the asset. `Ok(None)` when the release has no such asset,
+/// which a release from before ADR 0037 lacks. Any other failure is an
+/// error, a file this binary cannot read or notes of another version
+/// included.
 pub fn fetch(
     fetcher: &dyn Fetcher,
     base: &str,
+    version: &str,
     sums: Option<&str>,
 ) -> Result<Option<Notes>, String> {
-    let body = match fetcher.get(&format!("{base}/{ASSET}")) {
+    let url = format!("{base}/{ASSET}");
+    let body = match fetcher.get(&url) {
         Ok(body) => body,
-        Err(err) if err.contains("404") => return Ok(None),
+        // The fetcher puts the URL first; only the rest says 404.
+        Err(err) if err.strip_prefix(&url).unwrap_or(&err).contains("404") => return Ok(None),
         Err(err) => return Err(format!("could not download {ASSET}: {err}")),
     };
     let fetched;
@@ -174,7 +193,11 @@ pub fn fetch(
         }
     };
     crate::update::verify::verify_checksum(&body, sums, ASSET)?;
-    parse(&body).map(Some)
+    let notes = parse(&body)?;
+    if notes.version != version {
+        return Err(format!("{ASSET} is for {}, not {version}", notes.version));
+    }
+    Ok(Some(notes))
 }
 
 #[cfg(test)]
@@ -241,7 +264,7 @@ mod tests {
     #[test]
     fn render_removes_control_characters_from_the_text() {
         // Arrange
-        let item = r#"{"text":"red \u001b[31mtext\u0007 here","pr":null}"#;
+        let item = r#"{"text":"red \u001b[31mtext\u0007 here\u202e\u2028","pr":null}"#;
         let notes = parse(notes_json("0.28.0", "null", item).as_bytes()).unwrap();
 
         // Act
@@ -258,6 +281,10 @@ mod tests {
         let format_two = ok.replace(r#""format":1"#, r#""format":2"#);
         let bad_version = notes_json("0.28", "null", "");
         let bad_previous = notes_json("0.28.0", r#""v0.27.0""#, "");
+        let other = ok.replace(
+            r#""component":"playbook""#,
+            r#""component":"playbook-telemetry""#,
+        );
 
         // Act and assert
         assert_eq!(parse(ok.as_bytes()).unwrap().previous, None);
@@ -267,6 +294,9 @@ mod tests {
         assert!(parse(bad_version.as_bytes()).is_err());
         assert!(parse(bad_previous.as_bytes()).is_err());
         assert!(parse(b"not json").is_err());
+        assert!(parse(other.as_bytes())
+            .unwrap_err()
+            .contains("not for playbook"));
     }
 
     #[test]
@@ -277,15 +307,16 @@ mod tests {
         let (tampered, other_sums) = fetcher_with(&body, b"something else");
 
         // Act
-        let found = fetch(&good, BASE, Some(&sums));
-        let mismatch = fetch(&tampered, BASE, Some(&other_sums));
-        let missing = fetch(&FakeFetcher::default(), BASE, Some(&sums));
-        let no_sums = fetch(&good, BASE, None);
+        let found = fetch(&good, BASE, "0.28.0", Some(&sums));
+        let mismatch = fetch(&tampered, BASE, "0.28.0", Some(&other_sums));
+        let missing = fetch(&FakeFetcher::default(), BASE, "0.28.0", Some(&sums));
+        let no_sums = fetch(&good, BASE, "0.28.0", None);
+        let wrong_version = fetch(&good, BASE, "0.29.0", Some(&sums));
         let mut with_sums = good;
         with_sums
             .0
             .insert(format!("{BASE}/SHA256SUMS"), sums.into_bytes());
-        let read_sums = fetch(&with_sums, BASE, None);
+        let read_sums = fetch(&with_sums, BASE, "0.28.0", None);
 
         // Assert
         assert_eq!(found.unwrap().unwrap().breaking().count(), 1);
@@ -293,6 +324,30 @@ mod tests {
         assert_eq!(missing, Ok(None));
         assert!(no_sums.unwrap_err().contains("SHA256SUMS"));
         assert!(read_sums.unwrap().is_some());
+        assert!(wrong_version.unwrap_err().contains("is for 0.28.0"));
+    }
+
+    /// A fetcher whose every request fails with `error` after the URL.
+    struct Failing(&'static str);
+
+    impl Fetcher for Failing {
+        fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+            Err(format!("{url}: {}", self.0))
+        }
+    }
+
+    #[test]
+    fn fetch_reads_only_a_404_as_a_missing_asset() {
+        // Arrange: the URL itself holds 404.
+        let base = "https://dl.test/v0.404.0";
+
+        // Act
+        let missing = fetch(&Failing("http status: 404"), base, "0.404.0", Some(""));
+        let down = fetch(&Failing("http status: 500"), base, "0.404.0", Some(""));
+
+        // Assert
+        assert_eq!(missing, Ok(None));
+        assert!(down.unwrap_err().contains("could not download"));
     }
 
     #[test]
