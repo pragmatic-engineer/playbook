@@ -23,8 +23,8 @@ pub trait Host: Send + Sync {
 
     /// The command line a user runs for `args`, for messages. `args` always
     /// starts with `usage`: `usage --summary` becomes `playbook usage
-    /// --summary` for a host that nests the command, or `playbook-telemetry
-    /// --summary` for a program that is the usage tool itself.
+    /// --summary` for a host that nests the command, or `pbtop --summary`
+    /// for a program that is the usage tool itself.
     fn command(&self, args: &str) -> String;
 
     /// The arguments, before any usage subcommand, that make the program run

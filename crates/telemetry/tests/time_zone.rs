@@ -55,7 +55,7 @@ fn binary(args: &[&str], zone_env: Option<&str>) -> Output {
     let home: PathBuf =
         std::env::temp_dir().join(format!("pt-tz-{}-{}", std::process::id(), args.join("")));
     std::fs::create_dir_all(&home).expect("create a home");
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook-telemetry"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_pbtop"));
     cmd.args(args)
         .env("HOME", &home)
         .env_remove("CLAUDE_CONFIG_DIR")

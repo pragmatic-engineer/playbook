@@ -1,9 +1,9 @@
-# playbook-telemetry (alias: pbtop)
+# pbtop
 
-Type `pbtop`. It is the short name of the `playbook-telemetry` command, and both run the same program.
+`pbtop` is the usage dashboard of playbook as a command of its own. The Cargo package is `playbook-telemetry`.
 
 ```sh
-brew install pragmatic-engineer/tap/playbook-telemetry
+brew install pragmatic-engineer/tap/pbtop
 pbtop
 ```
 
@@ -23,22 +23,27 @@ It is part of the [playbook](https://github.com/pragmatic-engineer/playbook) too
 
 ## Install
 
-The tool ships two command names for the same program: the short alias `pbtop` and the long name `playbook-telemetry`. Type `pbtop` at the prompt and use `playbook-telemetry` in scripts, where the full name is easier to search for.
-
-With Homebrew (macOS and Linux), which installs both names:
+From playbook 0.35.0, with Homebrew (macOS and Linux):
 
 ```sh
-brew install pragmatic-engineer/tap/playbook-telemetry
-pbtop
+brew install pragmatic-engineer/tap/pbtop
 ```
 
-Or download the archive for your platform from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest). From 0.34.0, `playbook-telemetry` ships in the playbook `vX.Y.Z` release with the same version. Releases carry `playbook-telemetry-<version>-<target>.tar.gz` for macOS (arm64 and x86_64), Linux (arm64 and x86_64, static musl) and Windows (x86_64), each holding both `playbook-telemetry` and `pbtop`, plus a `SHA256SUMS` file with build provenance attestations.
+Or with the install script, which checks the archive's checksum, its build attestation when `gh` can check it, and `pbtop --version`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install-pbtop.sh | sh
+```
+
+Or download `pbtop-<version>-<target>.tar.gz` for your platform from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest): macOS (arm64 and x86_64), Linux (arm64 and x86_64, static musl) or Windows (x86_64). `SHA256SUMS` and the build provenance attestations come with it.
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS
-gh attestation verify playbook-telemetry-<version>-<target>.tar.gz --repo pragmatic-engineer/playbook
-tar -xzf playbook-telemetry-<version>-<target>.tar.gz -C ~/.local/bin
+gh attestation verify pbtop-<version>-<target>.tar.gz --repo pragmatic-engineer/playbook
+tar -xzf pbtop-<version>-<target>.tar.gz -C ~/.local/bin
 ```
+
+The `playbook-telemetry` command and formula are retired ([ADR 0041](../../docs/adr/0041-retire-playbook-telemetry.md)). With Homebrew, move with `brew uninstall playbook-telemetry && brew install pbtop`. Change a script that calls `playbook-telemetry` to call `pbtop` with the same arguments, or `playbook usage` where playbook is installed.
 
 Or build from source with the Rust version in `rust-toolchain.toml`:
 
@@ -59,8 +64,6 @@ pbtop collect         # run the local OpenTelemetry receiver in the foreground
 pbtop prune --dry-run # say what old telemetry rows would be removed
 pbtop doctor          # where the limits can be read on this machine (add --raw for the plan field values)
 ```
-
-`playbook-telemetry` takes the same arguments and is the long name for scripts. `pbtop --help` and `pbtop --version` print `pbtop`, and the long name prints `playbook-telemetry`.
 
 Times and days use your local time zone by default, daylight saving included, and a day runs from local midnight to local midnight. Every view says which zone it uses: the footer of the terminal view reads `local time (UTC+10)` or `UTC`, the text summary opens with `Times and days are in ...`, and `--json` carries a `time_zone` object with the `mode`, the `offset_seconds` and a `label`. To use UTC instead, pass `--utc` (or `--local` to force the default), set `PLAYBOOK_TELEMETRY_TZ=utc`, or run `playbook config set usage.timeZone utc`. The flag beats the environment variable, which beats the setting. A value that is not `local` or `utc` is ignored with a warning. Weeks start on Monday unless `usage.weekStart` says otherwise.
 

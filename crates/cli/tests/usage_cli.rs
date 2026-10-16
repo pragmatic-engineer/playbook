@@ -386,3 +386,49 @@ fn a_collector_is_seen_by_status_and_idles_out_even_while_status_polls_it() {
     let after = stdout(&home.run(&["usage", "status"]));
     assert!(after.contains("not running"), "{after}");
 }
+
+#[test]
+fn the_utc_flag_beats_a_local_environment_value() {
+    // Arrange
+    let home = Home::new("tz-utc");
+
+    // Act
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["usage", "--summary", "--utc"])
+        .env("HOME", &home.0)
+        .env("PLAYBOOK_TELEMETRY_TZ", "local")
+        .output()
+        .unwrap();
+
+    // Assert
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("Times and days are in UTC."),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn both_zone_flags_together_are_refused() {
+    // Arrange
+    let home = Home::new("tz-both");
+
+    // Act
+    let out = home.run(&["usage", "--summary", "--utc", "--local"]);
+
+    // Assert
+    assert!(!out.status.success());
+}
+
+#[test]
+fn the_zone_flags_work_after_a_usage_subcommand() {
+    // Arrange
+    let home = Home::new("tz-sub");
+
+    // Act
+    let out = home.run(&["usage", "status", "--utc"]);
+
+    // Assert
+    assert!(out.status.success(), "{}", stderr(&out));
+}

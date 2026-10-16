@@ -824,7 +824,14 @@ fn main() {
             json,
             summary,
             range,
+            utc,
+            local,
         } => {
+            usage::tz::init(match (utc, local) {
+                (true, _) => Some(usage::tz::Zone::Utc),
+                (_, true) => Some(usage::tz::Zone::Local),
+                _ => None,
+            });
             let paths = usage::run::Paths::real();
             let opts = usage::entry::Opts {
                 json,

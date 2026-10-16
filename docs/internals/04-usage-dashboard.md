@@ -92,7 +92,7 @@ The view is keyboard only, so the terminal's own text selection and scrolling ke
 
 ### Ranges
 
-Every range is a set of whole UTC days, shown in the header with its name and exact dates (`last week Aug 24 to Aug 30, 2026`, with `UTC` in the border). The time zone is UTC everywhere in the view, and the JSON, so there is no daylight saving: a day is always 86,400 seconds and a week is always seven days.
+Every range is a set of whole days in the chosen time zone, shown in the header with its name and exact dates (`last week Aug 24 to Aug 30, 2026`). The zone is local time unless `--utc`, `PLAYBOOK_TELEMETRY_TZ` or `usage.timeZone` picks UTC, and the view, the summary and the JSON name it. In local time a day can be 23 or 25 hours long around a daylight saving change.
 
 | Name (`--range`) | Days |
 |---|---|
@@ -153,7 +153,7 @@ Four details are worth knowing:
 
 ## Storage
 
-One SQLite database at `~/.config/playbook/data/usage.db`, not tied to any repo, because spend only makes sense as a total. The standalone [playbook-telemetry](../../crates/telemetry/README.md) tool (`playbook-telemetry`, short alias `pbtop`) reads and writes the same file, so both show the same numbers. The first run moves an older database from `~/.config/playbook/usage.db`, `~/.config/playbook/usage/usage.db` or `~/.local/state/playbook-usage/usage.db` into place and renames the old file to `usage.db.migrated`. Events stay there after Claude Code or `playbook cc` prunes old sessions. Connection setup follows `crates/cli/src/gate/db.rs`: `busy_timeout` first, then WAL mode, because a refresh reads while `ingest` writes from other processes.
+One SQLite database at `~/.config/playbook/data/usage.db`, not tied to any repo, because spend only makes sense as a total. The standalone [pbtop](../../crates/telemetry/README.md) tool reads and writes the same file, so both show the same numbers. The first run moves an older database from `~/.config/playbook/usage.db`, `~/.config/playbook/usage/usage.db` or `~/.local/state/playbook-usage/usage.db` into place and renames the old file to `usage.db.migrated`. Events stay there after Claude Code or `playbook cc` prunes old sessions. Connection setup follows `crates/cli/src/gate/db.rs`: `busy_timeout` first, then WAL mode, because a refresh reads while `ingest` writes from other processes.
 
 The first ingest after upgrading from an older version runs a one-time repair (`crates/telemetry/src/backfill.rs`): it rescans the transcripts and corrects the repo and the cache lifetime split on rows stored earlier. A row whose transcript is gone keeps its old repo and is priced as five minute cache.
 
