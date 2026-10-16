@@ -1068,7 +1068,7 @@ fn main() {
                     json,
                     list,
                     strategies: strategy,
-                    repo_root: root,
+                    plugin_root: playbook::plugin_root::in_checkout(&root),
                 };
                 std::process::exit(eval::bench::run(&opts));
             }

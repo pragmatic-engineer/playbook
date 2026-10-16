@@ -116,7 +116,7 @@ Check every agent definition follows the agent rules
 
 Exits 0 when all pass and 1 otherwise.
 
-- `<AGENTS_DIR>`: Folder of agent definitions (default: `agents` at the repo root)
+- `<AGENTS_DIR>`: Folder of agent definitions (default: `plugins/playbook/agents` in the repo, else `agents` at the repo root)
 
 ### `playbook agents variants`
 
@@ -126,7 +126,7 @@ Variants such as `reviewer-low` are not files. `playbook cc` and `playbook ccd` 
 
 Example: `playbook agents variants --ceiling medium`
 
-- `<AGENTS_DIR>`: Directory holding the agent definitions, default `<repo root>/agents`
+- `<AGENTS_DIR>`: Directory holding the agent definitions, default `plugins/playbook/agents` in the repo, else `<repo root>/agents`
 - `--ceiling <CEILING>`: Lowest effort ceiling to apply to every agent (default: none)
 - `--mode <MODE>`: auto, all or off (default: auto)
 - `--json`: Print the `--agents` JSON

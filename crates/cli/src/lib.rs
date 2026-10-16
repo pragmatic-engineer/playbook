@@ -1225,7 +1225,7 @@ pub enum AgentsCommand {
     ///
     /// Exits 0 when all pass and 1 otherwise.
     Check {
-        /// Folder of agent definitions (default: `agents` at the repo root)
+        /// Folder of agent definitions (default: `plugins/playbook/agents` in the repo, else `agents` at the repo root)
         agents_dir: Option<PathBuf>,
     },
     /// Show the effort-tier variants a session would get
@@ -1237,7 +1237,7 @@ pub enum AgentsCommand {
     ///
     /// Example: `playbook agents variants --ceiling medium`
     Variants {
-        /// Directory holding the agent definitions, default `<repo root>/agents`.
+        /// Directory holding the agent definitions, default `plugins/playbook/agents` in the repo, else `<repo root>/agents`.
         agents_dir: Option<PathBuf>,
         /// Lowest effort ceiling to apply to every agent (default: none)
         #[arg(long)]

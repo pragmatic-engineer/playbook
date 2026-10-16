@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const DEFAULT_FIXTURES: &str = "crates/cli/tests/fixtures/review-triage-eval-set.json";
+/// Relative to the plugin folder, see [`crate::plugin_root::in_checkout`].
 const DEFAULT_PROMPT: &str = "agents/review-triage.md";
 
 /// One (case, lens) comparison result.
@@ -185,7 +186,8 @@ fn fail(msg: &str) -> i32 {
 pub fn review_triage(fixtures: Option<PathBuf>, prompt: Option<PathBuf>) -> i32 {
     let root = repo_root();
     let fixtures = fixtures.unwrap_or_else(|| root.join(DEFAULT_FIXTURES));
-    let prompt = prompt.unwrap_or_else(|| root.join(DEFAULT_PROMPT));
+    let prompt =
+        prompt.unwrap_or_else(|| crate::plugin_root::in_checkout(&root).join(DEFAULT_PROMPT));
     if !on_path("gh") {
         return fail("gh is required");
     }

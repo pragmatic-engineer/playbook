@@ -194,6 +194,21 @@ fn the_shipped_fixtures_load_and_cover_every_role() {
 }
 
 #[test]
+fn the_default_cases_find_their_agent_files_in_this_checkout() {
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["eval", "bench", "--list"])
+        .current_dir(env!("PLAYBOOK_REPO_ROOT"))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("reviewer\t"));
+}
+
+#[test]
 fn the_lens_split_fixture_pairs_one_single_reviewer_with_five_lens_reviewers_per_diff() {
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["eval", "bench", "--list", "--cases"])

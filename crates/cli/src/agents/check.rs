@@ -329,12 +329,14 @@ fn check_agent(file: &str, name: &str, content: &str) -> Vec<String> {
     violations
 }
 
-/// The enclosing repo's `agents/` directory, mirroring the shell's default
-/// when no `AGENTS_DIR` argument was given (check-agents.sh:20-25). Reuses
+/// The `agents/` directory of the enclosing repo's plugin folder (see
+/// [`crate::plugin_root::in_checkout`]), used when no `AGENTS_DIR` argument
+/// was given (check-agents.sh:20-25). Reuses
 /// [`crate::manifest::check::toplevel`], since both validators resolve the
 /// same repo root the same way. `None` outside a git repository.
 pub fn default_dir() -> Option<PathBuf> {
-    crate::manifest::check::toplevel().map(|root| root.join("agents"))
+    crate::manifest::check::toplevel()
+        .map(|root| crate::plugin_root::in_checkout(&root).join("agents"))
 }
 
 /// Runs every rule against every `agents_dir/*.md` file (excluding

@@ -119,7 +119,8 @@ pub struct Options {
     /// Dispatch strategies for a tool-enabled implementer run; empty for the
     /// single turn bench.
     pub strategies: Vec<String>,
-    pub repo_root: PathBuf,
+    /// The plugin folder that case `agent` paths are relative to.
+    pub plugin_root: PathBuf,
 }
 
 /// A case with its prompts resolved.
@@ -174,7 +175,7 @@ fn agent_body(text: &str) -> String {
 
 /// Every case under `path`: one `.json` file or a directory of them. A file
 /// holds a list of cases or `{"cases": [...]}`.
-fn load_cases(path: &Path, repo_root: &Path) -> Result<Vec<Loaded>, String> {
+fn load_cases(path: &Path, plugin_root: &Path) -> Result<Vec<Loaded>, String> {
     let mut files = Vec::new();
     if path.is_dir() {
         let entries = std::fs::read_dir(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -209,7 +210,7 @@ fn load_cases(path: &Path, repo_root: &Path) -> Result<Vec<Loaded>, String> {
         for item in list {
             let case: Case = serde_json::from_value(item)
                 .map_err(|e| format!("{}: bad case: {e}", file.display()))?;
-            out.push(resolve(case, dir, repo_root)?);
+            out.push(resolve(case, dir, plugin_root)?);
         }
     }
     let mut seen = std::collections::BTreeSet::new();
@@ -221,10 +222,10 @@ fn load_cases(path: &Path, repo_root: &Path) -> Result<Vec<Loaded>, String> {
     Ok(out)
 }
 
-fn resolve(case: Case, dir: &Path, repo_root: &Path) -> Result<Loaded, String> {
+fn resolve(case: Case, dir: &Path, plugin_root: &Path) -> Result<Loaded, String> {
     let system = match (&case.agent, &case.system) {
         (Some(a), _) => {
-            let p = repo_root.join(a);
+            let p = plugin_root.join(a);
             let text = std::fs::read_to_string(&p)
                 .map_err(|e| format!("case {}: agent {}: {e}", case.id, p.display()))?;
             agent_body(&text)
@@ -672,7 +673,7 @@ fn estimate_total(jobs: &[(&Loaded, String, String, u32)]) -> Result<f64, String
 
 /// Runs the benchmark and returns the process exit code.
 pub fn run(opts: &Options) -> i32 {
-    let cases = match load_cases(&opts.cases, &opts.repo_root) {
+    let cases = match load_cases(&opts.cases, &opts.plugin_root) {
         Ok(c) => c,
         Err(e) => return fail(&e),
     };
@@ -778,7 +779,7 @@ fn run_wu(cases: &[Loaded], opts: &Options) -> i32 {
         max_cost_usd: opts.max_cost_usd,
         jobs: opts.jobs,
         json: opts.json,
-        plugin_root: opts.repo_root.clone(),
+        plugin_root: opts.plugin_root.clone(),
     })
 }
 

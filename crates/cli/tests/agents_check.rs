@@ -211,6 +211,37 @@ fn omitted_agents_dir_argument_defaults_to_repo_root_slash_agents() {
 }
 
 #[test]
+fn omitted_agents_dir_argument_finds_the_agents_under_plugins_playbook() {
+    // Arrange: the source checkout layout, agents under plugins/playbook.
+    let repo = scratch("default-resolution-nested");
+    let init = Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["init", "-q"])
+        .output()
+        .expect("git init should spawn");
+    assert!(init.status.success(), "git init failed");
+    let agents_dir = repo.join("plugins/playbook/agents");
+    fs::create_dir_all(&agents_dir).expect("agents dir should be creatable");
+    let content = agent(
+        "reviewer",
+        STRICT_DESC,
+        "Read, Grep, Glob",
+        "sonnet",
+        "medium",
+        GUARDRAILS_FULL,
+    );
+    fs::write(agents_dir.join("reviewer.md"), content).expect("fixture");
+
+    // Act
+    let out = run_default_from(&repo);
+
+    // Assert
+    assert!(out.status.success(), "got: {}", stderr_of(&out));
+    assert!(stdout_of(&out).contains("OK (1 agent definitions"));
+}
+
+#[test]
 fn omitted_agents_dir_argument_outside_a_git_repo_errors() {
     // Arrange: a scratch directory that is not a git repository at all.
     let not_a_repo = scratch("not-a-repo");
