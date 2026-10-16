@@ -719,18 +719,11 @@ fn skills(frame: &mut Frame, area: Rect, app: &App, data: &Data, pal: &Palette) 
     );
 }
 
-/// The empty state of a telemetry panel: what is missing and the command that
-/// fixes it, from the status the footer shows.
+/// The empty state of a telemetry panel: short lines that name the cause
+/// (telemetry off, collector down, or no rows yet) and each command on a line
+/// of its own.
 fn telemetry_off(app: &App) -> String {
-    match app.telemetry {
-        Some(mode) => match mode.fix() {
-            Some(fix) => format!("{} Fix: {fix}.", mode.text()),
-            None if mode == crate::telemetry_status::Mode::OffOwnSetup => mode.text().to_string(),
-            None => format!("{} but no rows in this range yet.", mode.text()),
-        },
-        None => "Telemetry off. Run `playbook setup --telemetry` (older versions: `playbook init --telemetry`), or start sessions with `cc`."
-            .to_string(),
-    }
+    crate::telemetry_status::empty_panel_lines(app.telemetry).join("\n")
 }
 
 fn telemetry_split(
