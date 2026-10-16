@@ -24,7 +24,7 @@ use crate::telemetry_db::{Health, ToolStat};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Table};
+use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
 /// A session whose last message is newer than this is working right now.
@@ -261,6 +261,7 @@ fn empty(frame: &mut Frame, area: Rect, pal: &Palette, block: Block<'static>, me
     frame.render_widget(
         Paragraph::new(message.to_string())
             .style(fg(pal, pal.inactive))
+            .wrap(Wrap { trim: true })
             .block(block),
         area,
     );
