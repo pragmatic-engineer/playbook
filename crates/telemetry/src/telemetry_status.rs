@@ -86,6 +86,53 @@ impl Mode {
     }
 }
 
+/// The empty state of a telemetry panel in short lines: the cause first
+/// (telemetry off, collector down, or no rows yet), then each command on a
+/// line of its own, so a short panel still shows the first fix. `None` is a
+/// status not read yet.
+pub fn empty_panel_lines(mode: Option<Mode>) -> Vec<String> {
+    let setup = super::host::setup_command("telemetry");
+    match mode {
+        None | Some(Mode::OffNotConfigured) => vec![
+            "No rows: telemetry is off.".into(),
+            "Turn it on with:".into(),
+            setup,
+            "Or start sessions with `playbook cc`.".into(),
+        ],
+        Some(Mode::OffNoEndpoint) => vec![
+            "No rows: telemetry has no OTLP endpoint.".into(),
+            "Add OTEL_EXPORTER_OTLP_ENDPOINT with:".into(),
+            setup,
+        ],
+        Some(Mode::OffDisabled) => vec![
+            "No rows: Claude Code settings turn it off.".into(),
+            "Turn telemetry on with:".into(),
+            setup,
+        ],
+        Some(Mode::OffByConfig) => vec![
+            "No rows: usage.telemetry is off.".into(),
+            "Turn it on with:".into(),
+            "playbook config set usage.telemetry auto".into(),
+        ],
+        Some(Mode::OffOwnSetup) => vec![
+            "No rows: telemetry goes to your own endpoint.".into(),
+            "playbook reads transcripts instead.".into(),
+        ],
+        Some(Mode::OnCollectorDown) => vec![
+            "No rows: the collector is not running.".into(),
+            "Start it with:".into(),
+            super::host::command("usage collect"),
+            "Keep it running in the background with:".into(),
+            super::host::setup_command("collector-service"),
+        ],
+        Some(Mode::OnRunning | Mode::OnReceiving) => vec![
+            "No rows in this range yet.".into(),
+            "Telemetry is on and the collector runs.".into(),
+            "Rows appear while sessions run.".into(),
+        ],
+    }
+}
+
 /// Facts beside the settings that change the answer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Signals {
@@ -180,6 +227,35 @@ pub fn detect_here(paths: &Paths) -> Mode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_empty_panel_names_one_cause_and_puts_each_command_on_its_own_line() {
+        let off = empty_panel_lines(Some(Mode::OffNotConfigured));
+        let down = empty_panel_lines(Some(Mode::OnCollectorDown));
+        let quiet = empty_panel_lines(Some(Mode::OnRunning));
+
+        assert!(off[0].contains("telemetry is off"), "{off:?}");
+        assert!(
+            off.contains(&crate::host::setup_command("telemetry")),
+            "{off:?}"
+        );
+        assert!(down[0].contains("collector is not running"), "{down:?}");
+        assert!(
+            down.iter().any(|l| l.ends_with("usage collect")),
+            "{down:?}"
+        );
+        assert!(down.contains(&crate::host::setup_command("collector-service")));
+        assert!(quiet[1].contains("collector runs"), "{quiet:?}");
+        assert!(
+            !quiet.iter().any(|l| l.starts_with("playbook")),
+            "{quiet:?}"
+        );
+        // The cause and the first command fit the four lines of a short panel.
+        assert_eq!(down[2], crate::host::command("usage collect"));
+        for line in off.iter().chain(&down).chain(&quiet) {
+            assert!(line.chars().count() <= 46, "too long: {line}");
+        }
+    }
 
     #[test]
     fn the_config_key_off_wins_over_everything() {
