@@ -6,7 +6,7 @@
 //! It removes only what playbook placed: the hook entries and status line
 //! `init` wrote into `settings.json`, the managed launcher block in the rc
 //! files, the files `init` copies under `~/.config/playbook`, and the two
-//! installer scripts in `~/.claude`. The binary and its rc `PATH` block go
+//! installer scripts in `~/.claude`, and the collector's background service. The binary and its rc `PATH` block go
 //! only on request. Memory, the data folder with every database, settings the
 //! user owns, sessions, history and earlier backups are never touched.
 
@@ -60,6 +60,14 @@ pub fn run(opts: &Options) -> Report {
 
     let settings = settings_step(opts, &claude_home, stamp, &mut report);
     rc_step(opts, stamp, &mut report);
+    // The service runs the binary, so it goes before the binary can.
+    match crate::init::collector_service::remove(&opts.home, opts.dry_run) {
+        Ok(Some(line)) => report.lines.push(line),
+        Ok(None) => {}
+        Err(err) => report
+            .errors
+            .push(format!("collector service left in place: {err}")),
+    }
     if !settings.ok {
         report.lines.push(
             "kept the placed files and the binary, since settings.json still refers to them"

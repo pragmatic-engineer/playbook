@@ -750,6 +750,53 @@ fn attribution_row(env: &Env) -> Row {
     }
 }
 
+/// The background service that keeps the collector running (ADR 0043), for
+/// a user whose telemetry points at the collector.
+fn service_row(home: &Path) -> Row {
+    use crate::init::collector_service::{declined, COMMAND};
+    use crate::usage::service;
+    match service::find(home) {
+        Some(found) if found.program_exists() => Row::new(
+            "-",
+            Level::Pass,
+            format!("collector service installed: {}", found.describe()),
+        ),
+        Some(found) => Row::new(
+            "-",
+            Level::Warn,
+            format!(
+                "the collector service starts a program that is gone: {}",
+                found
+                    .program
+                    .as_deref()
+                    .map_or_else(|| "unreadable".to_string(), |p| p.display().to_string())
+            ),
+        )
+        .hint(format!("run: {COMMAND}")),
+        None if service::Kind::current().is_none() => Row::new(
+            "-",
+            Level::Info,
+            "no collector service on this system (no launchd or systemd)",
+        )
+        .hint(format!(
+            "keep this running yourself: {}",
+            service::manual_command("playbook")
+        )),
+        None if declined(home) => Row::new(
+            "-",
+            Level::Info,
+            "no collector service (you said no)",
+        )
+        .hint(format!("to add it, run: {COMMAND}")),
+        None => Row::new(
+            "-",
+            Level::Info,
+            "no collector service, so the collector runs only while cc or the session hook starts it",
+        )
+        .hint(format!("run: {COMMAND}")),
+    }
+}
+
 /// The telemetry rows: Claude Code's settings point at the playbook
 /// collector, the collector runs, and rows arrived in the last day. Each
 /// failing row names the one command that fixes it.
@@ -830,6 +877,7 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
             .hint("run: playbook usage status")];
         }
     }
+    rows.push(service_row(&env.home));
     let Some(state) = state else {
         return rows;
     };
@@ -871,9 +919,9 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
             Row::new(
                 "-",
                 Level::Warn,
-                "collector not running (it starts with your next Claude Code session)",
+                "collector not running, so telemetry sent now is lost",
             )
-            .hint("run: playbook usage collect"),
+            .hint(crate::init::collector_service::collector_fix(&env.home)),
         );
     }
     let last =

@@ -339,7 +339,9 @@ Two more views of the projects panel (`4`, then `v` three and four times) read t
 
 **Starting it from the session hook.** When the settings that `setup` wrote point at the collector and it is down, the `session-init` hook (wired by the hooks part of `setup`) starts `playbook usage collect` detached. It does not need the usage database, waits at most 1.2 seconds, takes the same spawn lock so parallel sessions start one collector, starts nothing when another program already answers on the recorded port, and writes the collector's messages to `collector.log` next to `collector.json`. `usage.telemetry off` turns it off.
 
-To keep a collector running for `cc` sessions without a terminal tab, or to stop it from idling out, start it in a detached tmux session. The idle limit is off here so it does not stop in a quiet hour:
+**Starting it at login.** `playbook setup` asks whether to install a per-user service that runs `playbook usage collect --idle-seconds 0`: a launchd agent on macOS, a systemd user unit on Linux. `playbook setup --only collector-service` installs it later. It starts at login, starts again 30 seconds after it stops, never idles out, and writes to `collector-service.log` next to `collector.json`. The service file holds no token, since the collector reads it from `collector.json`. A start that finds a running collector exits, so a collector that `cc` or the hook started keeps the port until it idles out and the service then takes over. `playbook usage status` and `playbook doctor` name the service, and `playbook uninstall` removes it. See [ADR 0043](../adr/0043-collector-service-in-setup.md).
+
+On a system without launchd or systemd, start it in a detached tmux session instead. The idle limit is off here so it does not stop in a quiet hour:
 
 ```
 tmux new-session -d -s playbook-collect 'playbook usage collect --idle-seconds 0'
@@ -347,4 +349,4 @@ playbook usage status
 tmux kill-session -t playbook-collect
 ```
 
-`playbook usage collect` stays in the foreground, so any tool that runs a command in the background can run it the same way (`nohup playbook usage collect --idle-seconds 0 &` also works). A second start reports the running collector and exits, so it is safe to put the command in a shell profile or a tmux startup script. Playbook writes no service file for you: a launchd agent or a systemd user unit is yours to write if you want one, and it only needs that one command line.
+`playbook usage collect` stays in the foreground, so any tool that runs a command in the background can run it the same way (`nohup playbook usage collect --idle-seconds 0 &` also works). A second start reports the running collector and exits, so it is safe to put the command in a shell profile or a tmux startup script.
