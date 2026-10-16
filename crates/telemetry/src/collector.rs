@@ -53,6 +53,16 @@ pub struct State {
     /// The idle limit it runs with, in seconds; 0 means never.
     #[serde(default)]
     pub idle_seconds: u64,
+    /// The version of the program that started it. Empty in a file written
+    /// by an older version.
+    #[serde(default)]
+    pub version: String,
+}
+
+/// Whether a collector runs from a build other than this one, so a
+/// background service should restart it after an upgrade.
+pub fn runs_other_build(state: &State) -> bool {
+    running(state) && state.version != env!("CARGO_PKG_VERSION")
 }
 
 pub fn state_path(paths: &Paths) -> PathBuf {
@@ -219,6 +229,7 @@ pub fn ensure_state(paths: &Paths) -> Result<State, String> {
         },
         started_at: previous.started_at,
         idle_seconds: previous.idle_seconds,
+        version: previous.version,
     };
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
@@ -248,6 +259,12 @@ pub struct Status {
     /// How telemetry is configured, in words, and the one-line fix if any.
     pub telemetry: String,
     pub telemetry_fix: Option<String>,
+    /// The background service that runs the collector, in words, when one
+    /// is installed (ADR 0043).
+    pub service: Option<String>,
+    /// What to do while the collector is down, for the text.
+    #[serde(skip)]
+    pub collector_fix: String,
 }
 
 /// The time of the newest stored telemetry event, unix seconds. Opens the
@@ -317,6 +334,8 @@ pub fn status(paths: &Paths, retention: Retention) -> Result<Status, String> {
         last_event,
         telemetry: mode.text().to_string(),
         telemetry_fix: mode.fix().map(str::to_string),
+        service: super::service::find(&super::host::home_dir()).map(|f| f.describe()),
+        collector_fix: super::service::collector_fix(&super::host::home_dir()),
     })
 }
 
@@ -343,15 +362,16 @@ impl Status {
             }
             _ => {
                 lines.push("collector: not running".to_string());
-                lines.push(format!(
-                    "start it with `{}`, or see the usage dashboard guide for a background setup",
-                    super::host::command("usage collect")
-                ));
+                lines.push(self.collector_fix.clone());
                 if let Some(port) = self.port {
                     lines.push(format!("last port: {port}"));
                 }
             }
         }
+        lines.push(match &self.service {
+            Some(service) => format!("background service: {service}"),
+            None => "background service: none".to_string(),
+        });
         lines.push(format!(
             "rows: {} requests, {} tool calls, {} api errors, {} metric points",
             self.requests, self.tool_calls, self.api_errors, self.metric_points
@@ -500,6 +520,7 @@ fn run_collect_with(
         token: token.clone(),
         started_at: crate::util::time::now_secs(),
         idle_seconds,
+        version: env!("CARGO_PKG_VERSION").to_string(),
     };
     write_state(&path, &state)?;
     let retention = configured_retention();
@@ -533,6 +554,28 @@ mod tests {
         let mut p = Paths::from_home(&dir);
         p.db = dir.join("usage").join("usage.db");
         p
+    }
+
+    #[test]
+    fn a_collector_from_another_build_is_flagged_for_a_restart() {
+        let p = paths("collector-version");
+        let stop = Arc::new(AtomicBool::new(false));
+        run_collect(&p, Some(0), 1, &stop).unwrap();
+        let written = read_state(&state_path(&p)).unwrap();
+        assert_eq!(written.version, env!("CARGO_PKG_VERSION"));
+
+        let listener = bind(0).unwrap();
+        let live = |version: &str| State {
+            pid: std::process::id(),
+            port: listener.local_addr().unwrap().port(),
+            version: version.into(),
+            ..State::default()
+        };
+
+        assert!(runs_other_build(&live("0.1.0")));
+        assert!(runs_other_build(&live("")));
+        assert!(!runs_other_build(&live(env!("CARGO_PKG_VERSION"))));
+        assert!(!runs_other_build(&State::default()));
     }
 
     #[test]
@@ -874,6 +917,7 @@ mod tests {
             token: "supersecrettoken".into(),
             started_at: 1_760_000_000,
             idle_seconds: 600,
+            ..State::default()
         };
         write_state(&state_path(&p), &state).unwrap();
         let conn = crate::db::open_db(&p.db).unwrap();

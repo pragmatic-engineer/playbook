@@ -31,6 +31,19 @@ impl Host for Standalone {
         }
     }
 
+    /// `pbtop` may run next to a playbook from before the rename to `setup`,
+    /// or from before the collector-service part.
+    fn setup_command(&self, part: &str) -> String {
+        match part {
+            "telemetry" => {
+                "playbook setup --only telemetry (older versions: playbook init --telemetry)".into()
+            }
+            other => format!(
+                "playbook setup --only {other} (older versions: playbook init has no {other} part)"
+            ),
+        }
+    }
+
     fn launch_args(&self) -> Vec<String> {
         Vec::new()
     }

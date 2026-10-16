@@ -27,6 +27,11 @@ pub trait Host: Send + Sync {
     /// for a program that is the usage tool itself.
     fn command(&self, args: &str) -> String;
 
+    /// The command that runs one part of playbook's setup, for messages:
+    /// `telemetry` or `collector-service`. A host that may run next to an
+    /// older playbook adds the old command name.
+    fn setup_command(&self, part: &str) -> String;
+
     /// The arguments, before any usage subcommand, that make the program run
     /// usage. Used to start a detached `warm` run of the same program.
     fn launch_args(&self) -> Vec<String>;
@@ -96,6 +101,10 @@ impl Host for TestHost {
         format!("playbook {args}")
     }
 
+    fn setup_command(&self, part: &str) -> String {
+        format!("{} setup --only {part}", self.program())
+    }
+
     fn launch_args(&self) -> Vec<String> {
         vec!["usage".to_string()]
     }
@@ -139,6 +148,11 @@ pub fn program() -> &'static str {
 /// becomes `playbook usage --summary`.
 pub fn command(args: &str) -> String {
     current().command(args)
+}
+
+/// The command that runs one part of playbook's setup, for messages.
+pub fn setup_command(part: &str) -> String {
+    current().setup_command(part)
 }
 
 /// The arguments that make the program run usage, for a detached child.
