@@ -483,8 +483,33 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Cache cargo registry and build output (container-smoke)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # The built binary, keyed on what builds it: the crates, the Cargo
+      # files, the toolchain, the files the binary embeds with include_str!
+      # outside crates/, and this workflow, which holds the build step. A run
+      # with the same inputs reuses the binary of an earlier run and skips
+      # the build, most of this job. Add a file here when an include_str!
+      # starts reading one outside crates/. The daily run always rebuilds,
+      # so a change on the runner image still shows within a day. The static
+      # check and the container tests below run on every path.
+      - name: Restore the smoke binary
+        id: bin
+        if: github.event_name != 'schedule'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: smoke-bin/playbook
+          key: smoke-bin-v1-${{ matrix.target }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo/**', 'crates/**', 'Brewfile', 'settings.shared.json', 'prompts/**', 'breaking-changes.json', 'plugins/playbook/skills/*/SKILL.md', '.github/workflows/rust-ci.yml') }}
+
+      # Every step from here to the cargo save runs only when the binary was
+      # not restored, and carries the same `if`.
+      #
+      # Restored from a push to main, saved only there. Pull request runs
+      # saved their own copy before, about 600 MB per target, which only
+      # that pull request's later runs could read. A pull request that
+      # changes Cargo.lock now rebuilds the changed crates on each push.
+      - name: Restore cargo registry and build output (container-smoke)
+        id: cargo
+        if: steps.bin.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -495,6 +520,7 @@ jobs:
             cargo-container-smoke-${{ matrix.target }}-
 
       - name: Add the musl target
+        if: steps.bin.outputs.cache-hit != 'true'
         run: rustup target add ${{ matrix.target }}
 
       - name: Install the musl C cross-compiler
@@ -507,9 +533,11 @@ jobs:
         # `CC_*` env var in the build step below rather than a symlink,
         # since the binary it ships is named `musl-gcc`, not the
         # `<arch>-linux-musl-gcc` cc-rs guesses by default.
+        if: steps.bin.outputs.cache-hit != 'true'
         run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
 
       - name: Build the release binary (static musl)
+        if: steps.bin.outputs.cache-hit != 'true'
         # rust-lld still links the final binary (matches release.yml's own
         # musl legs): musl-gcc only compiles the bundled sqlite3.c into
         # object files, it never becomes the linker driver, so the musl
@@ -529,17 +557,37 @@ jobs:
           export "CARGO_TARGET_${tu}_LINKER=rust-lld"
           export "CC_${tc}=musl-gcc"
           cargo build --release -p playbook --target ${{ matrix.target }}
+          mkdir -p smoke-bin
+          cp target/${{ matrix.target }}/release/playbook smoke-bin/playbook
+
+      # The daily run skips the restore, so it has no key to save under.
+      - name: Save the smoke binary
+        if: steps.bin.outputs.cache-hit != 'true' && steps.bin.outputs.cache-primary-key != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: smoke-bin/playbook
+          key: ${{ steps.bin.outputs.cache-primary-key }}
+
+      - name: Save cargo registry and build output (container-smoke)
+        if: steps.bin.outputs.cache-hit != 'true' && steps.cargo.outputs.cache-hit != 'true' && github.event_name == 'push'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cargo.outputs.cache-primary-key }}
 
       - name: Confirm the binary is static
         run: |
           set -euo pipefail
-          file -b target/${{ matrix.target }}/release/playbook | tee /tmp/f.txt
+          file -b smoke-bin/playbook | tee /tmp/f.txt
           grep -qE 'static-pie linked|statically linked' /tmp/f.txt
 
       - name: Run every hook inside a minimal debian container
         run: |
           docker run --rm \
-            -v "$PWD/target/${{ matrix.target }}/release/playbook:/usr/local/bin/playbook:ro" \
+            -v "$PWD/smoke-bin/playbook:/usr/local/bin/playbook:ro" \
             debian:stable-slim \
             bash -c '
               set -e
@@ -587,7 +635,7 @@ jobs:
         # real CLI to prove that separately.
         run: |
           set -euo pipefail
-          bin="$PWD/target/${{ matrix.target }}/release/playbook"
+          bin="$PWD/smoke-bin/playbook"
           work="$(mktemp -d)"
           (cd "$work" && git init -q && git remote add origin https://github.com/smoke-test/smoke-test.git)
           echo "VERDICT: PASS" > "$work/source.txt"
