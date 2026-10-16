@@ -10,7 +10,6 @@ use crate::pr::shared::gh;
 use std::process::Command;
 
 pub mod checks;
-pub mod comment;
 pub mod lens;
 pub mod size;
 pub mod suggest;

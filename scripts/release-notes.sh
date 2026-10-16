@@ -14,8 +14,7 @@
 #
 #   release-notes.sh body <component> <version> <json-out>
 #     Writes release-notes.json to <json-out> and prints the release body:
-#     the upgrade note for playbook or the assets note for telemetry, then
-#     the markdown.
+#     the upgrade note, then the markdown.
 #
 # The sections come in this order, and an empty one is left out:
 #   breaking     `!` after the type or scope, or a BREAKING CHANGE footer
@@ -49,8 +48,9 @@ from_caller() {
 }
 
 # The components. Adding one means a line here, in prefix_of and paths_of,
-# and a tag in release.yml.
-COMPONENTS="playbook telemetry"
+# and a tag in release.yml. The telemetry line ended at telemetry-v0.2.0
+# (ADR 0041).
+COMPONENTS="playbook"
 
 check_component() {
   case " $COMPONENTS " in
@@ -62,20 +62,17 @@ check_component() {
 prefix_of() {
   case "$1" in
     playbook) echo "v" ;;
-    telemetry) echo "telemetry-v" ;;
   esac
 }
 
 # The paths each component's release is built from, one pathspec per line.
-# A playbook release ships the plugin too (ADR 0038). Shared crates count for
-# every binary that builds them, and the playbook binary builds
-# crates/telemetry too. Cargo.lock counts for none, since every
+# A playbook release ships the plugin too (ADR 0038), and the binary builds
+# every crate but the plugin checks. Cargo.lock counts for none, since every
 # dependency bump rewrites it.
 paths_of() {
   case "$1" in
     playbook) printf '%s\n' crates ':(exclude)crates/plugin-checks' \
       Cargo.toml install.sh settings.shared.json prompts Brewfile plugins/playbook ;;
-    telemetry) printf '%s\n' crates/telemetry crates/data crates/common ;;
   esac
 }
 
@@ -221,8 +218,6 @@ body() {
   json "$component" "$version" > "$out"
   case "$component" in
     playbook) cat .github/release-notes-upgrade.md; echo ;;
-    telemetry)
-      printf '## Assets\n\nRelease of playbook-telemetry %s. The archives below hold both binaries for each platform, and SHA256SUMS lists their checksums.\n\n' "$version" ;;
   esac
   markdown "$out"
 }
