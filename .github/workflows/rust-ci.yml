@@ -47,6 +47,13 @@ on:
 
 permissions: {}
 
+# Every job builds once per run, so incremental data and debug info only add
+# compile time, link time and cache size. Release builds already have neither.
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
 # A release gate gets a group per commit, and the daily and manual runs groups
 # of their own, so none of them waits behind or cancels a push to main.
 concurrency:
@@ -169,10 +176,6 @@ jobs:
       # Single source of truth for the cache key and the install command
       # below, so they can't drift apart. Bump deliberately, not implicitly.
       CARGO_AUDIT_VERSION: "0.22.2"
-      # Smaller target dir (no debuginfo, no incremental data) means a faster
-      # cache restore and faster links.
-      CARGO_INCREMENTAL: "0"
-      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         # Linux-only action; it self-skips on macOS with a confusing warning
@@ -211,9 +214,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-build-test-v2-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: cargo-build-test-v3-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
-            cargo-build-test-v2-${{ runner.os }}-
+            cargo-build-test-v3-${{ runner.os }}-
 
       # Prints the version rust-toolchain.toml actually resolved to, so a
       # reviewer can confirm the pin took effect from the job log instead of
@@ -254,10 +257,29 @@ jobs:
         if: env.LANE == 'true'
         run: cargo nextest run ${{ needs.changes.outputs.pkgs || '--workspace' }} --no-tests=pass --config-file .github/nextest.toml --profile ci
 
-      # nextest does not run doctests.
-      - name: cargo test --workspace --doc
+      # nextest does not run doctests. Only selected crates with a fenced
+      # block in a doc comment, or docs read from a file, can have one, and
+      # `cargo test --doc` builds every selected crate again to find out.
+      - name: cargo test --doc (crates with doctests)
         if: env.LANE == 'true'
-        run: cargo test ${{ needs.changes.outputs.pkgs || '--workspace' }} --doc
+        env:
+          PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
+        run: |
+          set -euo pipefail
+          sel=""
+          for toml in crates/*/Cargo.toml; do
+            dir="${toml%/Cargo.toml}"
+            [ -d "$dir/src" ] || continue
+            grep -rqE '^[[:space:]]*(//[/!].*```|#!?\[doc[^]]*include_str)' "$dir/src" || continue
+            name="$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$toml" | head -1)"
+            case " $PKGS " in *" --workspace "*|*" -p $name "*) sel="$sel -p $name" ;; esac
+          done
+          if [ -z "$sel" ]; then
+            echo "No selected crate has a doctest."
+            exit 0
+          fi
+          # shellcheck disable=SC2086
+          cargo test $sel --doc
 
       # Moved out of shell-ci with the port: the seed validator is now a
       # subcommand, so it needs a built binary and belongs on this lane.
@@ -324,18 +346,39 @@ jobs:
           # CVEs get caught, only skips recompiling the same binary.
           cargo audit
 
-      # Linux saves after a push to main, and macOS only after the daily run.
-      # Every other run, manual runs and release gates included, restores
-      # the main cache and skips the multi-minute save of a large target dir.
+      # The key changes only with Cargo.lock and the toolchain, and almost
+      # every change rebuilds the workspace crates, so the cache keeps only
+      # what dependencies need: their compiled output and the downloaded
+      # crate files. The workspace outputs, the test and bin executables and
+      # the unpacked sources (cargo unpacks them again from the downloads)
+      # only made the restore slower.
+      - name: Trim the cargo cache before saving
+        id: trim
+        if: env.LANE == 'true' && success() && ((github.event_name == 'push' && runner.os == 'Linux') || (runner.os == 'macOS' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')))
+        run: |
+          set -euo pipefail
+          du -sh target ~/.cargo/registry
+          rm -rf ~/.cargo/registry/src target/debug/incremental target/debug/examples
+          find target/debug -maxdepth 1 -type f -delete
+          find target/debug/deps -maxdepth 1 -type f ! -name '*.*' -delete
+          for d in target/debug/deps target/debug/.fingerprint target/debug/build; do
+            find "$d" -maxdepth 1 \( -name 'playbook*' -o -name 'libplaybook*' -o -name 'pbtop*' \) -exec rm -rf {} +
+          done
+          du -sh target ~/.cargo/registry
+
+      # Linux saves after a push to main. macOS saves after a daily or manual
+      # run on main, the runs that build it there. Every other run restores
+      # the main cache and skips the save. A key that exists is not saved
+      # again.
       - name: Save cargo registry and build output (build-test)
-        if: env.LANE == 'true' && success() && ((github.event_name == 'push' && runner.os == 'Linux') || (github.event_name == 'schedule' && runner.os == 'macOS'))
+        if: steps.trim.outcome == 'success'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-build-test-v2-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: cargo-build-test-v3-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
 
   # Cheap lane for docs-only changes: the only cargo tests that read docs
   # (generated reference page drift, config-key coverage, README and index
@@ -363,8 +406,11 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Cache cargo registry and build output (docs-checks)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Saved only by a push to main, like the other lanes, so a pull
+      # request does not store a copy only its own runs can read.
+      - name: Restore cargo registry and build output (docs-checks)
+        id: cargo
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -382,6 +428,16 @@ jobs:
       - name: Check the docs prose
         continue-on-error: true
         run: cargo run -q -p playbook -- prose check docs/adr/*.md
+
+      - name: Save cargo registry and build output (docs-checks)
+        if: success() && github.event_name == 'push' && steps.cargo.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cargo.outputs.cache-primary-key }}
 
   # release.yml builds five targets, but nothing else ever compiled for
   # Windows, so `std::os::unix` reached the lib unnoticed and every Windows
@@ -404,8 +460,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Cache cargo registry and build output (windows-check)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Saved only by a push to main, so a pull request does not store a
+      # copy (about 350 MB) only its own runs can read.
+      - name: Restore cargo registry and build output (windows-check)
+        id: cargo
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -417,6 +476,16 @@ jobs:
 
       - name: cargo check (lib and bin)
         run: cargo check --workspace --bins --lib
+
+      - name: Save cargo registry and build output (windows-check)
+        if: success() && github.event_name == 'push' && steps.cargo.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cargo.outputs.cache-primary-key }}
 
   # ADR 0007: a container built FROM debian:stable-slim with only git and
   # the binary installed runs every hook successfully, asserted by CI, not
