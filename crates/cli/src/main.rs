@@ -2287,9 +2287,20 @@ fn main() {
             pre,
             yes,
             refresh_check,
+            print_notes,
+            from,
         } => {
             if refresh_check {
                 update::check::run_refresh();
+                return;
+            }
+            // On stdout, so the install script can tell an answer from the
+            // usage error of a binary without the flag.
+            if let Some(file) = print_notes {
+                print!(
+                    "{}",
+                    playbook::release_notes::print_notes(&file, from.as_deref())
+                );
                 return;
             }
             let opts = update::Options {

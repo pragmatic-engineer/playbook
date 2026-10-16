@@ -373,6 +373,13 @@ pub enum Command {
         /// Refresh the cached release check and exit (started in the background)
         #[arg(long, hide = true)]
         refresh_check: bool,
+        /// Print the release notes of this binary from a release-notes.json
+        /// the install script checked, record them as shown, and exit
+        #[arg(long, hide = true, value_name = "FILE")]
+        print_notes: Option<std::path::PathBuf>,
+        /// The version the install script replaced, for --print-notes
+        #[arg(long, hide = true, value_name = "VERSION", requires = "print_notes")]
+        from: Option<String>,
     },
     /// List the breaking changes this binary knows about
     ///

@@ -3,8 +3,9 @@
 
 //! Release notes (ADR 0037). Every release carries `release-notes.json`,
 //! built from the Conventional Commits by `scripts/release-notes.sh` and
-//! listed in its SHA256SUMS. `playbook update` and the automatic update read
-//! it to show or hold for the breaking changes of a release.
+//! listed in its SHA256SUMS. `playbook update`, the automatic update and the
+//! install script read it to show the breaking changes of a release. The
+//! first run after an upgrade shows only a link, since it stays offline.
 
 use crate::update::download::Fetcher;
 use crate::update::resolve::compare;
@@ -200,6 +201,27 @@ pub fn fetch(
     Ok(Some(notes))
 }
 
+/// `playbook update --print-notes <file>`, which the install script runs on
+/// the binary it just installed: prints the notes of this binary's release
+/// from a file the script checked, and records them as shown so the first
+/// run step does not print its line too. A file that cannot be read, or
+/// notes of another release, print only the link. Never fails.
+pub fn print_notes(file: &std::path::Path, from: Option<&str>) -> String {
+    print_notes_in(&crate::common::paths::playbook_root(), file, from)
+}
+
+fn print_notes_in(root: &std::path::Path, file: &std::path::Path, from: Option<&str>) -> String {
+    let running = env!("CARGO_PKG_VERSION");
+    let notes = std::fs::read(file).ok().and_then(|b| parse(&b).ok());
+    let notes = notes.filter(|n| n.version == running);
+    // A home with old state files is left to `migrate`, which imports them
+    // and says so; its first run line then shows the release.
+    if crate::state::pending_legacy(root) == 0 {
+        crate::notices::record(root, running);
+    }
+    render(notes.as_ref(), from.unwrap_or(running), running)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,6 +370,33 @@ mod tests {
         // Assert
         assert_eq!(missing, Ok(None));
         assert!(down.unwrap_err().contains("could not download"));
+    }
+
+    #[test]
+    fn print_notes_shows_the_breaking_changes_of_this_release_and_records_them() {
+        // Arrange
+        let running = env!("CARGO_PKG_VERSION");
+        let root = crate::common::test_support::scratch_dir("print-notes");
+        std::fs::create_dir_all(&root).unwrap();
+        let this = root.join("this.json");
+        let other = root.join("other.json");
+        std::fs::write(&this, notes_json(running, "null", ONE_BREAK)).unwrap();
+        std::fs::write(&other, notes_json("0.0.1", "null", ONE_BREAK)).unwrap();
+
+        // Act
+        let shown = print_notes_in(&root, &this, Some("0.0.1"));
+        let another = print_notes_in(&root, &other, Some("0.0.1"));
+
+        // Assert
+        assert!(
+            shown.starts_with(&format!("Breaking changes in playbook {running}:\n")),
+            "{shown}"
+        );
+        assert_eq!(another, format!("Full notes: {}\n", release_url(running)));
+        assert_eq!(
+            crate::state::get(&root, "notices/binary").unwrap(),
+            Some(running.to_string())
+        );
     }
 
     #[test]

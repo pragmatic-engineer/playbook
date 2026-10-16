@@ -92,7 +92,7 @@ const CURL_STUB: &str = r#"out=""; url=""; fail_on_http_error=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
-    -w) shift 2 ;;
+    -w|--connect-timeout|--max-time) shift 2 ;;
     -*) case "$1" in *f*) fail_on_http_error=1 ;; esac; shift ;;
     *)  url="$1"; shift ;;
   esac
@@ -117,6 +117,11 @@ case "$url" in
   */releases/download/*/SHA256SUMS)
     if [ -n "$out" ]; then printf '%s' "${STUB_SUMS_BODY:-}" > "$out"
     else printf '%s' "${STUB_SUMS_BODY:-}"; fi
+    exit 0 ;;
+  */releases/download/*/release-notes.json)
+    if [ -z "${STUB_NOTES_BODY:-}" ]; then exit 22; fi
+    if [ -n "$out" ]; then printf '%s' "$STUB_NOTES_BODY" > "$out"
+    else printf '%s' "$STUB_NOTES_BODY"; fi
     exit 0 ;;
   */releases/download/*)
     if [ -n "${STUB_ASSET_FILE:-}" ] && [ -n "$out" ]; then cp "$STUB_ASSET_FILE" "$out"; exit 0; fi
