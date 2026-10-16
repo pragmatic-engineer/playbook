@@ -4,6 +4,7 @@
 //! Behavioural tests for `staleness::check_staleness`, exercised directly
 //! in-process, mirroring `tests/hooks_signals.rs`'s pattern.
 
+use playbook::hooks::rebuild_memory_graph::graph_touched_at;
 use playbook::hooks::staleness::check_staleness;
 use std::cell::Cell;
 use std::fs;
@@ -31,13 +32,14 @@ fn scratch_dir(tag: &str) -> PathBuf {
     dir
 }
 
-/// Stores a minimal graph in the `memory.db` beside `mem_dir`, returning its
-/// mtime as Unix epoch seconds: the fact-touched reference.
+/// Stores a minimal graph in the `memory.db` beside `mem_dir`, returning the
+/// time the check reads as the fact-touched reference, in Unix epoch seconds.
+/// The file mtime can land in the next second after the time the database
+/// records, so the test reads the same source as the check.
 fn seed_graph(mem_dir: &Path) -> i64 {
     playbook::testing::write_graph_fixture(mem_dir, r#"{"nodes":[],"edges":[]}"#);
-    let path = mem_dir.parent().unwrap().join("data").join("memory.db");
-    let modified = fs::metadata(&path).unwrap().modified().unwrap();
-    modified.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
+    let touched = graph_touched_at(mem_dir).unwrap().unwrap();
+    touched.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
 }
 
 /// A fake repo: a `.git` marker directory plus an anchor file.
