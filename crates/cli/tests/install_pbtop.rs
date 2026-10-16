@@ -24,13 +24,19 @@ fn asset(work: &Work, version: &str) -> (PathBuf, String) {
         &src.join("pbtop"),
         &format!("#!/usr/bin/env bash\necho \"pbtop {version}\"\n"),
     );
+    pack(work, &src)
+}
+
+/// Packs the `pbtop` entry of `src` (a file, a link or a folder) into the
+/// release asset, and returns it with its SHA256SUMS line.
+fn pack(work: &Work, src: &Path) -> (PathBuf, String) {
     let dir = work.dir("asset");
     let tarball = dir.join(ASSET);
     let status = Command::new("tar")
         .arg("-czf")
         .arg(&tarball)
         .arg("-C")
-        .arg(&src)
+        .arg(src)
         .arg("pbtop")
         .status()
         .expect("tar");
@@ -47,6 +53,10 @@ struct Run {
 }
 
 fn install(work: &Work, tarball: &Path, sums: &str) -> Run {
+    install_from(work, tarball, sums, RELEASE_BODY)
+}
+
+fn install_from(work: &Work, tarball: &Path, sums: &str, release: &str) -> Run {
     let stubs = work.dir("stubs");
     install_stubs(&stubs);
     let home = work.dir("home");
@@ -69,7 +79,7 @@ fn install(work: &Work, tarball: &Path, sums: &str) -> Run {
         .env("PLAYBOOK_BIN_DIR", &bindir)
         .env("SHELL", "/bin/bash")
         .env("STUB_CODE", "200")
-        .env("STUB_BODY", RELEASE_BODY)
+        .env("STUB_BODY", release)
         .env("STUB_ASSET_FILE", tarball)
         .env("STUB_SUMS_BODY", sums)
         .env("STUB_GH", "pass")
@@ -120,6 +130,12 @@ fn pbtop_alone_is_installed_from_its_own_verified_asset() {
         run.gh_log
     );
     assert!(!text.contains("playbook setup"), "{text}");
+    assert!(text.contains("pbtop is installed to"), "{text}");
+    let bashrc = fs::read_to_string(work.path("home/.bashrc")).unwrap_or_default();
+    assert!(
+        bashrc.contains(&run.bindir.display().to_string()),
+        "the bin folder is put on PATH: {bashrc}"
+    );
 }
 
 #[test]
@@ -156,4 +172,54 @@ fn a_pbtop_that_reports_another_version_is_not_installed() {
         "{text}"
     );
     assert!(!run.bindir.join("pbtop").exists());
+}
+
+#[test]
+fn a_release_before_pbtop_had_its_own_asset_is_refused_before_any_download() {
+    // Arrange
+    let work = Work::new("pbtop-old");
+    let (tarball, sums) = asset(&work, "0.34.0");
+
+    // Act
+    let run = install_from(&work, &tarball, &sums, r#"{"tag_name": "v0.34.0"}"#);
+
+    // Assert
+    let text = both(&run.out);
+    assert!(!run.out.status.success(), "{text}");
+    assert!(
+        text.contains("v0.34.0 has no pbtop asset; pbtop alone ships from playbook 0.35.0 on"),
+        "{text}"
+    );
+    assert!(
+        !run.curl_log.contains("/releases/download/"),
+        "{}",
+        run.curl_log
+    );
+    assert!(!run.bindir.join("pbtop").exists());
+}
+
+#[test]
+fn an_asset_without_a_regular_pbtop_is_not_installed() {
+    // Arrange
+    let linked_work = Work::new("pbtop-link");
+    let src = linked_work.dir("asset-src");
+    write_exec(&src.join("other"), "#!/usr/bin/env bash\n");
+    std::os::unix::fs::symlink("other", src.join("pbtop")).expect("symlink");
+    let (linked, linked_sums) = pack(&linked_work, &src);
+    let folder_work = Work::new("pbtop-folder");
+    let src = folder_work.dir("asset-src");
+    fs::create_dir_all(src.join("pbtop")).expect("a folder named pbtop");
+    let (folder, folder_sums) = pack(&folder_work, &src);
+
+    // Act
+    let link_run = install(&linked_work, &linked, &linked_sums);
+    let folder_run = install(&folder_work, &folder, &folder_sums);
+
+    // Assert
+    for run in [&link_run, &folder_run] {
+        let text = both(&run.out);
+        assert!(!run.out.status.success(), "{text}");
+        assert!(text.contains("is not a regular file"), "{text}");
+        assert!(!run.bindir.join("pbtop").exists());
+    }
 }

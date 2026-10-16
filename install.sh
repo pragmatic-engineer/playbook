@@ -428,6 +428,29 @@ check_runs() {
     esac
 }
 
+# Copies the binary $1 to PLAYBOOK_BIN_DIR/$2 through a temp file in the same
+# folder, so the name only ever points at a whole binary.
+place_binary() {
+    local src="$1" name="$2" tmp
+    mkdir -p "$PLAYBOOK_BIN_DIR"
+    tmp="$(mktemp "$PLAYBOOK_BIN_DIR/.$name.XXXXXX")"
+    cp "$src" "$tmp"
+    chmod 0755 "$tmp"
+    mv -f "$tmp" "$PLAYBOOK_BIN_DIR/$name"
+}
+
+# True when version $1 (X.Y.Z) is lower than version $2.
+version_lt() {
+    local a b i
+    IFS=. read -r -a a <<< "$1"
+    IFS=. read -r -a b <<< "$2"
+    for i in 0 1 2; do
+        [ "${a[$i]:-0}" -lt "${b[$i]:-0}" ] && return 0
+        [ "${a[$i]:-0}" -gt "${b[$i]:-0}" ] && return 1
+    done
+    return 1
+}
+
 # Fetches, verifies, and installs the release binary matching $RESOLVED_TAG.
 install_release_binary() {
     require_release
@@ -453,11 +476,7 @@ install_release_binary() {
     # A safety net, not a gate: a failed backup must never stop the install.
     backup_previous_binary "$STAGE/playbook" \
         || warn "could not back up the previous playbook binary; continuing without a backup"
-    local bin_tmp
-    bin_tmp="$(mktemp "$PLAYBOOK_BIN_DIR/.playbook.XXXXXX")"
-    cp "$STAGE/playbook" "$bin_tmp"
-    chmod 0755 "$bin_tmp"
-    mv -f "$bin_tmp" "$PLAYBOOK_BIN_DIR/playbook"
+    place_binary "$STAGE/playbook" playbook
     log "Installed playbook $version to $PLAYBOOK_BIN_DIR/playbook"
     if [ "$PREVIOUS_VERSION" != "$version" ]; then
         show_breaking_changes "$PREVIOUS_VERSION"
@@ -478,8 +497,12 @@ install_release_binary() {
 install_pbtop() {
     require_release
     log "Installing pbtop from release $RESOLVED_TAG"
-    local version bin_tmp
+    local version
     version="${RESOLVED_TAG#v}"
+    version="${version%%-*}"
+    if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || version_lt "$version" 0.35.0; then
+        die "$RESOLVED_TAG has no pbtop asset; pbtop alone ships from playbook 0.35.0 on. For an older release use: brew install pragmatic-engineer/tap/playbook-telemetry"
+    fi
     release_target "$version"
     ASSET="pbtop-${version}-${TARGET}.tar.gz"
 
@@ -495,25 +518,27 @@ install_pbtop() {
     chmod 0755 "$STAGE/out/pbtop"
     check_runs "$STAGE/out/pbtop" "$version"
 
-    mkdir -p "$PLAYBOOK_BIN_DIR"
-    bin_tmp="$(mktemp "$PLAYBOOK_BIN_DIR/.pbtop.XXXXXX")"
-    cp "$STAGE/out/pbtop" "$bin_tmp"
-    chmod 0755 "$bin_tmp"
-    mv -f "$bin_tmp" "$PLAYBOOK_BIN_DIR/pbtop"
+    place_binary "$STAGE/out/pbtop" pbtop
     log "Installed pbtop $version to $PLAYBOOK_BIN_DIR/pbtop"
 
     rm -rf "$STAGE"
     STAGE=""
     ensure_bin_dir_on_path pbtop
+    warn_if_shadowed pbtop
 }
 
-# Warns when another playbook earlier on PATH hides the one just installed.
+# Warns when another binary named $1 (default playbook) earlier on PATH hides
+# the one just installed.
 warn_if_shadowed() {
-    local first
-    first="$(command -v playbook 2>/dev/null || true)"
+    local name="${1:-playbook}" first
+    first="$(command -v "$name" 2>/dev/null || true)"
     [ -n "$first" ] || return 0
-    [ "$first" -ef "$PLAYBOOK_BIN_DIR/playbook" ] && return 0
-    warn "$first runs before the new $PLAYBOOK_BIN_DIR/playbook on PATH, so hooks keep using the old binary; remove it (Homebrew: brew uninstall playbook) or put $PLAYBOOK_BIN_DIR first on PATH"
+    [ "$first" -ef "$PLAYBOOK_BIN_DIR/$name" ] && return 0
+    if [ "$name" = playbook ]; then
+        warn "$first runs before the new $PLAYBOOK_BIN_DIR/playbook on PATH, so hooks keep using the old binary; remove it (Homebrew: brew uninstall playbook) or put $PLAYBOOK_BIN_DIR first on PATH"
+    else
+        warn "$first runs before the new $PLAYBOOK_BIN_DIR/$name on PATH; remove it (Homebrew: brew uninstall playbook-telemetry) or put $PLAYBOOK_BIN_DIR first on PATH"
+    fi
 }
 
 # Links `pb` to `playbook` as a short alias. Never replaces a different `pb`:

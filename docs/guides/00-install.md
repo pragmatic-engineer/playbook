@@ -83,7 +83,7 @@ brew install pragmatic-engineer/tap/playbook-telemetry
 pbtop
 ```
 
-The formula installs two commands that are the same program: the short `pbtop`, which is the one to type (`pbtop`, `pbtop --summary`, `pbtop --json`, `pbtop --range 30d`), and the long `playbook-telemetry`, which suits scripts. Release archives for macOS, Linux and Windows are on the [playbook releases page](https://github.com/pragmatic-engineer/playbook/releases), and the [crate README](../../crates/telemetry/README.md) covers `cargo` builds. Up to 0.2.0 the telemetry archives have their own `telemetry-vX.Y.Z` tags. From playbook 0.35.0 they ship in each `vX.Y.Z` release, next to `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone. Everything stays on your machine.
+The formula installs two commands that are the same program: the short `pbtop`, which is the one to type (`pbtop`, `pbtop --summary`, `pbtop --json`, `pbtop --range 30d`), and the long `playbook-telemetry`, which suits scripts. Release archives for macOS, Linux and Windows are on the [playbook releases page](https://github.com/pragmatic-engineer/playbook/releases), and the [crate README](../../crates/telemetry/README.md) covers `cargo` builds. Up to playbook-telemetry 0.2.0 the telemetry archives have their own `telemetry-vX.Y.Z` tags. From playbook 0.35.0 they ship in each `vX.Y.Z` release, next to `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone. Everything stays on your machine.
 
 To install `pbtop` alone from that archive, with no `playbook`:
 
@@ -91,7 +91,7 @@ To install `pbtop` alone from that archive, with no `playbook`:
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash -s -- --pbtop
 ```
 
-It checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `~/.local/bin` and puts that folder on `PATH`. It runs nothing else.
+It checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) and puts that folder on `PATH`. It runs nothing else. On a release before 0.35.0 it stops and points to the Homebrew formula.
 
 The tool shares its data with playbook: the database is `~/.config/playbook/data/usage.db` and the settings are the `usage.*` keys in `~/.config/playbook/data/config.db`. See [Config keys](04-config-keys.md).
 
