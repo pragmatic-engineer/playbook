@@ -24,6 +24,10 @@
 # The binary comes from the latest GitHub release, or from the release named by
 # PLAYBOOK_REF (a tag such as v1.2.3). A branch or a commit has no published
 # binary, so it is refused.
+#
+# With --pbtop it installs only pbtop, the standalone usage dashboard, from the
+# pbtop-<version>-<target>.tar.gz asset of the same release, verified the same
+# way. It then stops: no migrate, no setup.
 set -euo pipefail
 
 RELEASE_REPO="pragmatic-engineer/playbook"
@@ -42,6 +46,7 @@ OPT_SYSTEM_PROMPT=0
 ASSUME_YES=0
 BINARY_ONLY=0
 NO_INIT=0
+ONLY_PBTOP=0
 
 if [ -t 1 ]; then
     C_B=$'\033[1;34m'; C_Y=$'\033[1;33m'; C_R=$'\033[1;31m'; C_0=$'\033[0m'
@@ -154,6 +159,8 @@ Flags:
   --binary-only      still offers `playbook setup`, but skips the wrapper and system
                      prompt questions
   --no-init          install the binary only: never ask about `playbook setup`
+  --pbtop            install only pbtop, the standalone usage dashboard, from the
+                     same release, verified the same way; nothing else runs
   --ref <tag>        same as PLAYBOOK_REF
   -h, --help         show this help
 
@@ -170,6 +177,7 @@ while [ $# -gt 0 ]; do
         --system-prompt) OPT_SYSTEM_PROMPT=1; OPT_ALIASES=1 ;;
         --binary-only)   BINARY_ONLY=1 ;;
         --no-init)       NO_INIT=1 ;;
+        --pbtop)         ONLY_PBTOP=1 ;;
         --skills-only)   die "--skills-only is gone: this script installs only the binary. For the skills run: $SKILLS_INSTALL_CMD" ;;
         --ref)           shift; REF="${1:-}" ;;
         --ref=*)         REF="${1#--ref=}" ;;
@@ -258,14 +266,21 @@ _fetch() {
 # `uname -m` still reports x86_64 and the x86_64 binary runs correctly there,
 # so no Rosetta special case is needed.
 release_asset_name() {
+    local version="$1"
+    release_target "$version"
+    ASSET="playbook-${version}-${TARGET}"
+}
+
+# The release target of this machine, into the global TARGET.
+release_target() {
     local version="$1" os arch
     os="$(uname -s)"
     arch="$(uname -m)"
     case "$os-$arch" in
-        Darwin-arm64)  ASSET="playbook-${version}-aarch64-apple-darwin" ;;
-        Darwin-x86_64) ASSET="playbook-${version}-x86_64-apple-darwin" ;;
-        Linux-aarch64) ASSET="playbook-${version}-aarch64-unknown-linux-musl" ;;
-        Linux-x86_64)  ASSET="playbook-${version}-x86_64-unknown-linux-musl" ;;
+        Darwin-arm64)  TARGET="aarch64-apple-darwin" ;;
+        Darwin-x86_64) TARGET="x86_64-apple-darwin" ;;
+        Linux-aarch64) TARGET="aarch64-unknown-linux-musl" ;;
+        Linux-x86_64)  TARGET="x86_64-unknown-linux-musl" ;;
         *)
             die "unsupported platform: $os $arch (a Windows binary is published as playbook-${version}-x86_64-pc-windows-msvc.exe, but this is a bash installer and cannot select it)"
             ;;
@@ -365,17 +380,80 @@ verify_attestation() {
     warn "checksum only, provenance not verified: install gh to check the build attestation"
 }
 
-# Fetches, verifies, and installs the release binary matching $RESOLVED_TAG.
 # Refuses when the tag is not a confirmed release (a PLAYBOOK_REF that names a
 # branch or commit, or the no-release-published case in resolve_release):
 # those have no release and therefore no binary.
-install_release_binary() {
+require_release() {
     if [ "$RESOLVED_FROM_REF" -eq 1 ]; then
         if [ -n "$REF" ]; then
             die "PLAYBOOK_REF=$REF pins a branch or commit, not a published release; no release binary exists for it. Unset PLAYBOOK_REF to install the latest release together with its matching binary."
         fi
         die "$RELEASE_REPO has published no release; a verified release binary cannot be fetched."
     fi
+}
+
+# Downloads $ASSET and SHA256SUMS of $RESOLVED_TAG into $STAGE, checks the
+# asset against its line in SHA256SUMS, then checks its build attestation.
+fetch_verified_asset() {
+    _fetch "https://github.com/$RELEASE_REPO/releases/download/$RESOLVED_TAG/$ASSET" "$STAGE/$ASSET" \
+        || die "could not download $ASSET from the $RESOLVED_TAG release"
+    # SHA256SUMS itself is unsigned (TLS and github.com only); provenance comes
+    # from the build attestation checked by verify_attestation below.
+    _fetch "https://github.com/$RELEASE_REPO/releases/download/$RESOLVED_TAG/SHA256SUMS" "$STAGE/SHA256SUMS" \
+        || die "could not download SHA256SUMS from the $RESOLVED_TAG release"
+
+    # SHA256SUMS lists every published asset; shasum/sha256sum -c on the
+    # whole file fails, because the others are not present locally. Filter
+    # to the one line for our asset first. cd into staging so the filename in
+    # that line resolves relative to it.
+    (cd "$STAGE" && grep -E "^[0-9a-f]{64}  ${ASSET}$" SHA256SUMS > "$ASSET.sha256") \
+        || die "no checksum line for $ASSET in SHA256SUMS; the release may be incomplete or corrupt"
+    (cd "$STAGE" && "${CKSUM_CMD[@]}" "$ASSET.sha256") >/dev/null 2>&1 \
+        || die "checksum mismatch for $ASSET; the download is corrupt"
+
+    verify_attestation "$STAGE/$ASSET"
+}
+
+# Fails unless the binary $1 runs and reports $2 in its --version. The
+# checksum only proves the bytes downloaded intact; it cannot prove they run.
+# A binary that is intact-but-empty, or built for the wrong platform, needs an
+# actual execution to catch.
+check_runs() {
+    local bin="$1" version="$2" out
+    out="$("$bin" --version 2>/dev/null)" \
+        || die "the downloaded $(basename "$bin") did not run; the $RESOLVED_TAG release may be broken for this platform"
+    case "$out" in
+        *"$version"*) ;;
+        *) die "version mismatch: the downloaded $(basename "$bin") reports '$out', expected $version" ;;
+    esac
+}
+
+# Copies the binary $1 to PLAYBOOK_BIN_DIR/$2 through a temp file in the same
+# folder, so the name only ever points at a whole binary.
+place_binary() {
+    local src="$1" name="$2" tmp
+    mkdir -p "$PLAYBOOK_BIN_DIR"
+    tmp="$(mktemp "$PLAYBOOK_BIN_DIR/.$name.XXXXXX")"
+    cp "$src" "$tmp"
+    chmod 0755 "$tmp"
+    mv -f "$tmp" "$PLAYBOOK_BIN_DIR/$name"
+}
+
+# True when version $1 (X.Y.Z) is lower than version $2.
+version_lt() {
+    local a b i
+    IFS=. read -r -a a <<< "$1"
+    IFS=. read -r -a b <<< "$2"
+    for i in 0 1 2; do
+        [ "${a[$i]:-0}" -lt "${b[$i]:-0}" ] && return 0
+        [ "${a[$i]:-0}" -gt "${b[$i]:-0}" ] && return 1
+    done
+    return 1
+}
+
+# Fetches, verifies, and installs the release binary matching $RESOLVED_TAG.
+install_release_binary() {
+    require_release
 
     log "Installing release $RESOLVED_TAG"
     local version
@@ -385,37 +463,11 @@ install_release_binary() {
     STAGE="$(mktemp -d)"
 
     log "Fetching release binary $ASSET"
-    _fetch "https://github.com/$RELEASE_REPO/releases/download/$RESOLVED_TAG/$ASSET" "$STAGE/$ASSET" \
-        || die "could not download $ASSET from the $RESOLVED_TAG release"
-    # SHA256SUMS itself is unsigned (TLS and github.com only); provenance comes
-    # from the build attestation checked by verify_attestation below.
-    _fetch "https://github.com/$RELEASE_REPO/releases/download/$RESOLVED_TAG/SHA256SUMS" "$STAGE/SHA256SUMS" \
-        || die "could not download SHA256SUMS from the $RESOLVED_TAG release"
-
-    # SHA256SUMS lists all five published assets; shasum/sha256sum -c on the
-    # whole file fails, because the other four are not present locally. Filter
-    # to the one line for our asset first. cd into staging so the filename in
-    # that line resolves relative to it.
-    (cd "$STAGE" && grep -E "^[0-9a-f]{64}  ${ASSET}$" SHA256SUMS > "$ASSET.sha256") \
-        || die "no checksum line for $ASSET in SHA256SUMS; the release may be incomplete or corrupt"
-    (cd "$STAGE" && "${CKSUM_CMD[@]}" "$ASSET.sha256") >/dev/null 2>&1 \
-        || die "checksum mismatch for $ASSET; the download is corrupt"
-
-    verify_attestation "$STAGE/$ASSET"
+    fetch_verified_asset
 
     chmod 0755 "$STAGE/$ASSET"
     mv "$STAGE/$ASSET" "$STAGE/playbook"
-
-    # The checksum only proves the bytes downloaded intact; it cannot prove
-    # they run. A binary that is intact-but-empty, or built for the wrong
-    # platform, needs an actual execution to catch.
-    local bin_version
-    bin_version="$("$STAGE/playbook" --version 2>/dev/null)" \
-        || die "the downloaded binary did not run; the $RESOLVED_TAG release may be broken for this platform"
-    case "$bin_version" in
-        *"$version"*) ;;
-        *) die "version mismatch: the downloaded binary reports '$bin_version', expected $version" ;;
-    esac
+    check_runs "$STAGE/playbook" "$version"
 
     PREVIOUS_VERSION="$(installed_version)"
 
@@ -424,11 +476,7 @@ install_release_binary() {
     # A safety net, not a gate: a failed backup must never stop the install.
     backup_previous_binary "$STAGE/playbook" \
         || warn "could not back up the previous playbook binary; continuing without a backup"
-    local bin_tmp
-    bin_tmp="$(mktemp "$PLAYBOOK_BIN_DIR/.playbook.XXXXXX")"
-    cp "$STAGE/playbook" "$bin_tmp"
-    chmod 0755 "$bin_tmp"
-    mv -f "$bin_tmp" "$PLAYBOOK_BIN_DIR/playbook"
+    place_binary "$STAGE/playbook" playbook
     log "Installed playbook $version to $PLAYBOOK_BIN_DIR/playbook"
     if [ "$PREVIOUS_VERSION" != "$version" ]; then
         show_breaking_changes "$PREVIOUS_VERSION"
@@ -442,13 +490,55 @@ install_release_binary() {
     warn_if_shadowed
 }
 
-# Warns when another playbook earlier on PATH hides the one just installed.
+# Fetches, verifies and installs pbtop alone from the
+# pbtop-<version>-<target>.tar.gz asset of $RESOLVED_TAG, with the same checks
+# as the playbook binary. It writes only PLAYBOOK_BIN_DIR/pbtop and the PATH
+# block. Releases before 0.35.0 have no such asset.
+install_pbtop() {
+    require_release
+    log "Installing pbtop from release $RESOLVED_TAG"
+    local version
+    version="${RESOLVED_TAG#v}"
+    version="${version%%-*}"
+    if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || version_lt "$version" 0.35.0; then
+        die "$RESOLVED_TAG has no pbtop asset; pbtop alone ships from playbook 0.35.0 on. For an older release use: brew install pragmatic-engineer/tap/playbook-telemetry"
+    fi
+    release_target "$version"
+    ASSET="pbtop-${version}-${TARGET}.tar.gz"
+
+    STAGE="$(mktemp -d)"
+    log "Fetching $ASSET"
+    fetch_verified_asset
+
+    mkdir "$STAGE/out"
+    tar -xzf "$STAGE/$ASSET" -C "$STAGE/out" pbtop 2>/dev/null \
+        || die "$ASSET holds no pbtop; the $RESOLVED_TAG release may be corrupt"
+    [ -f "$STAGE/out/pbtop" ] && [ ! -L "$STAGE/out/pbtop" ] \
+        || die "pbtop in $ASSET is not a regular file"
+    chmod 0755 "$STAGE/out/pbtop"
+    check_runs "$STAGE/out/pbtop" "$version"
+
+    place_binary "$STAGE/out/pbtop" pbtop
+    log "Installed pbtop $version to $PLAYBOOK_BIN_DIR/pbtop"
+
+    rm -rf "$STAGE"
+    STAGE=""
+    ensure_bin_dir_on_path pbtop
+    warn_if_shadowed pbtop
+}
+
+# Warns when another binary named $1 (default playbook) earlier on PATH hides
+# the one just installed.
 warn_if_shadowed() {
-    local first
-    first="$(command -v playbook 2>/dev/null || true)"
+    local name="${1:-playbook}" first
+    first="$(command -v "$name" 2>/dev/null || true)"
     [ -n "$first" ] || return 0
-    [ "$first" -ef "$PLAYBOOK_BIN_DIR/playbook" ] && return 0
-    warn "$first runs before the new $PLAYBOOK_BIN_DIR/playbook on PATH, so hooks keep using the old binary; remove it (Homebrew: brew uninstall playbook) or put $PLAYBOOK_BIN_DIR first on PATH"
+    [ "$first" -ef "$PLAYBOOK_BIN_DIR/$name" ] && return 0
+    if [ "$name" = playbook ]; then
+        warn "$first runs before the new $PLAYBOOK_BIN_DIR/playbook on PATH, so hooks keep using the old binary; remove it (Homebrew: brew uninstall playbook) or put $PLAYBOOK_BIN_DIR first on PATH"
+    else
+        warn "$first runs before the new $PLAYBOOK_BIN_DIR/$name on PATH; remove it (Homebrew: brew uninstall playbook-telemetry) or put $PLAYBOOK_BIN_DIR first on PATH"
+    fi
 }
 
 # Links `pb` to `playbook` as a short alias. Never replaces a different `pb`:
@@ -498,6 +588,7 @@ _add_path_block() {
 }
 
 ensure_bin_dir_on_path() {
+    local name="${1:-playbook}"
     case "$PLAYBOOK_BIN_DIR" in
         /usr/bin|/bin|/usr/sbin|/sbin) return 0 ;;
         *\"*|*\$*|*\`*|*\\*)
@@ -519,7 +610,7 @@ ensure_bin_dir_on_path() {
         *) _add_path_block "$HOME/.profile" ;;
     esac
 
-    warn "playbook is installed to $PLAYBOOK_BIN_DIR. Open a new terminal (or source your rc file) so it resolves on PATH."
+    warn "$name is installed to $PLAYBOOK_BIN_DIR. Open a new terminal (or source your rc file) so it resolves on PATH."
 }
 
 # STAGE (the binary staging dir) is cleaned up on any exit, including an
@@ -537,6 +628,14 @@ _cleanup_staging() {
     return 0
 }
 trap _cleanup_staging EXIT INT TERM
+
+# --pbtop installs pbtop and stops: nothing below runs.
+if [ "$ONLY_PBTOP" -eq 1 ]; then
+    resolve_release
+    install_pbtop
+    log "Done. Run pbtop for the usage dashboard."
+    exit 0
+fi
 
 # PLAYBOOK_SKIP_DOWNLOAD=1 is a test seam: use the binary already in
 # PLAYBOOK_BIN_DIR and skip the network entirely.
