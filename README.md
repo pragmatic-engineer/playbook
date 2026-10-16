@@ -71,7 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/in
 brew install pragmatic-engineer/tap/pbtop
 ```
 
-The script checks the `pbtop` archive like the `playbook` binary (its line in `SHA256SUMS`, its build attestation when `gh` can check it, and `pbtop --version`) and installs `pbtop` into `~/.local/bin`. It needs `bash` and `curl`. Then run `pbtop`, `pbtop --summary` or `pbtop --json`. The code index gets the same treatment later: `pbcode` is the planned short name of the standalone `playbook-code` tool, which has no release yet, so use `playbook code` today.
+The script checks the `pbtop` archive like the `playbook` binary (its line in `SHA256SUMS`, its build attestation when `gh` can check it, and `pbtop --version`) and installs `pbtop` into `~/.local/bin`. It needs `bash` and `curl`. Then run `pbtop`, `pbtop --summary` or `pbtop --json`. The code index has no standalone tool. It ships inside `playbook` as `playbook code`.
 
 ## A first session
 
