@@ -94,7 +94,9 @@ not published its release five minutes after the merge, the job tags and
 releases it through the API. When something here fails, the playbook release
 stays published, the job fails, and the summary prints the commands to finish
 it. Running the workflow again with `version=X.Y.Z` goes on from where it
-stopped.
+stopped. When `BOT_APP_CLIENT_ID` or `BOT_APP_PRIVATE_KEY` is not set, the job
+skips the downstream step with a notice, and the summary says to move the tap
+and the marketplace by hand or to run again once the secrets are set.
 
 A dry run plans, shows the diff of the release pull request in the run
 summary, and builds the five targets from `main`. It also shows the tap and

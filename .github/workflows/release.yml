@@ -763,9 +763,31 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Read through env, so the values never appear in the script. Without
+      # the secrets the job stops here with a notice and the commands to
+      # finish by hand.
+      - name: Check for the app credentials
+        id: bot
+        env:
+          BOT_APP_CLIENT_ID: ${{ secrets.BOT_APP_CLIENT_ID }}
+          BOT_APP_PRIVATE_KEY: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$BOT_APP_CLIENT_ID" ] && [ -n "$BOT_APP_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::BOT_APP_CLIENT_ID or BOT_APP_PRIVATE_KEY is not set, so the tap and the marketplace are not moved to $TAG."
+          {
+            echo "## Downstream skipped"
+            echo
+            echo "The app secrets are not set. Move the tap and the marketplace to $TAG by hand, as the release doc says, or set the secrets and run \`gh workflow run release.yml -f version=$VERSION\` again."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # One token per repository. A dry run asks for read access only and
       # makes read calls, which checks the secrets and the installation.
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        if: steps.bot.outputs.configured == 'true'
         id: tap-app
         with:
           client-id: ${{ secrets.BOT_APP_CLIENT_ID }}
@@ -776,6 +798,7 @@ jobs:
           permission-pull-requests: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
 
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        if: steps.bot.outputs.configured == 'true'
         id: marketplace-app
         with:
           client-id: ${{ secrets.BOT_APP_CLIENT_ID }}
@@ -786,7 +809,7 @@ jobs:
           permission-pull-requests: ${{ needs.plan.outputs.dry_run == 'true' && 'read' || 'write' }}
 
       - name: Check the app tokens
-        if: needs.plan.outputs.dry_run == 'true'
+        if: steps.bot.outputs.configured == 'true' && needs.plan.outputs.dry_run == 'true'
         env:
           TAP_TOKEN: ${{ steps.tap-app.outputs.token }}
           MARKETPLACE_TOKEN: ${{ steps.marketplace-app.outputs.token }}
@@ -798,7 +821,7 @@ jobs:
           GH_TOKEN="$MARKETPLACE_TOKEN" gh pr list --repo "$MARKETPLACE" --head "release/$TAG" --state all --json number,state
 
       - name: Open the pull requests and wait for the releases
-        if: needs.plan.outputs.dry_run != 'true'
+        if: steps.bot.outputs.configured == 'true' && needs.plan.outputs.dry_run != 'true'
         env:
           TAP_TOKEN: ${{ steps.tap-app.outputs.token }}
           MARKETPLACE_TOKEN: ${{ steps.marketplace-app.outputs.token }}
