@@ -700,7 +700,7 @@ fn the_agents_view_falls_back_to_transcript_counts_with_a_label() {
 
     assert!(text.contains("from transcripts"), "{text}");
     assert!(text.contains("Explore"), "{text}");
-    assert!(!text.contains("Telemetry off"), "{text}");
+    assert!(!text.contains("telemetry is off"), "{text}");
 }
 
 #[test]
@@ -736,7 +736,7 @@ fn transcript_agents_sort_by_count_when_the_cost_column_is_the_sort() {
 #[test]
 fn the_agents_view_says_telemetry_is_off_when_there_are_no_rows() {
     let text = draw(&agents_app(false), 100, 30);
-    assert!(text.contains("Telemetry off"), "{text}");
+    assert!(text.contains("telemetry is off"), "{text}");
     check("agents_off_100x30", &text);
 }
 
@@ -752,7 +752,7 @@ fn the_skills_view_lists_cost_per_skill_and_says_when_none_ran() {
     a.data.as_mut().unwrap().skills = Default::default();
     let text = draw(&a, 100, 30);
     assert!(text.contains("No skill activity"), "{text}");
-    assert!(!text.contains("Telemetry off"), "{text}");
+    assert!(!text.contains("telemetry is off"), "{text}");
 }
 
 #[test]
@@ -760,7 +760,7 @@ fn the_skills_view_says_telemetry_is_off_when_there_are_no_rows() {
     use crate::tui::app::ProjectsView;
     let mut a = agents_app(false);
     a.projects_view = ProjectsView::Skills;
-    assert!(draw(&a, 100, 30).contains("Telemetry off"));
+    assert!(draw(&a, 100, 30).contains("telemetry is off"));
 }
 
 #[test]
@@ -865,8 +865,33 @@ fn the_tools_and_health_views_say_telemetry_is_off_when_there_are_no_rows() {
     use crate::tui::app::ProjectsView;
     for view in [ProjectsView::Tools, ProjectsView::Health] {
         let text = draw(&health_app(false, view), 100, 30);
-        assert!(text.contains("Telemetry off"), "{view:?}\n{text}");
+        assert!(text.contains("telemetry is off"), "{view:?}\n{text}");
     }
+}
+
+#[test]
+fn the_tools_view_tells_a_stopped_collector_from_telemetry_off_and_from_no_rows() {
+    use crate::telemetry_status::Mode;
+    use crate::tui::app::ProjectsView;
+    let mut a = health_app(false, ProjectsView::Tools);
+    a.telemetry = Some(Mode::OnCollectorDown);
+    let down = draw(&a, 100, 40);
+    a.telemetry = Some(Mode::OnRunning);
+    let quiet = draw(&a, 100, 30);
+
+    assert!(down.contains("collector is not running"), "{down}");
+    assert!(!down.contains("telemetry is off"), "{down}");
+    // The command sits alone on its line, inside the panel border.
+    let alone = |text: &str, command: &str| {
+        text.lines()
+            .any(|l| l.trim_matches(|c: char| c == '│' || c.is_whitespace()) == command)
+    };
+    assert!(
+        alone(&down, &crate::host::setup_command("collector-service")),
+        "{down}"
+    );
+    assert!(quiet.contains("collector runs"), "{quiet}");
+    check("tools_collector_down_100x40", &down);
 }
 
 #[test]
