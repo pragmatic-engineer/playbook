@@ -28,18 +28,18 @@ Run `just test` for everything, or `cargo nextest run -p playbook-code --config-
 
 ### Faster local builds
 
-These settings are per shell or per command, so nothing changes for other contributors. Measured on an M-series Mac with Rust 1.99.1, building every test binary with `cargo test --workspace --no-run`:
+These settings are per shell or per command, so nothing changes for other contributors. Measured once each on an M-series Mac with Rust 1.99.1 and `CARGO_INCREMENTAL=0`, building every test binary with `cargo test --workspace --no-run`:
 
 | Setting | Clean build | Rebuild after editing `playbook-common` | Target folder |
 | --- | --- | --- | --- |
-| defaults | 43 s | 20 s | 1.7 GB |
-| `CARGO_PROFILE_DEV_DEBUG=0` | 35 s | 18 s | 1.0 GB |
+| debug info on (the default) | 43 s | 20 s | 1.7 GB |
+| `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` | 35 s | 18 s | 1.0 GB |
 | the above and `ld64.lld` | 36 s | 16 s | 1.0 GB |
 
-- **Run tests with nextest.** `cargo nextest run` runs every test binary at once. Narrow it with `-p <crate>` and a filter such as `-E 'test(held_lock)'`. Install it with `cargo install cargo-nextest --locked`.
-- **Drop debug info.** `export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` makes builds faster and the target folder smaller. Panics still print a backtrace with function names, but a debugger has no line numbers. Unset it when you need one.
+- **Run only the tests you need.** `just test` passes its arguments to nextest with the repo's config file, for example `just test -E 'test(held_lock)'`, and then runs the doc tests. For one crate, use the `cargo nextest run -p` command above, which builds only that crate.
+- **Drop debug info.** `export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` makes builds faster and the target folder smaller. A panic message keeps its file and line, but backtraces and debuggers show only function names. Unset both when you need a debugger.
 - **Keep incremental builds on locally.** CI sets `CARGO_INCREMENTAL=0` because each run builds once. On your machine, incremental builds make the edit and test loop faster.
-- **Linker.** On x86_64 Linux, Rust already links with `rust-lld`. In CI, mold was slower: 44 s against 37 s to rebuild the test binaries. On macOS, `ld64.lld` from `brew install lld` saves about 2 s per rebuild: `RUSTFLAGS="-C link-arg=-fuse-ld=$(brew --prefix lld)/bin/ld64.lld"`. Changing `RUSTFLAGS` rebuilds everything once.
+- **Linker.** The rustup toolchain for x86_64 Linux already links with `rust-lld`. In CI, mold was slower: 44 s against 37 s to rebuild the test binaries. On macOS, `ld64.lld` from `brew install lld` saved 2 s per rebuild in one run: `RUSTFLAGS="-C link-arg=-fuse-ld=$(brew --prefix lld)/bin/ld64.lld"`. Cargo rebuilds everything whenever `RUSTFLAGS` changes, so set it the same way in every shell and editor, or in your own `~/.cargo/config.toml`.
 - **Disk.** One `CARGO_TARGET_DIR` per worktree keeps parallel builds from blocking each other, and each one grows to 1 GB or more. Run `cargo clean` in a worktree you are done with.
 
 The repository has no shared `.cargo/config.toml` build settings for speed, because a debugger or a missing linker would break them for some contributors.
