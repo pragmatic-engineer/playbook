@@ -33,6 +33,7 @@ pub mod reconcile;
 pub mod repo;
 pub mod run;
 pub mod say;
+pub mod service;
 pub mod session_view;
 pub mod standalone;
 pub mod summary;

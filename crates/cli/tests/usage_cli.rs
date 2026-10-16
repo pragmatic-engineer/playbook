@@ -345,10 +345,41 @@ fn usage_status_says_not_running_and_prints_json_without_a_token() {
     let text = stdout(&text);
     assert!(text.contains("collector: not running"), "{text}");
     assert!(text.contains("last event: none"), "{text}");
+    assert!(text.contains("background service: none"), "{text}");
+    assert!(
+        text.contains("playbook setup --only collector-service"),
+        "{text}"
+    );
     let doc: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
     assert_eq!(doc["running"], false);
+    assert_eq!(doc["service"], serde_json::Value::Null);
     assert_eq!(doc["requests"], 0);
     assert!(doc.get("token").is_none());
+}
+
+#[test]
+fn usage_status_names_an_installed_service() {
+    use playbook::usage::service::{log_path, render, Kind};
+    let Some(kind) = Kind::current() else {
+        return;
+    };
+    let home = Home::new("status-service");
+    let file = kind.file(&home.0);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let program = std::path::Path::new(env!("CARGO_BIN_EXE_playbook"));
+    std::fs::write(&file, render(kind, program, &log_path(&home.0))).unwrap();
+
+    let text = stdout(&home.run(&["usage", "status"]));
+
+    assert!(
+        text.contains(&format!(
+            "background service: {} {}",
+            kind.name(),
+            kind.id()
+        )),
+        "{text}"
+    );
+    assert!(text.contains("installed but not running it"), "{text}");
 }
 
 #[test]

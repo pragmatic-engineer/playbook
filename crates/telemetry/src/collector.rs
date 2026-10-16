@@ -248,6 +248,9 @@ pub struct Status {
     /// How telemetry is configured, in words, and the one-line fix if any.
     pub telemetry: String,
     pub telemetry_fix: Option<String>,
+    /// The background service that runs the collector, in words, when one
+    /// is installed (ADR 0043).
+    pub service: Option<String>,
 }
 
 /// The time of the newest stored telemetry event, unix seconds. Opens the
@@ -317,6 +320,7 @@ pub fn status(paths: &Paths, retention: Retention) -> Result<Status, String> {
         last_event,
         telemetry: mode.text().to_string(),
         telemetry_fix: mode.fix().map(str::to_string),
+        service: super::service::find(&super::host::home_dir()).map(|f| f.describe()),
     })
 }
 
@@ -343,15 +347,26 @@ impl Status {
             }
             _ => {
                 lines.push("collector: not running".to_string());
-                lines.push(format!(
-                    "start it with `{}`, or see the usage dashboard guide for a background setup",
-                    super::host::command("usage collect")
-                ));
+                lines.push(match self.service {
+                    Some(_) => format!(
+                        "start it with `{}`; the background service below is installed but not running it",
+                        super::host::command("usage collect")
+                    ),
+                    None => format!(
+                        "start it with `{}`, or keep it running in the background with `{}`",
+                        super::host::command("usage collect"),
+                        super::host::setup_command("collector-service")
+                    ),
+                });
                 if let Some(port) = self.port {
                     lines.push(format!("last port: {port}"));
                 }
             }
         }
+        lines.push(match &self.service {
+            Some(service) => format!("background service: {service}"),
+            None => "background service: none".to_string(),
+        });
         lines.push(format!(
             "rows: {} requests, {} tool calls, {} api errors, {} metric points",
             self.requests, self.tool_calls, self.api_errors, self.metric_points

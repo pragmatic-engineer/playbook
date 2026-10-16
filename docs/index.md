@@ -96,5 +96,6 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0038](adr/0038-one-release-line.md) | One release line for the binary and the plugin | Accepted, amended by 0041 | 2026-10-16 |
 | [0039](adr/0039-release-workflow.md) | A release workflow that runs every step | Accepted, amended by 0041 | 2026-10-16 |
 | [0040](adr/0040-rename-init-to-setup.md) | Rename `playbook init` to `playbook setup` and keep `init` as a deprecated name | Accepted | 2026-10-16 |
-| [0041](adr/0041-retire-playbook-telemetry.md) | Retire the `playbook-telemetry` binary and formula, and keep `pbtop` | Accepted | 2026-10-16 |
+| [0041](adr/0041-retire-playbook-telemetry.md) | Retire the `playbook-telemetry` binary and formula, and keep `pbtop` | Accepted, amended by 0043 | 2026-10-16 |
 | [0042](adr/0042-attribution-off-in-setup.md) | Turn off Claude Code attribution in setup | Accepted | 2026-10-17 |
+| [0043](adr/0043-collector-service-in-setup.md) | Keep the usage collector running with a per-user service | Accepted | 2026-10-17 |

@@ -21,6 +21,10 @@ impl Host for Playbook {
         format!("playbook {args}")
     }
 
+    fn setup_command(&self, part: &str) -> String {
+        format!("playbook setup --only {part}")
+    }
+
     fn launch_args(&self) -> Vec<String> {
         vec!["usage".to_string()]
     }
