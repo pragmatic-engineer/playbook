@@ -532,6 +532,7 @@ jobs:
             github.com:443
             objects.githubusercontent.com:443
             release-assets.githubusercontent.com:443
+            tmaproduction.blob.core.windows.net:443
             uploads.github.com:443
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -560,11 +561,24 @@ jobs:
             find . -type f
             exit 1
           fi
-          # Each asset must carry the attestation its build leg made.
+          # Each asset must carry the attestation its build leg made. A fetch
+          # failure, a missing attestation and a mismatch each get their own
+          # message.
           for f in playbook-* pbtop-*; do
-            gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
-              --signer-workflow "$GH_REPO/.github/workflows/release.yml" >/dev/null \
-              || { echo "::error::$f does not match the attestation of its build. Nothing is published." >&2; exit 1; }
+            if ! err="$(gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
+              --signer-workflow "$GH_REPO/.github/workflows/release.yml" 2>&1 >/dev/null)"; then
+              echo "$err" >&2
+              # gh may wrap "no attestations found" in a fetch error, so it is
+              # matched first.
+              if grep -qi 'no attestations found' <<<"$err"; then
+                echo "::error::$f has no attestation. Nothing is published." >&2
+              elif grep -qiE 'failed to fetch|HTTP [0-9]{3}' <<<"$err"; then
+                echo "::error::could not fetch the attestation of $f, so it was not checked. Nothing is published." >&2
+              else
+                echo "::error::$f does not match the attestation of its build. Nothing is published." >&2
+              fi
+              exit 1
+            fi
           done
           gh release download "$TAG" --pattern release-notes.json --clobber
           gh release download "$TAG" --pattern breaking-changes.json --clobber
@@ -608,6 +622,7 @@ jobs:
             github.com:443
             objects.githubusercontent.com:443
             release-assets.githubusercontent.com:443
+            tmaproduction.blob.core.windows.net:443
             tuf-repo.github.com:443
             tuf-repo-cdn.sigstore.dev:443
 
