@@ -21,6 +21,8 @@ const SKILL_KEY_PREFIX: &str = "skill:";
 pub const STATUSLINE_MIGRATION: &str = "0006-statusline-rust-command";
 /// The `Consent` migration `init` skips when the user declines the hooks.
 pub const DEAD_HOOKS_MIGRATION: &str = "0011-dead-hook-scripts";
+/// The `Consent` item for the attribution-off part (ADR 0042).
+pub const ATTRIBUTION_MIGRATION: &str = "0015-attribution-off";
 
 /// What a migration needs to find the state it moves.
 pub struct Ctx {
@@ -208,7 +210,33 @@ pub fn registry() -> Vec<Migration> {
             scope: Scope::Owned,
             run: orphaned_plugin_caches,
         },
+        Migration {
+            id: ATTRIBUTION_MIGRATION,
+            kind: Kind::Idempotent,
+            scope: Scope::Consent {
+                check: attribution_pending,
+                command: crate::init::attribution::COMMAND,
+            },
+            run: attribution_by_setup,
+        },
     ]
+}
+
+/// `attribution` keys missing from settings.json (ADR 0042), unless the user
+/// said no. Only reported: the hook and the first run step name the command,
+/// and the setup part writes the key after its question.
+fn attribution_pending(ctx: &Ctx) -> Option<String> {
+    let settings = ctx.claude_home.join("settings.json");
+    settings
+        .is_file()
+        .then(|| crate::init::attribution::pending(&ctx.home, &settings))
+        .flatten()
+}
+
+/// Setup's attribution-off part writes the key, because only it knows the
+/// answer to the question. The registry entry carries the check.
+fn attribution_by_setup(_: &Ctx) -> Outcome {
+    Outcome::Quiet
 }
 
 /// Hook entries whose `~/.claude/hooks/` script is gone (ADR 0034 decision
@@ -1484,6 +1512,6 @@ mod tests {
 
     #[test]
     fn the_schema_is_the_highest_registry_number() {
-        assert_eq!(schema(), 14);
+        assert_eq!(schema(), 15);
     }
 }

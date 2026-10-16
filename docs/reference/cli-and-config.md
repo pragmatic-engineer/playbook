@@ -495,7 +495,7 @@ The full health check is the `/playbook:doctor` command inside Claude Code. Thes
 
 Example: `playbook doctor pending-migrations`
 
-`playbook doctor --fix` repairs playbook's own files after an upgrade and prints the command for each change that needs you, the same as `playbook migrate`. It never writes Claude Code settings.
+`playbook doctor --fix` repairs playbook's own files after an upgrade and prints the command for each change that needs you, the same as `playbook migrate`. At a terminal it first asks whether to add the missing `attribution` keys; that yes is the only Claude Code setting it writes.
 
 - `--fix`: Run the safe migrations for playbook's own files, then list what needs you
 
@@ -1357,7 +1357,9 @@ Example: `playbook setup --no-hooks --aliases`
 - `--no-claude-override`: Do not turn on the `claude` shell function
 - `--short-name`: Add `pb` as a short name for `playbook`, only when `pb` is free (recorded in playbook own config)
 - `--no-short-name`: Do not add the `pb` short name
-- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
+- `--attribution-off`: Turn off the commit, PR and session link attribution Claude Code adds (sets `attribution` in settings.json)
+- `--no-attribution-off`: Do not set or change attribution in settings.json
+- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing

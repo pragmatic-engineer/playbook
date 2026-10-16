@@ -76,6 +76,7 @@ Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the
 | Usage telemetry | on, asked | `--telemetry`, `--no-telemetry` | `~/.claude/settings.json` (the `env` block), `~/.config/playbook/telemetry-env.json` |
 | `pb` short name | off, asked | `--short-name`, `--no-short-name` | `~/.config/playbook` (the `launcher.shortName` key) |
 | `claude` function | off, asked | `--claude-override`, `--no-claude-override` | `~/.config/playbook` (the `launcher.claudeOverride` key) |
+| Attribution off | on, asked | `--attribution-off`, `--no-attribution-off` | `~/.claude/settings.json` (the `attribution` key) |
 
 `--settings` and `--no-settings` no longer exist. Each option that part used to carry now sits behind the hooks, status line or security part, or is not shipped.
 
@@ -130,6 +131,10 @@ Setup adds a block that starts with `# playbook binary` to your shell startup fi
 ### The `pb` short name
 
 `--short-name` asks whether `pb` should be a short name for `playbook`. A yes sets `launcher.shortName` to `true` in playbook's own config, and nothing else changes. Setup looks for a command named `pb` on your PATH first and writes nothing when it finds one. With the key on, `playbook shell-init` defines `pb` only when no command, alias, function or builtin of that name exists in your shell at that moment, so a `pb` you install or define later always wins and playbook never overwrites it. The function needs the `eval` line from `--aliases` in your rc file. Undo it with `playbook config set launcher.shortName false`. See [the launcher](../internals/01-launcher-and-hooks.md#the-pb-short-name).
+
+### Attribution off
+
+`--attribution-off` (on by default; `--yes` is a yes) sets `attribution` to `{"commit": "", "pr": "", "sessionUrl": false}` in `~/.claude/settings.json`. Claude Code then adds no `Co-Authored-By` trailer to commits, no generated-by line to pull requests, and no `Claude-Session` trailer or claude.ai link. Setup adds only the keys that are missing. A key that holds your own value stays, unless you answer yes to the question or pass `--attribution-off`; `--yes` and `--only attribution-off` keep it. A no is remembered, so the session reminder stops. `playbook doctor` shows the key as ok, missing, or set to your own value, and `playbook doctor --fix` asks before it adds the missing keys. A project or managed settings file can still set its own value. Undo it by deleting the key. See [ADR 0042](../adr/0042-attribution-off-in-setup.md).
 
 ### Memory migration
 
