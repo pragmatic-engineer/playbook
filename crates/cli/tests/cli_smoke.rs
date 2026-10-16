@@ -21,6 +21,7 @@
 #![cfg(unix)]
 
 use clap::{Command, CommandFactory};
+use playbook::common::par;
 use playbook::Cli;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -744,20 +745,29 @@ fn every_command_has_a_smoke_entry() {
 fn every_command_prints_help_and_exits_zero_with_no_stderr() {
     let paths = all_paths();
     let top = vec!["--help".to_string()];
-    let env = Env::new(true);
-    let mut failures = Vec::new();
     let mut runs = vec![top];
     for p in &paths {
         let mut args = p.clone();
         args.push("--help".to_string());
         runs.push(args);
     }
-    for args in &runs {
-        let r = env.run(args, "");
-        if r.code != 0 || r.stdout.trim().is_empty() || !r.stderr.is_empty() {
-            failures.push(format!("{args:?}: {r:?}"));
+    // Eight chunks at a time, each with its own home: one after another the
+    // runs took 11 s on a macOS runner.
+    let chunks: Vec<&[Vec<String>]> = runs.chunks(runs.len().div_ceil(8)).collect();
+    let failures: Vec<String> = par::map(&chunks, 8, |chunk| {
+        let env = Env::new(true);
+        let mut bad = Vec::new();
+        for args in *chunk {
+            let r = env.run(args, "");
+            if r.code != 0 || r.stdout.trim().is_empty() || !r.stderr.is_empty() {
+                bad.push(format!("{args:?}: {r:?}"));
+            }
         }
-    }
+        bad
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     assert!(
         failures.is_empty(),
         "help failures:\n{}",

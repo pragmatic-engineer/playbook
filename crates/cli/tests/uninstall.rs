@@ -592,3 +592,58 @@ fn a_dry_run_keeps_the_pb_link() {
 
     assert!(sb.path("bin/pb").symlink_metadata().is_ok());
 }
+
+#[test]
+fn setup_installs_the_collector_service_and_uninstall_removes_it() {
+    use playbook::usage::service::Kind;
+    let Some(kind) = Kind::current() else {
+        return;
+    };
+    // Arrange: telemetry that points at a recorded collector.
+    let sb = Sandbox::new("collector-service");
+    sb.write(
+        ".config/playbook/data/collector.json",
+        r#"{"pid":0,"port":47318,"token":"secret-token"}"#,
+    );
+    sb.write(
+        ".claude/settings.json",
+        r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:47318","OTEL_EXPORTER_OTLP_HEADERS":"Authorization=Bearer secret-token"}}"#,
+    );
+    let file = kind.file(&sb.home);
+
+    // Act
+    let setup = sb.run(&["setup", "--only", "collector-service"]);
+    let again = sb.run(&["setup", "--only", "collector-service"]);
+    let unit = fs::read_to_string(&file).unwrap_or_default();
+    let dry = sb.run(&["uninstall", "--yes", "--dry-run"]);
+    let kept_by_dry_run = file.is_file();
+    let removed = sb.run(&["uninstall", "--yes"]);
+
+    // Assert
+    assert!(setup.status.success(), "{}", text(&setup));
+    // A scratch HOME never reaches the real service manager.
+    assert!(
+        text(&setup).contains("HOME is not the home of your account"),
+        "{}",
+        text(&setup)
+    );
+    assert!(
+        text(&again).contains("[=] collector-service"),
+        "{}",
+        text(&again)
+    );
+    assert!(unit.contains("usage") && unit.contains("collect"), "{unit}");
+    assert!(!unit.contains("secret-token"), "{unit}");
+    assert!(
+        text(&dry).contains("would stop and remove the"),
+        "{}",
+        text(&dry)
+    );
+    assert!(kept_by_dry_run);
+    assert!(
+        text(&removed).contains("stopped and removed the"),
+        "{}",
+        text(&removed)
+    );
+    assert!(!file.exists());
+}

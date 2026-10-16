@@ -76,6 +76,7 @@ fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
         telemetry: false,
         claude_override: false,
         telemetry_replace_off: false,
+        collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
         short_name: false,
         attribution: playbook::init::attribution::Choice::Skip,

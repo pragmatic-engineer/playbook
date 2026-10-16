@@ -4,7 +4,7 @@
 //! The optional parts of `playbook setup` and how each one gets decided: a flag
 //! wins, else a question in a terminal, else the default.
 
-use crate::init::{attribution, catalog};
+use crate::init::{attribution, catalog, collector_service};
 use clap::Args;
 use std::io::{self, IsTerminal};
 
@@ -53,6 +53,12 @@ pub struct Flags {
     /// Do not write telemetry variables into settings.json
     #[arg(long, overrides_with = "telemetry")]
     pub no_telemetry: bool,
+    /// Keep the usage collector running in a per-user background service (launchd agent or systemd user unit), when telemetry points at it
+    #[arg(long, overrides_with = "no_collector_service")]
+    pub collector_service: bool,
+    /// Do not install the background service for the usage collector
+    #[arg(long, overrides_with = "collector_service")]
+    pub no_collector_service: bool,
     /// Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config)
     #[arg(long, overrides_with = "no_claude_override")]
     pub claude_override: bool,
@@ -71,7 +77,7 @@ pub struct Flags {
     /// Do not set or change attribution in settings.json
     #[arg(long, overrides_with = "attribution_off")]
     pub no_attribution_off: bool,
-    /// Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
+    /// Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, collector-service, claude-override, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
     #[arg(long, value_name = "PART", value_delimiter = ',', num_args = 1..)]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
@@ -95,6 +101,7 @@ pub struct Choices {
     pub aliases: bool,
     pub system_prompt: bool,
     pub telemetry: bool,
+    pub collector_service: bool,
     pub claude_override: bool,
     pub short_name: bool,
     pub attribution_off: bool,
@@ -119,6 +126,7 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
         "aliases" => (flags.aliases, flags.no_aliases),
         "system-prompt" => (flags.system_prompt, flags.no_system_prompt),
         "telemetry" => (flags.telemetry, flags.no_telemetry),
+        "collector-service" => (flags.collector_service, flags.no_collector_service),
         "claude-override" => (flags.claude_override, flags.no_claude_override),
         "short-name" => (flags.short_name, flags.no_short_name),
         "attribution-off" => (flags.attribution_off, flags.no_attribution_off),
@@ -180,6 +188,7 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         aliases: has("aliases"),
         system_prompt: has("system-prompt"),
         telemetry: has("telemetry"),
+        collector_service: has("collector-service"),
         claude_override: has("claude-override"),
         short_name: has("short-name"),
         attribution_off: has("attribution-off"),
@@ -207,6 +216,16 @@ pub fn attribution_choice(flags: &Flags, on: bool, asked: bool) -> attribution::
         (true, false, _) => attribution::Choice::AddMissing,
         (false, _, true) => attribution::Choice::Declined,
         (false, _, false) => attribution::Choice::Skip,
+    }
+}
+
+/// What the collector-service part does. A no or `--no-collector-service`
+/// is recorded; a run that asked nothing is not.
+pub fn collector_service_choice(flags: &Flags, on: bool, asked: bool) -> collector_service::Choice {
+    match (on, flags.no_collector_service || asked) {
+        (true, _) => collector_service::Choice::Install,
+        (false, true) => collector_service::Choice::Declined,
+        (false, false) => collector_service::Choice::Skip,
     }
 }
 
@@ -288,6 +307,12 @@ pub fn resolve_with(
             catalog::question("telemetry"),
             settings_default,
         ),
+        collector_service: decide(
+            flags.collector_service,
+            flags.no_collector_service,
+            catalog::question("collector-service"),
+            settings_default,
+        ),
         claude_override: decide(
             flags.claude_override,
             flags.no_claude_override,
@@ -325,13 +350,14 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
         (flags.aliases, flags.no_aliases),
         (flags.system_prompt, flags.no_system_prompt),
         (flags.telemetry, flags.no_telemetry),
+        (flags.collector_service, flags.no_collector_service),
         (flags.attribution_off, flags.no_attribution_off),
     ]
     .iter()
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
         "setup: output is not a terminal, so no questions were asked; the hooks, status line, \
-         telemetry and attribution-off parts stay off and the other defaults apply; pass --yes to accept all defaults or the \
+         telemetry, collector-service and attribution-off parts stay off and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
 }
@@ -357,6 +383,7 @@ mod tests {
             no_aliases: true,
             system_prompt: true,
             no_telemetry: true,
+            no_collector_service: true,
             no_attribution_off: true,
             ..Flags::default()
         };
@@ -407,6 +434,7 @@ mod tests {
                 aliases: false,
                 system_prompt: false,
                 telemetry: false,
+                collector_service: false,
                 claude_override: false,
                 short_name: false,
                 attribution_off: false
@@ -429,10 +457,32 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.aliases);
-        assert_eq!(asked.len(), 7, "{asked:?}");
+        assert_eq!(asked.len(), 8, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| !q.contains("hooks") && !q.contains("cd wrapper")));
+    }
+
+    #[test]
+    fn a_collector_service_no_is_recorded_only_when_someone_said_it() {
+        use collector_service::Choice::*;
+        let off = Flags {
+            no_collector_service: true,
+            ..Flags::default()
+        };
+        assert_eq!(
+            collector_service_choice(&Flags::default(), true, false),
+            Install
+        );
+        assert_eq!(
+            collector_service_choice(&Flags::default(), false, true),
+            Declined
+        );
+        assert_eq!(collector_service_choice(&off, false, false), Declined);
+        assert_eq!(
+            collector_service_choice(&Flags::default(), false, false),
+            Skip
+        );
     }
 
     #[test]
@@ -567,6 +617,7 @@ mod tests {
                 aliases: false,
                 system_prompt: false,
                 telemetry: true,
+                collector_service: false,
                 claude_override: false,
                 short_name: false,
                 attribution_off: false
