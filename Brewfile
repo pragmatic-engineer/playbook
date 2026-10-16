@@ -1,26 +1,26 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: Apache-2.0
 #
-# Dependencies for this ~/.claude config (hooks, shell/, statusline).
+# Tools that playbook, its hooks and its plugin commands call.
 #
-# The canonical dependency list. `/playbook:setup` reads the `brew "X"` formula names
-# from here and runs a per-dependency check-then-install (`playbook deps ensure`):
+# The canonical dependency list. The binary carries a copy, and `/playbook:setup`
+# runs a per-dependency check-then-install from it (`playbook deps ensure --builtin`):
 # for each one it uses the version already on PATH (brew, nvm, pyenv, system, a
 # manual install) and installs via brew only when the tool is missing, so an
 # existing tool is never shadowed by a duplicate brew install. You can still run
-# `brew bundle --file ~/.claude/Brewfile` directly, which installs the brew
+# `brew bundle --file Brewfile` from a checkout, which installs the brew
 # formula for each regardless of a non-brew copy.
 #
 # Not available via Homebrew, install separately:
 #   - claude  (Claude Code)  https://docs.claude.com/en/docs/claude-code  (npm i -g @anthropic-ai/claude-code, or the native installer)
 
-# Core: required by hooks and the cc launcher
+# Core
 brew "git"          # used everywhere; hooks drive git directly
-brew "just"         # task runner; see justfile (replaced the Makefile)
+brew "just"         # task runner for the justfile in this repository
 
 # Statusline and PR/CI integration
 brew "gh"           # statusline PR and CI status (optional but recommended)
-brew "node"         # statusline shows the active Node version (installed only if no node is on PATH)
+brew "node"         # installed only if no node is on PATH
 
 # Browser automation (optional): agent-browser MCP, used by /playbook:plan for web-only tickets and attachments
 brew "agent-browser"  # register: claude mcp add --scope user agent-browser -- agent-browser mcp --tools core
@@ -33,10 +33,3 @@ brew "agent-browser"  # register: claude mcp add --scope user agent-browser -- a
 # on purpose, since trusting a tap grants it code execution.
 tap "atlassian/acli"
 brew "acli"           # see the atlassian skill in the playbook plugin; auth per product with `acli confluence auth login`
-
-# zsh ships with macOS; the `cc` launcher is zsh-only. Uncomment to pin a Homebrew zsh.
-# brew "zsh"
-
-# macOS ships bash 3.2; the hooks use no bash 4+ features so the system bash works.
-# Uncomment for a modern bash.
-# brew "bash"
