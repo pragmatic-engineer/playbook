@@ -65,7 +65,13 @@ pub struct Flags {
     /// Do not add the `pb` short name
     #[arg(long, overrides_with = "short_name")]
     pub no_short_name: bool,
-    /// Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
+    /// Turn off the commit, PR and session link attribution Claude Code adds (sets `attribution` in settings.json)
+    #[arg(long, overrides_with = "no_attribution_off")]
+    pub attribution_off: bool,
+    /// Do not set or change attribution in settings.json
+    #[arg(long, overrides_with = "attribution_off")]
+    pub no_attribution_off: bool,
+    /// Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, claude-override, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
     #[arg(long, value_name = "PART", value_delimiter = ',', num_args = 1..)]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
@@ -91,6 +97,7 @@ pub struct Choices {
     pub telemetry: bool,
     pub claude_override: bool,
     pub short_name: bool,
+    pub attribution_off: bool,
 }
 
 fn pick(on: bool, off: bool) -> Option<bool> {
@@ -114,6 +121,7 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
         "telemetry" => (flags.telemetry, flags.no_telemetry),
         "claude-override" => (flags.claude_override, flags.no_claude_override),
         "short-name" => (flags.short_name, flags.no_short_name),
+        "attribution-off" => (flags.attribution_off, flags.no_attribution_off),
         _ => return None,
     })
 }
@@ -174,6 +182,7 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         telemetry: has("telemetry"),
         claude_override: has("claude-override"),
         short_name: has("short-name"),
+        attribution_off: has("attribution-off"),
     }))
 }
 
@@ -182,6 +191,12 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
 /// `--yes` alone never replaces it.
 pub fn replace_off_ok(flags: &Flags, telemetry: bool, only_run: bool) -> bool {
     telemetry && (flags.telemetry || only_run || !flags.yes)
+}
+
+/// Whether the attribution part may replace a value the user set: the same
+/// rule as [`replace_off_ok`], with `--attribution-off` as the explicit flag.
+pub fn replace_attribution_ok(flags: &Flags, on: bool, only_run: bool) -> bool {
+    on && (flags.attribution_off || only_run || !flags.yes)
 }
 
 /// True when there is no terminal to ask on and the user did not pass `--yes`.
@@ -274,6 +289,12 @@ pub fn resolve_with(
             catalog::question("short-name"),
             false,
         ),
+        attribution_off: decide(
+            flags.attribution_off,
+            flags.no_attribution_off,
+            catalog::question("attribution-off"),
+            settings_default,
+        ),
     }
 }
 
@@ -293,12 +314,13 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
         (flags.aliases, flags.no_aliases),
         (flags.system_prompt, flags.no_system_prompt),
         (flags.telemetry, flags.no_telemetry),
+        (flags.attribution_off, flags.no_attribution_off),
     ]
     .iter()
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
-        "setup: output is not a terminal, so no questions were asked; the hooks, status line and \
-         telemetry stay off and the other defaults apply; pass --yes to accept all defaults or the \
+        "setup: output is not a terminal, so no questions were asked; the hooks, status line, \
+         telemetry and attribution-off parts stay off and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
 }
@@ -324,6 +346,7 @@ mod tests {
             no_aliases: true,
             system_prompt: true,
             no_telemetry: true,
+            no_attribution_off: true,
             ..Flags::default()
         };
         assert!(defaults_notice(true, false, &all_set).is_none());
@@ -374,7 +397,8 @@ mod tests {
                 system_prompt: false,
                 telemetry: false,
                 claude_override: false,
-                short_name: false
+                short_name: false,
+                attribution_off: false
             }
         );
     }
@@ -394,10 +418,30 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.aliases);
-        assert_eq!(asked.len(), 6, "{asked:?}");
+        assert_eq!(asked.len(), 7, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| !q.contains("hooks") && !q.contains("cd wrapper")));
+    }
+
+    #[test]
+    fn yes_turns_attribution_off_but_replaces_a_user_value_only_with_the_flag() {
+        let yes = Flags {
+            yes: true,
+            ..Flags::default()
+        };
+        let explicit = Flags {
+            yes: true,
+            attribution_off: true,
+            ..Flags::default()
+        };
+
+        assert!(resolve(&yes, false, false, &mut never).attribution_off);
+        assert!(!resolve(&Flags::default(), false, false, &mut never).attribution_off);
+        assert!(!replace_attribution_ok(&yes, true, false));
+        assert!(replace_attribution_ok(&explicit, true, false));
+        assert!(replace_attribution_ok(&Flags::default(), true, false));
+        assert!(replace_attribution_ok(&yes, true, true));
     }
 
     #[test]
@@ -508,7 +552,8 @@ mod tests {
                 system_prompt: false,
                 telemetry: true,
                 claude_override: false,
-                short_name: false
+                short_name: false,
+                attribution_off: false
             }
         );
     }

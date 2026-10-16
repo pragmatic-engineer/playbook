@@ -117,10 +117,15 @@ pub enum Trigger {
     /// no migration after `deadline`, and retries after a failure once a day.
     Start { deadline: Instant },
     /// `playbook setup`, after it ran every migration itself. `statusline` is
-    /// false when the user declined the status line, so its item is dropped.
+    /// false when the user declined the status line, and `attribution` when
+    /// they declined the attribution-off part, so that item is dropped.
     /// The dead hook item stays even when hooks were left off, because those
     /// entries fail on every event.
-    Init { failed: bool, statusline: bool },
+    Init {
+        failed: bool,
+        statusline: bool,
+        attribution: bool,
+    },
 }
 
 /// Why a heal ran nothing.
@@ -325,9 +330,14 @@ fn heal_for(
             out.warnings.extend(migrate::owned_notes(ctx));
             out
         }
-        Trigger::Init { failed, statusline } => {
+        Trigger::Init {
+            failed,
+            statusline,
+            attribution,
+        } => {
             let mut open = migrate::open_items(ctx, None);
             open.retain(|i| statusline || i.id != migrate::STATUSLINE_MIGRATION);
+            open.retain(|i| attribution || i.id != migrate::ATTRIBUTION_MIGRATION);
             let out = Outcome {
                 open,
                 ..Outcome::default()
@@ -544,17 +554,48 @@ mod tests {
         record
     }
 
+    /// Attribution already off, so only the item a test sets up is open.
+    const ATTRIBUTION_OFF: &str = r#""attribution":{"commit":"","pr":"","sessionUrl":false}"#;
+
     fn legacy_statusline(home: &Path) {
         fs::create_dir_all(home.join(".claude")).unwrap();
         let cmd = crate::init::statusline::playbook_statusline_path(home);
         fs::write(
             home.join(".claude/settings.json"),
             format!(
-                r#"{{"statusLine":{{"type":"command","command":"bash {}"}}}}"#,
+                r#"{{{ATTRIBUTION_OFF},"statusLine":{{"type":"command","command":"bash {}"}}}}"#,
                 cmd.display()
             ),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn a_missing_attribution_key_is_reported_with_its_command_and_never_written() {
+        // Arrange
+        let home = scratch_dir("heal-attribution");
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        fs::write(home.join(".claude/settings.json"), "{\"theme\":\"dark\"}\n").unwrap();
+
+        // Act
+        let out = run(&ctx(&home), Trigger::Hook, 1000);
+
+        // Assert
+        assert!(
+            out.line()
+                .unwrap()
+                .contains("need `playbook setup --only attribution-off`"),
+            "{:?}",
+            out.line()
+        );
+        assert_eq!(
+            Record::read(&root(&home)).unwrap().pending,
+            vec![migrate::ATTRIBUTION_MIGRATION.to_string()]
+        );
+        assert_eq!(
+            fs::read_to_string(home.join(".claude/settings.json")).unwrap(),
+            "{\"theme\":\"dark\"}\n"
+        );
     }
 
     #[test]
@@ -761,7 +802,9 @@ mod tests {
         run(&ctx(&home), Trigger::Hook, 1000);
         fs::write(
             home.join(".claude/settings.json"),
-            r#"{"statusLine":{"type":"command","command":"playbook statusline"}}"#,
+            format!(
+                r#"{{{ATTRIBUTION_OFF},"statusLine":{{"type":"command","command":"playbook statusline"}}}}"#
+            ),
         )
         .unwrap();
 
@@ -809,6 +852,7 @@ mod tests {
         let init = |failed| Trigger::Init {
             failed,
             statusline: true,
+            attribution: true,
         };
         assert!(!run(&ctx(&home), init(true), 1000).recorded);
         assert!(run(&ctx(&home), init(false), 1000).recorded);
@@ -826,6 +870,7 @@ mod tests {
             Trigger::Init {
                 failed: false,
                 statusline: false,
+                attribution: false,
             },
             1000,
         );

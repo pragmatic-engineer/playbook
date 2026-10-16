@@ -34,6 +34,7 @@ fn part_of_key(key: &str) -> &'static str {
         "hooks" => "hooks",
         "statusLine" => "statusline",
         "permissions" => "security",
+        "attribution" => "attribution-off",
         _ => "hooks", // a key no part claims, never shipped
     }
 }
@@ -195,6 +196,8 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         only: paths.only,
         claude_override: paths.claude_override,
         short_name: paths.short_name,
+        attribution_off: paths.attribution_off,
+        attribution_replace: paths.attribution_replace,
         path_setup: paths.path_setup.as_ref().map(|s| path::Setup {
             bin_dir: s.bin_dir.clone(),
             shell: s.shell,
@@ -204,6 +207,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
     let epoch = crate::common::time::now_epoch_secs();
     let (settings_step, hooks_step) = run::settings_and_hooks_steps(&scratch_paths, epoch);
     let telemetry_step = run::telemetry_step(&scratch_paths, epoch);
+    let attribution_step = run::attribution_step(&scratch_paths, epoch);
     let override_step = run::claude_override_step(&sh, scratch_paths.claude_override);
     let short_step = run::short_name_step(
         &sh,
@@ -239,6 +243,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("telemetry", choices.telemetry),
         ("claude-override", choices.claude_override),
         ("short-name", choices.short_name),
+        ("attribution-off", choices.attribution_off),
     ];
     for (id, enabled) in flags {
         if paths.only && !enabled {
@@ -275,10 +280,15 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
                     mine
                 }
             }
-            "telemetry" => {
+            "telemetry" | "attribution-off" => {
                 let mine = grouped(&changes, id, &settings_file);
+                let step = if id == "telemetry" {
+                    &telemetry_step
+                } else {
+                    &attribution_step
+                };
                 if mine.is_empty() {
-                    vec![format!("{settings_file}: {}", telemetry_step.detail)]
+                    vec![format!("{settings_file}: {}", step.detail)]
                 } else {
                     mine
                 }

@@ -25,7 +25,7 @@ fn marker_path(home: &Path) -> PathBuf {
     crate::common::paths::playbook_root_from(home).join("telemetry-env.json")
 }
 
-fn load(path: &Path) -> Result<Map<String, Value>, String> {
+pub(crate) fn load(path: &Path) -> Result<Map<String, Value>, String> {
     if !path.is_file() {
         return Ok(Map::new());
     }
@@ -38,7 +38,11 @@ fn load(path: &Path) -> Result<Map<String, Value>, String> {
 }
 
 /// Copies `path` to `.bak.<epoch>` (kept when one exists) and writes `root`.
-fn write_with_backup(path: &Path, root: Map<String, Value>, epoch: u64) -> Result<(), String> {
+pub(crate) fn write_with_backup(
+    path: &Path,
+    root: Map<String, Value>,
+    epoch: u64,
+) -> Result<(), String> {
     if path.is_file() {
         let name = path
             .file_name()

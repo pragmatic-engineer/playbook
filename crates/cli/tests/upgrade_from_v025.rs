@@ -153,6 +153,8 @@ impl V025Home {
             telemetry_replace_off: false,
             only: false,
             short_name: false,
+            attribution_off: false,
+            attribution_replace: false,
             path_setup: None,
             repo: None,
         });
@@ -200,7 +202,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     );
     for message in [&first, &second] {
         for part in [
-            "3 change(s) to your settings or shell files need `playbook setup` and `playbook setup --hooks` and `playbook setup --statusline`",
+            "4 change(s) to your settings or shell files need `playbook setup` and `playbook setup --hooks` and `playbook setup --only attribution-off` and `playbook setup --statusline`",
             "2 item(s) need you: run `playbook migrate`",
         ] {
             assert!(message.contains(part), "{message}");
@@ -213,6 +215,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
         "claude plugin update playbook@pragmatic-engineer",
         "0014-orphaned-plugin-caches: 1 old plugin folder(s)",
         "(run `playbook setup --hooks`)",
+        "(run `playbook setup --only attribution-off`)",
     ] {
         assert!(report.contains(line), "{report}");
     }

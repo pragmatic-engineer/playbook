@@ -155,7 +155,9 @@ fn auto_is_accepted_and_follows_claude_code() {
     )
     .unwrap();
     assert!(h.run(&["effort", "auto"]).status.success());
-    let j: serde_json::Value = serde_json::from_str(&text(&h.run(&["effort", "--json"]))).unwrap();
+    // JSON is on stdout; the first run step may add a notice on stderr.
+    let out = h.run(&["effort", "--json"]);
+    let j: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     assert_eq!(j["playbook"], "auto");
     assert_eq!(j["effective"], "medium");
     assert_eq!(j["winner"], "claude-code");
@@ -282,7 +284,7 @@ fn claude_code_stays_the_top_ceiling_for_a_component() {
         &root,
         &["effort", "resolve", "commands", "deep-review", "--json"],
     );
-    let j: serde_json::Value = serde_json::from_str(&text(&out)).unwrap();
+    let j: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     assert_eq!(j["ceiling"], "medium");
     assert_eq!(j["effective"], "medium");
 }

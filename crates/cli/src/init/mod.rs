@@ -9,6 +9,7 @@
 //!   first.
 //! - `path` puts the binary's directory on PATH for every shell start.
 //! - `shim` installs the bash and zsh launcher shim idempotently.
+//! - `attribution` turns off the commit and PR attribution, with consent.
 //! - `statusline` moves a legacy `statusLine.command` to `playbook statusline`.
 //! - `system_prompt` places the opt-in `prompts/SYSTEM_PROMPT.md`.
 //! - `memory_migrate`, `migrate` and `self_root` handle upgrades and the plugin root.
@@ -26,6 +27,7 @@
 //! `settings.shared.json` is in binary-invoked form. `wire` changes what a user's own `settings.json` looks like after
 //! they choose to run `playbook setup`.
 
+pub mod attribution;
 pub mod catalog;
 pub mod choices;
 pub mod dead_hooks;

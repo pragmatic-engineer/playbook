@@ -69,6 +69,12 @@ pub struct InitPaths {
     /// Whether the user consented to the `pb` short name: writes
     /// `launcher.shortName` to playbook's own config, only when `pb` is free.
     pub short_name: bool,
+    /// Whether to set `attribution` in settings.json so Claude Code adds no
+    /// attribution to commits and pull requests. Only missing keys are added.
+    pub attribution_off: bool,
+    /// Whether the attribution part may replace a value the user set. True
+    /// only for an answer to the question, `--attribution-off` or `--only`.
+    pub attribution_replace: bool,
     /// Where the binary lives and the shell to wire it for. `None` skips the
     /// `path` step.
     pub path_setup: Option<path::Setup>,
@@ -185,6 +191,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         crate::heal::Trigger::Init {
             failed: migrated.failed || migrated.lock_busy,
             statusline: paths.statusline,
+            attribution: paths.attribution_off,
         },
         crate::common::time::now_epoch_secs(),
     );
@@ -203,6 +210,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let (settings_step, hooks_step) = settings_and_hooks_steps(paths, epoch);
 
     let telemetry_step = telemetry_step(paths, epoch);
+    let attribution_step = attribution_step(paths, epoch);
     let override_step = claude_override_step(&paths.home, paths.claude_override);
     let short_name_step = short_name_step(
         &paths.home,
@@ -219,6 +227,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         settings_step,
         hooks_step,
         telemetry_step,
+        attribution_step,
         override_step,
         short_name_step,
         path_step,
@@ -255,6 +264,9 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     }
     if paths.telemetry {
         steps.push(telemetry_step(paths, epoch));
+    }
+    if paths.attribution_off {
+        steps.push(attribution_step(paths, epoch));
     }
     if paths.claude_override {
         steps.push(claude_override_step(&paths.home, true));
@@ -316,6 +328,22 @@ pub(crate) fn settings_and_hooks_steps(paths: &InitPaths, epoch: u64) -> (StepRe
         StepReport::skipped("hooks", "not requested; pass --hooks to opt in")
     };
     (settings_step, hooks_step)
+}
+
+/// The attribution-off part: sets the missing `attribution` keys in
+/// settings.json, and a value the user set only with `attribution_replace`.
+pub(crate) fn attribution_step(paths: &InitPaths, epoch: u64) -> StepReport {
+    if !paths.attribution_off {
+        return StepReport::skipped(
+            crate::init::attribution::PART,
+            "not requested; pass --attribution-off to opt in",
+        );
+    }
+    crate::init::attribution::apply(
+        &paths.claude_home.join("settings.json"),
+        epoch,
+        paths.attribution_replace,
+    )
 }
 
 /// The claude-override part: records the user's consent in playbook's own

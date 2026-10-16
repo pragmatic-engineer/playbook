@@ -50,6 +50,8 @@ fn paths(home: &Path, root: &Path, repo: Option<(PathBuf, PathBuf)>) -> InitPath
         telemetry_replace_off: false,
         only: false,
         short_name: false,
+        attribution_off: false,
+        attribution_replace: false,
         path_setup: None,
         repo,
     }
