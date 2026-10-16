@@ -6,6 +6,8 @@
 //! `CLAUDE_PLUGIN_ROOT`, then the newest usable cache directory. The binary
 //! version plays no part in finding it. The binary and the plugin share one
 //! version line (ADR 0038), and `plugin_out_of_range` checks it afterward.
+//! `in_checkout` is separate from that lookup: it maps a playbook source
+//! checkout to the plugin folder inside it.
 
 use std::path::{Path, PathBuf};
 
@@ -493,6 +495,7 @@ mod tests {
     fn in_checkout_finds_the_nested_plugin_folder() {
         let root = scratch_dir("in-checkout-nested");
         fs::create_dir_all(root.join("plugins/playbook/agents")).unwrap();
+        fs::create_dir_all(root.join("agents")).unwrap();
         assert_eq!(in_checkout(&root), root.join("plugins/playbook"));
     }
 
