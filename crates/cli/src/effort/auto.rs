@@ -687,6 +687,7 @@ mod tests {
             }),
             allowed,
             satisfied: true,
+            variants_plugin: None,
         }
     }
 

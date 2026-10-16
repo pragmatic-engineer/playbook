@@ -96,9 +96,12 @@ pub const VARIANTS_ENV: &str = "PLAYBOOK_AGENT_VARIANTS";
 /// throwaway plugin, so their `subagent_type` carries that prefix.
 pub const VARIANTS_PLUGIN_ENV: &str = "PLAYBOOK_AGENT_VARIANTS_PLUGIN";
 
-/// The `subagent_type` for variant `file` of the session's variants.
-fn variant_type(file: &str) -> String {
-    prefixed(file, std::env::var(VARIANTS_PLUGIN_ENV).ok().as_deref())
+/// The agent variants a session can dispatch: their names, and the plugin
+/// that holds them, which prefixes their `subagent_type`.
+#[derive(Clone, Copy)]
+struct Variants<'a> {
+    names: &'a [String],
+    plugin: Option<&'a str>,
 }
 
 fn prefixed(file: &str, plugin: Option<&str>) -> String {
@@ -148,6 +151,9 @@ pub struct Resolution {
     /// False when the ceiling is below every agent the session has, so the
     /// lowest one is returned and still exceeds it.
     pub satisfied: bool,
+    /// The plugin holding the session's variants, which prefixes their
+    /// `subagent_type`. `None` when they are plain agents.
+    pub variants_plugin: Option<String>,
 }
 
 fn level_of(home: &Path, key: &str) -> String {
@@ -187,7 +193,7 @@ pub fn resolve(
     claude: Option<&str>,
     root: Option<&Path>,
 ) -> Resolution {
-    resolve_with(kind, name, home, claude, root, &available_variants())
+    resolve_capped(kind, name, home, claude, root, None)
 }
 
 /// `resolve` with an extra ceiling `cap` from the calling command, such as
@@ -201,11 +207,17 @@ pub fn resolve_capped(
     root: Option<&Path>,
     cap: Option<&str>,
 ) -> Resolution {
-    resolve_inner(kind, name, home, claude, root, &available_variants(), cap)
+    let names = available_variants();
+    let plugin = std::env::var(VARIANTS_PLUGIN_ENV).ok();
+    let variants = Variants {
+        names: &names,
+        plugin: plugin.as_deref(),
+    };
+    resolve_inner(kind, name, home, claude, root, variants, cap)
 }
 
 /// `resolve` with the session's variants given instead of read from the
-/// environment.
+/// environment. They are plain agents, with no plugin prefix.
 pub fn resolve_with(
     kind: Kind,
     name: &str,
@@ -214,7 +226,11 @@ pub fn resolve_with(
     root: Option<&Path>,
     available: &[String],
 ) -> Resolution {
-    resolve_inner(kind, name, home, claude, root, available, None)
+    let variants = Variants {
+        names: available,
+        plugin: None,
+    };
+    resolve_inner(kind, name, home, claude, root, variants, None)
 }
 
 fn resolve_inner(
@@ -223,7 +239,7 @@ fn resolve_inner(
     home: &Path,
     claude: Option<&str>,
     root: Option<&Path>,
-    available: &[String],
+    variants: Variants,
     cap: Option<&str>,
 ) -> Resolution {
     let path = root.map(|r| kind.file(r, name));
@@ -252,7 +268,7 @@ fn resolve_inner(
     let mut subagent_type = None;
     if kind == Kind::Agent {
         if let Some(base_effort) = shipped.as_deref() {
-            let files = agent_files(name, base_effort, available);
+            let files = agent_files(name, base_effort, variants.names);
             let limit = ceiling.as_deref().and_then(rank);
             allowed = files
                 .iter()
@@ -271,7 +287,7 @@ fn resolve_inner(
                 subagent_type = Some(if f == name {
                     format!("playbook:{f}")
                 } else {
-                    variant_type(f)
+                    prefixed(f, variants.plugin)
                 });
                 file = Some(f.clone());
             }
@@ -297,6 +313,7 @@ fn resolve_inner(
         subagent_type,
         allowed,
         satisfied,
+        variants_plugin: variants.plugin.map(str::to_string),
     }
 }
 
@@ -330,7 +347,7 @@ impl Resolution {
                 if *f == self.name {
                     format!("playbook:{f}")
                 } else {
-                    variant_type(f)
+                    prefixed(f, self.variants_plugin.as_deref())
                 }
             })
             .collect()
@@ -617,7 +634,10 @@ mod tests {
             &home,
             None,
             Some(&root),
-            &have,
+            Variants {
+                names: &have,
+                plugin: None,
+            },
             Some("medium"),
         );
         assert_eq!(r.subagent_type.as_deref(), Some("reviewer-medium"));
@@ -630,7 +650,10 @@ mod tests {
             &home,
             None,
             Some(&root),
-            &[],
+            Variants {
+                names: &[],
+                plugin: None,
+            },
             Some("medium"),
         );
         assert_eq!(none.subagent_type.as_deref(), Some("playbook:reviewer"));
@@ -642,7 +665,10 @@ mod tests {
             &home,
             Some("low"),
             Some(&root),
-            &have,
+            Variants {
+                names: &have,
+                plugin: None,
+            },
             Some("medium"),
         );
         assert_eq!(low.subagent_type.as_deref(), Some("reviewer-low"));
@@ -653,10 +679,56 @@ mod tests {
             &home,
             None,
             Some(&root),
-            &have,
+            Variants {
+                names: &have,
+                plugin: None,
+            },
             Some("max"),
         );
         assert_eq!(high.subagent_type.as_deref(), Some("playbook:reviewer"));
+    }
+
+    #[test]
+    fn variants_of_a_session_plugin_carry_its_prefix_and_the_base_does_not() {
+        let (home, root) = plugin("cmp-prefix");
+        let have = names(&["reviewer-low", "reviewer-medium"]);
+        let variants = Variants {
+            names: &have,
+            plugin: Some("playbook-variants"),
+        };
+        let r = resolve_inner(
+            Kind::Agent,
+            "reviewer",
+            &home,
+            None,
+            Some(&root),
+            variants,
+            Some("medium"),
+        );
+        assert_eq!(
+            r.subagent_type.as_deref(),
+            Some("playbook-variants:reviewer-medium")
+        );
+        assert_eq!(
+            r.allowed_types(),
+            [
+                "playbook-variants:reviewer-low",
+                "playbook-variants:reviewer-medium"
+            ]
+        );
+        let base = resolve_inner(
+            Kind::Agent,
+            "reviewer",
+            &home,
+            None,
+            Some(&root),
+            variants,
+            None,
+        );
+        assert_eq!(base.subagent_type.as_deref(), Some("playbook:reviewer"));
+        assert!(base
+            .allowed_types()
+            .contains(&"playbook:reviewer".to_string()));
     }
 
     #[test]

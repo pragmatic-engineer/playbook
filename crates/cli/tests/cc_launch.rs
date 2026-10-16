@@ -106,6 +106,8 @@ impl Env {
             .env_remove("OTEL_LOGS_EXPORTER")
             .env_remove("OTEL_METRICS_EXPORTER")
             .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
+            .env_remove("CLAUDE_PLUGIN_ROOT")
+            .env_remove("PLAYBOOK_PLUGIN_DIR")
             .env("FAKE_LOG", self.log())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null");
@@ -959,6 +961,23 @@ fn without_a_plugin_root_no_variants_are_passed() {
     assert!(variant_files(&e).is_none());
     let seen = fs::read_to_string(e.root.join("claude.log.var")).unwrap();
     assert_eq!(seen.trim(), "unset");
+}
+
+#[test]
+fn variants_inherited_from_a_parent_session_do_not_reach_the_new_one() {
+    let e = env("variants-inherited");
+    e.launch_with(
+        &["--"],
+        &["fresh"],
+        &[
+            ("PLAYBOOK_AGENT_VARIANTS", "reviewer-low"),
+            ("PLAYBOOK_AGENT_VARIANTS_PLUGIN", "playbook-variants"),
+        ],
+    );
+    let names = fs::read_to_string(e.root.join("claude.log.var")).unwrap();
+    let plugin = fs::read_to_string(e.root.join("claude.log.vplug")).unwrap();
+    assert_eq!(names.trim(), "unset");
+    assert_eq!(plugin.trim(), "unset");
 }
 
 #[test]
