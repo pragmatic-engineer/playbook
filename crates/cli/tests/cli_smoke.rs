@@ -21,6 +21,7 @@
 #![cfg(unix)]
 
 use clap::{Command, CommandFactory};
+use playbook::common::par;
 use playbook::Cli;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -750,30 +751,23 @@ fn every_command_prints_help_and_exits_zero_with_no_stderr() {
         args.push("--help".to_string());
         runs.push(args);
     }
-    // Eight threads, each with its own home: one after another the runs took
-    // 11 s on a macOS runner.
-    let failures: Vec<String> = std::thread::scope(|s| {
-        let workers: Vec<_> = runs
-            .chunks(runs.len().div_ceil(8))
-            .map(|chunk| {
-                s.spawn(move || {
-                    let env = Env::new(true);
-                    let mut bad = Vec::new();
-                    for args in chunk {
-                        let r = env.run(args, "");
-                        if r.code != 0 || r.stdout.trim().is_empty() || !r.stderr.is_empty() {
-                            bad.push(format!("{args:?}: {r:?}"));
-                        }
-                    }
-                    bad
-                })
-            })
-            .collect();
-        workers
-            .into_iter()
-            .flat_map(|w| w.join().expect("help thread"))
-            .collect()
-    });
+    // Eight chunks at a time, each with its own home: one after another the
+    // runs took 11 s on a macOS runner.
+    let chunks: Vec<&[Vec<String>]> = runs.chunks(runs.len().div_ceil(8)).collect();
+    let failures: Vec<String> = par::map(&chunks, 8, |chunk| {
+        let env = Env::new(true);
+        let mut bad = Vec::new();
+        for args in *chunk {
+            let r = env.run(args, "");
+            if r.code != 0 || r.stdout.trim().is_empty() || !r.stderr.is_empty() {
+                bad.push(format!("{args:?}: {r:?}"));
+            }
+        }
+        bad
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     assert!(
         failures.is_empty(),
         "help failures:\n{}",

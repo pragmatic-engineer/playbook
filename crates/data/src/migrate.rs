@@ -89,7 +89,8 @@ const LOCK_DELAY: Duration = Duration::from_millis(20);
 /// Test seam for the lock budget. A test that holds the migrate lock on
 /// purpose would otherwise wait out all of [`LOCK_RETRIES`]: about 6 s, and
 /// 30 s on a busy macOS runner. A debug build reads this variable, so a test
-/// can shorten the budget of the binary it runs. A release build ignores it.
+/// can shorten the budget of the binary it runs.
+#[doc(hidden)]
 pub const TEST_LOCK_RETRIES_ENV: &str = "PLAYBOOK_TEST_MIGRATE_LOCK_RETRIES";
 
 thread_local! {
@@ -110,18 +111,22 @@ pub fn with_test_lock_retries<T>(retries: u32, f: impl FnOnce() -> T) -> T {
     f()
 }
 
-/// The lock budget. A test setting can only shorten it.
+/// The lock budget. A release build always uses the full budget; a debug
+/// build takes a test setting, which can only shorten it.
 fn lock_retries() -> u32 {
-    let from_env = || {
-        if !cfg!(debug_assertions) {
-            return None;
-        }
-        std::env::var(TEST_LOCK_RETRIES_ENV).ok()?.parse().ok()
-    };
-    TEST_LOCK_RETRIES
-        .with(Cell::get)
-        .or_else(from_env)
-        .map_or(LOCK_RETRIES, |n: u32| n.clamp(1, LOCK_RETRIES))
+    if !cfg!(debug_assertions) {
+        return LOCK_RETRIES;
+    }
+    let env = std::env::var(TEST_LOCK_RETRIES_ENV).ok();
+    test_budget(TEST_LOCK_RETRIES.with(Cell::get), env.as_deref())
+}
+
+/// The thread setting wins over the variable. A value that does not parse is
+/// ignored, and every value is clamped to `1..=LOCK_RETRIES`.
+fn test_budget(thread: Option<u32>, env: Option<&str>) -> u32 {
+    thread
+        .or_else(|| env?.trim().parse().ok())
+        .map_or(LOCK_RETRIES, |n| n.clamp(1, LOCK_RETRIES))
 }
 
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -799,10 +804,21 @@ mod tests {
 
     #[test]
     fn the_test_lock_budget_only_shortens_and_is_restored() {
-        assert_eq!(with_test_lock_retries(0, lock_retries), 1);
         assert_eq!(with_test_lock_retries(2, lock_retries), 2);
-        assert_eq!(with_test_lock_retries(u32::MAX, lock_retries), LOCK_RETRIES);
         assert_eq!(TEST_LOCK_RETRIES.with(Cell::get), None);
+    }
+
+    #[test]
+    fn the_test_lock_budget_reads_the_thread_then_the_variable() {
+        assert_eq!(test_budget(None, None), LOCK_RETRIES);
+        assert_eq!(test_budget(None, Some("2")), 2);
+        assert_eq!(test_budget(None, Some(" 2 ")), 2);
+        assert_eq!(test_budget(Some(3), Some("2")), 3);
+        assert_eq!(test_budget(None, Some("0")), 1);
+        assert_eq!(test_budget(Some(0), None), 1);
+        assert_eq!(test_budget(None, Some("100000")), LOCK_RETRIES);
+        assert_eq!(test_budget(None, Some("abc")), LOCK_RETRIES);
+        assert_eq!(test_budget(None, Some("-1")), LOCK_RETRIES);
     }
 
     #[test]

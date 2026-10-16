@@ -5,6 +5,7 @@
 //! cases ported from the retired shell suite, and a determinism run over
 //! every fixture.
 
+use playbook::common::par;
 use playbook::statusline::{render, Env};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -775,37 +776,30 @@ fn build(c: &Case, home: &Path) -> (PathBuf, String) {
     (cwd, stdin)
 }
 
+/// Renders `c` in two fresh homes and describes the difference, if any.
+fn renders_differ(c: &Case, days: &regex::Regex) -> Option<String> {
+    let a = Scratch::new();
+    let b = Scratch::new();
+    let (_, in_a) = build(c, &a.0);
+    let (_, in_b) = build(c, &b.0);
+    // Homes differ per run and ages tick over midnight, so normalise both.
+    let norm = |out: Vec<u8>, home: &Path| {
+        let t = text(&out).replace(home.to_str().unwrap(), "<HOME>");
+        days.replace_all(&t, "Nd ago").into_owned()
+    };
+    let first = norm(rust(&a.0, &a.0, &in_a, &c.env), &a.0);
+    let second = norm(rust(&b.0, &b.0, &in_b, &c.env), &b.0);
+    (first != second).then(|| format!("{}\n  first:  {first:?}\n  second: {second:?}", c.name))
+}
+
 #[test]
 fn every_fixture_renders_the_same_bytes_on_two_runs() {
-    let days = &regex::Regex::new(r"\d+d ago").unwrap();
-    let cases = cases();
-    // One thread per fixture: each one runs git and the binary several
-    // times, and one after another they took 11 s on a macOS runner.
-    let failures: Vec<String> = std::thread::scope(|s| {
-        let runs: Vec<_> = cases
-            .iter()
-            .map(|c| {
-                s.spawn(move || {
-                    let a = Scratch::new();
-                    let b = Scratch::new();
-                    let (_, in_a) = build(c, &a.0);
-                    let (_, in_b) = build(c, &b.0);
-                    // Homes differ per run and ages tick over midnight, so
-                    // normalise both.
-                    let norm = |out: Vec<u8>, home: &Path| {
-                        let t = text(&out).replace(home.to_str().unwrap(), "<HOME>");
-                        days.replace_all(&t, "Nd ago").into_owned()
-                    };
-                    let first = norm(rust(&a.0, &a.0, &in_a, &c.env), &a.0);
-                    let second = norm(rust(&b.0, &b.0, &in_b, &c.env), &b.0);
-                    (first != second)
-                        .then(|| format!("{}\n  first:  {first:?}\n  second: {second:?}", c.name))
-                })
-            })
-            .collect();
-        runs.into_iter()
-            .filter_map(|run| run.join().expect("fixture thread"))
-            .collect()
-    });
+    let days = regex::Regex::new(r"\d+d ago").unwrap();
+    // Eight at a time: each fixture runs git and the binary several times,
+    // and one after another they took 11 s on a macOS runner.
+    let failures: Vec<String> = par::map(&cases(), 8, |c| renders_differ(c, &days))
+        .into_iter()
+        .flatten()
+        .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
