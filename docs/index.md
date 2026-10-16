@@ -46,9 +46,9 @@ How the machine works.
 - [Release channels](internals/06-release-channels.md): how a tagged release reaches the GitHub assets and the Homebrew tap.
 - [Migrations](internals/07-migrations.md): how `playbook setup` carries an install across breaking changes, the three migration kinds, and how edits to placed files are detected.
 - [State store](internals/08-state-store.md): where playbook keeps its internal state, how to inspect it with `playbook state list`, and the one-time import of the old files.
+- [Sessions](internals/09-sessions.md): `playbook sessions`, the read only list of recent sessions with repo, branch, worktree, PR, state, context size and cost, and what it never does.
 - [Document conversion benchmark](internals/10-document-conversion-benchmark.md): the measurement behind the `docs.convert` default.
 - [Data folder](internals/11-data-folder.md): the one folder that holds every database, what each file is, how older files move in, and how to clean up.
-- [Sessions](internals/09-sessions.md): `playbook sessions`, the read only list of recent sessions with repo, branch, worktree, PR, state, context size and cost, and what it never does.
 
 ## Decisions
 
@@ -56,7 +56,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 
 | ADR | Title | Status | Date |
 |---|---|---|---|
-| [0001](adr/0001-package-toolkit-as-plugin.md) | Package the toolkit as an opt-in Claude Code plugin | Accepted, amended by 0002, 0006, 0007 | 2026-07-23 |
+| [0001](adr/0001-package-toolkit-as-plugin.md) | Package the toolkit as an opt-in Claude Code plugin | Accepted, amended by 0002, 0006, 0007, 0030 | 2026-07-23 |
 | [0002](adr/0002-plugin-based-install-safety-hooks.md) | Plugin based install with always-on safety hooks | Accepted, amended by 0006, 0007, 0031 | 2026-07-30 |
 | [0003](adr/0003-purpose-built-subagents.md) | Purpose-built subagents over generic fallbacks | Accepted | 2026-08-07 |
 | [0004](adr/0004-graph-first-memory.md) | Graph-first memory retrieval and triggered capture | Accepted | 2026-08-10 |
@@ -75,7 +75,9 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0017](adr/0017-per-component-effort-ceilings.md) | Per-component effort ceilings | Accepted | 2026-10-09 |
 | [0018](adr/0018-tls-platform-verifier-not-adopted.md) | Keep the bundled root certificates, do not adopt the TLS platform verifier yet | Accepted | 2026-10-09 |
 | [0019](adr/0019-pr-stack-review.md) | Review a whole pull request stack with shared context | Accepted | 2026-10-09 |
+| [0020](adr/0020-usage-terminal-ui.md) | A terminal UI for `playbook usage`, with ratatui and crossterm | Accepted, amended | 2026-10-10 |
 | [0021](adr/0021-reviewer-at-opus-medium.md) | Ship the reviewer agent at Opus medium | Accepted | 2026-10-10 |
+| [0022](adr/0022-effort-auto-tune-from-evidence.md) | Tune effort from local evidence, in three stages | Accepted | 2026-10-10 |
 | [0023](adr/0023-commands-at-medium.md) | Ship the Opus and Sonnet commands at medium | Accepted | 2026-10-11 |
 | [0024](adr/0024-session-management-view-and-lifecycle.md) | Session management view with a derived record and suggest first lifecycle | Proposed | 2026-10-11 |
 | [0025](adr/0025-self-improving-playbook.md) | A self improving playbook proposes config patches behind a staged trust ladder | Proposed | 2026-10-11 |
