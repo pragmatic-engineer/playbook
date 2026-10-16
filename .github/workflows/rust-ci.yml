@@ -92,8 +92,8 @@ jobs:
           echo "docs_only=$docs_only" | tee -a "$GITHUB_OUTPUT"
 
           # Package selection. A crate maps to itself plus its dependents:
-          # cli (playbook) depends on common, code and telemetry; common is depended on
-          # by everything.
+          # cli (playbook) depends on common, code, data and telemetry; code and
+          # telemetry depend on data; common is depended on by everything.
           pkgs="--workspace"
           if [ -n "${files:-}" ] && ! echo "$files" | grep -qvE '^crates/(cli|code|common|data|telemetry)/'; then
             sel=""
@@ -104,7 +104,7 @@ jobs:
                 cli) add playbook ;;
                 code) add playbook-code; add playbook ;;
                 telemetry) add playbook-telemetry; add playbook ;;
-                data) add playbook-data ;;
+                data) add playbook-data; add playbook-code; add playbook-telemetry; add playbook ;;
               esac
             done
             if [ -n "$sel" ]; then
