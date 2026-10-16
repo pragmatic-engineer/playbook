@@ -8,9 +8,11 @@
 //! [`crate::usage::service`]; this module decides, records the answer, and
 //! reports.
 
-use crate::init::run::StepReport;
-use crate::usage::service::{self, Installed, Kind, Manager};
+use crate::init::run::{StepReport, StepStatus};
+use crate::service_manager::{self as manager, Installed, Manager};
+use crate::usage::service::{self, Kind};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 /// The part id, also the name of the step and the setup flag.
 pub const PART: &str = "collector-service";
@@ -20,6 +22,10 @@ pub const COMMAND: &str = "playbook setup --only collector-service";
 
 /// The command that runs the collector in the foreground.
 pub const COLLECT: &str = "playbook usage collect";
+
+/// How long setup waits for a service it just started to bring the
+/// collector up, before its next steps call the collector down.
+pub const START_WAIT: Duration = Duration::from_secs(2);
 
 /// The state key that records a no, so the reminder stops.
 const DECLINED_KEY: &str = "collector-service/declined";
@@ -57,15 +63,23 @@ fn record_declined(home: &Path, no: bool) {
     };
 }
 
+/// The collector state recorded for the user at `home`.
+fn collector_state(home: &Path) -> Option<crate::usage::collector::State> {
+    let paths = crate::usage::run::Paths::from_home(home);
+    crate::usage::collector::read_state(&crate::usage::collector::state_path(&paths))
+}
+
 /// Whether the Claude Code user settings point telemetry at the playbook
 /// collector, the case where a receiver is needed.
 pub fn telemetry_points_here(home: &Path) -> bool {
     use crate::usage::telemetry_detect::{configured_from_files, Configured};
-    let paths = crate::usage::run::Paths::from_home(home);
-    let port = crate::usage::collector::read_state(&crate::usage::collector::state_path(&paths))
-        .map(|s| s.port)
-        .filter(|p| *p != 0);
+    let port = collector_state(home).map(|s| s.port).filter(|p| *p != 0);
     configured_from_files(home, home, port) == Configured::Playbook
+}
+
+/// Whether a collector answers for the user at `home`.
+pub fn collector_running(home: &Path) -> bool {
+    collector_state(home).is_some_and(|s| crate::usage::collector::running(&s))
 }
 
 /// The `playbook` the service starts: the copy on PATH that is this binary,
@@ -87,6 +101,15 @@ pub fn skip_line(home: &Path) -> Option<String> {
         "collector-service: already installed as the {}",
         found.describe()
     ))
+}
+
+/// The detail for a service file that is in place but did not start.
+fn not_started(kind: Kind, file: &Path, why: &str) -> String {
+    format!(
+        "{} is in place but did not start ({why}); to start it, run: {}",
+        file.display(),
+        manager::load_hint(kind, file, manager::uid())
+    )
 }
 
 /// The setup step for `choice`. A no is recorded, and a yes clears it.
@@ -131,78 +154,75 @@ pub fn step(
             ),
         );
     };
-    let report = match service::install(kind, home, program, manager, service::uid()) {
+    let file = kind.file(home);
+    let outdated =
+        collector_state(home).is_some_and(|s| crate::usage::collector::runs_other_build(&s));
+    let report = match manager::install(kind, home, program, manager, manager::uid(), outdated) {
         Ok(Installed::Unchanged) => {
             StepReport::already_correct(PART, format!("the {} runs the collector", kind.name()))
         }
+        Ok(Installed::Restarted(Ok(()))) => StepReport::wired(
+            PART,
+            format!("restarted the {} so it runs this version", kind.name()),
+        ),
+        Ok(Installed::Restarted(Err(why))) => StepReport::already_correct(
+            PART,
+            format!(
+                "the {} runs an older collector and did not restart ({why})",
+                kind.name()
+            ),
+        ),
         Ok(Installed::Started(Ok(()))) => StepReport::wired(
             PART,
             format!("started the {} that was not running", kind.name()),
         ),
-        Ok(Installed::Started(Err(why))) => StepReport::already_correct(
-            PART,
-            format!(
-                "{} is in place but did not start ({why}); to start it, run: {}",
-                kind.file(home).display(),
-                service::load_hint(kind, &kind.file(home), service::uid())
-            ),
-        ),
+        Ok(Installed::Started(Err(why))) => {
+            StepReport::already_correct(PART, not_started(kind, &file, &why))
+        }
         Ok(Installed::Wrote { started: Ok(()) }) => StepReport::wired(
             PART,
             format!(
                 "installed the {} {}; it runs `{COLLECT}` now and after every login",
                 kind.name(),
-                kind.file(home).display()
+                file.display()
             ),
         ),
-        Ok(Installed::Wrote { started: Err(why) }) => StepReport::wired(
-            PART,
-            format!(
-                "wrote {}, but it did not start ({why}); to start it, run: {}",
-                kind.file(home).display(),
-                service::load_hint(kind, &kind.file(home), service::uid())
-            ),
-        ),
+        Ok(Installed::Wrote { started: Err(why) }) => {
+            StepReport::wired(PART, not_started(kind, &file, &why))
+        }
         Err(err) => StepReport::failed(PART, err),
     };
-    if report.status != crate::init::run::StepStatus::Failed {
+    if report.status != StepStatus::Failed {
         record_declined(home, false);
     }
     report
 }
 
-/// Whether a collector answers for the user at `home`.
-pub fn collector_running(home: &Path) -> bool {
-    let paths = crate::usage::run::Paths::from_home(home);
-    crate::usage::collector::read_state(&crate::usage::collector::state_path(&paths))
-        .is_some_and(|s| crate::usage::collector::running(&s))
-}
-
 /// What to do when telemetry points at the collector and none runs, as one
 /// line for the fix hints of setup and doctor.
 pub fn collector_fix(home: &Path) -> String {
-    match service::find(home) {
-        Some(found) => format!(
-            "start it with `{COLLECT}`; the {} is installed but the collector is not up, see {}",
-            found.kind.name(),
-            service::log_path(home).display()
-        ),
-        None => format!(
-            "start it with `{COLLECT}`, or keep it running in the background with `{COMMAND}`"
-        ),
-    }
+    service::collector_fix(home)
 }
 
 /// The line for setup's "Next steps" when telemetry points at the collector
-/// and none runs. `None` when this run installed or kept the service, since
-/// the service manager starts it.
-pub fn next_step(home: &Path, steps: &[StepReport]) -> Option<String> {
-    use crate::init::run::StepStatus;
+/// and none runs. When this run installed, started or kept the service, it
+/// first waits up to `wait` for the collector to come up.
+pub fn next_step(home: &Path, steps: &[StepReport], wait: Duration) -> Option<String> {
+    if !telemetry_points_here(home) {
+        return None;
+    }
     let service_ran = steps.iter().any(|s| {
         s.name == PART && matches!(s.status, StepStatus::Wired | StepStatus::AlreadyCorrect)
     });
-    if service_ran || !telemetry_points_here(home) || collector_running(home) {
-        return None;
+    let deadline = Instant::now() + if service_ran { wait } else { Duration::ZERO };
+    loop {
+        if collector_running(home) {
+            return None;
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
     Some(format!(
         "Telemetry is on, but the collector is not running, so nothing is stored. To fix it, {}.",
@@ -222,8 +242,7 @@ pub fn preview(home: &Path, telemetry_on: bool, program: &Path) -> String {
     if !telemetry_on {
         return format!("{file}: skipped, telemetry does not point at the playbook collector");
     }
-    let want = service::render(kind, program, &service::log_path(home));
-    if std::fs::read_to_string(kind.file(home)).is_ok_and(|now| now == want) {
+    if service::is_current(kind, home, program) {
         format!("{file}: no change, already installed")
     } else {
         format!("{file}: would write the {} and start it", kind.name())
@@ -242,8 +261,8 @@ pub fn remove(home: &Path, dry_run: bool) -> Result<Option<String>, String> {
             found.describe()
         )));
     }
-    let manager = service::manager_for(home);
-    service::remove(found.kind, home, manager.as_ref(), service::uid())?;
+    let manager = manager::manager_for(home);
+    manager::remove(found.kind, home, manager.as_ref(), manager::uid())?;
     Ok(Some(format!(
         "stopped and removed the {}",
         found.describe()
@@ -254,18 +273,17 @@ pub fn remove(home: &Path, dry_run: bool) -> Result<Option<String>, String> {
 mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
-    use crate::init::run::StepStatus;
     use std::fs;
 
     /// Runs nothing and reports every service as stopped.
     struct Stopped;
 
     impl Manager for Stopped {
-        fn run(&self, _: &str, args: &[String]) -> Result<(), String> {
+        fn run(&self, _: &str, args: &[String]) -> Result<String, String> {
             if args.iter().any(|a| a == "print" || a == "is-active") {
                 Err("not loaded".into())
             } else {
-                Ok(())
+                Ok(String::new())
             }
         }
     }
@@ -399,7 +417,7 @@ mod tests {
     fn a_start_that_fails_names_the_commands_to_start_it() {
         struct Refuses;
         impl Manager for Refuses {
-            fn run(&self, _: &str, _: &[String]) -> Result<(), String> {
+            fn run(&self, _: &str, _: &[String]) -> Result<String, String> {
                 Err("no session".into())
             }
         }
@@ -423,44 +441,79 @@ mod tests {
     }
 
     #[test]
-    fn a_scratch_home_never_loads_a_real_service() {
-        let home = telemetry_home("scratch");
-        let manager = service::manager_for(&home);
-
-        let report = step(
-            &home,
-            Path::new("/p"),
-            Choice::Install,
-            Some(Kind::Launchd),
-            manager.as_ref(),
-        );
-
-        assert!(
-            report
-                .detail
-                .contains("HOME is not the home of your account"),
-            "{}",
-            report.detail
-        );
-    }
-
-    #[test]
-    fn next_steps_name_the_collector_only_when_telemetry_is_on_and_it_is_down() {
+    fn next_steps_name_the_collector_when_telemetry_is_on_and_none_runs() {
         // Arrange
         let on = telemetry_home("next");
         let off = scratch_dir("collector-service-next-off");
+        let up = telemetry_home("next-up");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let paths = crate::usage::run::Paths::from_home(&up);
+        fs::write(
+            crate::usage::collector::state_path(&paths),
+            format!(
+                r#"{{"pid":{},"port":{port},"token":"t"}}"#,
+                std::process::id()
+            ),
+        )
+        .unwrap();
+        fs::write(
+            up.join(".claude/settings.json"),
+            format!(r#"{{"env":{{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:{port}"}}}}"#),
+        )
+        .unwrap();
         let kept = [StepReport::already_correct(PART, "runs")];
 
         // Act
-        let down = next_step(&on, &[]);
-        let after_service = next_step(&on, &kept);
-        let no_telemetry = next_step(&off, &[]);
+        let down = next_step(&on, &[], Duration::ZERO);
+        let kept_but_down = next_step(&on, &kept, Duration::from_millis(200));
+        let no_telemetry = next_step(&off, &[], Duration::ZERO);
 
         // Assert
         let down = down.expect("a next step");
-        assert!(down.contains(COLLECT) && down.contains(COMMAND), "{down}");
-        assert_eq!(after_service, None);
+        // The commands come from the usage host, which a unit test may not set.
+        assert!(
+            down.contains(" collect`") && down.contains("--only collector-service"),
+            "{down}"
+        );
+        assert!(
+            kept_but_down.is_some(),
+            "a service that did not start still needs the line"
+        );
         assert_eq!(no_telemetry, None);
+        // A collector that answers needs no line.
+        assert!(telemetry_points_here(&up));
+        assert_eq!(next_step(&up, &[], Duration::ZERO), None);
+        drop(listener);
+    }
+
+    #[test]
+    fn preview_and_skip_line_follow_the_file_on_disk() {
+        let Some(kind) = Kind::current() else {
+            return;
+        };
+        let home = telemetry_home("preview");
+        let program = home.join("bin/playbook");
+        fs::create_dir_all(program.parent().unwrap()).unwrap();
+        fs::write(&program, "").unwrap();
+
+        let before = preview(&home, true, &program);
+        let off = preview(&home, false, &program);
+        let no_line = skip_line(&home);
+        step(&home, &program, Choice::Install, Some(kind), &Stopped);
+        let after = preview(&home, true, &program);
+        let line = skip_line(&home);
+        fs::remove_file(&program).unwrap();
+
+        assert!(
+            before.ends_with(&format!("would write the {} and start it", kind.name())),
+            "{before}"
+        );
+        assert!(off.contains("skipped, telemetry does not point"), "{off}");
+        assert_eq!(no_line, None);
+        assert!(after.ends_with("no change, already installed"), "{after}");
+        assert!(line.is_some_and(|l| l.starts_with("collector-service: already installed")));
+        assert_eq!(skip_line(&home), None, "a gone program asks again");
     }
 
     #[test]

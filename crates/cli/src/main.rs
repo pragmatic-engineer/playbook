@@ -472,12 +472,14 @@ fn main() {
             let mut guided: Vec<(&'static str, bool)> = Vec::new();
             if asking {
                 let security_on = flags.security || (!flags.no_security && security_config);
-                let items = init::wizard::items_for(
-                    &flags,
-                    security_on,
-                    skip_telemetry_question.is_some(),
-                    skip_service_question.is_some(),
-                );
+                let skipped: Vec<&str> = [
+                    ("telemetry", skip_telemetry_question.is_some()),
+                    ("collector-service", skip_service_question.is_some()),
+                ]
+                .into_iter()
+                .filter_map(|(id, skip)| skip.then_some(id))
+                .collect();
+                let items = init::wizard::items_for(&flags, security_on, &skipped);
                 print!("{}", init::wizard::welcome(&caps));
                 let stdin = std::io::stdin();
                 let mut input = stdin.lock();
@@ -629,10 +631,13 @@ fn main() {
                 return;
             }
             let outcome = init::run::run(&paths);
-            let collector_next: Vec<String> =
-                init::collector_service::next_step(&paths.home, &outcome.steps)
-                    .into_iter()
-                    .collect();
+            let collector_next: Vec<String> = init::collector_service::next_step(
+                &paths.home,
+                &outcome.steps,
+                init::collector_service::START_WAIT,
+            )
+            .into_iter()
+            .collect();
             print!(
                 "{}",
                 init::wizard::progress(&caps, &outcome.steps, &collector_next)

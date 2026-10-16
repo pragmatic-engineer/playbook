@@ -144,20 +144,11 @@ pub fn items(flags: &Flags, security_on: bool) -> Vec<Item> {
     list
 }
 
-/// [`items`] without the telemetry question when `skip_telemetry` is true,
-/// and without the collector-service question when `skip_service` is true.
-pub fn items_for(
-    flags: &Flags,
-    security_on: bool,
-    skip_telemetry: bool,
-    skip_service: bool,
-) -> Vec<Item> {
+/// [`items`] without the questions of the parts in `skip`, each a part id
+/// whose question setup replaced with one line.
+pub fn items_for(flags: &Flags, security_on: bool, skip: &[&str]) -> Vec<Item> {
     let mut list = items(flags, security_on);
-    list.retain(|i| match i.choice.id.as_str() {
-        "telemetry" => !skip_telemetry,
-        "collector-service" => !skip_service,
-        _ => true,
-    });
+    list.retain(|i| !skip.contains(&i.choice.id.as_str()));
     list
 }
 
@@ -358,8 +349,8 @@ mod tests {
     fn the_telemetry_question_is_left_out_when_it_is_skipped() {
         let flags = Flags::default();
 
-        let skipped = items_for(&flags, false, true, true);
-        let asked = items_for(&flags, false, false, false);
+        let skipped = items_for(&flags, false, &["telemetry", "collector-service"]);
+        let asked = items_for(&flags, false, &[]);
 
         assert!(!skipped.iter().any(|i| i.choice.id == "telemetry"));
         assert!(!skipped.iter().any(|i| i.choice.id == "collector-service"));

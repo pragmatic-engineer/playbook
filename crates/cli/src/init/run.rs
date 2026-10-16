@@ -340,7 +340,7 @@ pub(crate) fn settings_and_hooks_steps(paths: &InitPaths, epoch: u64) -> (StepRe
 /// service manager runs only when `paths.home` is the home of the account.
 pub(crate) fn collector_service_step(paths: &InitPaths) -> StepReport {
     use crate::init::collector_service::{program, step};
-    let manager = crate::usage::service::manager_for(&paths.home);
+    let manager = crate::service_manager::manager_for(&paths.home);
     step(
         &paths.home,
         &program(),

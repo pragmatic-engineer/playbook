@@ -1447,3 +1447,41 @@ fn doctor_names_the_collector_service_and_the_command_that_adds_it() {
         text(&gone)
     );
 }
+
+#[test]
+fn a_no_to_the_collector_service_shows_in_doctor() {
+    let b = Box::new("svc-declined");
+    point_settings_at_collector(&b, free_port());
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args([
+            "setup",
+            "--no-collector-service",
+            "--no-hooks",
+            "--no-statusline",
+            "--no-path",
+            "--no-telemetry",
+            "--no-attribution-off",
+        ])
+        .env("HOME", b.home())
+        .current_dir(b.home())
+        .env_remove("CLAUDE_CODE_ENABLE_TELEMETRY")
+        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .output()
+        .unwrap();
+
+    let rows = b.run_with_env(&[]);
+
+    let mine = telemetry_rows(&rows);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("you said no"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    if playbook::usage::service::Kind::current().is_some() {
+        assert!(
+            text(&mine).contains("INFO no collector service (you said no)"),
+            "{}",
+            text(&mine)
+        );
+    }
+}
