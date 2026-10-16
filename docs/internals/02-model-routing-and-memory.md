@@ -217,4 +217,4 @@ An omitted `subagent_type` forks the parent conversation and bills its full hist
 
 ### Return cap
 
-Subagent returns are capped at about 300 words by the agent prompts and the `Return` line of the brief template, and `TaskOutput` carries the same compact message. The named output file is the deliverable and is not capped, so the delegating-subagents file handoff rule is unchanged.
+Subagent returns are capped at about 300 words by the agent prompts and the `Return` line of the brief template. The named output file is the deliverable and is not capped, so the delegating-subagents file handoff rule is unchanged.

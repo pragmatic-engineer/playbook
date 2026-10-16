@@ -64,7 +64,7 @@ Constraints: <scope, files not to touch, read-only or not>
 Return: status, findings as file:line, output path; at most about 300 words
 ```
 
-The `Return` line caps the message, not the work: the full report goes in the output file, uncapped. Every agent's prompt carries the same cap. To keep the parent context small, read a finished agent's output file instead of calling `TaskOutput`, and when you must call it, ask once for the compact result rather than polling.
+The `Return` line caps the message, not the work: the full report goes in the output file, uncapped. Every agent's prompt carries the same cap. To keep the parent context small, read a finished agent's output file for detail, and do not poll it while the agent runs.
 
 Fork only when the child needs the decisions and corrections made earlier in this session and writing them down would cost more than the inheritance. That is rare: the measured forks were research, review, edits and commit text, all of which a brief covers. Classification of every playbook spawn site is in [references/briefs.md](references/briefs.md).
 
