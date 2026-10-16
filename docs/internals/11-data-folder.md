@@ -1,6 +1,6 @@
 # Data folder
 
-Every database a playbook tool creates lives in one folder, `~/.config/playbook/data`. The folder is owner only (mode 0700) and is made the first time a database is opened. It is the same folder for `playbook`, `playbook-telemetry` (`pbtop`) and `playbook-code`. `playbook path data` prints it.
+Every database a playbook tool creates lives in one folder, `~/.config/playbook/data`. The folder is owner only (mode 0700) and is made the first time a database is opened. It is the same folder for `playbook`, `pbtop` and `playbook-code`. `playbook path data` prints it.
 
 ## What is in it
 
