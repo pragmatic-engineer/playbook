@@ -9,9 +9,11 @@
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
-/// The plugin folder of a playbook checkout (ADR 0032).
-const PLUGIN_DIR: &str = "plugins/playbook";
-const PLUGIN_MARKER: &str = "plugins/playbook/.claude-plugin/plugin.json";
+// The plugin folder of a playbook checkout (ADR 0032).
+use crate::plugin_root::CHECKOUT_PLUGIN_DIR as PLUGIN_DIR;
+
+/// The plugin manifest, relative to `PLUGIN_DIR`.
+const PLUGIN_MARKER: &str = ".claude-plugin/plugin.json";
 const NOT_A_CHECKOUT: &str = "not a playbook checkout";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,7 +123,7 @@ fn from_check(name: &'static str, outcome: Result<String, String>) -> CheckResul
 /// skipped, never failed, so the command is safe to run anywhere.
 pub fn run_in(root: &Path) -> Report {
     let mut report = Report::default();
-    if !root.join(PLUGIN_MARKER).is_file() {
+    if !root.join(PLUGIN_DIR).join(PLUGIN_MARKER).is_file() {
         for name in ["manifest", "agents", "settings"] {
             report
                 .checks

@@ -2,9 +2,9 @@
 
 - **Status:** Accepted, amended by [ADR 0041](0041-retire-playbook-telemetry.md)
 - **Date created:** 2026-10-16
-- **Date modified:** 2026-10-16
+- **Date modified:** 2026-10-17
 - **Supersedes:** decisions 3 and 5 of [ADR 0032](0032-plugin-in-the-playbook-repo.md), the plugin's own version line and its own release workflow, and the part of its decision 2 that leaves the marketplace entry without a `ref`.
-- **Amends:** [ADR 0034](0034-self-healing-upgrades.md) decisions 9, 10 and 11, the supported plugin range and `minBinaryVersion`. [ADR 0029](0029-cargo-workspace-monorepo.md) decisions 4 and 5, the `telemetry-v` tags and the separate telemetry version. [ADR 0037](0037-release-notes-from-conventional-commits.md) decisions 1.1 and 1.3, the `plugin` component and the playbook paths, decision 2, the plugin release page, decision 3, the plugin version bump, and decision 5.6, the plugin notes.
+- **Amends:** [ADR 0034](0034-self-healing-upgrades.md) decisions 9, 10 and 11, the supported plugin range and `minBinaryVersion`. [ADR 0029](0029-cargo-workspace-monorepo.md) decisions 4 and 5, the `telemetry-v` tags and the separate telemetry version. [ADR 0037](0037-release-notes-from-conventional-commits.md) decisions 1.1 and 1.3, the `plugin` and `telemetry` components and the playbook paths, decision 2, the plugin release page, decision 3, the plugin version bump, and decision 5.6, the plugin notes.
 
 ## Context
 

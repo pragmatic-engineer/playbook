@@ -22,7 +22,7 @@ const ORPHAN_MARKER: &str = ".orphaned_at";
 const PLUGIN_NAME: &str = "playbook";
 
 /// Where the plugin files sit inside the playbook source checkout.
-const CHECKOUT_PLUGIN_DIR: &str = "plugins/playbook";
+pub const CHECKOUT_PLUGIN_DIR: &str = "plugins/playbook";
 
 /// The plugin folder inside the checkout at `root`: `plugins/playbook` when
 /// it exists, else `root` itself, for a checkout that holds only the plugin.
