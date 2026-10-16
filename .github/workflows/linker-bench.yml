@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# Temporary measurement, closed without merging: the default linker against
+# mold for the test build on Linux.
+
+name: linker-bench
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mold
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold && mold --version && rustc -vV
+
+      - name: Fetch the crates
+        run: cargo fetch --locked
+
+      - name: Measure
+        run: |
+          set -euo pipefail
+          t() { local s e; s=$(date +%s.%N); "$@" >/dev/null 2>&1; e=$(date +%s.%N); echo "$e - $s" | bc; }
+          for mode in default mold; do
+            export CARGO_TARGET_DIR="$PWD/target-$mode"
+            if [ "$mode" = mold ]; then export RUSTFLAGS="-C link-arg=-fuse-ld=mold"; else unset RUSTFLAGS; fi
+            cold=$(t cargo test --workspace --no-run --locked)
+            touch crates/common/src/lib.rs
+            warm=$(t cargo test --workspace --no-run --locked)
+            touch crates/cli/src/lib.rs
+            cli=$(t cargo test --workspace --no-run --locked)
+            echo "$mode: cold $cold s, after touching common $warm s, after touching cli $cli s" | tee -a "$GITHUB_STEP_SUMMARY"
+            f="$(find "$CARGO_TARGET_DIR/debug/deps" -maxdepth 1 -type f -name 'cli_smoke-*' ! -name '*.d' | head -1)"
+            readelf -p .comment "$f" | grep -iE 'lld|mold|gnu' | head -3 | tee -a "$GITHUB_STEP_SUMMARY"
+            du -sh "$CARGO_TARGET_DIR" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
