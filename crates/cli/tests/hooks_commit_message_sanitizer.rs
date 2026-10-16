@@ -640,7 +640,7 @@ fn gh_pr_text_is_cleaned_in_every_form() {
         format!("gh pr new --title 'feat: x' --body={}", sh(&body)),
         format!("gh pr edit 7 --body {}", sh(&body)),
         format!("gh pr create --title 'feat: x' -b {}", sh(&body)),
-        format!("gh pr create --title 'Generated with Claude Code' --body ok"),
+        "gh pr create --title 'Generated with Claude Code' --body ok".to_string(),
         format!("gh pr create --title t --body \"$(cat <<'EOF'\n{body}\nEOF\n)\""),
         format!("gh pr create --title t --body-file {}", body_file.display()),
         format!("gh pr create --title t --body-file - <<'EOF'\n{body}\nEOF"),
