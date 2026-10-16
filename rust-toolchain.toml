@@ -21,4 +21,4 @@
 # exposure is the next actual release tag.
 
 [toolchain]
-channel = "1.97.0"
+channel = "1.99.1"
