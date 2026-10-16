@@ -13,9 +13,10 @@
 # the same version and goes on from there:
 #   prepare  open the release pull request with the bump and the changelog
 #            section, and wait for it to merge through the merge queue;
-#   macos    build and test the release commit on macOS through rust-ci.yml,
-#            which pull requests and the merge queue run on Linux only. A
-#            red or missing result stops the run before the tag;
+#   macos    build and test the release commit on macOS through rust-ci.yml.
+#            Pull requests and the merge queue run Linux only, except the
+#            release pull request. A red or missing result stops the run
+#            before the tag, or before the draft when it starts at publish;
 #   tag      create the tag vX.Y.Z on the merged commit with the igorjs app
 #            token, which the "Protect release tags" ruleset lets through;
 #   publish  build the five targets, attach the assets to a draft release,
@@ -247,6 +248,9 @@ jobs:
       contents: read
     uses: ./.github/workflows/rust-ci.yml
     with:
+      # In order: the merged release pull request, the release commit the
+      # plan found (tag state), the existing tag (publish state), and the
+      # dispatch commit on a dry run that starts at prepare.
       ref: ${{ needs.prepare.outputs.sha || needs.plan.outputs.commit || (needs.plan.outputs.state == 'publish' && needs.plan.outputs.tag) || (needs.plan.outputs.dry_run == 'true' && github.sha) || '' }}
 
   # Creates vX.Y.Z on the commit that carries the version. When GitHub
@@ -285,22 +289,23 @@ jobs:
           DISPATCH_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          if [ -z "$SHA" ] && [ "$DRY_RUN" != "true" ]; then
+            echo "::error::no commit to tag for $VERSION." >&2; exit 1
+          fi
+          # The commit the macOS gate must have passed on. A dry run that
+          # starts at prepare has no release commit and tests the dispatch one.
+          want="${SHA:-$DISPATCH_SHA}"
+          if [ "$MACOS_RESULT" != success ] || [ "$MACOS_SHA" != "$want" ]; then
+            echo "::error::macOS build and test must pass on $want before the tag (result: ${MACOS_RESULT:-none}, tested: ${MACOS_SHA:-nothing})." >&2
+            exit 1
+          fi
           if [ -z "$SHA" ]; then
-            [ "$DRY_RUN" = "true" ] || { echo "::error::no commit to tag for $VERSION." >&2; exit 1; }
-            if [ "$MACOS_RESULT" != success ] || [ "$MACOS_SHA" != "$DISPATCH_SHA" ]; then
-              echo "::error::the macOS gate did not pass on $DISPATCH_SHA (result: ${MACOS_RESULT:-none}, tested: ${MACOS_SHA:-nothing})." >&2
-              exit 1
-            fi
-            echo "A dry run has no release commit to tag. The macOS gate passed on $DISPATCH_SHA."
+            echo "A dry run has no release commit to tag. The macOS gate passed on $want."
             exit 0
           fi
           # The release pull request merged after the checkout, so fetch.
           git fetch --quiet origin "$MAIN"
           git checkout --quiet "$SHA"
-          if [ "$MACOS_RESULT" != success ] || [ "$MACOS_SHA" != "$SHA" ]; then
-            echo "::error::macOS build and test must pass on $SHA before the tag (result: ${MACOS_RESULT:-none}, tested: ${MACOS_SHA:-nothing})." >&2
-            exit 1
-          fi
           scripts/check-plugin.sh version
           [ "$(scripts/check-plugin.sh cargo-version)" = "$VERSION" ] \
             || { echo "::error::$SHA does not carry $VERSION." >&2; exit 1; }

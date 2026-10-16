@@ -155,15 +155,16 @@ jobs:
     # Run even if `changes` failed (fail open); never let a skipped needs
     # turn a required check into a skipped one.
     if: ${{ !cancelled() }}
-    # Keep the macOS condition the same as in LANE below.
-    runs-on: ${{ (matrix.os == 'macos-latest' && !(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v') || inputs.ref)) && 'ubuntu-latest' || matrix.os }}
+    # The macOS condition here and in LANE below must stay the same.
+    runs-on: ${{ (matrix.os == 'macos-latest' && !(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v') || (inputs.ref || '') != '')) && 'ubuntu-latest' || matrix.os }}
     permissions:
       contents: read
     outputs:
       sha: ${{ steps.head.outputs.sha }}
     env:
-      # Whether this leg builds and tests. Each step below checks it. It
-      # reads the event, not the `changes` outputs, so it fails open.
+      # Whether this leg builds and tests. Each step below checks it. The
+      # macOS condition matches runs-on above and reads only the event, and
+      # a missing docs_only output counts as not docs-only, so it fails open.
       LANE: ${{ needs.changes.outputs.docs_only != 'true' && (matrix.os != 'macos-latest' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v') || (inputs.ref || '') != '') }}
       # Single source of truth for the cache key and the install command
       # below, so they can't drift apart. Bump deliberately, not implicitly.
@@ -323,9 +324,9 @@ jobs:
           # CVEs get caught, only skips recompiling the same binary.
           cargo audit
 
-      # Saved after a push to main on Linux, and after the daily run on macOS,
-      # the one run on main that builds macOS. PR and queue runs restore the
-      # main cache and skip the multi-minute save of a multi-GiB target dir.
+      # Linux saves after a push to main, and macOS only after the daily run.
+      # Every other run, manual runs and release gates included, restores
+      # the main cache and skips the multi-minute save of a large target dir.
       - name: Save cargo registry and build output (build-test)
         if: env.LANE == 'true' && success() && ((github.event_name == 'push' && runner.os == 'Linux') || (github.event_name == 'schedule' && runner.os == 'macOS'))
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
