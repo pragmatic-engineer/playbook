@@ -3,7 +3,16 @@
   "displayName": "Playbook",
   "version": "0.34.0",
   "metadata": {
-    "minBinaryVersion": "0.34.0"
+    "minBinaryVersion": "0.34.0",
+    "breakingChanges": [
+      {
+        "version": "0.35.0",
+        "component": "plugin",
+        "summary": "/playbook:setup now takes the flags of playbook setup with the same meaning, so a bare --yes no longer adds the launcher and the system prompt.",
+        "action": "/playbook:setup --yes --aliases --system-prompt",
+        "migration": null
+      }
+    ]
   },
   "description": "A pragmatic Claude Code toolkit: opinionated skills, slash commands and subagents for planning, review, memory, and guarded editing.",
   "author": {

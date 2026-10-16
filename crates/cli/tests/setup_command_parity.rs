@@ -26,9 +26,11 @@ fn table(md: &str, heading: &str) -> Vec<Vec<String>> {
         .unwrap_or_else(|| panic!("setup.md has no `## {heading}` section"));
     md[start..]
         .lines()
+        // The empty line before the heading, then the heading itself.
         .skip(2)
         .skip_while(|l| !l.starts_with('|'))
         .take_while(|l| l.starts_with('|'))
+        // The header row and the divider row.
         .skip(2)
         .map(|l| {
             l.trim()
@@ -104,10 +106,13 @@ fn the_flag_table_matches_playbook_setup_help() {
 #[test]
 fn the_argument_hint_names_every_flag() {
     let md = setup_md();
-    let hint = md
+    let hint: Vec<&str> = md
         .lines()
         .find_map(|l| l.strip_prefix("argument-hint: "))
-        .expect("argument-hint");
+        .expect("argument-hint")
+        .split(|c: char| "[]|\" ".contains(c))
+        .filter(|t| !t.is_empty())
+        .collect();
     for (names, _) in help_rows() {
         let long = names
             .split(", ")
@@ -116,7 +121,7 @@ fn the_argument_hint_names_every_flag() {
             .expect("a long name");
         let flag = long.split(' ').next().unwrap_or(long);
         if flag != "--defaults" {
-            assert!(hint.contains(flag), "argument-hint lacks {flag}");
+            assert!(hint.contains(&flag), "argument-hint lacks {flag}");
         }
     }
 }
@@ -146,15 +151,35 @@ fn the_question_table_matches_the_wizard() {
     }
 }
 
+/// The starts of the lines that skip the telemetry question. Older binaries
+/// word the rest of the line differently, so the command matches on these.
+const SKIP_PREFIXES: [&str; 2] = ["telemetry: already", "telemetry: switched off"];
+
 #[test]
-fn the_command_names_the_telemetry_skip_lines_and_the_welcome() {
+fn the_command_spots_every_telemetry_skip_line() {
     let md = setup_md();
+    for prefix in SKIP_PREFIXES {
+        assert!(
+            md.contains(&format!("`{prefix}`")),
+            "setup.md must name `{prefix}`"
+        );
+    }
     for line in [
         telemetry::ENABLED_LINE,
         telemetry::SET_UP_LINE,
         telemetry::OFF_ELSEWHERE_LINE,
-        wizard::WELCOME,
     ] {
-        assert!(md.contains(line), "setup.md must quote: {line}");
+        assert!(
+            SKIP_PREFIXES.iter().any(|p| line.starts_with(p)),
+            "no prefix in setup.md matches: {line}"
+        );
     }
+}
+
+#[test]
+fn the_command_quotes_the_welcome() {
+    assert!(
+        setup_md().contains(wizard::WELCOME),
+        "setup.md must quote the welcome text"
+    );
 }

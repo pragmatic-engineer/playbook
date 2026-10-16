@@ -52,6 +52,9 @@ fn run_with(name: &str, args: &[&str], terminal_stderr: bool) -> Run {
         .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
         .current_dir(&home);
     let out = if terminal_stderr {
+        // A terminal on stderr turns on the release check, which would call
+        // the network and write to the scratch home. Headless turns it off.
+        cmd.env("PLAYBOOK_HEADLESS", "1");
         terminal::output(cmd)
     } else {
         cmd.output().expect("playbook should spawn")
@@ -260,6 +263,13 @@ mod terminal {
             )
         };
         assert_eq!(rc, 0, "openpty failed");
+        for fd in [master, slave] {
+            // SAFETY: fd is a descriptor openpty just opened. Close on exec
+            // keeps it out of processes other tests spawn meanwhile; the
+            // child still gets the slave as its stderr.
+            let rc = unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+            assert_eq!(rc, 0, "fcntl failed");
+        }
         // SAFETY: both descriptors are new, open and owned only here.
         let (master, slave) = unsafe { (File::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
         cmd.stdin(Stdio::null())
@@ -303,7 +313,7 @@ fn init_warns_once_on_a_terminal_and_only_on_stderr() {
     let init = run_with("init", &args, true);
 
     // Assert
-    let line = "playbook init is deprecated, use: playbook setup\n";
+    let line = format!("{}\n", playbook::INIT_DEPRECATION);
     assert_eq!(init.code, setup.code);
     assert_eq!(init.stdout, setup.stdout, "init changed stdout");
     assert!(!init.stdout.contains("deprecated"), "{}", init.stdout);

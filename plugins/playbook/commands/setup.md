@@ -16,13 +16,13 @@ The plugin's skills and commands work without the binary. This command, like /pl
 
 In the steps below, `playbook setup` means `playbook init` when Step 1 found an older binary (older versions: `playbook init`).
 
-## Help
-
-If `$ARGUMENTS` holds `--help` or `-h`, run `playbook setup --help`, or the old name with `--help` when that fails with "unrecognized subcommand" (older versions: `playbook init --help`), and print its output verbatim in a text block, with nothing before or after it. Then stop. The help writes nothing.
-
 ## Step 0: Read the run mode
 
-Do this first. If `command -v playbook` finds nothing, stop with one line: "playbook is not on PATH. If you just installed it, open a new terminal and run /playbook:setup again; otherwise run `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash` first." Otherwise read the run mode for this run's arguments. Intent: run-mode. If the session's tool map (printed at session start) lists it, use that command, then read `skills/delegating-subagents/references/run-context.md` in this plugin and follow it for the warning, the both-flags exit, any other failure, and an outdated binary. Otherwise do this: if `$ARGUMENTS` holds both `--auto` and `--ask`, stop with one line saying they conflict; `--auto` or `--ask` alone sets the mode; with neither, use `PLAYBOOK_MODE` when it is `auto` or `ask`; else the mode is `ask`.
+Do this first. If `command -v playbook` finds nothing, stop with one line: "playbook is not on PATH. If you just installed it, open a new terminal and run /playbook:setup again; otherwise run `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash` first."
+
+If `$ARGUMENTS` holds `--help` or `-h`, run `playbook setup --help`, or the old name with `--help` when that fails with "unrecognized subcommand" (older versions: `playbook init --help`). Print its output verbatim in a text block, with nothing before or after it, and stop. The help changes nothing.
+
+Otherwise read the run mode for this run's arguments. Intent: run-mode. If the session's tool map (printed at session start) lists it, use that command, then read `skills/delegating-subagents/references/run-context.md` in this plugin and follow it for the warning, the both-flags exit, any other failure, and an outdated binary. Otherwise do this: if `$ARGUMENTS` holds both `--auto` and `--ask`, stop with one line saying they conflict; `--auto` or `--ask` alone sets the mode; with neither, use `PLAYBOOK_MODE` when it is `auto` or `ask`; else the mode is `ask`.
 
 If the mode is `auto`, stop here. Print one line and nothing else: "/playbook:setup needs a person to run it, because it changes your global settings and shell files outside this repo." Do not run any later step.
 
@@ -41,48 +41,56 @@ playbook setup --help >/dev/null 2>&1 && echo setup || echo init
 Take `$ARGUMENTS` word by word:
 
 - Drop `--auto` and `--ask`. Step 0 read them, and the binary does not take them.
-- Replace `--install-aliases` with `--aliases` and `--use-system-prompt` with `--system-prompt`, and say so in one line. These are the old names this command used.
-- Keep every other word as it is, in order. Do not check the flags yourself: the binary checks them. When it exits with code 2, show its error verbatim and stop.
+- Replace the old names this command used, keeping what they meant: `--install-aliases` becomes `--yes --aliases`, and `--use-system-prompt` becomes `--yes --aliases --system-prompt`. Say so in one line.
+- Every other word must be a flag from the Flags table below, or the value after `--only` or `--explain`. A value is part names from the Questions table or `security`, joined by commas. When a word is neither, stop with one line that names it and points to `/playbook:setup --help`. Ask nothing and run nothing.
 
-The rest of this file calls the kept words the arguments.
+The rest of this file calls the kept words the arguments. A part flag is any flag in the Flags table from `--hooks` to `--no-short-name`. When you build a command, put each argument in single quotes.
 
 ## Step 3: Runs that ask nothing
 
 These runs ask no question in a terminal either, so pass the arguments straight to the binary:
 
-- The arguments hold `--dry-run` or `--explain`: run `playbook setup` with the arguments, print the output verbatim, and stop. Both write nothing.
+- The arguments hold `--dry-run` or `--explain`: run `playbook setup` with the arguments, print the output verbatim, and stop. Neither changes any part. When the arguments hold `--dry-run` and none of `--yes`, `-y`, `--defaults` or `--only`, add one line after the output: "This session has no terminal, so this preview shows the hooks, the status line and telemetry off unless a flag turns them on. Answering the questions with the defaults turns them on."
 - The arguments hold `--yes`, `-y`, `--defaults` or `--only`, or `--telemetry` with no other part flag (a bare `--telemetry` means `--only telemetry`): the user already chose. Go to Step 6 with the arguments as they are.
 
 Otherwise go on to Step 4.
 
 ## Step 4: Ask the questions
 
-`playbook setup` in a terminal asks one question per part, in the order of the Questions table below. It skips a part when the arguments already decide it with that part's `--x` or `--no-x` flag. Do the same:
+`playbook setup` in a terminal asks one question per part, in the order of the Questions table below. It skips a part when the arguments hold that part's `--x` or `--no-x` flag. Do the same:
 
 1. Print the welcome text, verbatim: "This walks through each change playbook can make to your machine. Nothing is written until you confirm at the end. playbook never changes Claude Code's memory, and it edits settings.json only for the parts you accept."
-2. Run `playbook setup --dry-run`. It writes nothing. When a line of its output is one of these three, print that line and do not ask the telemetry question, since setup would not ask it either:
-   - `telemetry: already enabled in your environment or Claude Code settings, so nothing to ask`
-   - `` telemetry: already set up by you, left as it is (`playbook usage status` shows how it is read) ``
-   - `` telemetry: switched off by a setting setup will not change (`playbook usage status` shows where), so nothing to ask ``
-3. Run `playbook setup --explain` once. It writes nothing. For each part it prints a `What it does:` line.
-4. Ask the remaining questions with the AskUserQuestion tool, in table order, at most four questions per call. Each question uses the Header and Question columns verbatim and has two options, Yes and No. The default option comes first, and its label ends with " (Recommended)". The Yes description is the part's `What it does:` line from step 3. The No description is the If no column.
+2. Run both probes in one Bash call. Neither changes any part:
+
+   ```bash
+   playbook setup --dry-run; echo '--- explain ---'; playbook setup --explain; echo '--- security ---'; playbook config get security.defaults
+   ```
+
+3. Read the dry run output. A line that starts with `telemetry: already` or `telemetry: switched off` means setup would not ask about telemetry. Print that line and drop the telemetry question.
+4. Read the explain output. For each part it prints a `What it does:` line.
+5. Ask the remaining questions with the AskUserQuestion tool, in table order, at most four questions per call. For each question:
+   - The header and the question are the Header and Question columns, verbatim.
+   - There are two options, Yes and No. The default option comes first, and its label ends with " (Recommended)".
+   - The Yes description is the part's `What it does:` line from sub-step 4.
+   - The No description is the If no column.
+   - An answer whose label starts with Yes means the part's `--x` flag. An answer whose label starts with No means its `--no-x` flag.
 
 ## Step 5: Summary and confirm
 
-Print "Summary of your choices", then one line per part in table order: the part, on or off, and "will be applied" or "left as it is", plus "(set by a flag)" when the arguments decided it. Add `security: on (set by a flag)` when the arguments hold `--security`.
+Print "Summary of your choices", then one line per part in table order: the part, on or off, and "will be applied" or "left as it is", plus "(set by a flag)" when the arguments decided it. For a telemetry question dropped in Step 4, print the dry run line from sub-step 3 in place of on or off. Add the line `security: on, will be applied` when the arguments hold `--security`, or when `security.defaults` printed true and the arguments do not hold `--no-security`.
 
-Build the command: `playbook setup`, then the arguments, then for each answered part its `--x` flag on a yes or its `--no-x` flag on a no. Print the command in a bash block.
+Build the command: `playbook setup`, then the arguments, then for each answered part its `--x` or `--no-x` flag. When Step 4 dropped the telemetry question and the arguments hold no telemetry flag, also add `--telemetry`: a terminal run keeps telemetry on in that case, and setup still leaves a setting of yours alone. Print the command in a bash block.
 
 Ask "Apply these changes?" with the AskUserQuestion tool, header "Apply", options "Yes (Recommended)" and "No". On No, print "Cancelled. Nothing was changed." and stop.
 
-Every asked part now has a flag, so the binary writes what the user chose even though this session has no terminal. A part the user did not answer keeps the binary's own rule: without a terminal and without `--yes`, hooks, the status line and telemetry stay off unless a flag turns them on.
+Every asked part now has a flag, so the binary writes what the user chose even though this session has no terminal.
 
 ## Step 6: Run
 
 Run the command, then check the tools the plugin needs and install only the missing ones:
 
 ```bash
-playbook setup <the flags from Step 3 or Step 5>
+playbook setup <the flags from Step 3 or Step 5, each in single quotes>
 playbook deps ensure --builtin
 ```
 
@@ -90,9 +98,9 @@ The binary carries its own settings template, system prompt and Brewfile, so nei
 
 When the setup command fails, check these cases in order:
 
-1. It fails with "unexpected argument": the installed binary is older than the plugin. Run the same command again without that flag, and tell the user to upgrade with `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`.
+1. It fails with "unexpected argument": the installed binary is older than the plugin. Run `playbook setup --help`, remove every flag it does not list, and run the command once more. Tell the user which flags were left out and to upgrade with `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`.
 2. It reports the settings step skipped with "no template shipped": the binary is also older than the plugin. Give the same upgrade advice, because no guards were wired.
-3. Any other non-zero exit: still run the second command, then report which setup steps failed.
+3. Any other non-zero exit: show the error verbatim, still run the second command, then report which setup steps failed.
 
 If `playbook deps ensure --builtin` fails with "unrecognized subcommand" or "unexpected argument", skip it and say so.
 
@@ -135,7 +143,7 @@ The same flags as `playbook setup`, with the same text as `playbook setup --help
 | `--explain [<PART>]` | Describe a part, or every part when none is named, and change nothing |
 | `-h`, `--help` | Print help (see a summary with '-h') |
 
-This command also reads `--auto` and `--ask` (the run mode, Step 0), and the old names `--install-aliases` and `--use-system-prompt` (Step 2). It passes none of them to the binary.
+This command also reads `--auto` and `--ask` (the run mode, Step 0), and the old names `--install-aliases` and `--use-system-prompt` (Step 2), which it turns into the flags they stood for. It passes none of these four to the binary.
 
 ## Questions
 
