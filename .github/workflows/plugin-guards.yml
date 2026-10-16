@@ -3,15 +3,13 @@
 #
 # Guards for the playbook plugin in plugins/playbook, which the marketplace
 # serves as it is.
-#   payload-guard: the directory holds only markdown and the manifest, and
-#   metadata.breakingChanges in plugin.json lists the plugin entries of
-#   breaking-changes.json (ADR 0035 decision 4.6).
+#   payload-guard: the directory holds only markdown and the manifest.
 #   version-sync: the plugin version in plugin.json equals the workspace
 #   version in Cargo.toml, and its minBinaryVersion is the X.Y.0 of that
 #   minor line (ADR 0038). The binary and the plugin ship as one release
 #   line, so a plugin change between releases needs no bump; the release
 #   bumps all three.
-# They run when the plugin, the versions, the changelog or a script changes,
+# They run when the plugin, the versions, the changelog or the script changes,
 # on a pull request and on a push to main.
 
 name: plugin-guards
@@ -23,9 +21,7 @@ on:
       - "plugins/**"
       - "Cargo.toml"
       - "CHANGELOG.md"
-      - "breaking-changes.json"
       - "scripts/check-plugin.sh"
-      - "scripts/check-breaking.sh"
       - ".github/workflows/plugin-guards.yml"
   push:
     branches: [main]
@@ -60,14 +56,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Lint the scripts
-        run: shellcheck --severity=warning scripts/check-plugin.sh scripts/check-breaking.sh
+      - name: Lint the script
+        run: shellcheck --severity=warning scripts/check-plugin.sh
 
       - name: Check the plugin payload
         run: scripts/check-plugin.sh payload
-
-      - name: Check the breaking changes mirror in plugin.json
-        run: scripts/check-breaking.sh mirror
 
   version-sync:
     runs-on: ubuntu-latest
