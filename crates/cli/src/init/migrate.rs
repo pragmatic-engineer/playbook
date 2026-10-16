@@ -23,6 +23,8 @@ pub const STATUSLINE_MIGRATION: &str = "0006-statusline-rust-command";
 pub const DEAD_HOOKS_MIGRATION: &str = "0011-dead-hook-scripts";
 /// The `Consent` item for the attribution-off part (ADR 0042).
 pub const ATTRIBUTION_MIGRATION: &str = "0015-attribution-off";
+/// The `Consent` item for the collector-service part (ADR 0043).
+pub const COLLECTOR_SERVICE_MIGRATION: &str = "0016-collector-service";
 
 /// What a migration needs to find the state it moves.
 pub struct Ctx {
@@ -219,7 +221,27 @@ pub fn registry() -> Vec<Migration> {
             },
             run: attribution_by_setup,
         },
+        Migration {
+            id: COLLECTOR_SERVICE_MIGRATION,
+            kind: Kind::Idempotent,
+            scope: Scope::Consent {
+                check: collector_service_pending,
+                command: crate::init::collector_service::COMMAND,
+            },
+            run: collector_service_by_setup,
+        },
     ]
+}
+
+/// Telemetry points at the collector and no service keeps it running (ADR
+/// 0043). Reported once, and never after the user said no.
+fn collector_service_pending(ctx: &Ctx) -> Option<String> {
+    crate::init::collector_service::pending(&ctx.home)
+}
+
+/// Setup's collector-service part installs the service after its question.
+fn collector_service_by_setup(_: &Ctx) -> Outcome {
+    Outcome::Quiet
 }
 
 /// `attribution` keys missing from settings.json (ADR 0042), unless the user
@@ -1512,6 +1534,6 @@ mod tests {
 
     #[test]
     fn the_schema_is_the_highest_registry_number() {
-        assert_eq!(schema(), 15);
+        assert_eq!(schema(), 16);
     }
 }

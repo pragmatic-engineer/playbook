@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date created:** 2026-10-17
 - **Date modified:** 2026-10-17
-- **Amends:** [ADR 0041](0041-retire-playbook-telemetry.md), whose context says no launchd or systemd unit starts the collector.
+- **Amends:** [ADR 0041](0041-retire-playbook-telemetry.md), whose context says no launchd or systemd unit starts the collector. Decision 6 of [ADR 0034](0034-self-healing-upgrades.md), for one `Consent` check that records that it reminded the user.
 
 ## Context
 

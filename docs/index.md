@@ -89,7 +89,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0031](adr/0031-hooks-in-settings-json.md) | Put the hooks in settings.json | Accepted, amended by 0034 | 2026-10-14 |
 | [0032](adr/0032-plugin-in-the-playbook-repo.md) | Keep the plugin in the playbook repository | Accepted, amended by 0037, partly superseded by 0038 | 2026-10-14 |
 | [0033](adr/0033-telemetry-on-by-default.md) | Turn Claude Code telemetry on by default at install | Accepted | 2026-10-15 |
-| [0034](adr/0034-self-healing-upgrades.md) | One plugin root resolver and migrations between versions | Accepted, amended by 0037, 0038 and 0042 | 2026-10-15 |
+| [0034](adr/0034-self-healing-upgrades.md) | One plugin root resolver and migrations between versions | Accepted, amended by 0037, 0038, 0042 and 0043 | 2026-10-15 |
 | [0035](adr/0035-breaking-change-notices.md) | Breaking change notices on every update channel | Superseded by 0037 | 2026-10-15 |
 | [0036](adr/0036-release-check-and-automatic-updates.md) | A release check and automatic updates | Accepted, amended by 0037 | 2026-10-15 |
 | [0037](adr/0037-release-notes-from-conventional-commits.md) | Release notes built from Conventional Commits | Accepted, amended by 0038 and 0039 | 2026-10-16 |

@@ -30,6 +30,9 @@ pub const START_WAIT: Duration = Duration::from_secs(2);
 /// The state key that records a no, so the reminder stops.
 const DECLINED_KEY: &str = "collector-service/declined";
 
+/// The state key that records the one reminder of migration 0016.
+const REMINDED_KEY: &str = "collector-service/reminded";
+
 /// What setup does with the part, decided from the flags and the answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Choice {
@@ -247,6 +250,26 @@ pub fn preview(home: &Path, telemetry_on: bool, program: &Path) -> String {
     } else {
         format!("{file}: would write the {} and start it", kind.name())
     }
+}
+
+/// The `Consent` check of migration 0016: one line, once, when telemetry
+/// points at the collector and no service keeps it running. Nothing after
+/// the user said no or after the first reminder.
+pub fn pending(home: &Path) -> Option<String> {
+    if Kind::current().is_none()
+        || declined(home)
+        || has_key(home, REMINDED_KEY)
+        || service::find(home).is_some()
+        || !telemetry_points_here(home)
+    {
+        return None;
+    }
+    // Shown once: the record makes later checks quiet.
+    let _ = crate::state::set(&root(home), REMINDED_KEY, "1");
+    Some(
+        "telemetry is on, but nothing keeps the usage collector running, so telemetry is lost while it is down"
+            .to_string(),
+    )
 }
 
 /// The step `playbook uninstall` runs: stops and deletes the service file.
@@ -514,6 +537,29 @@ mod tests {
         assert!(after.ends_with("no change, already installed"), "{after}");
         assert!(line.is_some_and(|l| l.starts_with("collector-service: already installed")));
         assert_eq!(skip_line(&home), None, "a gone program asks again");
+    }
+
+    #[test]
+    fn the_reminder_shows_once_and_never_after_a_no() {
+        if Kind::current().is_none() {
+            return;
+        }
+        let home = telemetry_home("remind");
+        let said_no = telemetry_home("remind-no");
+        step(
+            &said_no,
+            Path::new("/p"),
+            Choice::Declined,
+            Kind::current(),
+            &Stopped,
+        );
+
+        let first = pending(&home);
+        let second = pending(&home);
+
+        assert!(first.is_some_and(|l| l.contains("collector")));
+        assert_eq!(second, None);
+        assert_eq!(pending(&said_no), None);
     }
 
     #[test]
