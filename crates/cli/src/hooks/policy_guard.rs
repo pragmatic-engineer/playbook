@@ -117,11 +117,25 @@ owner or repo in the text.";
 
 const RM_GUARD_CONFIG_REASON: &str = "The rm guard's allowed roots, the prose lint mode and the pull request rules are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Until then, work within the current setting and say so.";
 
-const SETTINGS_WRITE_REASON: &str = "Claude Code settings files (settings.json and settings.local.json, user or project) are changed through playbook, not by writing the file. Use `playbook setup --yes` to add the hooks, `playbook uninstall` to remove them, `playbook config set <key> <value>` for a playbook setting, or `playbook doctor` to check and fix the setup. For any other settings change, ask the user to make it themselves in the prompt with `!`. Reading the file is fine.";
+/// The part both settings reasons share: what to ask the user and what the
+/// model may run itself.
+macro_rules! settings_reason_tail {
+    () => {
+        " Ask the user to run `playbook setup --only hooks` (to add the hooks) or `playbook uninstall` (to remove them) themselves in the prompt with `!`. Use `playbook config set <key> <value>` for a playbook setting, or `playbook doctor` to check the setup. For any other settings change, ask the user to make it themselves in the prompt with `!`. Reading the file is fine."
+    };
+}
 
-const HOOK_ENTRIES_REASON: &str = "The hook entries in settings.json are the user's to change, not the model's. They are the guards that keep this session safe. Ask the user to run `playbook setup --yes` (to add them) or `playbook uninstall` (to remove them) themselves in the prompt with `!`, or to edit settings.json by hand. Until then, leave the hook entries as they are and say so; in an unattended run, report this and stop.";
+const SETTINGS_WRITE_REASON: &str = concat!(
+    "Claude Code settings files (settings.json and settings.local.json, user or project) are changed through playbook, not by writing the file.",
+    settings_reason_tail!()
+);
 
-const SETTINGS_EDIT_REASON: &str = "Claude Code settings files (settings.json and settings.local.json, user or project) are changed through playbook, not with the Edit or Write tool. Use `playbook setup --yes` to add the hooks, `playbook uninstall` to remove them, `playbook config set <key> <value>` for a playbook setting, or `playbook doctor` to check and fix the setup. For any other settings change, ask the user to make it themselves in the prompt with `!`. Reading the file is fine.";
+const HOOK_ENTRIES_REASON: &str = "The hook entries in settings.json are the user's to change, not the model's. They are the guards that keep this session safe. Ask the user to run `playbook setup --only hooks` (to add them) or `playbook uninstall` (to remove them) themselves in the prompt with `!`, or to edit settings.json by hand. Until then, leave the hook entries as they are and say so; in an unattended run, report this and stop.";
+
+const SETTINGS_EDIT_REASON: &str = concat!(
+    "Claude Code settings files (settings.json and settings.local.json, user or project) are changed through playbook, not with the Edit or Write tool.",
+    settings_reason_tail!()
+);
 
 const MEMORY_REASON: &str = "Claude Code's own memory is off limits here. Save the fact in playbook's store instead: ~/.config/playbook/memory/ for a global fact, <owner>/<repo>/ under it for a project fact.";
 
@@ -882,6 +896,7 @@ mod tests {
             "playbook uninstall --dry-run",
             "playbook uninstall --yes --dry-run",
             "playbook setup",
+            "playbook init",
             "cargo run -q -- doctor",
         ] {
             assert_eq!(deny(command), None, "{command}");

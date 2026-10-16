@@ -713,7 +713,7 @@ fn marker_endpoint(home: &Path) -> Option<String> {
         .map(|e| e.trim_end_matches('/').to_string())
 }
 
-const TELEMETRY_INIT_FIX: &str = "run: playbook setup --only telemetry";
+const TELEMETRY_SETUP_FIX: &str = "run: playbook setup --only telemetry";
 
 /// The telemetry rows: Claude Code's settings point at the playbook
 /// collector, the collector runs, and rows arrived in the last day. Each
@@ -758,7 +758,7 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
                     "telemetry is not set up in Claude Code settings"
                 },
             )
-            .hint(TELEMETRY_INIT_FIX)];
+            .hint(TELEMETRY_SETUP_FIX)];
         }
         Configured::Other => {
             let endpoint = merged_vars(&env.home, &cwd, false)
@@ -772,7 +772,7 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
                     Level::Warn,
                     "telemetry points at the playbook collector but CLAUDE_CODE_ENABLE_TELEMETRY is not 1",
                 )
-                .hint(TELEMETRY_INIT_FIX)];
+                .hint(TELEMETRY_SETUP_FIX)];
             }
             // The endpoint init wrote earlier, now out of step with the port.
             if theirs.is_some() && theirs == written.as_deref() && ours.is_some() {
@@ -785,7 +785,7 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
                         port.unwrap_or_default()
                     ),
                 )
-                .hint(TELEMETRY_INIT_FIX)];
+                .hint(TELEMETRY_SETUP_FIX)];
             }
             return vec![Row::new(
                 "-",

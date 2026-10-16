@@ -1093,7 +1093,7 @@ fn free_port() -> u16 {
 }
 
 #[test]
-fn telemetry_that_is_not_set_up_warns_with_the_init_command() {
+fn telemetry_that_is_not_set_up_warns_with_the_setup_command() {
     let b = Box::new("tel-none");
     b.settings("{}");
 
@@ -1109,7 +1109,7 @@ fn telemetry_that_is_not_set_up_warns_with_the_init_command() {
 }
 
 #[test]
-fn an_off_switch_warns_with_the_init_command() {
+fn an_off_switch_warns_with_the_setup_command() {
     let b = Box::new("tel-off");
     b.settings(r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}"#);
 

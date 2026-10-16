@@ -146,7 +146,7 @@ pub const SET_UP_LINE: &str =
 /// The line when telemetry is off and init cannot turn it on without
 /// overriding a setting of yours.
 pub const OFF_ELSEWHERE_LINE: &str =
-    "telemetry: switched off by a setting setup will not change (`playbook usage status` shows where), so nothing to ask";
+    "telemetry: switched off by a setting that `playbook setup` will not change (`playbook usage status` shows where), so nothing to ask";
 
 /// The line init prints before the telemetry question is skipped, or `None`
 /// when the question should be asked.
@@ -314,7 +314,7 @@ pub fn apply(
         if holds_all(&settings_path, &crate::cc::telemetry::env_for(&current)) {
             return StepReport::already_correct(
                 "telemetry",
-                "the variables setup wrote are still in place",
+                "the variables `playbook setup` wrote are still in place",
             );
         }
     }
