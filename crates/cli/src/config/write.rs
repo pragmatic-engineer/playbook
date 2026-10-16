@@ -31,7 +31,7 @@ pub fn set(
 ) -> Result<(), ConfigError> {
     validate_key_and_value(key, &value)?;
     require_global_for_user_key(key, tier == Tier::Global)?;
-    check_cap_order(key, &value, home, repo_slug)?;
+    check_cap_order(tier, key, &value, home, repo_slug)?;
     let root = crate::common::paths::playbook_root_from(home);
     super::store::put(&root, tier, repo_slug, key, &value)
 }
@@ -172,55 +172,82 @@ fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
 }
 
 const CEILING_KEY: &str = "auto.sessionCeilingUsd";
-const BUDGET_KEYS: [&str; 2] = ["auto.budgetUsd", "auto.agentBudgetUsd"];
+const BUDGET_KEYS: [(&str, u32); 2] = [
+    ("auto.budgetUsd", keys::AUTO_BUDGET_USD),
+    ("auto.agentBudgetUsd", keys::AUTO_AGENT_BUDGET_USD),
+];
 
 /// Keep a set `auto.sessionCeilingUsd` at least as large as `auto.budgetUsd`
 /// and `auto.agentBudgetUsd`, since a lower ceiling parks every agent before
-/// its own cap is reached. A ceiling of 0 means ten times `auto.budgetUsd`
-/// and is not checked. The other keys are read as they resolve for
-/// `repo_slug`, and a value that cannot be read leaves the write alone.
+/// its own cap is reached. Setting the ceiling checks it against both
+/// budgets; setting a budget checks only that budget against the ceiling. A
+/// ceiling of 0 means ten times `auto.budgetUsd` and is not checked. The
+/// other keys are read the way the spend hook reads them, as they resolve
+/// for `repo_slug`, and for a global write also as they resolve outside any
+/// repo, since a global value reaches every repo.
 fn check_cap_order(
+    tier: Tier,
     key: &str,
     value: &Value,
     home: &Path,
     repo_slug: Option<&str>,
 ) -> Result<(), ConfigError> {
-    if key != CEILING_KEY && !BUDGET_KEYS.contains(&key) {
-        return Ok(());
-    }
-    let usd = |other: &str| {
-        if other == key {
-            value.as_f64()
-        } else {
-            super::resolve(other, home, repo_slug)
-                .ok()
-                .and_then(|(value, _)| value.as_f64())
-        }
-    };
-    let Some(ceiling) = usd(CEILING_KEY).filter(|ceiling| *ceiling > 0.0) else {
-        return Ok(());
-    };
-    let Some((budget_key, budget)) = BUDGET_KEYS
+    let Some(budget_default) = BUDGET_KEYS
         .iter()
-        .filter_map(|budget_key| Some((*budget_key, usd(budget_key)?)))
-        .find(|(_, budget)| *budget > ceiling)
+        .find(|(budget_key, _)| *budget_key == key)
+        .map(|(_, default)| *default)
+        .or((key == CEILING_KEY).then_some(0))
     else {
         return Ok(());
     };
-    let reason = if key == CEILING_KEY {
-        format!(
-            "it is below {budget_key} ({budget}). Set it to 0 (ten times auto.budgetUsd) or to at least {budget}"
-        )
-    } else {
-        format!(
-            "it is above auto.sessionCeilingUsd ({ceiling}). Raise the ceiling first with `playbook config set auto.sessionCeilingUsd <usd>`, or set it to 0 (ten times auto.budgetUsd)"
-        )
-    };
-    Err(ConfigError::CapOrder {
-        key: key.to_string(),
-        value: value.to_string(),
-        reason,
-    })
+    let mut slugs = vec![repo_slug];
+    if tier == Tier::Global && repo_slug.is_some() {
+        slugs.push(None);
+    }
+    for slug in slugs {
+        let cents = |other: &str| {
+            super::resolve(other, home, slug)
+                .ok()
+                .and_then(|(value, _)| super::auto_cap_cents(&value))
+        };
+        let reason = if key == CEILING_KEY {
+            let Some(ceiling) = super::auto_cap_cents(value) else {
+                return Ok(());
+            };
+            BUDGET_KEYS.iter().find_map(|(budget_key, default)| {
+                let budget = cents(budget_key).unwrap_or(i64::from(*default) * 100);
+                (budget > ceiling).then(|| {
+                    format!(
+                        "it is below {budget_key} ({}). Set it to 0 (ten times auto.budgetUsd) or to at least {}",
+                        usd(budget),
+                        usd(budget)
+                    )
+                })
+            })
+        } else {
+            let budget = super::auto_cap_cents(value).unwrap_or(i64::from(budget_default) * 100);
+            cents(CEILING_KEY).filter(|ceiling| budget > *ceiling).map(|ceiling| {
+                format!(
+                    "it is above auto.sessionCeilingUsd ({}). Raise the ceiling first with `playbook config set auto.sessionCeilingUsd <usd>`, or set it to 0 (ten times auto.budgetUsd)",
+                    usd(ceiling)
+                )
+            })
+        };
+        if let Some(reason) = reason {
+            return Err(ConfigError::CapOrder {
+                key: key.to_string(),
+                value: value.to_string(),
+                reason,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Whole cents as dollars, without trailing zeros: 20000 is `200`, 250 `2.5`.
+fn usd(cents: i64) -> String {
+    let text = format!("{:.2}", cents as f64 / 100.0);
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 /// `auto.budgetUsd` and `auto.agentBudgetUsd` take any number of at least one cent, since the spend cap

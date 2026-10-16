@@ -23,7 +23,7 @@ Each migration has an id such as `0006-statusline-rust-command`. Ids are append 
 | Idempotent | On every `setup`, `migrate` and heal | No | Repairs state and does nothing when there is nothing to repair. It takes no lock, and a failure in one does not block the others. |
 | Manual | On every `setup` and in `playbook doctor pending-migrations` | No | Never changes anything. It prints a warning that tells you what to do. |
 
-No Auto migration ships today. The current entries are:
+`0017-auto-budget-defaults` is the first Auto migration. The current entries include:
 
 | Id | Kind | What it does |
 |---|---|---|
@@ -37,6 +37,7 @@ No Auto migration ships today. The current entries are:
 | `0008-remove-config-hash-script` | Idempotent | Removes the `hooks/lib/config-hash.sh` copy older installs placed under `~/.config/playbook`. The hash is computed inside the binary now. |
 | `0009-adopt-late-config-json` | Idempotent | Adopts a `config.json` written after the SQLite import when it agrees with the store, and warns with its path when it does not. |
 | `0010-state-files-to-sqlite` | Idempotent | Moves `migrations.state` and the worktree sweep markers into the `state` table. See [State store](08-state-store.md). |
+| `0017-auto-budget-defaults` | Auto | Moves a stored `auto.budgetUsd` or `auto.agentBudgetUsd` of exactly 5, the old default, to the new default once, held at a set global `auto.sessionCeilingUsd`. See [ADR 0028](../adr/0028-per-agent-auto-budget.md). |
 
 ## How playbook knows you edited a file
 

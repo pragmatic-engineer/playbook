@@ -596,6 +596,30 @@ fn the_default_caps_still_park_a_caller_past_its_new_cap() {
 }
 
 #[test]
+fn an_invalid_agent_budget_falls_back_to_fifty_with_a_one_time_note() {
+    // Arrange: the config turns invalid after the baseline call
+    let tree = Tree::with_defaults("bad-agent-budget");
+    let config = json!({"mode": "auto", "auto": {"agentBudgetUsd": "banana"}});
+    auto_env::seed_raw_global_config(&tree.s.home, &config.to_string());
+    tree.spend_agent("a1", 49.99);
+
+    // Act
+    let first = new_work_call(&tree, Some("a1"), "Edit", "");
+    let second = new_work_call(&tree, Some("a1"), "Edit", "");
+    tree.spend_agent("a1", 0.01);
+    let at_cap = new_work_call(&tree, Some("a1"), "Edit", "");
+
+    // Assert
+    let Outcome::Note(note) = first else {
+        panic!("the first call must note the invalid budget, got {first:?}");
+    };
+    assert!(note.contains("auto.agentBudgetUsd"), "{note}");
+    assert!(note.contains("$50.00"), "{note}");
+    assert!(!second.is_denied(), "{second:?}");
+    assert!(at_cap.reason().contains("budget reached"), "{at_cap:?}");
+}
+
+#[test]
 fn the_default_ceiling_is_ten_times_the_default_main_cap() {
     // Arrange: 45 agents at 45.00 each is 2025.00, each under its own cap.
     let tree = Tree::with_defaults("default-ceiling");

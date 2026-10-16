@@ -260,19 +260,32 @@ const OLD_AUTO_BUDGET_USD: f64 = 5.0;
 /// old default of 5 to the new default (ADR 0028, 2026-10-17 amendment). Any
 /// other stored value was chosen on purpose and stays. A key that is not
 /// stored already resolves to the new default, so nothing is written for it.
+/// A global `auto.sessionCeilingUsd` the user set below the new default caps
+/// the moved value, so the ceiling stays at or above both budgets.
 fn auto_budget_defaults(ctx: &Ctx) -> Outcome {
     use crate::config::keys::{AUTO_AGENT_BUDGET_USD, AUTO_BUDGET_USD};
     let root = playbook_root_from(&ctx.home);
+    let ceiling = crate::config::resolve("auto.sessionCeilingUsd", &ctx.home, None)
+        .ok()
+        .and_then(|(value, _)| crate::config::auto_cap_cents(&value));
     let rows = [
         ("auto.budgetUsd", AUTO_BUDGET_USD),
         ("auto.agentBudgetUsd", AUTO_AGENT_BUDGET_USD),
     ];
     let mut moved = Vec::new();
-    for (key, new) in rows {
-        let new_value = serde_json::Value::from(new);
+    for (key, default) in rows {
+        let new_value = match ceiling {
+            Some(cents) if cents < i64::from(default) * 100 => {
+                serde_json::Value::from(cents as f64 / 100.0)
+            }
+            _ => serde_json::Value::from(default),
+        };
         match crate::config::store::replace_number(&root, key, OLD_AUTO_BUDGET_USD, &new_value) {
             Ok(0) => {}
-            Ok(_) => moved.push(format!("{key} $5 to ${new}")),
+            Ok(_) => moved.push(format!(
+                "{key} $5 to ${}",
+                new_value.to_string().trim_end_matches(".0")
+            )),
             Err(err) => return Outcome::Failed(StepReport::failed("auto budget", err.to_string())),
         }
     }
@@ -282,10 +295,16 @@ fn auto_budget_defaults(ctx: &Ctx) -> Outcome {
             "no stored auto budget held the old $5 default",
         ));
     }
+    let capped = match ceiling {
+        Some(cents) if cents < i64::from(AUTO_BUDGET_USD) * 100 => {
+            " (held at your auto.sessionCeilingUsd; set it to 0 for ten times auto.budgetUsd)"
+        }
+        _ => "",
+    };
     Outcome::Done(StepReport::wired(
         "auto budget",
         format!(
-            "raised the old default: {}. Run `playbook config set <key> <usd>` to pick another cap",
+            "raised the old default: {}{capped}. Run `playbook config set <key> <usd>` to pick another cap",
             moved.join(", ")
         ),
     ))

@@ -145,6 +145,9 @@ struct Limits {
     agent_cap: i64,
     /// The whole tree's ceiling, past which every caller is parked.
     ceiling: i64,
+    /// `auto.sessionCeilingUsd` is set, so `config set` refuses a budget
+    /// above it.
+    ceiling_is_set: bool,
     pct: u64,
     budget_is_valid: bool,
     agent_budget_is_valid: bool,
@@ -160,12 +163,7 @@ impl Limits {
                 .ok()
                 .map(|(value, _)| value)
         };
-        let cents = |key: &str| {
-            value(key)
-                .and_then(|value| value.as_f64())
-                .map(to_cents)
-                .filter(|cents| *cents > 0)
-        };
+        let cents = |key: &str| value(key).and_then(|value| config::auto_cap_cents(&value));
         let budget = cents("auto.budgetUsd");
         let agent_budget = cents("auto.agentBudgetUsd");
         let pct = value("auto.warnPct")
@@ -173,10 +171,12 @@ impl Limits {
             .filter(|pct| (1..=100).contains(pct))
             .unwrap_or(DEFAULT_WARN_PCT);
         let cap = budget.unwrap_or(DEFAULT_BUDGET_CENTS);
+        let set_ceiling = cents("auto.sessionCeilingUsd");
         Limits {
             cap,
             agent_cap: agent_budget.unwrap_or(DEFAULT_AGENT_BUDGET_CENTS),
-            ceiling: cents("auto.sessionCeilingUsd").unwrap_or(cap.saturating_mul(CEILING_FACTOR)),
+            ceiling: set_ceiling.unwrap_or(cap.saturating_mul(CEILING_FACTOR)),
+            ceiling_is_set: set_ceiling.is_some(),
             pct,
             budget_is_valid: budget.is_some(),
             agent_budget_is_valid: agent_budget.is_some(),
@@ -334,7 +334,7 @@ fn enforce(payload: &Payload, limits: &Limits, root: &Path) {
         if !call.is_allowed_when_parked(park_note.as_deref()) {
             let note = park_note.unwrap_or_default();
             let reason = if spend >= cap {
-                budget_reached_reason(caller, cap, &note, limits.mode_from_env)
+                budget_reached_reason(caller, limits, &note)
             } else {
                 ceiling_reason(limits.ceiling, &note, limits.mode_from_env)
             };
@@ -434,17 +434,21 @@ fn dollars(cents: i64) -> String {
 }
 
 /// The command that doubles a cap, in whole dollars, for a denial to name.
-fn raise_command(key: &str, cents: i64) -> String {
+/// When a set ceiling is below the doubled cap, `config set` would refuse
+/// the budget, so the command raises the ceiling to the same value first.
+fn raise_command(key: &str, cents: i64, set_ceiling: Option<i64>) -> String {
     let doubled = cents.saturating_mul(2).saturating_add(99) / 100;
-    format!("playbook config set {key} {doubled}")
+    match set_ceiling {
+        Some(ceiling) if ceiling < doubled.saturating_mul(100) => format!(
+            "playbook config set auto.sessionCeilingUsd {doubled} && playbook config set {key} {doubled}"
+        ),
+        _ => format!("playbook config set {key} {doubled}"),
+    }
 }
 
-fn budget_reached_reason(
-    caller: &Caller,
-    cap: i64,
-    park_note: &Path,
-    mode_from_env: bool,
-) -> String {
+fn budget_reached_reason(caller: &Caller, limits: &Limits, park_note: &Path) -> String {
+    let cap = limits.cap_of(caller);
+    let set_ceiling = limits.ceiling_is_set.then_some(limits.ceiling);
     let (who, key) = match caller {
         Caller::Main => ("the main session", "auto.budgetUsd"),
         Caller::Agent(_) => ("this agent", "auto.agentBudgetUsd"),
@@ -453,8 +457,8 @@ fn budget_reached_reason(
         "budget reached: {who} has spent its {} cap, which is `{key}`. New work is denied. If there is finished work to deliver, the closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. Tell the user which cap was hit and that they can raise it by running `{}` themselves (any number of dollars works), or {}.",
         dollars(cap),
         park_note.display(),
-        raise_command(key, cap),
-        user_exit(mode_from_env)
+        raise_command(key, cap, set_ceiling),
+        user_exit(limits.mode_from_env)
     )
 }
 
@@ -463,7 +467,7 @@ fn ceiling_reason(ceiling: i64, park_note: &Path, mode_from_env: bool) -> String
         "session ceiling reached: the agents together have spent the {} ceiling, which is `auto.sessionCeilingUsd` (0 means ten times auto.budgetUsd), so every agent is parked and new work is denied. The closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. Tell the user the session ceiling was hit and that they can raise it by running `{}` themselves (any number of dollars works), or {}.",
         dollars(ceiling),
         park_note.display(),
-        raise_command("auto.sessionCeilingUsd", ceiling),
+        raise_command("auto.sessionCeilingUsd", ceiling, None),
         user_exit(mode_from_env)
     )
 }
@@ -907,25 +911,24 @@ mod tests {
     #[test]
     fn the_raise_command_doubles_the_cap_in_whole_dollars() {
         let rows = [
+            ("auto.budgetUsd", 20_000, None, "playbook config set auto.budgetUsd 400"),
+            ("auto.agentBudgetUsd", 5_000, None, "playbook config set auto.agentBudgetUsd 100"),
+            ("auto.budgetUsd", 250, None, "playbook config set auto.budgetUsd 5"),
+            ("auto.budgetUsd", 1, None, "playbook config set auto.budgetUsd 1"),
+            ("auto.budgetUsd", 20_000, Some(40_000), "playbook config set auto.budgetUsd 400"),
             (
                 "auto.budgetUsd",
                 20_000,
-                "playbook config set auto.budgetUsd 400",
+                Some(30_000),
+                "playbook config set auto.sessionCeilingUsd 400 && playbook config set auto.budgetUsd 400",
             ),
-            (
-                "auto.agentBudgetUsd",
-                5_000,
-                "playbook config set auto.agentBudgetUsd 100",
-            ),
-            (
-                "auto.budgetUsd",
-                250,
-                "playbook config set auto.budgetUsd 5",
-            ),
-            ("auto.budgetUsd", 1, "playbook config set auto.budgetUsd 1"),
         ];
-        for (key, cents, want) in rows {
-            assert_eq!(raise_command(key, cents), want, "{cents}");
+        for (key, cents, ceiling, want) in rows {
+            assert_eq!(
+                raise_command(key, cents, ceiling),
+                want,
+                "{cents} {ceiling:?}"
+            );
         }
     }
 

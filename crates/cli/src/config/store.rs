@@ -497,7 +497,11 @@ pub fn replace_number(root: &Path, key: &str, old: f64, new: &Value) -> Result<u
         return Ok(0);
     }
     let mut conn = open(root)?;
-    let tx = conn.transaction().map_err(broken(root))?;
+    // Immediate, so a write by another process between the read and the
+    // first update waits on the busy timeout instead of failing the upgrade.
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(broken(root))?;
     let rows = {
         let mut stmt = tx
             .prepare("SELECT tier, scope, value_json FROM config WHERE key = ?1")

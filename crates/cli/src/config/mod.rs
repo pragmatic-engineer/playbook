@@ -169,6 +169,18 @@ pub fn adopt_late_config(home: &Path) -> Vec<String> {
     }
 }
 
+/// An auto spend cap or ceiling in whole cents, the way the spend hook reads
+/// it: a number rounded to cents, kept only when it is above 0. `None` means
+/// the hook uses the built-in default instead (or, for the ceiling, ten times
+/// `auto.budgetUsd`).
+pub fn auto_cap_cents(value: &Value) -> Option<i64> {
+    value
+        .as_f64()
+        .filter(|usd| usd.is_finite())
+        .map(|usd| (usd * 100.0).round() as i64)
+        .filter(|cents| *cents > 0)
+}
+
 /// The default of a key that `resolve` already proved is known.
 #[allow(
     clippy::expect_used,

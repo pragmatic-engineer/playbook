@@ -149,3 +149,38 @@ fn a_store_without_a_budget_is_not_written_and_resolves_to_the_new_default() {
         assert!(text(&agent).contains("50"), "{n}: {}", text(&agent));
     }
 }
+
+#[test]
+fn a_set_ceiling_below_the_new_default_holds_the_moved_budget_at_the_ceiling() {
+    // Arrange: budgets of 5 under a ceiling of 40, valid before this change
+    let home = scratch("ceiling");
+    seed(
+        &home,
+        &[
+            (Tier::Global, "auto.budgetUsd", json!(5)),
+            (Tier::Global, "auto.agentBudgetUsd", json!(5)),
+            (Tier::Global, "auto.sessionCeilingUsd", json!(40)),
+        ],
+    );
+
+    // Act
+    let out = playbook(&home, &["migrate", "--json"]);
+
+    // Assert: both budgets rise to the ceiling, so it stays above them
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let doc = stored(&home);
+    assert_eq!(
+        doc["global"]["auto.budgetUsd"].as_f64(),
+        Some(40.0),
+        "{doc}"
+    );
+    assert_eq!(
+        doc["global"]["auto.agentBudgetUsd"].as_f64(),
+        Some(40.0),
+        "{doc}"
+    );
+    assert_eq!(doc["global"]["auto.sessionCeilingUsd"], json!(40), "{doc}");
+    let report = String::from_utf8_lossy(&out.stdout);
+    assert!(report.contains("auto.budgetUsd $5 to $40"), "{report}");
+    assert!(report.contains("auto.sessionCeilingUsd"), "{report}");
+}

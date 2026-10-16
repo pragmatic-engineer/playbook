@@ -12,7 +12,7 @@ Claude Code puts `agent_id` in the hook input of a tool call made inside a subag
 
 ## Decision
 
-1. **One cap per caller.** The main session is held to `auto.budgetUsd` on its own transcript. Each subagent is held to `auto.agentBudgetUsd` (default 5) on its own transcript. Spend is counted in integer cents from a baseline, with saturating arithmetic.
+1. **One cap per caller.** The main session is held to `auto.budgetUsd` on its own transcript. Each subagent is held to `auto.agentBudgetUsd` (default 5, raised to 50 by the 2026-10-17 amendment) on its own transcript. Spend is counted in integer cents from a baseline, with saturating arithmetic.
 2. **A tree ceiling that parks everyone.** `auto.sessionCeilingUsd` limits the sum over the tree. Its default, 0, means ten times the main cap, so raising the main cap does not make the ceiling bind first. At the ceiling every caller is parked. A forked skill is a spawn, so denying only `Agent` calls would leave it open.
 3. **Parked means no new work, and delivery stays open.** A parked caller may read, write its own park note, and run the closing steps: the two delivery skills with the skills they load, and a short list of commands (`git add`, `git commit`, `git push`, `git status`, `git diff`, `git log`, read-only `gh`, `playbook pr create|prepare|rules`, `playbook commit run --auto|prepare`, `playbook config get`, `playbook mode status`). The skills' own literal blocks are allowed: the `--help` probe and the quoted-heredoc write of `pr-body.md`.
 4. **The command list is strict.** Every simple command in a Bash call must be on the list. These are denied: chained commands that are not listed, `$VAR`, `$(...)` and backticks, an unquoted heredoc whose body holds one, any redirect to a file, a word with a glued redirect, and `gh api` with a body, a non-GET method (including attached forms such as `-fkey=v` and `-XPOST`) or `graphql`. `git diff` and `git log` with `--output` are denied. `git push` must name a branch, must not force, delete, mirror, push all branches or tags, pass `--receive-pack` or `--exec`, and must not target `main`, `master`, `trunk` or `develop`. `playbook commit run` needs `--auto`, since without it the command may force push after an amend or rebase.
@@ -42,7 +42,7 @@ Claude Code puts `agent_id` in the hook input of a tool call made inside a subag
 
 The default of 5 for both budgets parked normal work. A real user's sessions cost tens to hundreds of dollars a day, so a session in auto mode hit its cap early and stopped.
 
-**What is counted.** The main session's cap is checked against its own transcript only. Two paths still count the whole tree: when the main transcript holds a model missing from the price table, the hook falls back to the status line cost, which covers every agent; and the ceiling, which was ten times 5, so $50 for the tree.
+**What is counted.** The main session's cap is checked against its own transcript only. Two paths still count the whole tree: when the main transcript holds a model missing from the price table or has not been read, the hook falls back to the status line cost, which covers every agent; and the ceiling, which was ten times 5, so $50 for the tree.
 
 **Measured basis.** 30 days of one heavy user's transcripts (207 sessions, $5,234 in total by `playbook usage --range 30d`), priced with playbook's own price table and the hook's own rule (the largest cost per message id):
 
@@ -54,11 +54,11 @@ The default of 5 for both budgets parked normal work. A real user's sessions cos
 
 **New defaults.**
 
-1. `auto.budgetUsd` is 200, the p95 of the main transcript of a real session, rounded up.
+1. `auto.budgetUsd` is 200, the p95 of the main transcript of a real session, rounded up. On the status line fallback the main cap is compared with the whole tree, and 7 of the 30 real sessions spent more than $200 over the whole tree. That path is rare, since it needs an unpriced model, and the denial names the command that raises the cap.
 2. `auto.agentBudgetUsd` is 50. Only 3 of the 3,083 subagents cost more, so the cap stops a runaway agent and leaves normal ones alone.
 3. `auto.sessionCeilingUsd` keeps 0, meaning ten times `auto.budgetUsd`, so $2,000. That is above the largest measured tree.
-4. `playbook config set` refuses a set ceiling below `auto.budgetUsd` or `auto.agentBudgetUsd`, and a budget above a set ceiling, since such a ceiling parks every agent before its own cap. A ceiling of 0 is not checked.
-5. A denial says which cap was hit and gives the exact command to raise it, with double the current cap, for example `playbook config set auto.budgetUsd 400`.
-6. Migration `0017-auto-budget-defaults` (`Auto`, `Owned`, ADR 0034) moves a stored budget of exactly 5, in any tier, to the new default once. It runs on the first use of any command and through `playbook migrate`. Any other stored value stays. A store with no budget gets no write, since the key already resolves to the new default. The config store is playbook's own file, so the migration is `Owned`. A user who chose 5 on purpose before this change gets the new default too; after the migration has run, a value of 5 set again stays.
+4. `playbook config set` refuses a set ceiling below `auto.budgetUsd` or `auto.agentBudgetUsd`, and a budget above a set ceiling, since such a ceiling parks every agent before its own cap. Setting a budget checks only that budget. Values are read the way the hook reads them, for the current repo and, on a global write, outside any repo too. A ceiling of 0 is not checked, and `playbook config import` does not run the check.
+5. A denial says which cap was hit and gives the exact command to raise it, with double the current cap, for example `playbook config set auto.budgetUsd 400`. When a set ceiling is below that value, the command raises the ceiling first.
+6. Migration `0017-auto-budget-defaults` (`Auto`, `Owned`, ADR 0034) moves a stored budget of exactly 5, in any tier, to the new default once. It runs at session start, on the first run of most commands after the upgrade (ADR 0034 decision 13), and through `playbook migrate` or `playbook doctor --fix`. When a global `auto.sessionCeilingUsd` is set below the new default, the moved budget is held at the ceiling, so the ceiling stays at or above it, and the step says so. Any other stored value stays. A store with no budget gets no write, since the key already resolves to the new default. The config store is playbook's own file, so the migration is `Owned`. A user who chose 5 on purpose before this change gets the new default too; after the migration has run, a value of 5 set again stays.
 
 These numbers come from one user. A team with cheaper sessions can lower the caps with `playbook config set`.
