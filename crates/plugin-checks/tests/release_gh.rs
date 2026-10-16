@@ -35,11 +35,6 @@ impl FakeGh {
         let dir = std::env::temp_dir().join(format!("fake-gh-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("bin")).expect("fake gh dir");
-        let mut rows = String::new();
-        for (pattern, code, output) in table {
-            rows.push_str(&format!("{pattern}\t{code}\t{output}\n"));
-        }
-        fs::write(dir.join("table"), rows).expect("table");
         let gh = r#"#!/usr/bin/env bash
 dir="$(cd "$(dirname "$0")/.." && pwd)"
 args="$*"
@@ -83,7 +78,9 @@ exit 99
             .arg(&path)
             .status()
             .expect("chmod");
-        FakeGh { dir }
+        let fake = FakeGh { dir };
+        fake.answer(table);
+        fake
     }
 
     fn run(&self, cwd: &Path, args: &[&str]) -> Output {
@@ -163,6 +160,16 @@ const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const NOT_FOUND: &str = r#"{"message":"Not Found","status":"404"}"#;
 
+const DEFAULT_BRANCH: &str = r#"{"default_branch":"main"}"#;
+const COMMIT: &str = r#"{"data":{"createCommitOnBranch":{"commit":{"oid":"def456"}}}}"#;
+const PULL: &str = r#"{"number":34}"#;
+const OPEN_ON_BRANCH: &str = "api repos/o/tap/pulls?head=o:release/v1.0.0&state=open --jq length";
+
+/// The answer to reading the head of a branch.
+fn head_ref(sha: &str) -> String {
+    format!(r#"{{"object":{{"type":"commit","sha":"{sha}"}}}}"#)
+}
+
 const RAW: &str = "api -H Accept: application/vnd.github.raw repos/o/tap/contents/Formula/pbtop.rb?ref=release/v1.0.0";
 
 #[test]
@@ -171,7 +178,7 @@ fn an_open_or_merged_pull_request_from_the_app_is_reused() {
     let open = FakeGh::new(&[]);
     let (open_work, _) = checkout(&open);
     open.answer(&[
-        ("api repos/o/tap --jq .default_branch", 0, "main"),
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
         (
             "pr list * --state open *",
             0,
@@ -183,7 +190,7 @@ fn an_open_or_merged_pull_request_from_the_app_is_reused() {
     let merged = FakeGh::new(&[]);
     let (merged_work, _) = checkout(&merged);
     merged.answer(&[
-        ("api repos/o/tap --jq .default_branch", 0, "main"),
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
         ("pr list * --state open *", 0, "[]"),
         (
             "pr list * --state merged *",
@@ -218,7 +225,7 @@ fn an_open_pull_request_that_differs_from_the_checkout_is_not_reused() {
     let gh = FakeGh::new(&[]);
     let (work, _) = checkout(&gh);
     gh.answer(&[
-        ("api repos/o/tap --jq .default_branch", 0, "main"),
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
         (
             "pr list * --state open *",
             0,
@@ -250,10 +257,16 @@ fn a_file_outside_the_checkout_stops_the_pull_request_before_any_call() {
     parent[6] = "../body.md";
     let mut link = PR_ARGS;
     link[6] = "Formula/link.rb";
+    fs::create_dir_all(gh.dir.join("outside")).expect("outside");
+    fs::write(gh.dir.join("outside/secret.rb"), "secret\n").expect("secret");
+    std::os::unix::fs::symlink(gh.dir.join("outside"), work.join("Formula/out")).expect("symlink");
+    let mut through = PR_ARGS;
+    through[6] = "Formula/out/secret.rb";
 
     // Act
     let up = gh.run(&work, &parent);
     let linked = gh.run(&work, &link);
+    let escaped = gh.run(&work, &through);
 
     // Assert
     assert!(
@@ -266,6 +279,11 @@ fn a_file_outside_the_checkout_stops_the_pull_request_before_any_call() {
         "{}",
         text_of(&linked)
     );
+    assert!(
+        text_of(&escaped).contains("Formula/out/secret.rb is outside the checkout"),
+        "{}",
+        text_of(&escaped)
+    );
     assert_eq!(gh.log(), "", "nothing is called");
 }
 
@@ -276,12 +294,12 @@ fn a_new_pull_request_gets_one_signed_commit_and_auto_merge() {
     let (work, head) = checkout(&gh);
     gh.answer(&[
         ("pr list *", 0, ""),
-        ("api repos/o/tap --jq .default_branch", 0, "main"),
-        ("api repos/o/tap/git/ref/heads/main *", 0, &head),
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
+        ("api repos/o/tap/git/ref/heads/main *", 0, &head_ref(&head)),
         ("api repos/o/tap/git/ref/heads/release/v1.0.0", 1, NOT_FOUND),
         ("api -X POST repos/o/tap/git/refs *", 0, ""),
-        ("api graphql *", 0, "def456"),
-        ("api -X POST repos/o/tap/pulls *", 0, "34"),
+        ("api graphql *", 0, COMMIT),
+        ("api -X POST repos/o/tap/pulls *", 0, PULL),
         ("pr merge 34 --repo o/tap --auto --squash", 0, ""),
     ]);
 
@@ -318,17 +336,18 @@ fn a_rerun_drops_a_stale_branch_and_falls_back_for_a_merge_queue() {
     let (work, head) = checkout(&gh);
     gh.answer(&[
         ("pr list *", 0, ""),
-        ("api repos/o/tap --jq .default_branch", 0, "main"),
-        ("api repos/o/tap/git/ref/heads/main *", 0, &head),
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
+        ("api repos/o/tap/git/ref/heads/main *", 0, &head_ref(&head)),
         ("api repos/o/tap/git/ref/heads/release/v1.0.0", 0, "{}"),
+        (OPEN_ON_BRANCH, 0, "[]"),
         (
             "api -X DELETE repos/o/tap/git/refs/heads/release/v1.0.0",
             0,
             "",
         ),
         ("api -X POST repos/o/tap/git/refs *", 0, ""),
-        ("api graphql *", 0, "def456"),
-        ("api -X POST repos/o/tap/pulls *", 0, "34"),
+        ("api graphql *", 0, COMMIT),
+        ("api -X POST repos/o/tap/pulls *", 0, PULL),
         (
             "pr merge 34 --repo o/tap --auto --squash",
             1,
@@ -364,8 +383,8 @@ fn a_pull_request_is_refused_when_main_moved_or_the_branch_is_not_a_release() {
     let (work, head) = checkout(&gh);
     gh.answer(&[
         ("pr list *", 0, ""),
-        ("api repos/o/tap --jq .default_branch", 0, "main"),
-        ("api repos/o/tap/git/ref/heads/main *", 0, B),
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
+        ("api repos/o/tap/git/ref/heads/main *", 0, &head_ref(B)),
     ]);
     let mut feature = PR_ARGS;
     feature[2] = "main";
@@ -460,6 +479,7 @@ fn a_tag_is_created_once_and_never_moved() {
     );
     assert_eq!(text_of(&exists), "tag=v1.0.0\nstate=exists\n");
     assert_eq!(text_of(&followed), "tag=v1.0.0\nstate=exists\n");
+    assert!(!same.log().contains("POST") && !signed.log().contains("POST"));
     assert!(text_of(&elsewhere).contains(&format!("points at {B}, not {A}")));
     assert!(!unknown.status.success());
     assert!(
@@ -527,6 +547,7 @@ fn waiting_reports_the_merge_commit_or_why_it_stopped() {
     let late = open.run(&open.dir, &["wait", "o/r", "34", "0"]);
     let flaky = failing.run(&failing.dir, &["wait", "o/r", "34", "0"]);
     let bad = open.run(&open.dir, &["wait", "o/r", "34", "1+1"]);
+    let no_pr = open.run(&open.dir, &["wait", "o/r", "", "60"]);
     let retried = recovered.run(&recovered.dir, &["wait", "o/r", "34", "60"]);
 
     // Assert
@@ -549,4 +570,122 @@ fn waiting_reports_the_merge_commit_or_why_it_stopped() {
     );
     assert_eq!(text_of(&retried), format!("sha={A}\n"));
     assert_eq!(bad.status.code(), Some(2));
+    assert_eq!(no_pr.status.code(), Some(2), "{}", text_of(&no_pr));
+}
+
+#[test]
+fn an_open_pull_request_of_another_author_keeps_its_branch() {
+    // Arrange
+    let gh = FakeGh::new(&[]);
+    let (work, head) = checkout(&gh);
+    gh.answer(&[
+        ("pr list *", 0, ""),
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
+        ("api repos/o/tap/git/ref/heads/main *", 0, &head_ref(&head)),
+        ("api repos/o/tap/git/ref/heads/release/v1.0.0", 0, "{}"),
+        (OPEN_ON_BRANCH, 0, r#"[{"number":40}]"#),
+    ]);
+
+    // Act
+    let out = gh.run(&work, &PR_ARGS);
+
+    // Assert
+    assert!(!out.status.success());
+    assert!(
+        text_of(&out).contains("an open pull request in o/tap uses release/v1.0.0"),
+        "{}",
+        text_of(&out)
+    );
+    assert!(!gh.log().contains("-X DELETE"), "{}", gh.log());
+    assert!(!gh.log().contains("-X POST"), "{}", gh.log());
+}
+
+#[test]
+fn a_commit_that_github_did_not_create_opens_no_pull_request() {
+    // Arrange
+    let gh = FakeGh::new(&[]);
+    let (work, head) = checkout(&gh);
+    gh.answer(&[
+        ("pr list *", 0, ""),
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
+        ("api repos/o/tap/git/ref/heads/main *", 0, &head_ref(&head)),
+        ("api repos/o/tap/git/ref/heads/release/v1.0.0", 1, NOT_FOUND),
+        ("api -X POST repos/o/tap/git/refs *", 0, ""),
+        (
+            "api graphql *",
+            0,
+            r#"{"data":{"createCommitOnBranch":null}}"#,
+        ),
+    ]);
+
+    // Act
+    let out = gh.run(&work, &PR_ARGS);
+
+    // Assert
+    assert!(!out.status.success());
+    assert!(
+        text_of(&out).contains("GitHub did not create the commit on o/tap release/v1.0.0"),
+        "{}",
+        text_of(&out)
+    );
+    assert!(!gh.log().contains("repos/o/tap/pulls"), "{}", gh.log());
+}
+
+#[test]
+fn a_pull_request_that_refuses_auto_merge_fails_the_run() {
+    // Arrange
+    let gh = FakeGh::new(&[]);
+    let (work, head) = checkout(&gh);
+    gh.answer(&[
+        ("pr list *", 0, ""),
+        ("api repos/o/tap --jq .default_branch", 0, DEFAULT_BRANCH),
+        ("api repos/o/tap/git/ref/heads/main *", 0, &head_ref(&head)),
+        ("api repos/o/tap/git/ref/heads/release/v1.0.0", 1, NOT_FOUND),
+        ("api -X POST repos/o/tap/git/refs *", 0, ""),
+        ("api graphql *", 0, COMMIT),
+        ("api -X POST repos/o/tap/pulls *", 0, PULL),
+        (
+            "pr merge 34 --repo o/tap --auto --squash",
+            1,
+            "auto-merge is off",
+        ),
+        ("pr merge 34 --repo o/tap --auto", 1, "auto-merge is off"),
+    ]);
+
+    // Act
+    let out = gh.run(&work, &PR_ARGS);
+
+    // Assert
+    assert!(!out.status.success());
+    assert!(
+        text_of(&out).contains("could not turn on auto-merge for o/tap#34"),
+        "{}",
+        text_of(&out)
+    );
+}
+
+#[test]
+fn a_tag_or_release_that_is_not_a_version_is_refused_before_any_call() {
+    // Arrange
+    let gh = FakeGh::new(&[]);
+
+    // Act
+    let tag = gh.run(&gh.dir, &["tag", "o/r", "1.0.0", A]);
+    let release = gh.run(
+        &gh.dir,
+        &["release", "o/r", "../heads/main", "t", "notes.md"],
+    );
+
+    // Assert
+    assert!(
+        text_of(&tag).contains("'1.0.0' is not a release tag vX.Y.Z"),
+        "{}",
+        text_of(&tag)
+    );
+    assert!(
+        text_of(&release).contains("'../heads/main' is not a release tag vX.Y.Z"),
+        "{}",
+        text_of(&release)
+    );
+    assert_eq!(gh.log(), "", "nothing is called");
 }

@@ -16,7 +16,8 @@
 #     release/vX.Y.Z, and each <file> a regular file inside <dir>. An open
 #     pull request from <branch> in <repo> by the app is reused when its
 #     files match <dir> (auto-merge is turned on again), and a merged one is
-#     reported as merged. Prints pr=<number> and state=open|merged.
+#     reported as merged. Any other open pull request on <branch> stops the
+#     run. Prints pr=<number> and state=open|merged.
 #
 #   release-gh.sh wait <repo> <pr> <seconds>
 #     Waits until the pull request merges, then prints sha=<merge commit>.
@@ -24,9 +25,9 @@
 #     poll is retried.
 #
 #   release-gh.sh tag <repo> <tag> <sha>
-#     Creates the lightweight tag <tag> on <sha>. A tag that already points
-#     at <sha>, an annotated one included, is fine, and one that points
-#     elsewhere fails. When the create fails, the tag is read again, since
+#     Creates the lightweight tag <tag>, a vX.Y.Z, on <sha>. A tag that
+#     already points at <sha>, an annotated one included, is fine, and one
+#     that points elsewhere fails. When the create fails, the tag is read again, since
 #     another run may have made it. Exits 3 when it is still missing, so the
 #     caller can print the manual step.
 #
@@ -47,6 +48,7 @@ usage() {
 }
 
 SHA='^[0-9a-f]{40}$'
+TAG='^v[0-9]+\.[0-9]+\.[0-9]+$'
 # The GitHub App that opens release pull requests.
 APP="${RELEASE_GH_APP:-igorjs}"
 
@@ -73,15 +75,22 @@ pr() {
   local repo="$1" branch="$2" title="$3" body="$4" dir="$5"
   shift 5
   [[ "$branch" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "branch '$branch' is not release/vX.Y.Z"
-  local number base head want f
+  local number base head want f root parent open
   # Each file is a regular file inside <dir>, checked before anything is
-  # written. A symlink could make jq read a file outside the checkout.
+  # written. A symlink, the file or a folder on its path, could make jq read
+  # a file outside the checkout.
+  root="$(cd "$dir" && pwd -P)" || fail "$dir is not a folder"
   for f in "$@"; do
     case "/$f/" in
       //* | */../* | */./*) fail "'$f' is not a plain path inside the checkout" ;;
     esac
     [ ! -L "$dir/$f" ] || fail "$dir/$f is a symlink"
     [ -f "$dir/$f" ] || fail "$dir/$f is missing"
+    parent="$(cd "$(dirname "$dir/$f")" && pwd -P)"
+    case "$parent/" in
+      "$root"/*) ;;
+      *) fail "$dir/$f is outside the checkout" ;;
+    esac
   done
   base="$(gh api "repos/$repo" --jq .default_branch)"
 
@@ -109,8 +118,12 @@ pr() {
   head="$(gh api "repos/$repo/git/ref/heads/$base" --jq .object.sha)"
   [ "$head" = "$want" ] || fail "$repo $base moved from $want to $head since the checkout. Run again."
   # A branch left by a failed run is dropped, so the commit starts from the
-  # checkout.
+  # checkout. The list above comes from search, which can lag and only
+  # counts the app, so an open pull request of any author on the branch,
+  # read directly, stops the run before its branch is deleted.
   if gh api "repos/$repo/git/ref/heads/$branch" >/dev/null 2>&1; then
+    open="$(gh api "repos/$repo/pulls?head=${repo%%/*}:$branch&state=open" --jq length)"
+    [ "$open" = 0 ] || fail "an open pull request in $repo uses $branch. Close it or let it merge, then run again."
     gh api -X DELETE "repos/$repo/git/refs/heads/$branch" >/dev/null
   fi
   gh api -X POST "repos/$repo/git/refs" -f "ref=refs/heads/$branch" -f "sha=$head" >/dev/null
@@ -141,6 +154,7 @@ pr() {
 wait_merged() {
   [ "$#" -eq 3 ] || usage
   local repo="$1" number="$2" seconds="$3" end state sha
+  [[ "$number" =~ ^[0-9]+$ ]] || usage
   [[ "$seconds" =~ ^[0-9]+$ ]] || usage
   end=$(( $(date +%s) + seconds ))
   while :; do
@@ -178,6 +192,7 @@ tag_commit() {
 tag() {
   [ "$#" -eq 3 ] || usage
   local repo="$1" tag="$2" sha="$3" have err
+  [[ "$tag" =~ $TAG ]] || fail "'$tag' is not a release tag vX.Y.Z"
   [[ "$sha" =~ $SHA ]] || fail "'$sha' is not a commit sha"
   have="$(tag_commit "$repo" "$tag")"
   if [ -z "$have" ]; then
@@ -196,15 +211,21 @@ tag() {
   printf 'tag=%s\nstate=exists\n' "$tag"
 }
 
+# Prints the page of the release for <tag> in <repo>.
+release_url() {
+  gh release view "$2" --repo "$1" --json url --jq .url
+}
+
 release() {
   [ "$#" -eq 4 ] || usage
   local repo="$1" tag="$2" title="$3" notes="$4" url
-  url="$(gh release view "$tag" --repo "$repo" --json url --jq .url 2>/dev/null || true)"
+  [[ "$tag" =~ $TAG ]] || fail "'$tag' is not a release tag vX.Y.Z"
+  url="$(release_url "$repo" "$tag" 2>/dev/null || true)"
   if [ -z "$url" ]; then
     # gh prints the page of the new release. Another run may have made it
     # in the meantime, so a failed create looks again.
     url="$(gh release create "$tag" --repo "$repo" --verify-tag --latest --title "$title" --notes-file "$notes")" \
-      || url="$(gh release view "$tag" --repo "$repo" --json url --jq .url)"
+      || url="$(release_url "$repo" "$tag")"
   fi
   printf 'url=%s\n' "$url"
 }
