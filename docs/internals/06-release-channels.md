@@ -9,8 +9,8 @@ marketplace, as the section on the release workflow describes. The tap also
 checks every 30 minutes for a newer release and bumps a formula itself when the
 `downstream` job has not done it within an hour.
 
-A release attaches fifteen assets (three per target), `release-notes.json`,
-`breaking-changes.json` and `SHA256SUMS`, which lists the other seventeen. It
+A release attaches ten assets (two per target), `release-notes.json`,
+`breaking-changes.json` and `SHA256SUMS`, which lists the other twelve. It
 builds no plugin archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as
 described next.
 
@@ -64,8 +64,8 @@ the `v` tags and picks where the run starts:
 After the tag, `draft` creates a draft release with the notes and attaches
 `release-notes.json` and `breaking-changes.json`. `build` compiles the five
 targets with `--locked` and attaches two assets per target: the `playbook`
-binary and `pbtop-X.Y.Z-<target>.tar.gz` with `pbtop` alone. Releases
-before 0.35.0 also had `playbook-telemetry-X.Y.Z-<target>.tar.gz`, which
+binary and `pbtop-X.Y.Z-<target>.tar.gz` with `pbtop` alone. No release
+carries the `playbook-telemetry` archive, which
 [ADR 0041](../adr/0041-retire-playbook-telemetry.md) retires. Each
 build job first runs its binaries with `--version` (all but the cross built
 x86_64 macOS one) and attests the assets it built. `publish` checks every
@@ -170,7 +170,9 @@ installs and the tap may already point at them. To pull a bad release:
    a formula back to a lower version, and it skips a pre-release. Before
    0.35.0 the tap had no `pbtop` formula: for such an A.B.C, move only
    `playbook` this way and remove `Formula/pbtop.rb` by hand. The retired
-   `playbook-telemetry` formula stays on `telemetry-v0.2.0`.
+   `playbook-telemetry` formula stays on `telemetry-v0.2.0`; when
+   `pbtop.rb` goes, also remove its `disable!` line, since it names `pbtop`
+   as the replacement.
 5. Ship the fix as the next patch release, which moves the tap and the
    marketplace forward again.
 
