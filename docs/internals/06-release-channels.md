@@ -29,7 +29,8 @@ The marketplace repository `pragmatic-engineer/marketplace` lists the plugin as
 a `git-subdir` source that points at `plugins/playbook` in this repository.
 The `downstream` job pins its `ref` to the release tag `vX.Y.Z` and sets
 `metadata.version` once the release is published. Claude Code copies only that
-folder at the tag and updates the plugin when the pin moves. Until the first
+folder at the tag and updates an installed plugin when the `version` at the
+new pin is higher. Until the first
 release that runs `downstream`, the entry has no `ref` and follows the default
 branch. There is no separate plugin release. The `playbook-plugin-v` tags made before 0.34.0 stay as history. The
 `payload-guard` check keeps the folder to markdown and the manifest.
@@ -83,15 +84,17 @@ prints the signed `git tag` command to run by hand, and the next run with
 After `verify`, `downstream` moves the tap and the marketplace to the release
 ([ADR 0039](../adr/0039-release-workflow.md) decision 9). It runs the tap's
 `.github/scripts/bump-formula.sh` for `playbook`, `pbtop` and
-`playbook-telemetry`, which reads the release's `SHA256SUMS`, and sets the
-marketplace `ref` to `vX.Y.Z` and `metadata.version` to `X.Y.Z`. Each change
+`playbook-telemetry`, which reads the release's `SHA256SUMS`, in a
+`formulas` job with no secrets, and sets the marketplace `ref` to `vX.Y.Z`
+and `metadata.version` to `X.Y.Z`. Each change
 goes to a `release/vX.Y.Z` pull request titled `chore(release): playbook X.Y.Z`,
 made with `scripts/release-gh.sh pr` and the app token, with auto-merge on.
 When a pull request merges, a workflow in that repository tags the merge
-commit `vX.Y.Z` and publishes a release. The job waits up to 30 minutes for both
-merges and both releases, and the run summary links them. When a repository has
-not published its release five minutes after the merge, the job tags and
-releases it through the API. When something here fails, the playbook release
+commit `vX.Y.Z` and publishes a release. The job opens both pull requests
+first, then waits up to 30 minutes for both merges, and the run summary links
+them. When a repository has not published its release five minutes after its
+merge, the job tags and releases it through the API, and only when the merge
+commit changes nothing but the formulas or the marketplace file. When something here fails, the playbook release
 stays published, the job fails, and the summary prints the commands to finish
 it. Running the workflow again with `version=X.Y.Z` goes on from where it
 stopped. When `BOT_APP_CLIENT_ID` or `BOT_APP_PRIVATE_KEY` is not set, the job
@@ -162,7 +165,11 @@ installs and the tap may already point at them. To pull a bad release:
    `SOURCE_REPO=playbook TAG_PREFIX=v .github/scripts/bump-formula.sh A.B.C
    Formula/<formula>.rb` for `playbook`, `pbtop` and `playbook-telemetry`, and
    open a pull request with the result. The tap's scheduled check never moves
-   a formula back to a lower version, and it skips a pre-release.
+   a formula back to a lower version, and it skips a pre-release. Before
+   0.34.0, `pbtop` and `playbook-telemetry` had no assets in the `v`
+   releases: for such an A.B.C, move only `playbook` this way, take
+   `playbook-telemetry` back to its last `telemetry-v` tag with
+   `TAG_PREFIX=telemetry-v`, and remove `Formula/pbtop.rb` by hand.
 5. Ship the fix as the next patch release, which moves the tap and the
    marketplace forward again.
 
