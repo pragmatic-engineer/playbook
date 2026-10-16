@@ -7,7 +7,7 @@
 pub use playbook_common::paths::*;
 
 /// The data folder that holds `usage.db`, the durable, cross-project usage
-/// store shared with playbook-telemetry, and the lock and receiver files next
+/// store shared with pbtop, and the lock and receiver files next
 /// to it. The crate owns the folder logic.
 pub fn usage_db_dir() -> std::path::PathBuf {
     crate::usage::data::data_dir(&crate::common::session::home_dir())

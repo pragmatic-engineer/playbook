@@ -211,7 +211,7 @@ Start at the [docs index](docs/index.md).
 
 ## Repository layout
 
-This repository holds the `playbook` binary and `install.sh`. The skills, commands and agents live in `plugins/playbook`. The Rust code is a Cargo workspace under `crates/`: `cli` (the `playbook` binary), `common`, `code`, `telemetry` (the `playbook-telemetry` package, which builds `pbtop`) and `data`. See [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout). A `vX.Y.Z` release ships the binary and the plugin with the same version ([ADR-0038](docs/adr/0038-one-release-line.md)).
+This repository holds the `playbook` binary and `install.sh`. The skills, commands and agents live in `plugins/playbook`. The Rust code is a Cargo workspace under `crates/`: `cli` (the `playbook` binary), `common`, `code`, `telemetry` (the `playbook-telemetry` package, which builds `pbtop`), `data` and `plugin-checks` (tests for the plugin). See [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout). A `vX.Y.Z` release ships the binary and the plugin with the same version ([ADR-0038](docs/adr/0038-one-release-line.md)).
 
 ## License
 
