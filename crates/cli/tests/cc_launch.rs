@@ -106,6 +106,8 @@ impl Env {
             .env_remove("OTEL_LOGS_EXPORTER")
             .env_remove("OTEL_METRICS_EXPORTER")
             .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
+            .env_remove("CLAUDE_PLUGIN_ROOT")
+            .env_remove("PLAYBOOK_PLUGIN_DIR")
             .env("FAKE_LOG", self.log())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null");
