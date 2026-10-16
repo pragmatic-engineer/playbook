@@ -92,7 +92,7 @@ const CURL_STUB: &str = r#"out=""; url=""; fail_on_http_error=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
-    -w) shift 2 ;;
+    -w|--connect-timeout|--max-time) shift 2 ;;
     -*) case "$1" in *f*) fail_on_http_error=1 ;; esac; shift ;;
     *)  url="$1"; shift ;;
   esac

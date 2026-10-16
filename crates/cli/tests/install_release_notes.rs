@@ -27,7 +27,12 @@ case "$*" in
 esac
 printf '%s\n' "$*" >> "$HOME/calls.log"
 case "$*" in
-  "update --print-notes "*) printf 'Breaking changes in playbook 0.17.0:\n  - The old flag is gone\nFull notes: the link\n' ;;
+  "update --print-notes "*)
+    if [ -f "$3" ]; then
+      printf 'Breaking changes in playbook 0.17.0:\n  - The old flag is gone\nFull notes: the link\n'
+    else
+      printf 'Full notes: the link\n'
+    fi ;;
   *) exit 0 ;;
 esac"#;
 
@@ -176,12 +181,16 @@ fn a_release_without_notes_prints_the_line_and_the_link() {
 
     // Assert
     assert!(
-        out.contains(&format!(
-            "playbook updated from 0.16.0 to 0.17.0.\n{LINK}\n"
-        )),
+        out.contains("playbook updated from 0.16.0 to 0.17.0.\nFull notes: the link\n"),
         "{out}"
     );
-    assert!(sandbox.notes_calls().is_empty());
+    let calls = sandbox.notes_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "the binary still records the release: {calls:?}"
+    );
+    assert!(calls[0].contains("/no-release-notes.json"), "{calls:?}");
 }
 
 #[test]
@@ -193,9 +202,13 @@ fn notes_that_do_not_match_their_checksum_are_not_read() {
     let out = sandbox.install(NEW_BINARY, Some(NOTES), "other bytes");
 
     // Assert
-    assert!(out.contains(LINK), "{out}");
+    assert!(out.contains("Full notes: the link"), "{out}");
     assert!(!out.contains("Breaking changes"), "{out}");
-    assert!(sandbox.notes_calls().is_empty());
+    let calls = sandbox.notes_calls();
+    assert!(
+        calls.iter().all(|c| c.contains("/no-release-notes.json")),
+        "{calls:?}"
+    );
 }
 
 #[test]
@@ -212,10 +225,11 @@ fn a_binary_without_the_notes_flag_prints_the_link_and_no_error() {
 }
 
 #[test]
-fn a_fresh_install_a_reinstall_and_an_unreadable_version_print_no_line() {
+fn a_fresh_install_a_reinstall_a_downgrade_and_an_unreadable_version_print_no_line() {
     for (tag, installed) in [
         ("fresh", None),
         ("same", Some("playbook 0.17.0")),
+        ("downgrade", Some("playbook 0.18.0")),
         ("unreadable", Some("error: broken!")),
     ] {
         // Arrange

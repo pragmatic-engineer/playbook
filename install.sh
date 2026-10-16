@@ -343,20 +343,24 @@ installed_version() {
 
 # show_release_notes OLD NEW: after this script replaced playbook OLD with
 # NEW, prints one line and the release notes on stderr (ADR 0037 decision
-# 5.4). It downloads release-notes.json and checks it against the SHA256SUMS
-# already in STAGE. The new binary prints the breaking changes from that file
-# and records the notes as shown, so its first run does not print them again.
-# When the asset is missing or does not match, or the binary is older than
-# that step, it prints the link alone. It never fails the install.
+# 5.4). It downloads release-notes.json, with a short time limit, and checks
+# it against the SHA256SUMS already in STAGE. The new binary prints the
+# breaking changes from that file, or only the link when the file is missing
+# or does not match, and records the notes as shown, so its first run does not
+# print them again. A binary older than that step gets the link from here. It
+# never fails the install.
 show_release_notes() {
-    local old="$1" new="$2" text
+    local old="$1" new="$2" text notes="$STAGE/release-notes.json"
     [ -n "$old" ] || return 0
     printf 'playbook updated from %s to %s.\n' "$old" "$new" >&2
-    if _fetch "https://github.com/$RELEASE_REPO/releases/download/$RESOLVED_TAG/release-notes.json" \
-            "$STAGE/release-notes.json" 2>/dev/null \
-        && (cd "$STAGE" && grep -E '^[0-9a-f]{64}  release-notes\.json$' SHA256SUMS > release-notes.sha256 \
-            && "${CKSUM_CMD[@]}" release-notes.sha256) >/dev/null 2>&1 \
-        && text="$("$PLAYBOOK_BIN_DIR/playbook" update --print-notes "$STAGE/release-notes.json" \
+    if ! curl -fsSL --connect-timeout 5 --max-time 20 \
+            "https://github.com/$RELEASE_REPO/releases/download/$RESOLVED_TAG/release-notes.json" \
+            -o "$notes" 2>/dev/null \
+        || ! (cd "$STAGE" && grep -E '^[0-9a-f]{64}  release-notes\.json$' SHA256SUMS > release-notes.sha256 \
+            && "${CKSUM_CMD[@]}" release-notes.sha256) >/dev/null 2>&1; then
+        notes="$STAGE/no-release-notes.json"
+    fi
+    if text="$("$PLAYBOOK_BIN_DIR/playbook" update --print-notes "$notes" \
             --from "$old" 2>/dev/null </dev/null)" \
         && [ -n "$text" ]; then
         printf '%s\n' "$text" >&2
@@ -486,7 +490,8 @@ install_release_binary() {
         || warn "could not back up the previous playbook binary; continuing without a backup"
     place_binary "$STAGE/playbook" playbook
     log "Installed playbook $version to $PLAYBOOK_BIN_DIR/playbook"
-    if [ "$PREVIOUS_VERSION" != "$version" ]; then
+    # Only an upgrade shows notes: a reinstall or a downgrade shows nothing.
+    if [ -n "$PREVIOUS_VERSION" ] && version_lt "$PREVIOUS_VERSION" "$version"; then
         show_release_notes "$PREVIOUS_VERSION" "$version"
     fi
     install_pb_alias
