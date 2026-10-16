@@ -21,6 +21,7 @@
 
 use playbook_common::atomic::{acquire_dir_lock_aged, ensure_private_dir, LONG_LOCK_STALE_AGE};
 use rusqlite::{Connection, OpenFlags};
+use std::cell::Cell;
 use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -84,6 +85,49 @@ pub enum Outcome {
 const SIDE_SUFFIXES: [&str; 3] = ["", "-wal", "-shm"];
 const LOCK_RETRIES: u32 = 300;
 const LOCK_DELAY: Duration = Duration::from_millis(20);
+
+/// Test seam for the lock budget. A test that holds the migrate lock on
+/// purpose would otherwise wait out all of [`LOCK_RETRIES`]: about 6 s, and
+/// 30 s on a busy macOS runner. A debug build reads this variable, so a test
+/// can shorten the budget of the binary it runs.
+#[doc(hidden)]
+pub const TEST_LOCK_RETRIES_ENV: &str = "PLAYBOOK_TEST_MIGRATE_LOCK_RETRIES";
+
+thread_local! {
+    static TEST_LOCK_RETRIES: Cell<Option<u32>> = const { Cell::new(None) };
+}
+
+/// Runs `f` with a lock budget of `retries` on this thread, for a test that
+/// holds the migrate lock and runs in the test process.
+#[doc(hidden)]
+pub fn with_test_lock_retries<T>(retries: u32, f: impl FnOnce() -> T) -> T {
+    struct Restore(Option<u32>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_LOCK_RETRIES.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(TEST_LOCK_RETRIES.with(|c| c.replace(Some(retries))));
+    f()
+}
+
+/// The lock budget. A release build always uses the full budget; a debug
+/// build takes a test setting, which can only shorten it.
+fn lock_retries() -> u32 {
+    if !cfg!(debug_assertions) {
+        return LOCK_RETRIES;
+    }
+    let env = std::env::var(TEST_LOCK_RETRIES_ENV).ok();
+    test_budget(TEST_LOCK_RETRIES.with(Cell::get), env.as_deref())
+}
+
+/// The thread setting wins over the variable. A value that does not parse is
+/// ignored, and every value is clamped to `1..=LOCK_RETRIES`.
+fn test_budget(thread: Option<u32>, env: Option<&str>) -> u32 {
+    thread
+        .or_else(|| env?.trim().parse().ok())
+        .map_or(LOCK_RETRIES, |n| n.clamp(1, LOCK_RETRIES))
+}
 
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
@@ -461,7 +505,7 @@ pub fn migrate(step: &Move) -> Result<Outcome, String> {
     let lock = with_suffix(&step.new, ".migrate.lock");
     // Without the lock another process may be mid-move, so do nothing and let
     // the next run retry. Only the holder removes the lock directory.
-    if !acquire_dir_lock_aged(&lock, LOCK_RETRIES, LOCK_DELAY, LONG_LOCK_STALE_AGE) {
+    if !acquire_dir_lock_aged(&lock, lock_retries(), LOCK_DELAY, LONG_LOCK_STALE_AGE) {
         return Ok(Outcome::Nothing);
     }
     let result = run_locked(step);
@@ -748,11 +792,33 @@ mod tests {
         make(&m.old, &[(1, "a")]);
         fs::create_dir_all(m.new.parent().unwrap()).unwrap();
         fs::create_dir(with_suffix(&m.new, ".migrate.lock")).unwrap();
-        assert_eq!(migrate(&m).unwrap(), Outcome::Nothing);
+        assert_eq!(
+            with_test_lock_retries(2, || migrate(&m)).unwrap(),
+            Outcome::Nothing
+        );
         assert!(m.old.exists());
         assert!(!m.new.exists());
         // The lock that was not ours is still there.
         assert!(with_suffix(&m.new, ".migrate.lock").is_dir());
+    }
+
+    #[test]
+    fn the_test_lock_budget_only_shortens_and_is_restored() {
+        assert_eq!(with_test_lock_retries(2, lock_retries), 2);
+        assert_eq!(TEST_LOCK_RETRIES.with(Cell::get), None);
+    }
+
+    #[test]
+    fn the_test_lock_budget_reads_the_thread_then_the_variable() {
+        assert_eq!(test_budget(None, None), LOCK_RETRIES);
+        assert_eq!(test_budget(None, Some("2")), 2);
+        assert_eq!(test_budget(None, Some(" 2 ")), 2);
+        assert_eq!(test_budget(Some(3), Some("2")), 3);
+        assert_eq!(test_budget(None, Some("0")), 1);
+        assert_eq!(test_budget(Some(0), None), 1);
+        assert_eq!(test_budget(None, Some("100000")), LOCK_RETRIES);
+        assert_eq!(test_budget(None, Some("abc")), LOCK_RETRIES);
+        assert_eq!(test_budget(None, Some("-1")), LOCK_RETRIES);
     }
 
     #[test]
