@@ -152,7 +152,7 @@ Playbook looks for a newer release on its own, the way Claude Code does. The `up
 | `update.mode` | What happens |
 |---|---|
 | `notify` (default) | A command run in a terminal prints one line on stderr when a newer release exists: `playbook X.Y.Z is available (you have A.B.C). Run: playbook update`. Homebrew installs see `brew upgrade playbook`. On an install that can update itself, the line also names `playbook config set --global update.mode auto`. The line shows at most once in 24 hours for each version. |
-| `auto` | Playbook installs the release in the background, with the same checks as `playbook update`, and runs the new binary's migrations. The command you ran finishes on the old binary. The next command you run in a terminal prints `playbook updated from A.B.C to X.Y.Z` and any breaking changes. |
+| `auto` | Playbook installs the release in the background, with the same checks as `playbook update`, and runs the new binary's migrations. The command you ran finishes on the old binary. The next command you run in a terminal prints `playbook updated from A.B.C to X.Y.Z. Release notes: <url>`. |
 | `off` | No check runs. |
 
 Turn on automatic updates with:
