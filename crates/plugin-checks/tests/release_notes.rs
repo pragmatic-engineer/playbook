@@ -373,6 +373,26 @@ fn a_component_without_a_previous_tag_lists_every_commit() {
 }
 
 #[test]
+fn the_markdown_puts_one_blank_line_between_sections() {
+    // Arrange
+    let repo = Repo::new();
+    repo.change("crates/cli/src/a.rs", "feat(cli): add a flag (#2)");
+    repo.change("crates/cli/src/b.rs", "fix(cli): repair the parser (#3)");
+    let notes = repo.notes("playbook", "0.2.0");
+
+    // Act
+    let md = repo.markdown(&notes);
+
+    // Assert
+    assert_eq!(
+        md,
+        "## Features\n\n- **cli**: add a flag ([#2](https://github.com/o/r/pull/2))\n\n\
+         ## Fixes\n\n- **cli**: repair the parser ([#3](https://github.com/o/r/pull/3))\n\n\
+         **Full changelog**: https://github.com/o/r/compare/v0.1.0...v0.2.0\n"
+    );
+}
+
+#[test]
 fn the_markdown_skips_empty_sections_and_links_each_pull_request() {
     // Arrange
     let repo = mixed_history();
