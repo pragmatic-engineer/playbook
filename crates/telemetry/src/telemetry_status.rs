@@ -91,7 +91,12 @@ impl Mode {
 /// line of its own, so a short panel still shows the first fix. `None` is a
 /// status not read yet.
 pub fn empty_panel_lines(mode: Option<Mode>) -> Vec<String> {
-    let setup = super::host::setup_command("telemetry");
+    empty_panel_lines_for(mode, super::host::current())
+}
+
+/// [`empty_panel_lines`] with the commands of `host`.
+pub fn empty_panel_lines_for(mode: Option<Mode>, host: &dyn super::host::Host) -> Vec<String> {
+    let setup = host.setup_command("telemetry");
     match mode {
         None | Some(Mode::OffNotConfigured) => vec![
             "No rows: telemetry is off.".into(),
@@ -121,14 +126,20 @@ pub fn empty_panel_lines(mode: Option<Mode>) -> Vec<String> {
         Some(Mode::OnCollectorDown) => vec![
             "No rows: the collector is not running.".into(),
             "Start it with:".into(),
-            super::host::command("usage collect"),
+            host.command("usage collect"),
             "Keep it running in the background with:".into(),
-            super::host::setup_command("collector-service"),
+            host.setup_command("collector-service"),
         ],
-        Some(Mode::OnRunning | Mode::OnReceiving) => vec![
+        Some(Mode::OnRunning) => vec![
             "No rows in this range yet.".into(),
             "Telemetry is on and the collector runs.".into(),
             "Rows appear while sessions run.".into(),
+        ],
+        Some(Mode::OnReceiving) => vec![
+            "No rows in this range yet.".into(),
+            "Telemetry rows arrived in the last day.".into(),
+            "Check the collector with:".into(),
+            host.command("usage status"),
         ],
     }
 }
@@ -255,6 +266,63 @@ mod tests {
         for line in off.iter().chain(&down).chain(&quiet) {
             assert!(line.chars().count() <= 46, "too long: {line}");
         }
+    }
+
+    /// Splits `line` into rows of at most `width` characters at spaces, as
+    /// the panel wraps it.
+    fn wrapped_rows(line: &str, width: usize) -> usize {
+        let mut rows = 1;
+        let mut used = 0;
+        for word in line.split(' ') {
+            let len = word.chars().count();
+            if used == 0 {
+                used = len;
+            } else if used + 1 + len <= width {
+                used += 1 + len;
+            } else {
+                rows += 1;
+                used = len;
+            }
+        }
+        rows
+    }
+
+    #[test]
+    fn under_pbtop_the_cause_and_first_command_fit_a_four_row_panel() {
+        let host = crate::standalone::Standalone;
+        let modes = [
+            Mode::OffNotConfigured,
+            Mode::OffNoEndpoint,
+            Mode::OffDisabled,
+            Mode::OffByConfig,
+            Mode::OffOwnSetup,
+            Mode::OnCollectorDown,
+            Mode::OnRunning,
+            Mode::OnReceiving,
+        ];
+
+        for mode in modes {
+            let lines = empty_panel_lines_for(Some(mode), &host);
+            let first_command = lines
+                .iter()
+                .position(|l| l.starts_with("playbook ") || l.starts_with("pbtop"))
+                .map_or(lines.len(), |i| i + 1);
+            let rows: usize = lines[..first_command]
+                .iter()
+                .map(|l| wrapped_rows(l, 46))
+                .sum();
+
+            assert!(rows <= 4, "{mode:?} needs {rows} rows: {lines:?}");
+        }
+    }
+
+    #[test]
+    fn data_arriving_does_not_claim_the_collector_runs() {
+        let lines = empty_panel_lines(Some(Mode::OnReceiving));
+
+        assert!(lines[1].contains("arrived in the last day"), "{lines:?}");
+        assert!(!lines.iter().any(|l| l.contains("collector runs")));
+        assert_eq!(lines[3], crate::host::command("usage status"));
     }
 
     #[test]

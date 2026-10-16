@@ -70,7 +70,7 @@ pub fn install(host: Box<dyn Host>) {
     *HOST.write().unwrap_or_else(|e| e.into_inner()) = Some(leaked);
 }
 
-fn current() -> &'static dyn Host {
+pub(crate) fn current() -> &'static dyn Host {
     let installed = *HOST.read().unwrap_or_else(|e| e.into_inner());
     installed.unwrap_or_else(|| DEFAULT.get_or_init(default_host).as_ref())
 }
