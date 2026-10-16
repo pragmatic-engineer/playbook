@@ -74,6 +74,7 @@ Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the
 | Shell wrapper for `playbook cc` and `playbook ccd` | off | `--aliases`, `--no-aliases` | your shell rc file |
 | System prompt | off | `--system-prompt`, `--no-system-prompt` | `~/.config/playbook/prompts/SYSTEM_PROMPT.md` |
 | Usage telemetry | on, asked | `--telemetry`, `--no-telemetry` | `~/.claude/settings.json` (the `env` block), `~/.config/playbook/telemetry-env.json` |
+| Collector service | on, asked | `--collector-service`, `--no-collector-service` | `~/Library/LaunchAgents/io.github.pragmatic-engineer.playbook.collector.plist` (macOS) or `~/.config/systemd/user/playbook-collector.service` (Linux) |
 | `pb` short name | off, asked | `--short-name`, `--no-short-name` | `~/.config/playbook` (the `launcher.shortName` key) |
 | `claude` function | off, asked | `--claude-override`, `--no-claude-override` | `~/.config/playbook` (the `launcher.claudeOverride` key) |
 | Attribution off | on, asked | `--attribution-off`, `--no-attribution-off` | `~/.claude/settings.json` (the `attribution` key) |
@@ -131,6 +132,10 @@ Setup adds a block that starts with `# playbook binary` to your shell startup fi
 ### The `pb` short name
 
 `--short-name` asks whether `pb` should be a short name for `playbook`. A yes sets `launcher.shortName` to `true` in playbook's own config, and nothing else changes. Setup looks for a command named `pb` on your PATH first and writes nothing when it finds one. With the key on, `playbook shell-init` defines `pb` only when no command, alias, function or builtin of that name exists in your shell at that moment, so a `pb` you install or define later always wins and playbook never overwrites it. The function needs the `eval` line from `--aliases` in your rc file. Undo it with `playbook config set launcher.shortName false`. See [the launcher](../internals/01-launcher-and-hooks.md#the-pb-short-name).
+
+### Collector service
+
+`--collector-service` (on by default; `--yes` is a yes) keeps the usage collector running, so the telemetry the part above points Claude Code at has a receiver after every login. It acts only when your Claude Code user settings point telemetry at the playbook collector. On macOS it writes a launchd agent to `~/Library/LaunchAgents/io.github.pragmatic-engineer.playbook.collector.plist` with `RunAtLoad` and `KeepAlive`, then loads it with `launchctl bootstrap`. On Linux it writes a systemd user unit to `~/.config/systemd/user/playbook-collector.service` with `Restart=always`, then runs `systemctl --user enable` and `restart`. On other systems it writes nothing and prints `playbook usage collect --idle-seconds 0` for you to run. The service runs `playbook usage collect --idle-seconds 0` and writes its output to `~/.config/playbook/data/collector-service.log` (mode `0600`). The service file (mode `0644`) names only the program and the log: the collector reads its token from `collector.json`, so no secret is written. Running setup again changes nothing when the file is current, and starts the service when it is stopped. A no is remembered. `playbook doctor` and `playbook usage status` name the service, and `playbook uninstall` stops it and removes the file. See [ADR 0043](../adr/0043-collector-service-in-setup.md).
 
 ### Attribution off
 

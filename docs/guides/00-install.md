@@ -200,7 +200,7 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 ## Setup flags
 
-`playbook setup` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override`, `--short-name` and `--attribution-off`, each with a `--no-` form. With `--yes` or in a terminal, hooks, status line, `PATH`, telemetry and attribution-off are on by default. Without a terminal and without `--yes`, hooks, the status line, telemetry and attribution-off stay off unless their flag is passed. `--only <part>[,<part>]` runs just the named parts, so `playbook setup --only telemetry` turns telemetry on and touches nothing else. A bare `--telemetry` (no `--yes` and no other part flag) means the same. The permissions rules (`--security`), launcher and system prompt are off.
+`playbook setup` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--collector-service`, `--claude-override`, `--short-name` and `--attribution-off`, each with a `--no-` form. With `--yes` or in a terminal, hooks, status line, `PATH`, telemetry, the collector service and attribution-off are on by default. Without a terminal and without `--yes`, hooks, the status line, telemetry, the collector service and attribution-off stay off unless their flag is passed. `--only <part>[,<part>]` runs just the named parts, so `playbook setup --only telemetry` turns telemetry on and touches nothing else. A bare `--telemetry` (no `--yes` and no other part flag) means the same. The permissions rules (`--security`), launcher and system prompt are off.
 
 ## Skills without the binary
 

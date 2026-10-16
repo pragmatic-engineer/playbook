@@ -55,6 +55,11 @@ fn extra_lines(id: &str) -> Vec<String> {
         "telemetry" => {
             crate::init::telemetry::plan_lines(&crate::common::home_dir().join(".claude"))
         }
+        "collector-service" => vec![format!(
+            "Runs: {} {}",
+            crate::init::collector_service::program().display(),
+            crate::usage::service::ARGS.join(" ")
+        )],
         "claude-override" => {
             vec![
                 "Runs the equivalent of `playbook config set launcher.claudeOverride true`."
@@ -82,6 +87,7 @@ pub fn decline_line(id: &str) -> &'static str {
         "aliases" => "No line is added to your rc file, so `playbook cc` will not follow you into a new worktree.",
         "system-prompt" => "No file is copied. The launchers start without the playbook prompt.",
         "telemetry" => "No variables are written. `playbook usage` reads transcripts instead.",
+        "collector-service" => "No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`.",
         "claude-override" => "`claude` stays the plain Claude Code command.",
         "short-name" => "`pb` is not defined. Use `playbook` in full.",
         "attribution-off" => "Claude Code keeps adding its attribution. The commit-message-sanitizer hook still strips it from commits and PRs when the hooks are on.",
@@ -138,12 +144,20 @@ pub fn items(flags: &Flags, security_on: bool) -> Vec<Item> {
     list
 }
 
-/// [`items`] without the telemetry question when `skip_telemetry` is true.
-pub fn items_for(flags: &Flags, security_on: bool, skip_telemetry: bool) -> Vec<Item> {
+/// [`items`] without the telemetry question when `skip_telemetry` is true,
+/// and without the collector-service question when `skip_service` is true.
+pub fn items_for(
+    flags: &Flags,
+    security_on: bool,
+    skip_telemetry: bool,
+    skip_service: bool,
+) -> Vec<Item> {
     let mut list = items(flags, security_on);
-    if skip_telemetry {
-        list.retain(|i| i.choice.id != "telemetry");
-    }
+    list.retain(|i| match i.choice.id.as_str() {
+        "telemetry" => !skip_telemetry,
+        "collector-service" => !skip_service,
+        _ => true,
+    });
     list
 }
 
@@ -192,7 +206,7 @@ pub fn status_of(step: &StepReport) -> Status {
 }
 
 /// The progress phase: one line per step, the totals and what to do next.
-pub fn progress(caps: &Caps, steps: &[StepReport]) -> String {
+pub fn progress(caps: &Caps, steps: &[StepReport], extra: &[String]) -> String {
     let mut out = render::heading(caps, "Applying");
     let mut statuses = Vec::new();
     for s in steps {
@@ -207,6 +221,10 @@ pub fn progress(caps: &Caps, steps: &[StepReport]) -> String {
         "Run `playbook doctor` to check the result.",
         "Run `playbook uninstall --dry-run` to see how to undo everything.",
     ];
+    // Before the generic steps, since telemetry is lost until it is done.
+    for (n, line) in extra.iter().enumerate() {
+        next.insert(n, line);
+    }
     if counts.failed > 0 {
         next.insert(
             0,
@@ -238,6 +256,7 @@ mod tests {
             aliases: true,
             system_prompt: true,
             telemetry: true,
+            collector_service: true,
             claude_override: true,
             short_name: true,
             attribution_off: true,
@@ -287,13 +306,22 @@ mod tests {
             StepReport::skipped("aliases", "you chose off"),
             StepReport::failed("trust", "cannot write"),
         ];
-        let got = progress(&Caps::plain(80), &steps);
+        let got = progress(
+            &Caps::plain(80),
+            &steps,
+            &["Start the collector.".to_string()],
+        );
         assert!(got.contains("[ok] hooks  29 entries added\n"));
         assert!(got.contains("[=] path  already set\n"));
         assert!(got.contains("[skip] aliases  you chose off\n"));
         assert!(got.contains("[fail] trust  cannot write\n"));
         assert!(got.contains("1 done, 1 unchanged, 1 skipped, 1 failed"));
         assert!(got.contains("Fix the failed lines"));
+        let next = got.split("Next steps").nth(1).unwrap_or_default();
+        assert!(
+            next.find("Start the collector") < next.find("Open a new terminal"),
+            "{got}"
+        );
     }
 
     #[test]
@@ -321,8 +349,8 @@ mod tests {
         assert!(!c.hooks && !c.statusline && !c.path);
         assert!(c.aliases && c.system_prompt && c.claude_override && c.short_name);
         assert!(
-            !c.telemetry && !c.attribution_off,
-            "telemetry and attribution-off are on by default, so a no flips them off"
+            !c.telemetry && !c.collector_service && !c.attribution_off,
+            "telemetry, collector-service and attribution-off are on by default, so a no flips them off"
         );
     }
 
@@ -330,12 +358,14 @@ mod tests {
     fn the_telemetry_question_is_left_out_when_it_is_skipped() {
         let flags = Flags::default();
 
-        let skipped = items_for(&flags, false, true);
-        let asked = items_for(&flags, false, false);
+        let skipped = items_for(&flags, false, true, true);
+        let asked = items_for(&flags, false, false, false);
 
         assert!(!skipped.iter().any(|i| i.choice.id == "telemetry"));
+        assert!(!skipped.iter().any(|i| i.choice.id == "collector-service"));
         assert!(asked.iter().any(|i| i.choice.id == "telemetry"));
-        assert_eq!(skipped.len() + 1, asked.len());
+        assert!(asked.iter().any(|i| i.choice.id == "collector-service"));
+        assert_eq!(skipped.len() + 2, asked.len());
     }
 
     #[test]
