@@ -13,7 +13,7 @@ claude plugin marketplace add pragmatic-engineer/marketplace
 claude plugin install playbook@pragmatic-engineer
 ```
 
-The binary, optional. The recommended install is the install script. It downloads the release binary, checks its SHA256 checksum, and its build attestation when `gh` can check it, puts it on `PATH`, and then asks whether to run `playbook init`:
+The binary, optional. The recommended install is the install script. It downloads the release binary, checks its SHA256 checksum, and its build attestation when `gh` can check it, puts it on `PATH`, and then asks whether to run `playbook setup`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
@@ -21,11 +21,13 @@ curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/in
 
 Update later with `playbook update`. Use `playbook update --check` to see whether a newer release exists without installing it.
 
-`playbook init` adds the hook entries to `~/.claude/settings.json`. In a terminal it asks first, and it keeps your own entries. `playbook uninstall` removes only the entries whose command is exactly one `playbook hook <name>` command that `init` writes. Run `playbook doctor check` to see what is in place. If you also installed the skills, open a Claude Code session and run `/playbook:doctor`. It checks every layer and tells you how to fix a miss.
+`playbook setup` adds the hook entries to `~/.claude/settings.json`. In a terminal it asks first, and it keeps your own entries. `playbook uninstall` removes only the entries whose command is exactly one `playbook hook <name>` command that `setup` writes. Run `playbook doctor check` to see what is in place. If you also installed the skills, open a Claude Code session and run `/playbook:doctor`. It checks every layer and tells you how to fix a miss.
 
-The installer only installs the `playbook` binary (checksum verified) and puts it on `PATH`. It never installs or removes a plugin. `playbook init` also sets the status line and asks before adding the launcher and system prompt. Pass `--yes` to the installer to say yes to every question.
+The installer only installs the `playbook` binary (checksum verified) and puts it on `PATH`. It never installs or removes a plugin. `playbook setup` also sets the status line and asks before adding the launcher and system prompt. Pass `--yes` to the installer to say yes to every question.
 
-To see what `playbook init` changes before you agree, read [What init installs](docs/guides/06-what-init-installs.md) and the [hook reference](docs/reference/hooks.md).
+To see what `playbook setup` changes before you agree, read [What setup installs](docs/guides/06-what-init-installs.md) and the [hook reference](docs/reference/hooks.md).
+
+Older releases call this command `playbook init`. That name still works and runs the same code.
 
 ### Homebrew
 
@@ -33,20 +35,20 @@ Homebrew is supported too:
 
 ```bash
 brew install pragmatic-engineer/tap/playbook
-playbook init
+playbook setup
 ```
 
 A Homebrew install updates with `brew upgrade playbook`. On a brew-managed install, `playbook update` stops and tells you to run `brew upgrade playbook`.
 
 ### Telemetry
 
-`playbook init` asks whether to send Claude Code telemetry to a collector on your own machine, and the answer defaults to yes. It writes eight OpenTelemetry variables into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage`. Prompt text and tool content are never sent. Nothing leaves your machine: the collector listens on 127.0.0.1 only, and playbook's `session-init` hook (part of the hooks you install with init) starts it when a session begins. Without those hooks, start it with `playbook usage collect`, or let `playbook cc` do it.
+`playbook setup` asks whether to send Claude Code telemetry to a collector on your own machine, and the answer defaults to yes. It writes eight OpenTelemetry variables into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage`. Prompt text and tool content are never sent. Nothing leaves your machine: the collector listens on 127.0.0.1 only, and playbook's `session-init` hook (part of the hooks you install with setup) starts it when a session begins. Without those hooks, start it with `playbook usage collect`, or let `playbook cc` do it.
 
-- To turn it on later, or after you declined: `playbook init --only telemetry`.
-- If `CLAUDE_CODE_ENABLE_TELEMETRY` is 0 in `~/.claude/settings.json` and nothing else sets telemetry, `--yes` leaves it alone; answer yes to the question or run `playbook init --only telemetry`. If telemetry is set in project settings, your shell or next to other `OTEL_` keys, init leaves all of it as it is (see [What init installs](docs/guides/06-what-init-installs.md)). `DISABLE_TELEMETRY` and `DO_NOT_TRACK` only turn off Anthropic's own analytics and are left as they are.
-- Restart Claude Code after init, because it reads settings at start.
+- To turn it on later, or after you declined: `playbook setup --only telemetry`.
+- If `CLAUDE_CODE_ENABLE_TELEMETRY` is 0 in `~/.claude/settings.json` and nothing else sets telemetry, `--yes` leaves it alone; answer yes to the question or run `playbook setup --only telemetry`. If telemetry is set in project settings, your shell or next to other `OTEL_` keys, setup leaves all of it as it is (see [What setup installs](docs/guides/06-what-init-installs.md)). `DISABLE_TELEMETRY` and `DO_NOT_TRACK` only turn off Anthropic's own analytics and are left as they are.
+- Restart Claude Code after setup, because it reads settings at start.
 - `playbook doctor` checks that settings point at the collector, that it runs, and that rows arrived in the last day.
-- `playbook uninstall` removes exactly the keys init wrote and puts back any value they replaced, unless you changed a key since.
+- `playbook uninstall` removes exactly the keys setup wrote and puts back any value they replaced, unless you changed a key since.
 
 Optional: the standalone usage dashboard for machines without playbook, `brew install pragmatic-engineer/tap/playbook-telemetry`, then run `pbtop`. `pbtop` is the short alias of `playbook-telemetry`. With playbook installed you do not need it, because `playbook usage` runs the same code. The code index gets the same treatment: `pbcode` is the planned alias of the standalone `playbook-code` tool, which has no release yet, so use `playbook code` today.
 
@@ -55,7 +57,7 @@ Pin a version with `PLAYBOOK_REF=v0.34.0`. Everything else about installing, inc
 | Mode | What you get | Commands |
 |---|---|---|
 | Skills only | Skills, commands and subagents. No guards, hooks or status line. | The two `claude plugin` commands above |
-| Binary only | The `playbook` command, hooks, guards, status line, memory and usage | The install script (recommended), or Homebrew then `playbook init` |
+| Binary only | The `playbook` command, hooks, guards, status line, memory and usage | The install script (recommended), or Homebrew then `playbook setup` |
 | Both (recommended) | Everything | Both of the above |
 
 The hooks, guards, status line and usage need the binary. Only the skill text works without it. See [Pick an install mode](docs/guides/00-install.md#pick-an-install-mode).
@@ -73,7 +75,7 @@ For a small bug, `/playbook:fix` goes from a failing test to one pull request. F
 
 ## The launcher
 
-`playbook cc` starts Claude Code with the playbook system prompt (it replaces Claude Code's built-in prompt and never appends to it), the right model chain and your effort ceiling. `playbook ccd` is the same with permission prompts skipped. `pb` is a short alias for `playbook` (`pb cc`, `pb ccd`), linked next to the binary by install.sh and Homebrew when the name is free. The old `ccc` and `ccd` shell functions are gone; `playbook doctor` finds leftovers and names the replacement. Add the cd wrapper, which lets `playbook cc launch worktree` leave you in the new worktree, with `playbook init --aliases`.
+`playbook cc` starts Claude Code with the playbook system prompt (it replaces Claude Code's built-in prompt and never appends to it), the right model chain and your effort ceiling. `playbook ccd` is the same with permission prompts skipped. `pb` is a short alias for `playbook` (`pb cc`, `pb ccd`), linked next to the binary by install.sh and Homebrew when the name is free. The old `ccc` and `ccd` shell functions are gone; `playbook doctor` finds leftovers and names the replacement. Add the cd wrapper, which lets `playbook cc launch worktree` leave you in the new worktree, with `playbook setup --aliases`.
 
 ```bash
 playbook cc                     # resume this directory's last session, or start fresh
@@ -172,16 +174,16 @@ One markdown store at `~/.config/playbook/memory/`, global and per project, loca
 
 ## Security
 
-The security defaults are opt-in. A plain `playbook init` does not add them. Turn them on with either of:
+The security defaults are opt-in. A plain `playbook setup` does not add them. Turn them on with either of:
 
 ```bash
-playbook init --security
-playbook config set --global security.defaults true   # then every `playbook init` applies them
+playbook setup --security
+playbook config set --global security.defaults true   # then every `playbook setup` applies them
 ```
 
 They are the `permissions` block of the shipped `settings.shared.json`. The permissions default is conservative. It removes bare `Bash` and keychain commands from auto-allow, and moves twelve interpreters (`node`, `python3`, `npx`, `npm`, `make`, `awk`, `go`, `source`, `xargs`, `sqlite3`, `psql`, `docker`) from allow to ask. It also adds `Read(**/.env)` deny rules Running it again changes nothing. It follows the usual settings merge, so a `permissions` block you customised wins.
 
-Without the opt-in, `init` leaves the `permissions` block in your `settings.json` as it is. It stops adding it and never removes one you already have. To turn the defaults off, run `playbook init --no-security` or set `playbook config set --global security.defaults false`, then delete the `permissions` entries from `~/.claude/settings.json` by hand.
+Without the opt-in, `setup` leaves the `permissions` block in your `settings.json` as it is. It stops adding it and never removes one you already have. To turn the defaults off, run `playbook setup --no-security` or set `playbook config set --global security.defaults false`, then delete the `permissions` entries from `~/.claude/settings.json` by hand.
 
 It is not a sandbox. `git`, `gh`, `find -exec` and the `sed` e-command still run without a prompt. The `Read(**/.env)` deny rules cover the `Read` tool only, so `cat .env` still runs.
 

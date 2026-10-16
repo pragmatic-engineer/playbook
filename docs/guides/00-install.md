@@ -1,6 +1,8 @@
 # Install
 
-To see every change `playbook init` makes before you agree to it, read [What init installs](06-what-init-installs.md) and the [hook reference](../reference/hooks.md).
+To see every change `playbook setup` makes before you agree to it, read [What setup installs](06-what-init-installs.md) and the [hook reference](../reference/hooks.md).
+
+Older releases call this command `playbook init`. That name still works and runs the same code ([ADR-0040](../adr/0040-rename-init-to-setup.md)).
 
 The recommended route is the install script, one command, and `playbook update` keeps it current. Homebrew is supported too. This page covers every route, requirements, how the binary reaches `PATH`, upgrades, the settings merge and uninstall.
 
@@ -9,12 +11,12 @@ The recommended route is the install script, one command, and `playbook update` 
 | Mode | Commands, in order | You get | You lack |
 |---|---|---|---|
 | Skills only | `claude plugin marketplace add pragmatic-engineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer` | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
-| Binary only | Install script (recommended): `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash`. Or Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook init` | The `playbook` command, hooks, guards, status line, memory and usage | The skills and slash commands |
+| Binary only | Install script (recommended): `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash`. Or Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook setup` | The `playbook` command, hooks, guards, status line, memory and usage | The skills and slash commands |
 | Both (recommended) | The binary first, then the two skills commands | Everything | Nothing |
 
 The skills are a Claude Code plugin and work on their own. The binary is optional. Installing one never installs the other, and playbook never installs or removes a plugin for you.
 
-When the binary is installed, `playbook init` adds its hook entries to `~/.claude/settings.json`. In a terminal it asks first. With no terminal and no `--yes`, it leaves your Claude Code settings alone and prints the command to run. `--hooks` or `--yes` is the explicit yes. It merges with the entries you already have. An entry counts as playbook's when its command is exactly one of the `playbook hook <name>` commands `init` writes, and `playbook uninstall` removes only those. The old `playbook-hooks` plugin is retired. If it is still installed, remove it with `claude plugin uninstall playbook-hooks@pragmatic-engineer`, because its hooks would run next to the ones in `settings.json`.
+When the binary is installed, `playbook setup` adds its hook entries to `~/.claude/settings.json`. In a terminal it asks first. With no terminal and no `--yes`, it leaves your Claude Code settings alone and prints the command to run. `--hooks` or `--yes` is the explicit yes. It merges with the entries you already have. An entry counts as playbook's when its command is exactly one of the `playbook hook <name>` commands `setup` writes, and `playbook uninstall` removes only those. The old `playbook-hooks` plugin is retired. If it is still installed, remove it with `claude plugin uninstall playbook-hooks@pragmatic-engineer`, because its hooks would run next to the ones in `settings.json`.
 
 Which one? Choose skills only if you want to read the skills and nothing else runs on your machine. Choose both for everything else. The binary is a hard dependency of the hooks, guards, status line and usage. Only the skill text works without it. See [Skills without the binary](#skills-without-the-binary).
 
@@ -40,20 +42,20 @@ It installs only the `playbook` binary, into `PLAYBOOK_BIN_DIR` (default `~/.loc
 
 When it replaces an older binary, it prints the breaking changes between the two versions, with the step to take for each.
 
-Then it asks "Run playbook init now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the launcher and the system prompt (Enter means yes for these two), then runs `playbook init --yes`, which adds the hook entries, the status line and the telemetry variables (a collector on this machine) to `settings.json`. On no, or with no terminal and no `--yes`, it skips `init` and prints the command to run later, with any `--aliases` or `--system-prompt` you passed. Open a new terminal afterward.
+Then it asks "Run playbook setup now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the launcher and the system prompt (Enter means yes for these two), then runs `playbook setup --yes`, which adds the hook entries, the status line and the telemetry variables (a collector on this machine) to `settings.json`. On no, or with no terminal and no `--yes`, it skips `setup` and prints the command to run later, with any `--aliases` or `--system-prompt` you passed. Open a new terminal afterward.
 
-Pass `--yes` to say yes to every question, including `playbook init`. Flags go after `-s --` when piping:
+Pass `--yes` to say yes to every question, including `playbook setup`. Flags go after `-s --` when piping:
 
 | Flag | Effect |
 |---|---|
-| `--yes`, `-y` | Say yes to every question, including running `playbook init`. |
-| `--no-init` | Install the binary only. Do not ask about `playbook init`. |
+| `--yes`, `-y` | Say yes to every question, including running `playbook setup`. |
+| `--no-init` | Install the binary only. Do not ask about `playbook setup`. |
 | `--aliases` | Add the `playbook` cd wrapper to your rc file without asking. |
 | `--system-prompt` | Install the system prompt without asking (implies `--aliases`). |
-| `--binary-only` | Still offers `playbook init`, but skips the launcher and system prompt questions. |
+| `--binary-only` | Still offers `playbook setup`, but skips the launcher and system prompt questions. |
 | `--ref <tag>` | Release tag, same as `PLAYBOOK_REF`. |
 
-`--skip-plugin`, `--no-setup`, `--skip-deps` and `--skip-shell` are accepted and ignored, so older commands keep working. `--skills-only` is gone and exits with the plugin commands. The other `init` options (`--claude-override`, `--short-name`) belong to `playbook init`; run it yourself to pass them, and install.sh also links `pb` to `playbook` when the name is free.
+`--skip-plugin`, `--no-setup`, `--skip-deps` and `--skip-shell` are accepted and ignored, so older commands keep working. `--skills-only` is gone and exits with the plugin commands. The other `setup` options (`--claude-override`, `--short-name`) belong to `playbook setup`; run it yourself to pass them, and install.sh also links `pb` to `playbook` when the name is free.
 
 Pin a version with `PLAYBOOK_REF`:
 
@@ -67,10 +69,10 @@ A release tag installs that release. A branch or commit is refused, because it h
 
 ```bash
 brew install pragmatic-engineer/tap/playbook
-playbook init
+playbook setup
 ```
 
-`playbook init` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `init` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew installs update with `brew upgrade playbook`, and `playbook update` refuses a Homebrew install and tells you to use brew.
+`playbook setup` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `setup` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew installs update with `brew upgrade playbook`, and `playbook update` refuses a Homebrew install and tells you to use brew.
 
 ### Optional: the standalone telemetry tool
 
@@ -121,10 +123,10 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 4. Wire the local config:
 
    ```bash
-   playbook init
+   playbook setup
    ```
 
-   In a terminal, `init` asks about hooks, settings, the status line, `PATH`, the launcher and the system prompt. The status line question reads "Use the playbook status line?" and has `--statusline` and `--no-statusline`. Answering no leaves `statusLine` in `settings.json` as it is, and an existing playbook status line stays until `playbook uninstall`. Each part has `--x` and `--no-x` flags. With `--yes`, hooks, settings, the status line and `PATH` are on and the launcher and system prompt are off. Without a terminal and without `--yes`, the hooks and the status line stay off unless you pass `--hooks` or `--statusline`. Every step is safe to repeat.
+   In a terminal, `setup` asks about hooks, settings, the status line, `PATH`, the launcher and the system prompt. The status line question reads "Use the playbook status line?" and has `--statusline` and `--no-statusline`. Answering no leaves `statusLine` in `settings.json` as it is, and an existing playbook status line stays until `playbook uninstall`. Each part has `--x` and `--no-x` flags. With `--yes`, hooks, settings, the status line and `PATH` are on and the launcher and system prompt are off. Without a terminal and without `--yes`, the hooks and the status line stay off unless you pass `--hooks` or `--statusline`. Every step is safe to repeat.
 
 5. For the skills, run the two plugin commands from [Pick an install mode](#pick-an-install-mode). Then run `/playbook:doctor`, or `playbook doctor check` without the skills.
 
@@ -172,10 +174,10 @@ Older releases delivered the hooks in a second plugin, `playbook-hooks`. The hoo
 
 ```bash
 claude plugin uninstall playbook-hooks@pragmatic-engineer
-playbook init --yes
+playbook setup --yes
 ```
 
-`playbook init` adds the hook entries and asks first when you run it in a terminal. Leaving the old plugin installed makes every hook run twice, and `playbook doctor check` points it out.
+`playbook setup` adds the hook entries and asks first when you run it in a terminal. Leaving the old plugin installed makes every hook run twice, and `playbook doctor check` points it out.
 
 See [release channels](../internals/06-release-channels.md) for how a release reaches each channel.
 
@@ -190,7 +192,7 @@ Every route ends with `playbook` on `PATH` for each shell start.
 | fish | `~/.config/fish/conf.d/playbook.fish` |
 | other | `~/.profile` |
 
-`install.sh` and `playbook init` write the same block and skip a file that already names the directory.
+`install.sh` and `playbook setup` write the same block and skip a file that already names the directory.
 
 Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a hook runs in a non-interactive `bash -c` with exactly the `PATH` of the process that started Claude Code. So:
 
@@ -198,29 +200,29 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 - **Started with `playbook cc` or `playbook ccd`:** the launcher adds the binary's directory when it is missing.
 - **Started from a desktop app or IDE:** hooks find `playbook` only if its directory is already on that `PATH`. Use `playbook cc`, or install with `PLAYBOOK_BIN_DIR` set to a directory that environment has.
 
-## Init flags
+## Setup flags
 
-`playbook init` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override` and `--short-name`, each with a `--no-` form. With `--yes` or in a terminal, hooks, status line, `PATH` and telemetry are on by default. Without a terminal and without `--yes`, hooks, the status line and telemetry stay off unless their flag is passed. `--only <part>[,<part>]` runs just the named parts, so `playbook init --only telemetry` turns telemetry on and touches nothing else. A bare `--telemetry` (no `--yes` and no other part flag) means the same. The permissions rules (`--security`), launcher and system prompt are off.
+`playbook setup` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--claude-override` and `--short-name`, each with a `--no-` form. With `--yes` or in a terminal, hooks, status line, `PATH` and telemetry are on by default. Without a terminal and without `--yes`, hooks, the status line and telemetry stay off unless their flag is passed. `--only <part>[,<part>]` runs just the named parts, so `playbook setup --only telemetry` turns telemetry on and touches nothing else. A bare `--telemetry` (no `--yes` and no other part flag) means the same. The permissions rules (`--security`), launcher and system prompt are off.
 
 ## Skills without the binary
 
-With the skills plugin alone, some commands call the `playbook` binary. They fall back to plain git, gh and file steps where they can. No hook runs, so the guards and status line are not active, and `/playbook:doctor` reports the binary and the hook entries as missing. Install the binary and run `playbook init` to add them.
+With the skills plugin alone, some commands call the `playbook` binary. They fall back to plain git, gh and file steps where they can. No hook runs, so the guards and status line are not active, and `/playbook:doctor` reports the binary and the hook entries as missing. Install the binary and run `playbook setup` to add them.
 
 ## Settings merge
 
-`playbook init` merges the shipped template into your `settings.json` and never overwrites it. The template carries three things, each behind its own part: the `hooks` block, the `statusLine` and, only when you opt in, the `permissions` block. It ships no display options, notification toggles or `env` entries, because no hook or launcher reads them. Keys you customised stay as you set them. Keys an older template shipped (`cleanupPeriodDays`, `outputStyle`, `env` and the like) stay in your file too, and init never removes them.
+`playbook setup` merges the shipped template into your `settings.json` and never overwrites it. The template carries three things, each behind its own part: the `hooks` block, the `statusLine` and, only when you opt in, the `permissions` block. It ships no display options, notification toggles or `env` entries, because no hook or launcher reads them. Keys you customised stay as you set them. Keys an older template shipped (`cleanupPeriodDays`, `outputStyle`, `env` and the like) stay in your file too, and setup never removes them.
 
 The retired `--settings` and `--no-settings` flags are gone. Use `--hooks`, `--statusline` and `--security` and their `--no-` forms instead.
 
 It tracks a baseline in `~/.claude/.settings.base.json` and compares it with the new template and your live file. After each run, `$CLAUDE_HOME/settings-merge-skipped.<epoch>.json` lists every key where your value won, as `{"key":"...", "template_had":..., "yours":...}`. Review it and adopt template values by hand if you want them.
 
-The security defaults, the `permissions` block, are opt-in. A plain `playbook init` does not add them and never removes ones you have. Update control (the Claude Code autoupdater) is left to you, `playbook update` and Homebrew. Pass `--security` or set `security.defaults` to true to merge them. `permissions` is one top-level key. If you customised it, the whole block counts as contested and the template's version is withheld, so your rules win. See [Security](../../README.md#security).
+The security defaults, the `permissions` block, are opt-in. A plain `playbook setup` does not add them and never removes ones you have. Update control (the Claude Code autoupdater) is left to you, `playbook update` and Homebrew. Pass `--security` or set `security.defaults` to true to merge them. `permissions` is one top-level key. If you customised it, the whole block counts as contested and the template's version is withheld, so your rules win. See [Security](../../README.md#security).
 
 If a run is interrupted between writing `settings.json` and the baseline, delete `.settings.base.json`. The next run treats the missing baseline as empty and only adds keys.
 
 ## Disabling the plugin
 
-Disabling `playbook@pragmatic-engineer` in Claude Code pauses playbook. Every hook, including the safety guards, exits as a silent success and the status line prints nothing, while the entries `playbook init` wrote stay in `settings.json`. Enable the plugin again to resume. Only an explicit `false` pauses: with no entry (a binary-only install), `true`, or a `settings.json` that cannot be read, playbook runs as usual. To run hooks anyway, set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` in the environment Claude Code starts in. See [Launcher and hooks](../internals/01-launcher-and-hooks.md#pausing-when-the-plugin-is-disabled).
+Disabling `playbook@pragmatic-engineer` in Claude Code pauses playbook. Every hook, including the safety guards, exits as a silent success and the status line prints nothing, while the entries `playbook setup` wrote stay in `settings.json`. Enable the plugin again to resume. Only an explicit `false` pauses: with no entry (a binary-only install), `true`, or a `settings.json` that cannot be read, playbook runs as usual. To run hooks anyway, set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` in the environment Claude Code starts in. See [Launcher and hooks](../internals/01-launcher-and-hooks.md#pausing-when-the-plugin-is-disabled).
 
 ## Uninstall
 
@@ -229,7 +231,7 @@ playbook uninstall --dry-run   # list what would go, change nothing
 playbook uninstall --yes       # remove it
 ```
 
-It removes only what playbook placed: the hook entries whose command is exactly one `playbook hook <name>` command that `init` writes and status line in `settings.json`, the launcher block in your rc files, and the files under `~/.config/playbook` that playbook copied (such as the system prompt). Without `--yes` it lists the plan and exits with status 1.
+It removes only what playbook placed: the hook entries whose command is exactly one `playbook hook <name>` command that `setup` writes and status line in `settings.json`, the launcher block in your rc files, and the files under `~/.config/playbook` that playbook copied (such as the system prompt). Without `--yes` it lists the plan and exits with status 1.
 
 Everything else stays: the rest of `settings.json` and your rc files, `.settings.base.json`, `backups/`, memory, the [data folder](../internals/11-data-folder.md) with every database, and all runtime state. Each changed file is backed up first (`settings.json.bak.<epoch>`). A status line script or system prompt you edited by hand is kept. If `settings.json` cannot be edited, such as invalid JSON, the placed files and the binary stay too.
 

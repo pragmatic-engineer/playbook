@@ -62,7 +62,7 @@ with these two questions:
 ## Step 3: Build the flag list and run
 
 Build the flag list. Note the names differ on purpose: this command takes
-`--install-aliases` and `--use-system-prompt`, while `playbook init` takes
+`--install-aliases` and `--use-system-prompt`, while `playbook setup` takes
 `--aliases` and `--system-prompt`. Translate, don't pass through.
 
 `--yes` alone (no `--install-aliases`, no `--use-system-prompt`) means "don't
@@ -80,20 +80,22 @@ non-interactive run would contradict what `--yes` says it does.
 - Add `--system-prompt` if Q2 answer is "Yes (Recommended)" OR
   `--use-system-prompt` or `--yes` was in `$ARGUMENTS`.
 
-`playbook init` always runs. This command has no terminal, so init does not ask its own questions and uses its defaults (hooks, settings and PATH on), plus the launcher and system prompt flags you built above. It also marks `~/.config/playbook` as trusted in an existing `~/.claude.json`, so Claude Code's trust dialog never blocks that folder. Then check the tools the plugin needs and install only the missing ones:
+`playbook setup` always runs. Older binaries call it `playbook init`. This command has no terminal, so setup does not ask its own questions and uses its defaults (hooks, settings and PATH on), plus the launcher and system prompt flags you built above. It also marks `~/.config/playbook` as trusted in an existing `~/.claude.json`, so Claude Code's trust dialog never blocks that folder. Then check the tools the plugin needs and install only the missing ones:
 
 ```bash
-playbook init [flags]
+playbook setup [flags]
 playbook deps ensure --builtin
 ```
 
+If `playbook setup` fails with "unrecognized subcommand", the binary predates the rename: run `playbook init [flags]` with the same flags instead, and use that name for the rest of this run. The two names run the same code.
+
 The binary carries its own settings template, system prompt and Brewfile, so neither command needs a plugin file.
 
-If `playbook init` exits non-zero, still run the second command, then report which init steps failed. If it fails with "unexpected argument", the installed binary is older than the plugin: run `playbook init` again without that flag and tell the user to upgrade with `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`. If init reports the settings step skipped with "no template shipped", the binary is also older than the plugin: give the same upgrade advice, because no guards were wired. If `playbook deps ensure --builtin` fails the same way, skip the second command and say so.
+If setup exits non-zero, still run the second command, then report which setup steps failed. If it fails with "unexpected argument", the installed binary is older than the plugin: run it again without that flag and tell the user to upgrade with `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash`. If setup reports the settings step skipped with "no template shipped", the binary is also older than the plugin: give the same upgrade advice, because no guards were wired. If `playbook deps ensure --builtin` fails the same way, skip the second command and say so.
 
 ## Step 4: Report
 
-Report the output of both commands verbatim. Then say in one line what this run installed or changed: the binary (if the shim installed it just now), the hooks and status line in `settings.json`, `PATH`, and the launcher or system prompt only if you added them. `playbook init` prints one line per
+Report the output of both commands verbatim. Then say in one line what this run installed or changed: the binary (if the shim installed it just now), the hooks and status line in `settings.json`, `PATH`, and the launcher or system prompt only if you added them. `playbook setup` prints one line per
 step with its status (for example, `[=] statusline  already up to date` when nothing changed), then the totals and next steps.
 
 End your report with:

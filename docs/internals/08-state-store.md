@@ -6,8 +6,8 @@ Playbook keeps small bits of internal state in the `state` table of its SQLite s
 
 | Key prefix | Holds | Used by |
 |---|---|---|
-| `migrations/applied/<id>` | One row per finished Auto migration | `playbook init` |
-| `migrations/shipped/<key>` | The hash of each file playbook placed | `playbook init` edit detection |
+| `migrations/applied/<id>` | One row per finished Auto migration | `playbook setup` |
+| `migrations/shipped/<key>` | The hash of each file playbook placed | `playbook setup` edit detection |
 | `worktree-sweep/<repo slug>` | Epoch seconds of the last worktree sweep | The session-start hook |
 
 Each row has a key, a text value and an update time. Writes that belong together (for example, rewriting all migration rows) run in one transaction. A failed write rolls back and leaves the old rows.
@@ -29,7 +29,7 @@ The first time the store opens, playbook reads the old files and moves them into
 - `~/.config/playbook/migrations.state` (lines `applied <id>` and `shipped <key> <hash>`)
 - every `worktree-sweep-marker-*` file
 
-The import is one transaction. After it commits, each old file is renamed to `<name>.migrated`. Playbook never deletes them. If any file cannot be read, nothing is imported and nothing is renamed, and the next run tries again. Migration 0010 (`state-files-to-sqlite`) makes sure this has happened and `playbook init` reports how many files it moved.
+The import is one transaction. After it commits, each old file is renamed to `<name>.migrated`. Playbook never deletes them. If any file cannot be read, nothing is imported and nothing is renamed, and the next run tries again. Migration 0010 (`state-files-to-sqlite`) makes sure this has happened and `playbook setup` reports how many files it moved.
 
 ## Safety
 

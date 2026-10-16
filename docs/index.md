@@ -22,9 +22,9 @@ Task-oriented workflows.
 - [Decisions and memory](guides/03-decisions-and-memory.md): record choices with `/playbook:adr`, build project knowledge with `/playbook:learn-project`.
 - [Config keys](guides/04-config-keys.md): every `playbook config` key with its default, allowed values and what it does.
 - [Auto mode](guides/05-auto-mode.md): run commands without questions, with a spend cap.
-- [What init installs](guides/06-what-init-installs.md): every change `playbook init` makes, what stays on your machine, and how to undo each part.
+- [What setup installs](guides/06-what-init-installs.md): every change `playbook setup` makes, what stays on your machine, and how to undo each part.
 - [Reading documents](guides/07-reading-documents.md): read a PDF or Office file as cheaper text with the optional anydoc converter.
-- [Hook reference](reference/hooks.md): every hook init wires, with its event, matcher, what it reads and writes, and how to turn it off.
+- [Hook reference](reference/hooks.md): every hook setup wires, with its event, matcher, what it reads and writes, and how to turn it off.
 - [CLI and config reference](reference/cli-and-config.md): every command, flag and config key, generated from the code so it cannot drift.
 
 ## Authoring
@@ -44,7 +44,7 @@ How the machine works.
 - [Usage view](internals/04-usage-dashboard.md): `playbook usage`, the terminal view and its keys, where the numbers come from and the store.
 - [Headless mode](internals/05-headless-mode.md): what runs without a person at the keyboard, real `claude -p` exit codes, how the hooks behave headless, and a first CI use case.
 - [Release channels](internals/06-release-channels.md): how a tagged release reaches the GitHub assets and the Homebrew tap.
-- [Migrations](internals/07-migrations.md): how `playbook init` carries an install across breaking changes, the three migration kinds, and how edits to placed files are detected.
+- [Migrations](internals/07-migrations.md): how `playbook setup` carries an install across breaking changes, the three migration kinds, and how edits to placed files are detected.
 - [State store](internals/08-state-store.md): where playbook keeps its internal state, how to inspect it with `playbook state list`, and the one-time import of the old files.
 - [Document conversion benchmark](internals/10-document-conversion-benchmark.md): the measurement behind the `docs.convert` default.
 - [Data folder](internals/11-data-folder.md): the one folder that holds every database, what each file is, how older files move in, and how to clean up.
