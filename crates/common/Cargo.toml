@@ -14,9 +14,9 @@ name = "playbook_common"
 path = "src/lib.rs"
 
 [dependencies]
-libc = "=0.2.189"
+libc = "=0.2.190"
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
-serde_json = { version = "=1.0.151", features = ["preserve_order"] }
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
 
 [lints]
 workspace = true
