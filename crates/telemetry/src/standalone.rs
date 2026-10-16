@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The host used when none is installed: playbook-telemetry as its own
-//! program.
+//! The host used when none is installed: `pbtop` as its own program.
 //!
 //! Data is the single file `~/.config/playbook/data/usage.db`, shared with
 //! playbook. Settings are playbook's own (see `config`), so both tools always
@@ -14,7 +13,7 @@ use super::session_view::Record;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-const NAME: &str = "playbook-telemetry";
+const NAME: &str = "pbtop";
 
 pub struct Standalone;
 
@@ -68,9 +67,9 @@ mod tests {
     #[test]
     fn command_drops_the_usage_word() {
         let h = Standalone;
-        assert_eq!(h.command("usage --summary"), "playbook-telemetry --summary");
-        assert_eq!(h.command("usage"), "playbook-telemetry");
-        assert_eq!(h.command("usage collect"), "playbook-telemetry collect");
+        assert_eq!(h.command("usage --summary"), "pbtop --summary");
+        assert_eq!(h.command("usage"), "pbtop");
+        assert_eq!(h.command("usage collect"), "pbtop collect");
     }
 
     #[test]

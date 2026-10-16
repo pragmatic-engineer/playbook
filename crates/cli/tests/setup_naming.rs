@@ -5,8 +5,8 @@
 //! binaries and the installer print must name it. Two kinds of line may
 //! still say `playbook init`: the deprecation line itself, and a note for a
 //! reader who may run an older binary, written `older versions: playbook init`.
-//! Only the telemetry crate keeps that note, since `playbook-telemetry` and
-//! `pbtop` can run next to an older `playbook`; there every `playbook setup`
+//! Only the telemetry crate keeps that note, since `pbtop` can run next to
+//! an older `playbook`; there every `playbook setup`
 //! hint must carry it. `crates/plugin-checks/tests/setup_command_name.rs`
 //! applies the same note rule to the plugin and the docs; keep the two in
 //! step.

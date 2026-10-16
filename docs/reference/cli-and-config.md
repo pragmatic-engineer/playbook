@@ -1443,13 +1443,15 @@ Example: `playbook update --check`
 
 Show token and cost usage across your sessions
 
-With no subcommand, opens the terminal view, which opens on this week compared with last week. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts. Days are UTC. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks start on Monday unless `usage.weekStart` says otherwise. For today, week and month, `--json` adds a comparison with the previous period over the same elapsed span, and `--summary` prints it. The cost per agent and skill, tool latency and health views come from Claude Code's OpenTelemetry export when it is available, see `playbook usage collect`.
+With no subcommand, opens the terminal view, which opens on this week compared with last week. When stdout is not a terminal, or with `--summary`, prints a text summary of estimated cost instead. `--json` prints the same numbers as JSON for scripts. Times and days use your local time zone, shown in the output; `--utc` switches to UTC, or set `usage.timeZone` or `PLAYBOOK_TELEMETRY_TZ` to `local` or `utc`. Ranges: today, week, last-week, month, last-month, 30d, 60d, 90d, all. Weeks start on Monday unless `usage.weekStart` says otherwise. For today, week and month, `--json` adds a comparison with the previous period over the same elapsed span, and `--summary` prints it. The cost per agent and skill, tool latency and health views come from Claude Code's OpenTelemetry export when it is available, see `playbook usage collect`.
 
 Example: `playbook usage --range today`
 
 - `--json`: Print the totals, groupings and live view as JSON
 - `--summary`: Print the text summary and exit (every recorded session unless `--range` is given)
-- `--range <RANGE>`: Date range (UTC days): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
+- `--range <RANGE>`: Date range (days in the chosen time zone): today, week, last-week, month, last-month, 30d, 60d, 90d or all. Default week for the terminal view, 30d for `--json`, all for `--summary`
+- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 
 Subcommands: `collect`, `doctor`, `prune`, `status`
 
@@ -1463,6 +1465,8 @@ Example: `playbook usage collect --idle-seconds 1800`
 
 - `--port <PORT>`: Port to listen on (an error when busy). Default: the recorded port, chosen once (47318, or a free one when that is taken) and kept. A port given here also replaces the recorded one; run `playbook setup --only telemetry` afterwards (older versions: `playbook init --only telemetry`)
 - `--idle-seconds <IDLE_SECONDS>`: Stop after this many seconds with no request; 0 means never
+- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 
 ### `playbook usage doctor`
 
@@ -1473,6 +1477,8 @@ Lists which sources exist: the plan fields and cached usage numbers in the Claud
 Example: `playbook usage doctor --raw`
 
 - `--raw`: Also print the plan field values and the cached spend limit
+- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 
 ### `playbook usage prune`
 
@@ -1483,6 +1489,8 @@ Removes telemetry rows older than `usage.telemetryRetentionDays` (default 90, 0 
 Example: `playbook usage prune --dry-run`
 
 - `--dry-run`: Say what would be removed without deleting anything
+- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 
 ### `playbook usage status`
 
@@ -1493,6 +1501,8 @@ Prints how telemetry is configured (on with the collector running, off because y
 Example: `playbook usage status --json`
 
 - `--json`: Print the status as JSON
+- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 
 ### `playbook version`
 

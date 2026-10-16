@@ -2,7 +2,7 @@
 
 Run `playbook config list` to see every key with its value and source tier in the current repo, and `playbook config get <key>` for one.
 
-The `usage.*` keys are also read by the standalone `playbook-telemetry` tool (alias `pbtop`) from the same `~/.config/playbook/config.json`. It has no config file of its own.
+The `usage.*` keys are also read by the standalone `pbtop` tool from the same `~/.config/playbook/config.json`. It has no config file of its own.
 
 ## Where a key is read from
 
@@ -71,7 +71,7 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `docs.maxOutputChars` | `200000` | whole number, 1 or more | The text printed is cut after this many characters, with a marker that says how many were shown. |
 | `docs.maxMemoryMb` | `1024` | whole number, 1 or more | The converter is stopped when its resident memory passes this many megabytes. |
 | `docs.anydocPath` | empty | a path, or empty | The converter to run. Empty means the first `anydoc` on PATH. |
-| `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` | The first day of the week for the `week` and `last-week` ranges of `playbook usage` (view, `--json`, `--summary`). Days are UTC. |
+| `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` | The first day of the week for the `week` and `last-week` ranges of `playbook usage` (view, `--json`, `--summary`). Days are in the chosen time zone, local unless `usage.timeZone` says `utc`. |
 | `usage.refreshSeconds` | `5` | whole number, 1 to 3600 | How often the `playbook usage` terminal view reads new history and redraws, in seconds. |
 | `usage.theme` | `default` | `default`, `dark`, `light`, `mono` | The color theme `playbook usage` starts with. `t` cycles the themes inside the view. `NO_COLOR` forces `mono`. |
 | `sessions.staleAfterDays` | `3` | whole number, 1 or more | Days without activity after which `playbook sessions` calls an unfinished session stale. |
