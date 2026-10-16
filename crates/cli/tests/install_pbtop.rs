@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `install.sh --pbtop` installs pbtop alone from the
+//! `install-pbtop.sh` installs pbtop alone from the
 //! `pbtop-<version>-<target>.tar.gz` asset, checked like the playbook binary:
 //! its SHA256SUMS line, its build attestation and its `--version`.
 
@@ -52,20 +52,47 @@ struct Run {
     curl_log: String,
 }
 
-fn install(work: &Work, tarball: &Path, sums: &str) -> Run {
-    install_from(work, tarball, sums, RELEASE_BODY)
+/// How the installer is started.
+#[derive(Clone, Copy)]
+enum Entry {
+    /// `sh install-pbtop.sh` in the checkout, next to install.sh.
+    Script,
+    /// `sh` reading install-pbtop.sh on stdin, as `curl ... | sh` does, so it
+    /// downloads install.sh.
+    Piped,
+    /// The old `install.sh --pbtop`.
+    Flag,
 }
 
-fn install_from(work: &Work, tarball: &Path, sums: &str, release: &str) -> Run {
+fn install(work: &Work, tarball: &Path, sums: &str) -> Run {
+    install_from(work, tarball, sums, RELEASE_BODY, Entry::Script)
+}
+
+fn install_from(work: &Work, tarball: &Path, sums: &str, release: &str, entry: Entry) -> Run {
     let stubs = work.dir("stubs");
     install_stubs(&stubs);
     let home = work.dir("home");
     let bindir = home.join(".local/bin");
     let gh_log = work.path("gh.log");
     let curl_log = work.path("curl.log");
-    let out = Command::new("bash")
-        .arg(repo_root().join("install.sh"))
-        .arg("--pbtop")
+    let mut cmd = match entry {
+        Entry::Script => {
+            let mut c = Command::new("sh");
+            c.arg(repo_root().join("install-pbtop.sh"));
+            c
+        }
+        Entry::Piped => {
+            let mut c = Command::new("sh");
+            c.stdin(fs::File::open(repo_root().join("install-pbtop.sh")).expect("script"));
+            c
+        }
+        Entry::Flag => {
+            let mut c = Command::new("bash");
+            c.arg(repo_root().join("install.sh")).arg("--pbtop");
+            c
+        }
+    };
+    let out = cmd
         .env(
             "PATH",
             format!(
@@ -85,7 +112,9 @@ fn install_from(work: &Work, tarball: &Path, sums: &str, release: &str) -> Run {
         .env("STUB_GH", "pass")
         .env("GH_LOG", &gh_log)
         .env("CURL_LOG", &curl_log)
+        .env("STUB_INSTALLER_FILE", repo_root().join("install.sh"))
         .env_remove("PLAYBOOK_REF")
+        .env_remove("PLAYBOOK_INSTALL_ONLY")
         .output()
         .expect("bash spawns");
     Run {
@@ -181,7 +210,13 @@ fn a_release_before_pbtop_had_its_own_asset_is_refused_before_any_download() {
     let (tarball, sums) = asset(&work, "0.34.0");
 
     // Act
-    let run = install_from(&work, &tarball, &sums, r#"{"tag_name": "v0.34.0"}"#);
+    let run = install_from(
+        &work,
+        &tarball,
+        &sums,
+        r#"{"tag_name": "v0.34.0"}"#,
+        Entry::Script,
+    );
 
     // Assert
     let text = both(&run.out);
@@ -222,4 +257,43 @@ fn an_asset_without_a_regular_pbtop_is_not_installed() {
         assert!(text.contains("is not a regular file"), "{text}");
         assert!(!run.bindir.join("pbtop").exists());
     }
+}
+
+#[test]
+fn the_piped_script_downloads_install_sh_from_main_and_installs_pbtop() {
+    // Arrange
+    let work = Work::new("pbtop-piped");
+    let (tarball, sums) = asset(&work, "1.2.3");
+
+    // Act
+    let run = install_from(&work, &tarball, &sums, RELEASE_BODY, Entry::Piped);
+
+    // Assert
+    let text = both(&run.out);
+    assert!(run.out.status.success(), "{text}");
+    assert!(text.contains("Installed pbtop 1.2.3"), "{text}");
+    assert!(
+        run.curl_log.contains(
+            "https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh"
+        ),
+        "{}",
+        run.curl_log
+    );
+    assert!(run.bindir.join("pbtop").exists());
+}
+
+#[test]
+fn the_old_pbtop_flag_still_works_and_names_the_new_script() {
+    // Arrange
+    let work = Work::new("pbtop-flag");
+    let (tarball, sums) = asset(&work, "1.2.3");
+
+    // Act
+    let run = install_from(&work, &tarball, &sums, RELEASE_BODY, Entry::Flag);
+
+    // Assert
+    let text = both(&run.out);
+    assert!(run.out.status.success(), "{text}");
+    assert!(text.contains("use install-pbtop.sh"), "{text}");
+    assert!(run.bindir.join("pbtop").exists());
 }

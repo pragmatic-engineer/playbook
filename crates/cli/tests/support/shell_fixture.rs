@@ -110,6 +110,9 @@ case "$url" in
       printf '%s' "${STUB_BODY:-}"
     fi
     exit 0 ;;
+  *raw.githubusercontent.com/*/install.sh)
+    if [ -n "$out" ]; then cp "$STUB_INSTALLER_FILE" "$out"; else cat "$STUB_INSTALLER_FILE"; fi
+    exit 0 ;;
   */releases/download/*/SHA256SUMS)
     if [ -n "$out" ]; then printf '%s' "${STUB_SUMS_BODY:-}" > "$out"
     else printf '%s' "${STUB_SUMS_BODY:-}"; fi
@@ -144,7 +147,8 @@ esac
 /// Write the `curl`, `uname` and `gh` stubs `install.sh` is driven with into
 /// `dir`. `curl` serves the releases API, the release asset and SHA256SUMS from
 /// `STUB_*` env vars (`STUB_ASSET_FILE` serves a file, for a binary asset such
-/// as a tarball) and fails on anything else, `uname` is fixed by
+/// as a tarball, and `STUB_INSTALLER_FILE` serves install.sh from
+/// raw.githubusercontent.com) and fails on anything else, `uname` is fixed by
 /// `STUB_UNAME_S` and `STUB_UNAME_M`, and `gh` plays the attestation check.
 pub fn install_stubs(dir: &Path) {
     write_exec(&dir.join("curl"), CURL_STUB);

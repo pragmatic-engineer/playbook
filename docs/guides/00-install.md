@@ -74,24 +74,18 @@ playbook setup
 
 `playbook setup` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `setup` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew installs update with `brew upgrade playbook`, and `playbook update` refuses a Homebrew install and tells you to use brew.
 
-### Optional: the standalone telemetry tool
+### Optional: pbtop alone
 
-You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. Install the standalone tool only on a machine that has no `playbook`, or when you want the short `pbtop` command.
-
-```bash
-brew install pragmatic-engineer/tap/playbook-telemetry
-pbtop
-```
-
-The formula installs two commands that are the same program: the short `pbtop`, which is the one to type (`pbtop`, `pbtop --summary`, `pbtop --json`, `pbtop --range 30d`), and the long `playbook-telemetry`, which suits scripts. Release archives for macOS, Linux and Windows are on the [playbook releases page](https://github.com/pragmatic-engineer/playbook/releases), and the [crate README](../../crates/telemetry/README.md) covers `cargo` builds. Up to playbook-telemetry 0.2.0 the telemetry archives have their own `telemetry-vX.Y.Z` tags. From playbook 0.35.0 they ship in each `vX.Y.Z` release, next to `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone. Everything stays on your machine.
-
-To install `pbtop` alone from that archive, with no `playbook`:
+You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. Install `pbtop`, the usage dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash -s -- --pbtop
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install-pbtop.sh | sh
+brew install pragmatic-engineer/tap/pbtop
 ```
 
-It checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) and puts that folder on `PATH`. It runs nothing else. On a release before 0.35.0 it stops and points to the Homebrew formula.
+`install-pbtop.sh` needs `bash` and `curl`. It downloads `install.sh` from `main` and runs it in its pbtop mode, which checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) and puts that folder on `PATH`. It runs nothing else. `PLAYBOOK_REF=vX.Y.Z` pins a release, and on a release before 0.35.0 it stops, because those have no `pbtop` archive. The old `install.sh --pbtop` still works for one more release and points to `install-pbtop.sh`.
+
+Type `pbtop`, `pbtop --summary`, `pbtop --json` or `pbtop --range 30d`. The [crate README](../../crates/telemetry/README.md) covers `cargo` builds. Up to playbook-telemetry 0.2.0 the telemetry archives had their own `telemetry-vX.Y.Z` tags. Everything stays on your machine.
 
 The tool shares its data with playbook: the database is `~/.config/playbook/data/usage.db` and the settings are the `usage.*` keys in `~/.config/playbook/data/config.db`. See [Config keys](04-config-keys.md).
 
