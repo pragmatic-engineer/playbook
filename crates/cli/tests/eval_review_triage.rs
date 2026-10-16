@@ -239,3 +239,29 @@ fn the_prompt_sent_to_claude_carries_the_body_lenses_and_diff() {
     assert!(sent.contains("security"));
     assert!(sent.contains("+placeholder"));
 }
+
+#[test]
+fn the_default_prompt_is_found_in_this_checkout() {
+    let dir = scratch();
+    shims(&dir, true);
+    fs::write(dir.join("response.json"), SEC_FULL).unwrap();
+    fs::write(dir.join("cases.json"), one(true)).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["eval", "review-triage"])
+        .arg(dir.join("cases.json"))
+        .current_dir(env!("PLAYBOOK_REPO_ROOT"))
+        .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    let sent = fs::read_to_string(dir.join("stdin")).unwrap();
+    assert!(
+        sent.contains("read-only triage classifier"),
+        "the shipped prompt was not sent: {sent}"
+    );
+}

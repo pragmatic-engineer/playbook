@@ -448,6 +448,15 @@ mod tests {
 
         write_graph(&db, &[node("a")], &[]).unwrap();
 
-        assert!(touched_at(&db).unwrap().is_some());
+        let stored: String = Connection::open(&db)
+            .unwrap()
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'rebuilt_at_ms'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let recorded = std::time::UNIX_EPOCH + Duration::from_millis(stored.parse().unwrap());
+        assert_eq!(touched_at(&db).unwrap(), Some(recorded));
     }
 }
