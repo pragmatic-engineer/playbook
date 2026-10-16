@@ -287,6 +287,15 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
     // heal returns, whether it succeeded or not.
     let pending = crate::notices::prepare(&root, record.binary.as_deref(), older);
     let out = heal_for(ctx, trigger, now, &root, &record, order);
+    // Every trigger but setup prints the open items, so the one reminder of
+    // migration 0016 counts as shown here. Setup asks the question itself.
+    let reminded = out
+        .open
+        .iter()
+        .any(|i| i.id == migrate::COLLECTOR_SERVICE_MIGRATION);
+    if reminded && !matches!(trigger, Trigger::Init { .. }) {
+        crate::init::collector_service::record_reminder(&ctx.home);
+    }
     Outcome {
         notices: pending.commit(&root),
         ..out
@@ -806,6 +815,36 @@ mod tests {
         // Assert
         assert!(soon.skipped.is_some());
         assert!(later.recorded);
+    }
+
+    #[test]
+    fn the_collector_reminder_is_used_up_only_when_shown() {
+        if crate::usage::service::Kind::current().is_none() {
+            return;
+        }
+        // Arrange
+        let home = crate::init::collector_service::tests::telemetry_home("heal-remind");
+        let shown = |out: &Outcome| {
+            out.open
+                .iter()
+                .any(|i| i.id == migrate::COLLECTOR_SERVICE_MIGRATION)
+        };
+        let init = Trigger::Init {
+            failed: false,
+            statusline: true,
+        };
+
+        // Act
+        let planned = migrate::plan(&ctx(&home)).is_some();
+        let by_setup = run(&ctx(&home), init, 1000);
+        let first = run(&ctx(&home), Trigger::Fix, 1000);
+        let second = run(&ctx(&home), Trigger::Fix, 2000);
+
+        // Assert
+        assert!(planned);
+        assert!(shown(&by_setup), "setup does not use up the reminder");
+        assert!(shown(&first), "a plan does not use up the reminder");
+        assert!(!shown(&second), "the reminder shows once");
     }
 
     #[test]

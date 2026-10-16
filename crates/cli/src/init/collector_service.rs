@@ -252,9 +252,10 @@ pub fn preview(home: &Path, telemetry_on: bool, program: &Path) -> String {
     }
 }
 
-/// The `Consent` check of migration 0016: one line, once, when telemetry
-/// points at the collector and no service keeps it running. Nothing after
-/// the user said no or after the first reminder.
+/// The `Consent` check of migration 0016: one line when telemetry points at
+/// the collector and no service keeps it running. Nothing after the user
+/// said no or after the reminder was shown. It writes nothing, so a plan or
+/// a status read never uses up the reminder; see [`record_reminder`].
 pub fn pending(home: &Path) -> Option<String> {
     if Kind::current().is_none()
         || declined(home)
@@ -264,12 +265,16 @@ pub fn pending(home: &Path) -> Option<String> {
     {
         return None;
     }
-    // Shown once: the record makes later checks quiet.
-    let _ = crate::state::set(&root(home), REMINDED_KEY, "1");
     Some(
         "telemetry is on, but nothing keeps the usage collector running, so telemetry is lost while it is down"
             .to_string(),
     )
+}
+
+/// Records that the reminder of migration 0016 was shown, so later checks
+/// stay quiet. The heal calls it after it printed the line.
+pub fn record_reminder(home: &Path) {
+    let _ = crate::state::set(&root(home), REMINDED_KEY, "1");
 }
 
 /// The step `playbook uninstall` runs: stops and deletes the service file.
@@ -293,7 +298,7 @@ pub fn remove(home: &Path, dry_run: bool) -> Result<Option<String>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
     use std::fs;
@@ -312,7 +317,7 @@ mod tests {
     }
 
     /// A scratch home whose settings point telemetry at the collector.
-    fn telemetry_home(tag: &str) -> PathBuf {
+    pub(crate) fn telemetry_home(tag: &str) -> PathBuf {
         let home = scratch_dir(&format!("collector-service-{tag}"));
         fs::create_dir_all(home.join(".claude")).unwrap();
         let paths = crate::usage::run::Paths::from_home(&home);
@@ -555,11 +560,31 @@ mod tests {
         );
 
         let first = pending(&home);
-        let second = pending(&home);
+        let again = pending(&home);
+        record_reminder(&home);
+        let after = pending(&home);
 
         assert!(first.is_some_and(|l| l.contains("collector")));
-        assert_eq!(second, None);
+        assert!(again.is_some(), "the check alone writes nothing");
+        assert_eq!(after, None);
         assert_eq!(pending(&said_no), None);
+    }
+
+    #[test]
+    fn an_installed_service_needs_no_reminder() {
+        if Kind::current().is_none() {
+            return;
+        }
+        let home = telemetry_home("remind-installed");
+        step(
+            &home,
+            Path::new("/p"),
+            Choice::Install,
+            Kind::current(),
+            &Stopped,
+        );
+
+        assert_eq!(pending(&home), None);
     }
 
     #[test]
