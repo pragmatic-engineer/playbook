@@ -379,7 +379,10 @@ fn usage_status_names_an_installed_service() {
         )),
         "{text}"
     );
-    assert!(text.contains("installed but not running it"), "{text}");
+    assert!(
+        text.contains("is installed but the collector is not up"),
+        "{text}"
+    );
 }
 
 #[test]

@@ -109,6 +109,26 @@ fn systemd_word(text: &str) -> String {
     }
 }
 
+/// A path for the `append:` of `StandardOutput=`: systemd takes the rest of
+/// the line as the path and expands only `%` specifiers, so only `%` is
+/// doubled.
+fn systemd_path(text: &str) -> String {
+    text.replace('%', "%%")
+}
+
+/// A path is written into a service file as text: refuse one that is not
+/// UTF-8 or holds a control character such as a line break, which would
+/// end the line and start a new directive.
+fn checked_text(what: &str, path: &Path) -> Result<(), String> {
+    match path.to_str() {
+        Some(text) if !text.chars().any(char::is_control) => Ok(()),
+        _ => Err(format!(
+            "the {what} path {} has characters a service file cannot hold",
+            path.display()
+        )),
+    }
+}
+
 /// The service file for `program`, writing its output to `log`.
 pub fn render(kind: Kind, program: &Path, log: &Path) -> String {
     let program = program.to_string_lossy();
@@ -153,7 +173,7 @@ pub fn render(kind: Kind, program: &Path, log: &Path) -> String {
                 .chain(ARGS)
                 .map(systemd_word)
                 .collect();
-            let log = systemd_word(&log);
+            let log = systemd_path(&log);
             format!(
                 "# The playbook usage collector. `playbook uninstall` removes this file.\n\
                  [Unit]\n\
@@ -208,23 +228,23 @@ pub fn program_in(kind: Kind, contents: &str) -> Option<PathBuf> {
 
 /// Runs the service manager's command line tool.
 pub trait Manager {
-    /// Runs `program` with `args`. `Err` holds what it printed on a non-zero
-    /// exit, or why it could not run.
-    fn run(&self, program: &str, args: &[String]) -> Result<(), String>;
+    /// Runs `program` with `args` and returns what it printed. `Err` holds
+    /// what it printed on a non-zero exit, or why it could not run.
+    fn run(&self, program: &str, args: &[String]) -> Result<String, String>;
 }
 
 /// The real tools on this machine.
 pub struct System;
 
 impl Manager for System {
-    fn run(&self, program: &str, args: &[String]) -> Result<(), String> {
+    fn run(&self, program: &str, args: &[String]) -> Result<String, String> {
         let out = std::process::Command::new(program)
             .args(args)
             .stdin(std::process::Stdio::null())
             .output()
             .map_err(|e| format!("could not run {program}: {e}"))?;
         if out.status.success() {
-            return Ok(());
+            return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
         }
         let text = String::from_utf8_lossy(&out.stderr);
         let text = text.trim();
@@ -241,7 +261,7 @@ impl Manager for System {
 pub struct NotThisHome;
 
 impl Manager for NotThisHome {
-    fn run(&self, program: &str, _: &[String]) -> Result<(), String> {
+    fn run(&self, program: &str, _: &[String]) -> Result<String, String> {
         Err(format!(
             "{program} not run, because HOME is not the home of your account"
         ))
@@ -341,6 +361,22 @@ pub fn load_commands(kind: Kind, file: &Path, uid: u32) -> Vec<(&'static str, Ve
     }
 }
 
+/// The commands that restart a running service, so it runs the program
+/// that is on disk now.
+pub fn restart_commands(kind: Kind, uid: u32) -> Vec<(&'static str, Vec<String>)> {
+    match kind {
+        Kind::Launchd => vec![(
+            "launchctl",
+            vec![
+                "kickstart".into(),
+                "-k".into(),
+                format!("gui/{uid}/{LABEL}"),
+            ],
+        )],
+        Kind::Systemd => vec![("systemctl", words(&["--user", "restart", UNIT]))],
+    }
+}
+
 /// The commands that stop the service and keep it from starting again.
 pub fn unload_commands(kind: Kind, uid: u32) -> Vec<(&'static str, Vec<String>)> {
     match kind {
@@ -352,19 +388,65 @@ pub fn unload_commands(kind: Kind, uid: u32) -> Vec<(&'static str, Vec<String>)>
     }
 }
 
-/// The load commands as one line a person can paste.
+/// One word for a shell line, in single quotes when it needs them.
+fn shell_word(word: &str) -> String {
+    let plain = word
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/._-:@%+=".contains(c));
+    if plain && !word.is_empty() {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    }
+}
+
+/// The load commands as one line a person can paste into a shell.
 pub fn load_hint(kind: Kind, file: &Path, uid: u32) -> String {
     load_commands(kind, file, uid)
         .into_iter()
-        .map(|(program, args)| format!("{program} {}", args.join(" ")))
+        .map(|(program, args)| {
+            std::iter::once(program.to_string())
+                .chain(args.iter().map(|a| shell_word(a)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .collect::<Vec<_>>()
         .join(" && ")
 }
 
-/// Whether the service manager runs the service now.
+/// Whether the service manager runs the service now. For launchd a loaded
+/// agent is not enough: `launchctl print` must say `state = running`.
 pub fn loaded(kind: Kind, manager: &dyn Manager, uid: u32) -> bool {
     let (program, args) = check_command(kind, uid);
+    match (kind, manager.run(program, &args)) {
+        (Kind::Launchd, Ok(out)) => out.contains("state = running"),
+        (Kind::Systemd, Ok(_)) => true,
+        (_, Err(_)) => false,
+    }
+}
+
+/// Whether launchd still knows the agent, running or not.
+fn known_to_launchd(manager: &dyn Manager, uid: u32) -> bool {
+    let (program, args) = check_command(Kind::Launchd, uid);
     manager.run(program, &args).is_ok()
+}
+
+/// Waits up to two seconds for launchd to let go of a booted out agent, so
+/// the next `bootstrap` does not fail while the old job is torn down.
+fn wait_until_unloaded(manager: &dyn Manager, uid: u32) {
+    for _ in 0..20 {
+        if !known_to_launchd(manager, uid) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// Whether the service file under `home` is the one [`install`] would write
+/// for `program`.
+pub fn is_current(kind: Kind, home: &Path, program: &Path) -> bool {
+    let want = render(kind, program, &log_path(home));
+    fs::read_to_string(kind.file(home)).is_ok_and(|now| now == want)
 }
 
 /// What [`install`] did.
@@ -372,6 +454,9 @@ pub fn loaded(kind: Kind, manager: &dyn Manager, uid: u32) -> bool {
 pub enum Installed {
     /// The file was already right and the service runs.
     Unchanged,
+    /// The file was already right and the service ran an older program, so
+    /// it was restarted. `Err` holds why the restart failed.
+    Restarted(Result<(), String>),
     /// The file was already right but the service was not running, so it
     /// was started. `Err` holds why it did not start.
     Started(Result<(), String>),
@@ -380,41 +465,50 @@ pub enum Installed {
     Wrote { started: Result<(), String> },
 }
 
+/// Runs `commands` in order and stops at the first failure.
+fn run_all(
+    manager: &dyn Manager,
+    commands: Vec<(&'static str, Vec<String>)>,
+) -> Result<(), String> {
+    commands
+        .into_iter()
+        .try_for_each(|(program, args)| manager.run(program, &args).map(|_| ()))
+}
+
 /// Writes the service file for `program` under `home` and starts it.
 /// Idempotent: a file that matches is never written again, and a service
-/// that runs is left alone. `Err` means the file could not be written.
+/// that runs is left alone unless `outdated` says it runs an older program,
+/// which restarts it. `Err` means the file could not be written.
 pub fn install(
     kind: Kind,
     home: &Path,
     program: &Path,
     manager: &dyn Manager,
     uid: u32,
+    outdated: bool,
 ) -> Result<Installed, String> {
     let file = kind.file(home);
     let log = log_path(home);
-    let contents = render(kind, program, &log);
+    checked_text("program", program)?;
+    checked_text("log", &log)?;
     let running = loaded(kind, manager, uid);
-    let start = || {
-        load_commands(kind, &file, uid)
-            .into_iter()
-            .try_for_each(|(program, args)| manager.run(program, &args))
-    };
-    if fs::read_to_string(&file).is_ok_and(|now| now == contents) {
-        return Ok(if running {
-            Installed::Unchanged
-        } else {
-            Installed::Started(start())
+    if is_current(kind, home, program) {
+        return Ok(match (running, outdated) {
+            (true, false) => Installed::Unchanged,
+            (true, true) => Installed::Restarted(run_all(manager, restart_commands(kind, uid))),
+            (false, _) => Installed::Started(run_all(manager, load_commands(kind, &file, uid))),
         });
     }
     prepare_log(&log)?;
-    write_file(&file, &contents)?;
-    if running && kind == Kind::Launchd {
+    write_file(&file, &render(kind, program, &log))?;
+    if kind == Kind::Launchd && known_to_launchd(manager, uid) {
         // launchd keeps the old definition until the agent is booted out.
-        for (program, args) in unload_commands(kind, uid) {
-            let _ = manager.run(program, &args);
-        }
+        let _ = run_all(manager, unload_commands(kind, uid));
+        wait_until_unloaded(manager, uid);
     }
-    Ok(Installed::Wrote { started: start() })
+    Ok(Installed::Wrote {
+        started: run_all(manager, load_commands(kind, &file, uid)),
+    })
 }
 
 /// Stops the service and deletes its file. `Ok(false)` when there was no file.
@@ -461,6 +555,24 @@ impl Found {
     }
 }
 
+/// What to do when telemetry points at the collector and none runs, in one
+/// line: start it by hand, and either check the installed service's log or
+/// install the service.
+pub fn collector_fix(home: &Path) -> String {
+    let collect = crate::host::command("usage collect");
+    match find(home) {
+        Some(found) => format!(
+            "start it with `{collect}`; the {} is installed but the collector is not up, see {}",
+            found.kind.name(),
+            log_path(home).display()
+        ),
+        None => format!(
+            "start it with `{collect}`, or keep it running in the background with `{}`",
+            crate::host::setup_command("collector-service")
+        ),
+    }
+}
+
 /// The service file under `home` for this system, if one exists.
 pub fn find(home: &Path) -> Option<Found> {
     let kind = Kind::current()?;
@@ -481,19 +593,10 @@ pub fn find_kind(kind: Kind, home: &Path) -> Option<Found> {
 /// Creates the log owner-only, or tightens an older one, so the service
 /// manager appends to a private file.
 fn prepare_log(log: &Path) -> Result<(), String> {
-    let error = |e: std::io::Error| format!("could not prepare {}: {e}", log.display());
     if let Some(dir) = log.parent() {
-        fs::create_dir_all(dir).map_err(error)?;
+        fs::create_dir_all(dir).map_err(|e| format!("could not prepare {}: {e}", log.display()))?;
     }
-    let mut options = fs::OpenOptions::new();
-    options.append(true).create(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options.open(log).map_err(error)?;
-    set_mode(log, 0o600).map_err(error)
+    crate::util::atomic::make_db_file_private(log)
 }
 
 /// Writes the service file through a temp file and a rename, readable by
@@ -524,28 +627,33 @@ mod tests {
     use crate::util::scratch_dir;
     use std::cell::RefCell;
 
-    /// Records each call; `running` answers the check command.
+    /// Records each call. `running` answers the check command the way the
+    /// real tool does, and `fail` makes any call naming that word fail.
     #[derive(Default)]
     struct Fake {
         calls: RefCell<Vec<String>>,
+        booted_out: RefCell<bool>,
         running: bool,
         fail: Option<&'static str>,
     }
 
     impl Manager for Fake {
-        fn run(&self, program: &str, args: &[String]) -> Result<(), String> {
+        fn run(&self, program: &str, args: &[String]) -> Result<String, String> {
             let line = format!("{program} {}", args.join(" "));
             self.calls.borrow_mut().push(line.clone());
-            if line.contains("print") || line.contains("is-active") {
-                return if self.running {
-                    Ok(())
+            if line.contains("bootout") {
+                *self.booted_out.borrow_mut() = true;
+            }
+            if line.contains(" print ") || line.contains("is-active") {
+                return if self.running && !*self.booted_out.borrow() {
+                    Ok("\tstate = running\n".into())
                 } else {
                     Err("not loaded".into())
                 };
             }
             match self.fail {
                 Some(word) if line.contains(word) => Err(format!("{word} failed")),
-                _ => Ok(()),
+                _ => Ok(String::new()),
             }
         }
     }
@@ -557,6 +665,10 @@ mod tests {
     }
 
     const PROGRAM: &str = "/opt/homebrew/bin/playbook";
+
+    fn put(kind: Kind, home: &Path, program: &str, fake: &Fake) -> Installed {
+        install(kind, home, Path::new(program), fake, 7, false).unwrap()
+    }
 
     #[test]
     fn the_plist_runs_the_collector_at_load_keeps_it_alive_and_logs_to_the_state_dir() {
@@ -603,11 +715,34 @@ mod tests {
             let text = render(kind, odd, Path::new("/l"));
             assert_eq!(program_in(kind, &text).unwrap(), odd, "{text}");
         }
-        let unit = render(Kind::Systemd, odd, Path::new("/l"));
+        let unit = render(Kind::Systemd, odd, Path::new("/home/a b/$x/5%.log"));
         assert!(
             unit.contains("\"/Users/a b/100%% & <x>/$$HOME/playbook\""),
             "{unit}"
         );
+        // The append path takes no quotes and no `$` doubling, only `%%`.
+        assert!(
+            unit.contains("StandardOutput=append:/home/a b/$x/5%%.log\n"),
+            "{unit}"
+        );
+    }
+
+    #[test]
+    fn a_path_with_a_line_break_is_refused_and_nothing_is_written() {
+        let home = scratch_dir("service-newline");
+
+        let err = install(
+            Kind::Systemd,
+            &home,
+            Path::new("/bin/playbook\nExecStartPre=/bin/evil"),
+            &Fake::default(),
+            1,
+            false,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("cannot hold"), "{err}");
+        assert!(!Kind::Systemd.file(&home).exists());
     }
 
     #[test]
@@ -627,7 +762,7 @@ mod tests {
         let fake = Fake::default();
 
         // Act
-        let done = install(Kind::Launchd, &home, Path::new(PROGRAM), &fake, 501).unwrap();
+        let done = install(Kind::Launchd, &home, Path::new(PROGRAM), &fake, 501, false).unwrap();
 
         // Assert
         assert_eq!(done, Installed::Wrote { started: Ok(()) });
@@ -636,6 +771,7 @@ mod tests {
         assert_eq!(
             fake.calls(),
             [
+                format!("launchctl print gui/501/{LABEL}"),
                 format!("launchctl print gui/501/{LABEL}"),
                 format!("launchctl enable gui/501/{LABEL}"),
                 format!("launchctl bootstrap gui/501 {}", file.display()),
@@ -653,20 +789,13 @@ mod tests {
     #[test]
     fn a_second_install_with_the_service_running_changes_nothing() {
         let home = scratch_dir("service-again");
-        install(
-            Kind::Systemd,
-            &home,
-            Path::new(PROGRAM),
-            &Fake::default(),
-            1,
-        )
-        .unwrap();
+        put(Kind::Systemd, &home, PROGRAM, &Fake::default());
         let running = Fake {
             running: true,
             ..Fake::default()
         };
 
-        let done = install(Kind::Systemd, &home, Path::new(PROGRAM), &running, 1).unwrap();
+        let done = put(Kind::Systemd, &home, PROGRAM, &running);
 
         assert_eq!(done, Installed::Unchanged);
         assert_eq!(
@@ -676,21 +805,44 @@ mod tests {
     }
 
     #[test]
+    fn an_outdated_running_service_is_restarted_in_place() {
+        let home = scratch_dir("service-outdated");
+        put(Kind::Launchd, &home, PROGRAM, &Fake::default());
+        let running = Fake {
+            running: true,
+            ..Fake::default()
+        };
+
+        let done = install(Kind::Launchd, &home, Path::new(PROGRAM), &running, 7, true).unwrap();
+
+        assert_eq!(done, Installed::Restarted(Ok(())));
+        assert!(running
+            .calls()
+            .contains(&format!("launchctl kickstart -k gui/7/{LABEL}")));
+    }
+
+    #[test]
+    fn a_loaded_agent_that_is_not_running_counts_as_stopped() {
+        struct Loaded;
+        impl Manager for Loaded {
+            fn run(&self, _: &str, _: &[String]) -> Result<String, String> {
+                Ok("\tstate = waiting\n".into())
+            }
+        }
+
+        assert!(!loaded(Kind::Launchd, &Loaded, 1));
+        assert!(loaded(Kind::Systemd, &Loaded, 1));
+    }
+
+    #[test]
     fn a_matching_file_with_the_service_stopped_is_started_and_not_written() {
         let home = scratch_dir("service-stopped");
-        install(
-            Kind::Launchd,
-            &home,
-            Path::new(PROGRAM),
-            &Fake::default(),
-            1,
-        )
-        .unwrap();
+        put(Kind::Launchd, &home, PROGRAM, &Fake::default());
         let file = Kind::Launchd.file(&home);
         let before = fs::metadata(&file).unwrap().modified().unwrap();
         let fake = Fake::default();
 
-        let done = install(Kind::Launchd, &home, Path::new(PROGRAM), &fake, 1).unwrap();
+        let done = put(Kind::Launchd, &home, PROGRAM, &fake);
 
         assert_eq!(done, Installed::Started(Ok(())));
         assert_eq!(fs::metadata(&file).unwrap().modified().unwrap(), before);
@@ -698,26 +850,36 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_program_reloads_a_running_agent() {
+    fn a_changed_program_boots_out_the_old_agent_before_loading_the_new_one() {
+        // Arrange
         let home = scratch_dir("service-moved");
-        install(
-            Kind::Launchd,
-            &home,
-            Path::new("/old/playbook"),
-            &Fake::default(),
-            7,
-        )
-        .unwrap();
+        put(Kind::Launchd, &home, "/old/playbook", &Fake::default());
         let running = Fake {
             running: true,
             ..Fake::default()
         };
 
-        install(Kind::Launchd, &home, Path::new(PROGRAM), &running, 7).unwrap();
+        // Act
+        let done = put(Kind::Launchd, &home, PROGRAM, &running);
 
-        assert!(running
+        // Assert
+        assert_eq!(done, Installed::Wrote { started: Ok(()) });
+        let calls: Vec<String> = running
             .calls()
-            .contains(&format!("launchctl bootout gui/7/{LABEL}")));
+            .into_iter()
+            .filter(|c| !c.contains(" print "))
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                format!("launchctl bootout gui/7/{LABEL}"),
+                format!("launchctl enable gui/7/{LABEL}"),
+                format!(
+                    "launchctl bootstrap gui/7 {}",
+                    Kind::Launchd.file(&home).display()
+                ),
+            ]
+        );
         assert_eq!(
             find_kind(Kind::Launchd, &home).unwrap().program.unwrap(),
             Path::new(PROGRAM)
@@ -732,7 +894,7 @@ mod tests {
             ..Fake::default()
         };
 
-        let done = install(Kind::Launchd, &home, Path::new(PROGRAM), &fake, 1).unwrap();
+        let done = put(Kind::Launchd, &home, PROGRAM, &fake);
 
         assert_eq!(
             done,
@@ -746,14 +908,7 @@ mod tests {
     #[test]
     fn remove_stops_the_service_and_deletes_only_its_file() {
         let home = scratch_dir("service-remove");
-        install(
-            Kind::Systemd,
-            &home,
-            Path::new(PROGRAM),
-            &Fake::default(),
-            1,
-        )
-        .unwrap();
+        put(Kind::Systemd, &home, PROGRAM, &Fake::default());
         let fake = Fake::default();
 
         let removed = remove(Kind::Systemd, &home, &fake, 1).unwrap();
@@ -774,6 +929,7 @@ mod tests {
     #[test]
     fn a_scratch_home_never_gets_the_real_manager() {
         let home = scratch_dir("service-scratch");
+        fs::create_dir_all(&home).unwrap();
 
         let err = manager_for(&home).run("launchctl", &[]).unwrap_err();
 
@@ -786,7 +942,7 @@ mod tests {
         assert_eq!(find_kind(Kind::Launchd, &home), None);
         let program = home.join("bin/playbook");
         fs::create_dir_all(program.parent().unwrap()).unwrap();
-        install(Kind::Launchd, &home, &program, &Fake::default(), 1).unwrap();
+        install(Kind::Launchd, &home, &program, &Fake::default(), 1, false).unwrap();
 
         let missing = find_kind(Kind::Launchd, &home).unwrap().program_exists();
         fs::write(&program, "").unwrap();
@@ -802,11 +958,17 @@ mod tests {
     }
 
     #[test]
-    fn the_load_hint_is_the_commands_a_person_runs() {
+    fn the_load_hint_is_the_commands_a_person_runs_with_odd_paths_quoted() {
         let hint = load_hint(Kind::Systemd, Path::new("/x"), 1);
+        let agent = load_hint(Kind::Launchd, Path::new("/Users/a b/it's;x.plist"), 5);
+
         assert_eq!(
             hint,
             format!("systemctl --user daemon-reload && systemctl --user enable {UNIT} && systemctl --user restart {UNIT}")
+        );
+        assert!(
+            agent.ends_with("launchctl bootstrap gui/5 '/Users/a b/it'\\''s;x.plist'"),
+            "{agent}"
         );
     }
 }
