@@ -180,9 +180,10 @@ installs and the tap may already point at them. To pull a bad release:
 
 ## Internal tool crates
 
-`playbook-telemetry` (and later `playbook-code`) are workspace members of this
+`playbook-telemetry` and `playbook-code` are workspace members of this
 repo under `crates/`. `playbook` depends on them by path, so there is one
-`Cargo.lock`. `playbook-telemetry` uses the workspace version, and its
+`Cargo.lock`. `playbook-code` is a library of the `playbook` binary and has
+no release of its own. `playbook-telemetry` uses the workspace version, and its
 `pbtop` binary ships in the `vX.Y.Z` release (ADR 0038, ADR 0041). The
 `telemetry-v` tags before 0.34.0 stay as history.
 

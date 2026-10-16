@@ -89,10 +89,6 @@ Type `pbtop`, `pbtop --summary`, `pbtop --json` or `pbtop --range 30d`. The [cra
 
 The tool shares its data with playbook: the database is `~/.config/playbook/data/usage.db` and the settings are the `usage.*` keys in `~/.config/playbook/data/config.db`. See [Config keys](04-config-keys.md).
 
-### Coming: the standalone code index
-
-`playbook code` will also get a standalone tool, [playbook-code](../../crates/code), with the short alias `pbcode`. It has no release yet, so there is nothing to install. Use `playbook code` today.
-
 ### Without `curl | bash`
 
 1. From the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest), download the asset for your platform and `SHA256SUMS`.
