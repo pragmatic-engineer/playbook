@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: Apache-2.0
 #
-# CI gate for the Rust binary. Runs on ubuntu-latest and macos-latest so a
-# platform-specific regression is caught on both hosts the binary ships for.
+# CI gate for the Rust binary. Pull requests, the merge queue and pushes to
+# main build and test on Linux. macOS builds and tests in the daily run, on a
+# manual run, and in every release: release.yml calls this workflow with the
+# commit it is about to tag, and the release stops when macOS is red.
 # Validates:
 #   - cargo fmt --all --check
 #   - cargo clippy --workspace --all-targets -- -D warnings
@@ -18,18 +20,34 @@ on:
   merge_group:
   push:
     branches: [main]
-  # Daily full matrix on main. The merge queue runs Linux only, so this
-  # catches a platform-only break within a day.
+  # Daily full matrix on main, macOS included. Pull requests and the merge
+  # queue run Linux only, so this catches a platform-only break within a day.
   schedule:
     - cron: "17 5 * * *"
+  # The full matrix on demand, macOS included.
+  workflow_dispatch:
+  # The release gate (release.yml): macOS build and test of one commit.
+  workflow_call:
+    inputs:
+      ref:
+        description: 'The commit to build and test on macOS.'
+        required: true
+        type: string
+    outputs:
+      sha:
+        description: 'The commit the macOS lane checked out and tested.'
+        value: ${{ jobs.build-test.outputs.sha }}
 
 permissions: {}
 
+# A release gate gets a group per commit, and the daily run one of its own, so
+# neither waits behind or cancels a push to main.
 concurrency:
-  group: rust-ci-${{ github.ref }}
-  # Never cancel a push to main: it is the run that saves the cargo cache, and
-  # back-to-back merges were cancelling it before the save step.
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  group: rust-ci-${{ inputs.ref && format('gate-{0}', inputs.ref) || (github.event_name == 'schedule' && 'schedule') || github.ref }}
+  # Only a newer pull request or queue run cancels an older one. A push to
+  # main saves the cargo cache, and back-to-back merges were cancelling it
+  # before the save step.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
 jobs:
   # Classifies the change so docs-only PRs skip the heavy lanes. Required
@@ -53,6 +71,10 @@ jobs:
       # root manifest, the toolchain, hooks, .github) selects the
       # whole workspace, and so does any error.
       pkgs: ${{ steps.classify.outputs.pkgs }}
+      # Whether the macOS leg builds and tests: the daily run and a manual
+      # run. A release gate is a call from release.yml's workflow_dispatch,
+      # so it counts as a manual run.
+      macos: ${{ steps.classify.outputs.macos }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -115,11 +137,20 @@ jobs:
           fi
           echo "pkgs=$pkgs" | tee -a "$GITHUB_OUTPUT"
 
+          case "$EVENT" in
+            schedule|workflow_dispatch) macos=true ;;
+            *) macos=false ;;
+          esac
+          echo "macos=$macos" | tee -a "$GITHUB_OUTPUT"
+
+  # The macOS leg always starts, because "build-test (macos-latest)" is a
+  # required check, and skips its steps unless `changes` says macOS runs. A
+  # release gate runs the macOS leg alone.
   build-test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ fromJSON(inputs.ref && '["macos-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
     needs: changes
     # Run even if `changes` failed (fail open); never let a skipped needs
     # turn a required check into a skipped one.
@@ -127,7 +158,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+    outputs:
+      sha: ${{ steps.head.outputs.sha }}
     env:
+      # Whether this leg builds and tests. Each step below checks it. A
+      # release gate always runs, even when `changes` failed.
+      LANE: ${{ needs.changes.outputs.docs_only != 'true' && (matrix.os != 'macos-latest' || needs.changes.outputs.macos == 'true' || (inputs.ref || '') != '') }}
       # Single source of truth for the cache key and the install command
       # below, so they can't drift apart. Bump deliberately, not implicitly.
       CARGO_AUDIT_VERSION: "0.22.2"
@@ -139,7 +175,7 @@ jobs:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         # Linux-only action; it self-skips on macOS with a confusing warning
         # (same convention as shell-ci.yml).
-        if: runner.os == 'Linux' && needs.changes.outputs.docs_only != 'true'
+        if: runner.os == 'Linux' && env.LANE == 'true'
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -153,10 +189,19 @@ jobs:
             static.rust-lang.org:443
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
+        with:
+          # Set only by a release gate. Empty means the event's commit.
+          ref: ${{ inputs.ref }}
+
+      # The commit under test, which a release gate hands back to release.yml.
+      - name: Record the commit under test
+        id: head
+        if: env.LANE == 'true'
+        run: echo "sha=$(git rev-parse HEAD)" | tee -a "$GITHUB_OUTPUT"
 
       - name: Cache cargo registry and build output (build-test)
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -171,25 +216,25 @@ jobs:
       # reviewer can confirm the pin took effect from the job log instead of
       # trusting rustup's documented override behavior on faith.
       - name: rustc --version
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         run: rustc --version
 
       - name: Ensure rustfmt and clippy components
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         run: rustup component add rustfmt clippy
 
       - name: cargo fmt --all --check
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         run: cargo fmt --all --check
 
       - name: cargo clippy
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         run: cargo clippy ${{ needs.changes.outputs.pkgs || '--workspace' }} --all-targets -- -D warnings
 
       # Non-test code must not panic on bad input: unwrap and expect are errors
       # there. Tests may use them, so this covers the library and the binary only.
       - name: cargo clippy (no unwrap or expect outside tests)
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         run: cargo clippy ${{ needs.changes.outputs.pkgs || '--workspace' }} --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
 
       # nextest schedules every test across all test binaries, where
@@ -197,24 +242,24 @@ jobs:
       # other tools: the action to a commit SHA, the tool to a release older
       # than two weeks. It downloads a prebuilt binary from github.com.
       - name: Install cargo-nextest
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: nextest@0.9.145
 
       - name: cargo nextest run
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         run: cargo nextest run ${{ needs.changes.outputs.pkgs || '--workspace' }} --no-tests=pass --config-file .github/nextest.toml --profile ci
 
       # nextest does not run doctests.
       - name: cargo test --workspace --doc
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         run: cargo test ${{ needs.changes.outputs.pkgs || '--workspace' }} --doc
 
       # Moved out of shell-ci with the port: the seed validator is now a
       # subcommand, so it needs a built binary and belongs on this lane.
       - name: Validate the shipped settings seed
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         run: |
           cargo build
           ./target/debug/playbook settings check \
@@ -224,17 +269,17 @@ jobs:
       # validator is now a subcommand too, so it needs the binary already
       # built by the step above.
       - name: Validate the tracked-file manifest
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         run: ./target/debug/playbook manifest check .
 
       - name: Validate the plugin agents
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         run: ./target/debug/playbook agents check plugins/playbook/agents
 
       # Warn-only for now: the findings show as annotations and never fail the
       # job. `--strict` would fail it on a hard finding.
       - name: Check the docs prose
-        if: needs.changes.outputs.docs_only != 'true' && runner.os == 'Linux'
+        if: env.LANE == 'true' && runner.os == 'Linux'
         continue-on-error: true
         run: ./target/debug/playbook prose check docs/adr/*.md
 
@@ -258,14 +303,14 @@ jobs:
       # first real run's harden-runner insights to confirm the cache
       # actually populates rather than assuming this holds forever.
       - name: Cache cargo-audit binary
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-audit
           key: cargo-audit-${{ runner.os }}-${{ env.CARGO_AUDIT_VERSION }}
 
       - name: cargo audit
-        if: needs.changes.outputs.docs_only != 'true' && !(github.event_name == 'merge_group' && runner.os == 'macOS')
+        if: env.LANE == 'true'
         run: |
           if [ ! -x "$HOME/.cargo/bin/cargo-audit" ]; then
             cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
@@ -276,10 +321,11 @@ jobs:
           # CVEs get caught, only skips recompiling the same binary.
           cargo audit
 
-      # Saved only after a push to main. PR and queue runs restore the main
-      # cache and skip the multi-minute save of a multi-GiB target dir.
+      # Saved after a push to main on Linux, and after the daily run on macOS,
+      # the one run on main that builds macOS. PR and queue runs restore the
+      # main cache and skip the multi-minute save of a multi-GiB target dir.
       - name: Save cargo registry and build output (build-test)
-        if: github.event_name == 'push' && success()
+        if: env.LANE == 'true' && success() && ((github.event_name == 'push' && runner.os == 'Linux') || (github.event_name == 'schedule' && runner.os == 'macOS'))
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -346,8 +392,9 @@ jobs:
   # unix-only APIs and making them portable is separate work.
   windows-check:
     needs: changes
-    # Already ran on the PR head; the queue re-runs Linux build-test only.
-    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group'
+    # Already ran on the PR head; the queue re-runs Linux build-test only. A
+    # release gate runs macOS only.
+    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref
     runs-on: windows-latest
     permissions:
       contents: read
@@ -407,8 +454,9 @@ jobs:
   # pushed tag or workflow_dispatch, never on a pull request.
   container-smoke:
     needs: changes
-    # Already ran on the PR head; the queue re-runs Linux build-test only.
-    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group'
+    # Already ran on the PR head; the queue re-runs Linux build-test only. A
+    # release gate runs macOS only.
+    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref
     strategy:
       fail-fast: false
       matrix:

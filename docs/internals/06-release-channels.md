@@ -61,6 +61,12 @@ the `v` tags and picks where the run starts:
 - `publish`: the tag exists. The run builds and publishes, unless the release
   is already published, in which case it only checks it.
 
+Before the tag, `macos` calls `rust-ci.yml` to build and test the release
+commit on macOS. Pull requests and the merge queue test on Linux only, so this
+is the one macOS check every release must pass. It tests the release commit,
+the tag when the run starts at `publish`, or the dispatch commit on a dry run.
+`tag` and `draft` stop the run unless it passed on that same commit.
+
 After the tag, `draft` creates a draft release with the notes and attaches
 `release-notes.json` and `breaking-changes.json`. `build` compiles the five
 targets with `--locked` and attaches two assets per target: the `playbook`

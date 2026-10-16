@@ -13,6 +13,9 @@
 # the same version and goes on from there:
 #   prepare  open the release pull request with the bump and the changelog
 #            section, and wait for it to merge through the merge queue;
+#   macos    build and test the release commit on macOS through rust-ci.yml,
+#            which pull requests and the merge queue run on Linux only. A
+#            red or missing result stops the run before the tag;
 #   tag      create the tag vX.Y.Z on the merged commit with the igorjs app
 #            token, which the "Protect release tags" ruleset lets through;
 #   publish  build the five targets, attach the assets to a draft release,
@@ -24,8 +27,8 @@
 #
 # Dry run: `dry_run=true` plans, shows the changes the release pull request
 # and the downstream pull requests would make, checks the app tokens with
-# read-only calls, and builds the five targets from main. It opens, tags,
-# uploads and publishes nothing.
+# read-only calls, runs the macOS gate, and builds the five targets from main.
+# It opens, tags, uploads and publishes nothing.
 #
 # Five targets, built on the host that matches them:
 #   aarch64-apple-darwin        macos-latest, native
@@ -230,10 +233,24 @@ jobs:
           set -euo pipefail
           scripts/release-gh.sh wait "$REPO" "$PR" 4800 | tee -a "$GITHUB_OUTPUT"
 
+  # macOS build and test of the commit this run releases: the release commit,
+  # the existing tag when the run starts at publish, or the dispatch commit
+  # on a dry run. Pull requests and the merge queue run Linux only, so this
+  # is where macOS must pass before anything is tagged or built. `tag` and
+  # `draft` fail unless it passed on the same commit.
+  macos:
+    needs: [plan, prepare]
+    if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rust-ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha || needs.plan.outputs.commit || (needs.plan.outputs.state == 'publish' && needs.plan.outputs.tag) || (needs.plan.outputs.dry_run == 'true' && github.sha) || '' }}
+
   # Creates vX.Y.Z on the commit that carries the version. When GitHub
   # refuses, the run stops with the command a maintainer runs instead.
   tag:
-    needs: [plan, prepare]
+    needs: [plan, prepare, macos]
     if: ${{ !cancelled() && !failure() && (needs.plan.outputs.state == 'prepare' || needs.plan.outputs.state == 'tag') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -261,6 +278,8 @@ jobs:
           SHA: ${{ needs.prepare.outputs.sha || needs.plan.outputs.commit }}
           DRY_RUN: ${{ needs.plan.outputs.dry_run }}
           MAIN: ${{ github.event.repository.default_branch }}
+          MACOS_RESULT: ${{ needs.macos.result }}
+          MACOS_SHA: ${{ needs.macos.outputs.sha }}
         run: |
           set -euo pipefail
           if [ -z "$SHA" ]; then
@@ -271,6 +290,10 @@ jobs:
           # The release pull request merged after the checkout, so fetch.
           git fetch --quiet origin "$MAIN"
           git checkout --quiet "$SHA"
+          if [ "$MACOS_RESULT" != success ] || [ "$MACOS_SHA" != "$SHA" ]; then
+            echo "::error::macOS build and test must pass on $SHA before the tag (result: ${MACOS_RESULT:-none}, tested: ${MACOS_SHA:-nothing})." >&2
+            exit 1
+          fi
           scripts/check-plugin.sh version
           [ "$(scripts/check-plugin.sh cargo-version)" = "$VERSION" ] \
             || { echo "::error::$SHA does not carry $VERSION." >&2; exit 1; }
@@ -313,7 +336,7 @@ jobs:
   # The draft release holds the assets until every check passes. A draft
   # left by a failed run is reused.
   draft:
-    needs: [plan, tag]
+    needs: [plan, macos, tag]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' && needs.plan.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -334,6 +357,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # A run that starts at publish has no tag job, so the gate is checked
+      # here against the tag's commit too.
+      - name: Check the macOS gate
+        env:
+          MACOS_RESULT: ${{ needs.macos.result }}
+          MACOS_SHA: ${{ needs.macos.outputs.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          if [ "$MACOS_RESULT" != success ] || [ "$MACOS_SHA" != "$sha" ]; then
+            echo "::error::macOS build and test must pass on $sha before the release is built (result: ${MACOS_RESULT:-none}, tested: ${MACOS_SHA:-nothing})." >&2
+            exit 1
+          fi
+
       - name: Create the draft release with its notes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -352,7 +389,7 @@ jobs:
           gh release upload "$TAG" release-notes.json breaking-changes.json --clobber
 
   build:
-    needs: [plan, draft]
+    needs: [plan, macos, draft]
     if: ${{ !cancelled() && !failure() && needs.plan.outputs.build == 'true' }}
     strategy:
       fail-fast: false
