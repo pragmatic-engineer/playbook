@@ -1,6 +1,6 @@
 # Hook reference
 
-Every hook that `playbook init` wires into `~/.claude/settings.json`. Each command is `playbook hook <name>`. A test fails when init wires a hook that is missing from the tables below, so this page cannot drift.
+Every hook that `playbook setup` wires into `~/.claude/settings.json`. Each command is `playbook hook <name>`. A test fails when setup wires a hook that is missing from the tables below, so this page cannot drift.
 
 Paths below use `~/.config/playbook/` as the playbook home. The session directory is `~/.config/playbook/runtime/<session id>/`, owner-only (mode 0700). No hook reads a secret value, and no hook sends anything over the network.
 
@@ -10,9 +10,9 @@ Five ways, from narrowest to widest.
 
 - A per-hook switch, where the last column names one. Environment switches (`POLICY_GUARD=0`) go in the `env` block of `settings.json` or your shell.
 - Disable the plugin in Claude Code. That sets `enabledPlugins["playbook@pragmatic-engineer"]` to `false`. Every hook then exits with no output and no side effects, and the status line prints nothing, while the entries stay in `settings.json`. The two worktree hooks keep running, because they replace Claude Code's own worktree creation. Enable the plugin again to resume.
-- Delete the hook's entry from `~/.claude/settings.json`. Init puts it back on the next run unless you pass `--no-hooks`.
-- `playbook init --no-hooks` never adds playbook hook entries. It does not remove ones that are already there.
-- `playbook uninstall` removes every entry init wired. Add `--dry-run` to see the list first.
+- Delete the hook's entry from `~/.claude/settings.json`. Setup puts it back on the next run unless you pass `--no-hooks`.
+- `playbook setup --no-hooks` never adds playbook hook entries. It does not remove ones that are already there.
+- `playbook uninstall` removes every entry setup wired. Add `--dry-run` to see the list first.
 
 A hook that fails or cannot read its input allows the call. Only the hooks marked "can deny" or "can block" ever stop a tool call.
 
@@ -60,7 +60,7 @@ The usage store is filled by `playbook usage` itself, by the `usage-warm` hook i
 | `PreToolUse` | `Edit\|Write` | `playbook hook memory-anchors` | Shows the memory facts anchored to the file you are about to edit. | Adds context. Never blocks. | Reads `data/memory.db`. Writes an anchor index file in the session directory. | Entry only. |
 | `UserPromptSubmit` | none | `playbook hook memory-anchors` | Adds the memory facts that match your prompt or the files touched this session. | Adds context. Never blocks. | Same as above. | Entry only. |
 | `PostToolUse` | `Edit\|Write\|NotebookEdit` | `playbook hook rebuild-memory-graph` | Rebuilds the memory graph after a fact file is saved. Does nothing for any other file. | Never blocks. Prints nothing. | Reads the memory tree. Writes `data/memory.db` in one transaction. | Entry only. |
-| `Stop` | none | `playbook hook memory-capture` | Once per context threshold crossing, asks the model to write down durable facts before it continues. | Can block the stop (up to two re-blocks), then releases. | Reads `edits.jsonl` and the memory graph. Writes `capture-attempts` in the session directory. Also runs the one-time memory move described in [What init installs](../guides/06-what-init-installs.md#memory-migration). | Entry only. |
+| `Stop` | none | `playbook hook memory-capture` | Once per context threshold crossing, asks the model to write down durable facts before it continues. | Can block the stop (up to two re-blocks), then releases. | Reads `edits.jsonl` and the memory graph. Writes `capture-attempts` in the session directory. Also runs the one-time memory move described in [What setup installs](../guides/06-what-init-installs.md#memory-migration). | Entry only. |
 
 ## Hygiene
 
@@ -74,7 +74,7 @@ The usage store is filled by `playbook usage` itself, by the `usage-warm` hook i
 
 ## Worktree
 
-`playbook init` writes these two into `settings.json` like every other hook.
+`playbook setup` writes these two into `settings.json` like every other hook.
 
 | Event | Matcher | Command | What it does | Can block or change | Reads and writes | Turn off |
 | :- | :- | :- | :- | :- | :- | :- |

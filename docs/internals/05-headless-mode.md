@@ -25,9 +25,9 @@ All run with `CI=true`, stdin from `/dev/null`, and an empty `HOME`.
 | `handoff save`, `handoff show`, `handoff status` | yes | `save` reads stdin and refuses empty input |
 | `trust <path>` | yes | always exit 0 |
 | `pr prepare --help` | yes | exit 0, so a caller can detect support |
-| `init` | yes | no prompt; second run changes nothing; with no plugin root it wires hooks and skips the rest |
+| `setup` | yes | no prompt; second run changes nothing; with no plugin root it wires hooks and skips the rest |
 
-Nothing needed anything from `~/.claude` except `init`, which writes `~/.claude/settings.json`. The state directories created under an empty `HOME` are the `data/` folder (`config.db`, `usage.db`), `runtime/` (handoffs, session folders, `session-start.log`), `memory/`, and `data/gate/<owner>/<repo>/<worktree>.db` for the gate.
+Nothing needed anything from `~/.claude` except `setup`, which writes `~/.claude/settings.json`. The state directories created under an empty `HOME` are the `data/` folder (`config.db`, `usage.db`), `runtime/` (handoffs, session folders, `session-start.log`), `memory/`, and `data/gate/<owner>/<repo>/<worktree>.db` for the gate.
 
 ## Running Claude headless
 
