@@ -273,6 +273,12 @@ pub fn needs_you(message: &str, command: Option<&str>) -> String {
 
 /// Runs the heal for `trigger` at `now` (epoch seconds).
 pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
+    run_shown(ctx, trigger, now, true)
+}
+
+/// [`run`], where `shown` says whether a person sees the open items. A
+/// headless session hook passes false, so it does not use up a reminder.
+fn run_shown(ctx: &Ctx, trigger: Trigger, now: u64, shown: bool) -> Outcome {
     let root = crate::common::paths::playbook_root_from(&ctx.home);
     // Before the store opens for writing, which imports the old files.
     let older = crate::notices::older_binary_ran(&root);
@@ -293,7 +299,7 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
         .open
         .iter()
         .any(|i| i.id == migrate::COLLECTOR_SERVICE_MIGRATION);
-    if reminded && !matches!(trigger, Trigger::Init { .. }) {
+    if reminded && shown && !matches!(trigger, Trigger::Init { .. }) {
         crate::init::collector_service::record_reminder(&ctx.home);
     }
     Outcome {
@@ -435,7 +441,8 @@ pub fn session_line(home: &Path) -> Option<String> {
     let ctx = Ctx::for_home(home);
     let now = crate::common::time::now_epoch_secs();
     std::panic::catch_unwind(|| {
-        let out = run(&ctx, Trigger::Hook, now);
+        let shown = !crate::common::headless::is_headless();
+        let out = run_shown(&ctx, Trigger::Hook, now, shown);
         notice(out.line(), &out.notices)
     })
     .ok()?
@@ -835,16 +842,30 @@ mod tests {
         };
 
         // Act
-        let planned = migrate::plan(&ctx(&home)).is_some();
+        let planned = migrate::plan(&ctx(&home)).unwrap_or_default();
         let by_setup = run(&ctx(&home), init, 1000);
-        let first = run(&ctx(&home), Trigger::Fix, 1000);
-        let second = run(&ctx(&home), Trigger::Fix, 2000);
+        let headless = run_shown(&ctx(&home), Trigger::Hook, 1000, false);
+        let first = run(&ctx(&home), Trigger::Hook, 1000);
+        let second = run(&ctx(&home), Trigger::Hook, 2000);
+        let fix = run(&ctx(&home), Trigger::Fix, 3000);
+        let pending = Record::read(&root(&home)).unwrap().pending;
 
         // Assert
-        assert!(planned);
+        assert!(
+            planned
+                .iter()
+                .any(|p| p.id == migrate::COLLECTOR_SERVICE_MIGRATION
+                    && matches!(p.state, migrate::State::Open { .. })),
+            "the plan lists the reminder as open"
+        );
         assert!(shown(&by_setup), "setup does not use up the reminder");
-        assert!(shown(&first), "a plan does not use up the reminder");
+        assert!(shown(&headless), "a headless hook still reports it");
+        assert!(shown(&first), "a plan or a headless hook did not use it up");
         assert!(!shown(&second), "the reminder shows once");
+        assert!(!shown(&fix));
+        assert!(!pending
+            .iter()
+            .any(|id| id == migrate::COLLECTOR_SERVICE_MIGRATION));
     }
 
     #[test]
