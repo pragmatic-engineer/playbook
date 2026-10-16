@@ -116,12 +116,6 @@ impl Pending {
     }
 }
 
-/// Records `version` as shown, for a caller that printed the notes of that
-/// release itself (ADR 0037): `playbook update`. Best effort.
-pub fn record(root: &Path, version: &str) {
-    let _ = crate::state::set(root, BINARY_KEY, version);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
