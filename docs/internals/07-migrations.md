@@ -39,6 +39,7 @@ Each migration has an id such as `0006-statusline-rust-command`. Ids are append 
 | `0010-state-files-to-sqlite` | Idempotent | Moves `migrations.state` and the worktree sweep markers into the `state` table. See [State store](08-state-store.md). |
 | `0017-auto-budget-defaults` | Auto | Moves a stored `auto.budgetUsd` or `auto.agentBudgetUsd` of exactly 5, the old default, to the new default once, held at a set global `auto.sessionCeilingUsd`. See [ADR 0028](../adr/0028-per-agent-auto-budget.md). |
 | `0018-retired-launcher-rc-line` | Idempotent, Consent | Removes the launcher lines older setups wrote to `~/.zshrc` and `~/.bashrc`, after a copy to `<rc>.bak-<time>`. `playbook migrate` lists it with `playbook setup`, which applies it. A hand-written `eval "$(playbook shell-init)"` stays. See [ADR 0044](../adr/0044-drop-the-shell-launcher.md). |
+| `0019-system-prompt-default-on` | Idempotent, Consent | Open on an earlier install that has playbook hooks or the status line, no system prompt file and no stored `systemPrompt.enabled`. `playbook migrate` lists it with `playbook setup --only system-prompt`. A yes or a no in setup stores the key and closes it. See [ADR 0044](../adr/0044-drop-the-shell-launcher.md). |
 
 ## How playbook knows you edited a file
 

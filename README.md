@@ -86,7 +86,7 @@ For a small bug, `/playbook:fix` goes from a failing test to one pull request. F
 
 ## The launcher
 
-`playbook cc` starts Claude Code with the playbook system prompt (it replaces Claude Code's built-in prompt and never appends to it), the right model chain and your effort ceiling. `playbook ccd` is the same with permission prompts skipped. `pb` is a short alias for `playbook` (`pb cc`, `pb ccd`), linked next to the binary by install.sh, Homebrew and `playbook setup` when the name is free. No shell line is needed. Turn the prompt off with `playbook setup --no-system-prompt`, and `pb cc` then starts with Claude Code's own prompt. A plain `claude` never loads the playbook prompt. The old `ccc` and `ccd` shell functions are gone; `playbook doctor` finds leftovers and names the replacement.
+`playbook cc` starts Claude Code with the playbook system prompt (it replaces Claude Code's built-in prompt and never appends to it), the right model chain and your effort ceiling. `playbook ccd` is the same with permission prompts skipped. `pb` is a short alias for `playbook` (`pb cc`, `pb ccd`), linked next to the binary by install.sh, Homebrew and `playbook setup` when the name is free and the binary sits in the install folder. No shell line is needed. Turn the prompt off with `playbook setup --no-system-prompt`, and `pb cc` then starts with Claude Code's own prompt. A plain `claude` never loads the playbook prompt. The old `ccc` and `ccd` shell functions are gone; `playbook doctor` finds leftovers and names the replacement.
 
 ```bash
 playbook cc                     # resume this directory's last session, or start fresh

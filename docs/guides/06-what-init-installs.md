@@ -39,7 +39,7 @@ Applying
 ------------------------------------------------------------
 [ok] hooks  wired the ported hooks into settings.json
 [=] statusline  already up to date
-[skip] short-name  pb is outside the install folder; run: ln -s ...
+[skip] short-name  playbook is not installed in ~/.local/bin, so no link was added; to add one, run: ln -s ...
 [fail] trust  could not write ~/.claude.json
 
 1 done, 1 unchanged, 1 skipped, 1 failed
@@ -63,7 +63,7 @@ Before this wizard, the command (then called `init`) printed a flat plan and one
 
 ## The parts
 
-Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the default otherwise. `--yes` accepts every default, so it turns every part but the security defaults on. It keeps the system prompt off when `systemPrompt.enabled` is false or on an earlier install that had none, and the `pb` link off after a stored no. `--aliases` and `--claude-override` are retired: setup accepts them, prints a note and does nothing.
+Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the default otherwise. `--yes` accepts every default, so it turns every part but the security defaults on. It keeps the system prompt off when `systemPrompt.enabled` is false or on an earlier install that had none, and the `pb` link off after a stored no. `--aliases` and `--claude-override` are retired: setup accepts them and does nothing, with a note on stderr when it is a terminal.
 
 | Part | Default | Flags | Files it edits |
 | :- | :- | :- | :- |
@@ -119,7 +119,7 @@ Setup writes no line to your `.zshrc` or `.bashrc`. `playbook cc`, `playbook ccd
 
 ### System prompt
 
-`--system-prompt` (on by default; `--yes` is a yes) copies `SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/` and stores `systemPrompt.enabled` as true. Claude Code uses it only when you start it through `pb cc`, `playbook cc` or `playbook ccd`. A plain `claude` never loads it. A no, or `--no-system-prompt`, stores false, so `pb cc` starts with Claude Code's own prompt, and leaves an existing copy in place. Run setup again with a yes to turn it back on. If you already have a copy, setup refreshes it on every run, unless you edited it, in which case your copy stays. An earlier install without the prompt gets a `playbook migrate` item (migration 0019) until you answer.
+`--system-prompt` (on by default; `--yes` is a yes unless the prompt was turned off or never installed, as above) copies `SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/` and stores `systemPrompt.enabled` as true. Claude Code uses it only when you start it through `pb cc`, `playbook cc` or `playbook ccd`. A plain `claude` never loads it. A no, or `--no-system-prompt`, stores false, so `pb cc` starts with Claude Code's own prompt, and leaves an existing copy in place. Run setup again with a yes to turn it back on. If you already have a copy, setup refreshes it on every run, unless you edited it, in which case your copy stays. An earlier install without the prompt gets a `playbook migrate` item (migration 0019) until you answer.
 
 `--telemetry` (on by default; `--yes` is a yes) writes the OpenTelemetry variables that point Claude Code at a collector on 127.0.0.1 into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage` too. Setup first reads whether telemetry is on, off or not set, from your environment and every Claude Code settings file (user, project, local, managed). When it is already on, set up by you, or switched off by something setup will not change, setup says so in one line and asks nothing. When it is not set, or switched off by a lone off switch in `~/.claude/settings.json`, setup suggests turning it on as a yes or no question, and nothing is written without a yes. It writes nothing when your environment or any Claude Code settings file already names a telemetry variable, with one exception: a yes replaces an off switch that stands alone in `~/.claude/settings.json`. Any other setting you made, including values beside an off switch or in another file, is never overridden. Plain `--yes` never replaces an off switch you set; answer the question or run `playbook setup --only telemetry` for that. `DISABLE_TELEMETRY` and `DO_NOT_TRACK` are shown and left as they are, because they only turn off Anthropic's own analytics. Prompt text, tool content, emails and tokens are not sent, and the account id stays out of the metrics. The collector keeps one port (47318 unless that was taken on the first run) and the `session-init` hook starts it when settings point at it. Restart Claude Code after setup. `playbook uninstall` removes exactly the keys setup wrote, unless you changed them, and puts back an off switch that a yes replaced. See [telemetry by default](../internals/04-usage-dashboard.md#telemetry-by-default).
 
