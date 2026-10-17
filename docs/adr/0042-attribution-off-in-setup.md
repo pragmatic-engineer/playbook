@@ -1,8 +1,8 @@
 # ADR-0042: Turn Off Claude Code Attribution in Setup
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended by [ADR 0044](0044-drop-the-shell-launcher.md), which makes `--yes` turn on every setup part.
 - **Date created:** 2026-10-17
-- **Date modified:** 2026-10-17
+- **Date modified:** 2026-10-18
 - **Amends:** decisions 8 and 12 of [ADR 0034](0034-self-healing-upgrades.md), for this one key: `playbook doctor --fix` asks about it before the shared heal step, and may write it after a yes at a terminal.
 
 ## Context

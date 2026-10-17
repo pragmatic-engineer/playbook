@@ -62,7 +62,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0004](adr/0004-graph-first-memory.md) | Graph-first memory retrieval and triggered capture | Accepted | 2026-08-10 |
 | [0005](adr/0005-python-hooks-and-config-scripts.md) | Migrate the hooks and the config scripts from shell to Python | Superseded by 0007 | 2026-08-11 |
 | [0006](adr/0006-separate-product-tree-from-runtime-dir.md) | Separate the product tree from the Claude Code runtime directory | Accepted | 2026-08-12 |
-| [0007](adr/0007-rust-binary-for-hooks-and-launcher.md) | Move the hooks and the launcher into a single Rust binary | Accepted | 2026-08-13 |
+| [0007](adr/0007-rust-binary-for-hooks-and-launcher.md) | Move the hooks and the launcher into a single Rust binary | Accepted, amended by 0044 | 2026-08-13 |
 | [0008](adr/0008-bounded-memory-injection-with-prompt-recall-and-handoff-continuity.md) | Bounded memory injection, prompt-time recall, and handoff continuity across /clear | Accepted | 2026-08-24 |
 | [0009](adr/0009-evidence-verified-memory-capture-and-bounded-handoff-nudging.md) | Evidence-verified memory capture and bounded handoff nudging | Accepted | 2026-08-25 |
 | [0010](adr/0010-agent-agnostic-repo-local-storage.md) | Agent-agnostic repo-local storage | Superseded by 0012 | 2026-08-30 |
@@ -88,8 +88,8 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0030](adr/0030-skills-and-commands-in-their-own-repo.md) | Keep the skills, commands and agents in their own repository | Accepted, partly superseded by 0031 and 0032 | 2026-10-13 |
 | [0031](adr/0031-hooks-in-settings-json.md) | Put the hooks in settings.json | Accepted, amended by 0034 | 2026-10-14 |
 | [0032](adr/0032-plugin-in-the-playbook-repo.md) | Keep the plugin in the playbook repository | Accepted, amended by 0037, partly superseded by 0038 | 2026-10-14 |
-| [0033](adr/0033-telemetry-on-by-default.md) | Turn Claude Code telemetry on by default at install | Accepted | 2026-10-15 |
-| [0034](adr/0034-self-healing-upgrades.md) | One plugin root resolver and migrations between versions | Accepted, amended by 0037, 0038 and 0042 | 2026-10-15 |
+| [0033](adr/0033-telemetry-on-by-default.md) | Turn Claude Code telemetry on by default at install | Accepted, amended by 0044 | 2026-10-15 |
+| [0034](adr/0034-self-healing-upgrades.md) | One plugin root resolver and migrations between versions | Accepted, amended by 0037, 0038, 0042 and 0044 | 2026-10-15 |
 | [0035](adr/0035-breaking-change-notices.md) | Breaking change notices on every update channel | Superseded by 0037 | 2026-10-15 |
 | [0036](adr/0036-release-check-and-automatic-updates.md) | A release check and automatic updates | Accepted, amended by 0037 | 2026-10-15 |
 | [0037](adr/0037-release-notes-from-conventional-commits.md) | Release notes built from Conventional Commits | Accepted, amended by 0038 and 0039 | 2026-10-16 |
@@ -97,5 +97,6 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0039](adr/0039-release-workflow.md) | A release workflow that runs every step | Accepted, amended by 0041 and on 2026-10-17 | 2026-10-16 |
 | [0040](adr/0040-rename-init-to-setup.md) | Rename `playbook init` to `playbook setup` and keep `init` as a deprecated name | Accepted | 2026-10-16 |
 | [0041](adr/0041-retire-playbook-telemetry.md) | Retire the `playbook-telemetry` binary and formula, and keep `pbtop` | Accepted, amended by 0043 | 2026-10-16 |
-| [0042](adr/0042-attribution-off-in-setup.md) | Turn off Claude Code attribution in setup | Accepted | 2026-10-17 |
-| [0043](adr/0043-collector-service-in-setup.md) | Keep the usage collector running with a per-user service | Accepted | 2026-10-17 |
+| [0042](adr/0042-attribution-off-in-setup.md) | Turn off Claude Code attribution in setup | Accepted, amended by 0044 | 2026-10-17 |
+| [0043](adr/0043-collector-service-in-setup.md) | Keep the usage collector running with a per-user service | Accepted, amended by 0044 | 2026-10-17 |
+| [0044](adr/0044-drop-the-shell-launcher.md) | Drop the shell launcher and turn every setup part on with `--yes` | Accepted | 2026-10-18 |

@@ -1,8 +1,8 @@
 # ADR-0033: Turn Claude Code Telemetry On by Default at Install
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended by [ADR 0044](0044-drop-the-shell-launcher.md), which makes `--yes` turn on every setup part.
 - **Date created:** 2026-10-15
-- **Date modified:** 2026-10-15
+- **Date modified:** 2026-10-18
 
 ## Context
 
