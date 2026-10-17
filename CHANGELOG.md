@@ -2,6 +2,36 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.36.0
+
+### Features
+
+- **setup**: turn off Claude Code attribution with consent ([#1101](https://github.com/pragmatic-engineer/playbook/pull/1101))
+- **usage**: add a launchd and systemd service for the collector ([#1104](https://github.com/pragmatic-engineer/playbook/pull/1104))
+- **cli**: install, start and remove the collector service ([#1108](https://github.com/pragmatic-engineer/playbook/pull/1108))
+- **setup**: keep the usage collector running in the background ([#1105](https://github.com/pragmatic-engineer/playbook/pull/1105))
+- **migrate**: remind existing installs once about the collector service ([#1107](https://github.com/pragmatic-engineer/playbook/pull/1107))
+
+### Fixes
+
+- **eval**: find agent files under plugins/playbook ([#1096](https://github.com/pragmatic-engineer/playbook/pull/1096))
+- **ci**: run the repo checks on the plugins/playbook layout ([#1095](https://github.com/pragmatic-engineer/playbook/pull/1095))
+- **cc**: clear inherited agent variants before a launch ([#1102](https://github.com/pragmatic-engineer/playbook/pull/1102))
+- **pbtop**: say why a telemetry view is empty and how to fix it ([#1106](https://github.com/pragmatic-engineer/playbook/pull/1106))
+- **auto**: raise the default spend caps to measured session cost ([#1115](https://github.com/pragmatic-engineer/playbook/pull/1115))
+
+### Other changes
+
+- chore(cli): remove code nothing calls ([#1092](https://github.com/pragmatic-engineer/playbook/pull/1092))
+- docs: list every ADR in the index and fix stale names ([#1097](https://github.com/pragmatic-engineer/playbook/pull/1097))
+- build(toolchain): pin Rust 1.99.1 ([#1098](https://github.com/pragmatic-engineer/playbook/pull/1098))
+- chore(deps): bump patch versions and refresh the lockfile ([#1094](https://github.com/pragmatic-engineer/playbook/pull/1094))
+- chore(settings): use current tool names in the shared allowlist ([#1099](https://github.com/pragmatic-engineer/playbook/pull/1099))
+- test(memory): read the touched time the staleness check reads ([#1090](https://github.com/pragmatic-engineer/playbook/pull/1090))
+- docs(plugin): stop telling agents to call TaskOutput ([#1100](https://github.com/pragmatic-engineer/playbook/pull/1100))
+- chore: fix gaps a review found in the sweep PRs ([#1103](https://github.com/pragmatic-engineer/playbook/pull/1103))
+- test: stop waiting out the migrate lock budget ([#1109](https://github.com/pragmatic-engineer/playbook/pull/1109))
+
 ## playbook 0.35.0
 
 ### Breaking changes
