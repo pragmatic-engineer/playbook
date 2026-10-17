@@ -44,25 +44,6 @@ pub fn short_name_enabled(home: &std::path::Path) -> bool {
     )
 }
 
-/// The first executable file called `name` in the directories of `path`, the
-/// way a shell would find a command. Used by `init` to see whether `pb` is taken.
-pub fn command_on_path(name: &str, path: &std::ffi::OsStr) -> Option<std::path::PathBuf> {
-    std::env::split_paths(path)
-        .map(|dir| dir.join(name))
-        .find(|p| p.metadata().is_ok_and(|m| m.is_file() && is_executable(&m)))
-}
-
-#[cfg(unix)]
-fn is_executable(meta: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    meta.permissions().mode() & 0o111 != 0
-}
-
-#[cfg(not(unix))]
-fn is_executable(_meta: &std::fs::Metadata) -> bool {
-    true
-}
-
 /// Whether `launcher.claudeOverride` is on. Off unless the user chose it.
 pub fn claude_override_enabled(home: &std::path::Path) -> bool {
     matches!(

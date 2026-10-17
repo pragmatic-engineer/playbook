@@ -137,7 +137,7 @@ The same flags as `playbook setup`, with the same text as `playbook setup --help
 | `--no-collector-service` | Do not install the background service for the usage collector |
 | `--claude-override` | Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config) |
 | `--no-claude-override` | Do not turn on the `claude` shell function |
-| `--short-name` | Add `pb` as a short name for `playbook`, only when `pb` is free (recorded in playbook own config) |
+| `--short-name` | Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free |
 | `--no-short-name` | Do not add the `pb` short name |
 | `--attribution-off` | Turn off the commit, PR and session link attribution Claude Code adds (sets `attribution` in settings.json) |
 | `--no-attribution-off` | Do not set or change attribution in settings.json |
@@ -163,7 +163,7 @@ The questions `playbook setup` asks in a terminal, in its order, with its defaul
 | 6 | `telemetry` | Telemetry | Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting that `playbook setup` will not change) | Yes | No variables are written. `playbook usage` reads transcripts instead. |
 | 7 | `collector-service` | Collector | Keep the usage collector (`playbook usage collect`) running in the background, so telemetry has a receiver after every login? This installs a per-user service: a launchd agent in ~/Library/LaunchAgents on macOS, a systemd user unit on Linux. It acts only when telemetry points at the playbook collector. | Yes | No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`. |
 | 8 | `claude-override` | claude | Make a plain `claude` load the playbook system prompt every time (it replaces Claude Code's built-in prompt), and pass calls that use their own flags straight to Claude Code? This sets `launcher.claudeOverride` in ~/.config/playbook. No Claude Code setting or memory is changed. | No | `claude` stays the plain Claude Code command. |
-| 9 | `short-name` | Short name | Add `pb` as a short name for `playbook`? It is added only when `pb` is not already a command, alias or function on your machine. This sets `launcher.shortName` in ~/.config/playbook. | No | `pb` is not defined. Use `playbook` in full. |
+| 9 | `short-name` | Short name | Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists. | No | No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing. |
 | 10 | `attribution-off` | Attribution | Turn off the attribution Claude Code adds to commits and pull requests (the Co-Authored-By trailer, the generated-by line and the claude.ai session link) by setting `attribution` in ~/.claude/settings.json? | Yes | Claude Code keeps adding its attribution. The commit-message-sanitizer hook still strips it from commits and PRs when the hooks are on. |
 
 The security part is never asked about, in a terminal or here. It runs only with `--security` or when `security.defaults` is true.

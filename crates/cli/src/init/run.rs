@@ -69,9 +69,10 @@ pub struct InitPaths {
     /// Whether the user consented to the `claude` shell function: writes
     /// `launcher.claudeOverride` to playbook's own config, never to Claude Code.
     pub claude_override: bool,
-    /// Whether the user consented to the `pb` short name: writes
-    /// `launcher.shortName` to playbook's own config, only when `pb` is free.
-    pub short_name: bool,
+    /// What the short-name part does: skip, record a no, or link `pb`.
+    pub short_name: crate::init::pb_link::Choice,
+    /// Where the `pb` link may go. `None` when the binary's location is unknown.
+    pub pb_target: Option<crate::init::pb_link::Target>,
     /// What the attribution-off part does: skip, record a no, add the missing
     /// `attribution` keys, or also replace values the user set.
     pub attribution: crate::init::attribution::Choice,
@@ -214,11 +215,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     // After telemetry, so the service sees the settings that step wrote.
     let service_step = collector_service_step(paths);
     let override_step = claude_override_step(&paths.home, paths.claude_override);
-    let short_name_step = short_name_step(
-        &paths.home,
-        paths.short_name,
-        &std::env::var_os("PATH").unwrap_or_default(),
-    );
+    let short_name_step = short_name_step(paths);
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
     let shim_step = rewire_rc_file_step(&paths.home, paths.shell_kind, paths.aliases);
 
@@ -277,12 +274,8 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     if paths.claude_override {
         steps.push(claude_override_step(&paths.home, true));
     }
-    if paths.short_name {
-        steps.push(short_name_step(
-            &paths.home,
-            true,
-            &std::env::var_os("PATH").unwrap_or_default(),
-        ));
+    if paths.short_name != crate::init::pb_link::Choice::Skip {
+        steps.push(short_name_step(paths));
     }
     if paths.path_setup.is_some() {
         steps.push(path_step(&paths.home, paths.path_setup.as_ref()));
@@ -387,38 +380,9 @@ pub(crate) fn claude_override_step(home: &Path, requested: bool) -> StepReport {
     }
 }
 
-/// The short-name part: records consent for `pb` in playbook's own config, but
-/// only when no command named `pb` is on `path`. Aliases and functions are
-/// checked later, by `shell-init`, in the shell that would define them.
-pub(crate) fn short_name_step(home: &Path, requested: bool, path: &std::ffi::OsStr) -> StepReport {
-    if !requested {
-        return StepReport::skipped("short-name", "not requested; pass --short-name to opt in");
-    }
-    if let Some(found) = super::shell_init::command_on_path("pb", path) {
-        return StepReport::skipped(
-            "short-name",
-            format!(
-                "`pb` is already a command at {}; left alone and not set",
-                found.display()
-            ),
-        );
-    }
-    if super::shell_init::short_name_enabled(home) {
-        return StepReport::already_correct("short-name", "launcher.shortName is on");
-    }
-    match crate::config::write::set(
-        crate::config::write::Tier::Global,
-        "launcher.shortName",
-        serde_json::Value::Bool(true),
-        home,
-        None,
-    ) {
-        Ok(()) => StepReport::wired(
-            "short-name",
-            "launcher.shortName set to true; `playbook shell-init` defines pb when no alias or function uses the name",
-        ),
-        Err(err) => StepReport::failed("short-name", format!("could not write config: {err}")),
-    }
+/// The short-name part, as `paths.short_name` says.
+pub(crate) fn short_name_step(paths: &InitPaths) -> StepReport {
+    crate::init::pb_link::step(&paths.home, paths.short_name, paths.pb_target.as_ref())
 }
 
 /// The telemetry part: writes the collector variables when asked and when the
@@ -990,50 +954,6 @@ pub(crate) fn rewire_rc_file_step(
 mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
-
-    #[cfg(unix)]
-    #[test]
-    fn short_name_is_written_only_when_pb_is_free_on_path() {
-        use std::os::unix::fs::PermissionsExt;
-        let home = scratch_dir("short-name-home");
-        let bin = scratch_dir("short-name-bin");
-        fs::create_dir_all(&home).unwrap();
-        fs::create_dir_all(&bin).unwrap();
-        let path = bin.as_os_str();
-
-        let off = short_name_step(&home, false, path);
-        assert_eq!(off.status, StepStatus::Skipped);
-        assert!(!super::super::shell_init::short_name_enabled(&home));
-
-        let taken = bin.join("pb");
-        fs::write(&taken, "#!/bin/sh\n").unwrap();
-        fs::set_permissions(&taken, fs::Permissions::from_mode(0o755)).unwrap();
-        let blocked = short_name_step(&home, true, path);
-        assert_eq!(blocked.status, StepStatus::Skipped);
-        assert!(
-            blocked.detail.contains("already a command"),
-            "{}",
-            blocked.detail
-        );
-        assert!(!super::super::shell_init::short_name_enabled(&home));
-
-        fs::remove_file(&taken).unwrap();
-        assert_eq!(short_name_step(&home, true, path).status, StepStatus::Wired);
-        assert!(super::super::shell_init::short_name_enabled(&home));
-        assert_eq!(
-            short_name_step(&home, true, path).status,
-            StepStatus::AlreadyCorrect
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_non_executable_file_named_pb_does_not_block_the_short_name() {
-        let bin = scratch_dir("short-name-plain");
-        fs::create_dir_all(&bin).unwrap();
-        fs::write(bin.join("pb"), "data").unwrap();
-        assert!(super::super::shell_init::command_on_path("pb", bin.as_os_str()).is_none());
-    }
 
     #[test]
     fn a_backup_under_the_same_stamp_is_kept_and_the_write_still_lands() {

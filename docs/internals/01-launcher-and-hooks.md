@@ -26,7 +26,7 @@ A session started without the launcher gets none of this except the hooks.
 
 ### The `pb` short name
 
-`playbook setup --short-name` (or `playbook config set launcher.shortName true`) makes `playbook shell-init` also define `pb`, which runs `playbook`. Setup writes the key only when no command named `pb` is on your PATH. Each time your shell reads the rc file, `shell-init` checks again and defines `pb` only when no command, alias, function or builtin has the name, so it never overwrites yours. Playbook writes only its own config key, never a Claude Code setting or memory.
+`pb` is a symlink to the `playbook` binary. `install.sh` links `$PLAYBOOK_BIN_DIR/pb`, and the Homebrew formula installs one with `bin.install_symlink`. `playbook setup --short-name` makes the same relative link in the install folder for other installs, only when no other `pb` is on your PATH, and stores the answer as `launcher.shortName`. With that key on, `playbook shell-init` still defines a `pb` function for an rc file that loads it, until ADR 0044 retires the shell line.
 
 ### Subcommands
 

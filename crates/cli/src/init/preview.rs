@@ -198,6 +198,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         only: paths.only,
         claude_override: paths.claude_override,
         short_name: paths.short_name,
+        pb_target: paths.pb_target.clone(),
         // A no is previewed as nothing to do, so the dry run records nothing.
         attribution: match paths.attribution {
             crate::init::attribution::Choice::Declined => crate::init::attribution::Choice::Skip,
@@ -214,11 +215,8 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
     let telemetry_step = run::telemetry_step(&scratch_paths, epoch);
     let attribution_step = run::attribution_step(&scratch_paths, epoch);
     let override_step = run::claude_override_step(&sh, scratch_paths.claude_override);
-    let short_step = run::short_name_step(
-        &sh,
-        scratch_paths.short_name,
-        &std::env::var_os("PATH").unwrap_or_default(),
-    );
+    let short_line =
+        crate::init::pb_link::preview(scratch_paths.short_name, scratch_paths.pb_target.as_ref());
     let path_step = run::path_step(&sh, scratch_paths.path_setup.as_ref());
     let after_path = rc_snapshot(&sh);
     let shim_step = run::rewire_rc_file_step(&sh, scratch_paths.shell_kind, scratch_paths.aliases);
@@ -300,7 +298,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
                 "~/.config/playbook config: {}",
                 override_step.detail
             )],
-            "short-name" => vec![format!("~/.config/playbook config: {}", short_step.detail)],
+            "short-name" => vec![format!("pb: {short_line}")],
             "path" => file_lines(&before_rc, &after_path, &path_step),
             "aliases" => file_lines(&after_path, &after_shim, &shim_step),
             _ => vec![system_prompt_line(paths)],

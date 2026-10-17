@@ -37,6 +37,7 @@ pub mod memory_migrate;
 pub mod merge;
 pub mod migrate;
 pub mod path;
+pub mod pb_link;
 pub mod preview;
 pub mod run;
 pub mod self_root;
