@@ -96,11 +96,11 @@ struct Telemetry {
     cents: i64,
 }
 
-const DEFAULT_BUDGET_CENTS: i64 = 500;
-const DEFAULT_AGENT_BUDGET_CENTS: i64 = 500;
+const DEFAULT_BUDGET_CENTS: i64 = config::keys::AUTO_BUDGET_USD as i64 * 100;
+const DEFAULT_AGENT_BUDGET_CENTS: i64 = config::keys::AUTO_AGENT_BUDGET_USD as i64 * 100;
 /// With `auto.sessionCeilingUsd` unset, the tree's ceiling is this many
 /// times the main cap.
-const CEILING_FACTOR: i64 = 10;
+const CEILING_FACTOR: i64 = config::keys::AUTO_CEILING_FACTOR as i64;
 const DEFAULT_WARN_PCT: u64 = 70;
 const SAFE_TOOLS: [&str; 3] = ["Read", "Grep", "Glob"];
 const MODE_ESCAPE: &str = "playbook mode ask";
@@ -145,6 +145,9 @@ struct Limits {
     agent_cap: i64,
     /// The whole tree's ceiling, past which every caller is parked.
     ceiling: i64,
+    /// `auto.sessionCeilingUsd` is set, so `config set` refuses a budget
+    /// above it.
+    ceiling_is_set: bool,
     pct: u64,
     budget_is_valid: bool,
     agent_budget_is_valid: bool,
@@ -160,12 +163,7 @@ impl Limits {
                 .ok()
                 .map(|(value, _)| value)
         };
-        let cents = |key: &str| {
-            value(key)
-                .and_then(|value| value.as_f64())
-                .map(to_cents)
-                .filter(|cents| *cents > 0)
-        };
+        let cents = |key: &str| value(key).and_then(|value| config::auto_cap_cents(&value));
         let budget = cents("auto.budgetUsd");
         let agent_budget = cents("auto.agentBudgetUsd");
         let pct = value("auto.warnPct")
@@ -173,10 +171,12 @@ impl Limits {
             .filter(|pct| (1..=100).contains(pct))
             .unwrap_or(DEFAULT_WARN_PCT);
         let cap = budget.unwrap_or(DEFAULT_BUDGET_CENTS);
+        let set_ceiling = cents("auto.sessionCeilingUsd");
         Limits {
             cap,
             agent_cap: agent_budget.unwrap_or(DEFAULT_AGENT_BUDGET_CENTS),
-            ceiling: cents("auto.sessionCeilingUsd").unwrap_or(cap.saturating_mul(CEILING_FACTOR)),
+            ceiling: set_ceiling.unwrap_or(cap.saturating_mul(CEILING_FACTOR)),
+            ceiling_is_set: set_ceiling.is_some(),
             pct,
             budget_is_valid: budget.is_some(),
             agent_budget_is_valid: agent_budget.is_some(),
@@ -334,7 +334,7 @@ fn enforce(payload: &Payload, limits: &Limits, root: &Path) {
         if !call.is_allowed_when_parked(park_note.as_deref()) {
             let note = park_note.unwrap_or_default();
             let reason = if spend >= cap {
-                budget_reached_reason(caller, cap, &note, limits.mode_from_env)
+                budget_reached_reason(caller, limits, &note)
             } else {
                 ceiling_reason(limits.ceiling, &note, limits.mode_from_env)
             };
@@ -354,10 +354,18 @@ fn enforce(payload: &Payload, limits: &Limits, root: &Path) {
     };
     let mut notes = Vec::new();
     if !limits.budget_is_valid && claim(&dir.join("budget-note")) {
-        notes.push(INVALID_BUDGET_NOTE.to_string());
+        notes.push(invalid_budget_note(
+            "auto.budgetUsd",
+            "cap",
+            DEFAULT_BUDGET_CENTS,
+        ));
     }
     if !limits.agent_budget_is_valid && claim(&dir.join("agent-budget-note")) {
-        notes.push(INVALID_AGENT_BUDGET_NOTE.to_string());
+        notes.push(invalid_budget_note(
+            "auto.agentBudgetUsd",
+            "agent cap",
+            DEFAULT_AGENT_BUDGET_CENTS,
+        ));
     }
     if spend >= limits.warn_of(caller) && claim(&dir.join(format!("warned{suffix}"))) {
         notes.push(warn_note(limits, caller));
@@ -411,36 +419,55 @@ fn user_exit(mode_from_env: bool) -> &'static str {
 }
 const SELF_PROTECTION_REASON: &str =
     "Auto mode settings are locked while auto is on. Ask the user to run this command themselves (in Claude Code, the `!` prefix runs it in the session).";
-const INVALID_BUDGET_NOTE: &str = "auto.budgetUsd must be a number of at least 0.01, so the default cap of $5 applies. Ask the user to run `playbook config set auto.budgetUsd <usd>`, since the model cannot change it.";
-const INVALID_AGENT_BUDGET_NOTE: &str = "auto.agentBudgetUsd must be a number of at least 0.01, so the default agent cap of $5 applies. Ask the user to run `playbook config set auto.agentBudgetUsd <usd>`, since the model cannot change it.";
+
+/// The one-time note for a budget key whose stored value is not a number of
+/// at least one cent, so the built-in default applies.
+fn invalid_budget_note(key: &str, what: &str, default_cents: i64) -> String {
+    format!(
+        "{key} must be a number of at least 0.01, so the default {what} of {} applies. Ask the user to run `playbook config set {key} <usd>`, since the model cannot change it.",
+        dollars(default_cents)
+    )
+}
 
 fn dollars(cents: i64) -> String {
     format!("${:.2}", cents as f64 / 100.0)
 }
 
-fn budget_reached_reason(
-    caller: &Caller,
-    cap: i64,
-    park_note: &Path,
-    mode_from_env: bool,
-) -> String {
+/// The command that doubles a cap, in whole dollars, for a denial to name.
+/// When a set ceiling is below the doubled cap, `config set` would refuse
+/// the budget, so the command raises the ceiling to the same value first.
+fn raise_command(key: &str, cents: i64, set_ceiling: Option<i64>) -> String {
+    let doubled = cents.saturating_mul(2).saturating_add(99) / 100;
+    match set_ceiling {
+        Some(ceiling) if ceiling < doubled.saturating_mul(100) => format!(
+            "playbook config set auto.sessionCeilingUsd {doubled} && playbook config set {key} {doubled}"
+        ),
+        _ => format!("playbook config set {key} {doubled}"),
+    }
+}
+
+fn budget_reached_reason(caller: &Caller, limits: &Limits, park_note: &Path) -> String {
+    let cap = limits.cap_of(caller);
+    let set_ceiling = limits.ceiling_is_set.then_some(limits.ceiling);
     let (who, key) = match caller {
         Caller::Main => ("the main session", "auto.budgetUsd"),
         Caller::Agent(_) => ("this agent", "auto.agentBudgetUsd"),
     };
     format!(
-        "budget reached: {who} has spent its {} cap. New work is denied. If there is finished work to deliver, the closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. To go on, the user can run `playbook config set {key} <usd>` or {}.",
+        "budget reached: {who} has spent its {} cap, which is `{key}`. New work is denied. If there is finished work to deliver, the closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. Tell the user which cap was hit and that they can raise it by running `{}` themselves (any number of dollars works), or {}.",
         dollars(cap),
         park_note.display(),
-        user_exit(mode_from_env)
+        raise_command(key, cap, set_ceiling),
+        user_exit(limits.mode_from_env)
     )
 }
 
 fn ceiling_reason(ceiling: i64, park_note: &Path, mode_from_env: bool) -> String {
     format!(
-        "session ceiling reached: the agents together have spent the {} ceiling, so every agent is parked and new work is denied. The closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. To go on, the user can run `playbook config set auto.sessionCeilingUsd <usd>` or {}.",
+        "session ceiling reached: the agents together have spent the {} ceiling, which is `auto.sessionCeilingUsd` (0 means ten times auto.budgetUsd), so every agent is parked and new work is denied. The closing steps still work (commit, push and pull request through the playbook skills). Write a park note to {} describing where you stopped, then report to the user. Tell the user the session ceiling was hit and that they can raise it by running `{}` themselves (any number of dollars works), or {}.",
         dollars(ceiling),
         park_note.display(),
+        raise_command("auto.sessionCeilingUsd", ceiling, None),
         user_exit(mode_from_env)
     )
 }
@@ -880,6 +907,40 @@ fn write_atomic(path: &Path, value: &impl Serialize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_raise_command_doubles_the_cap_in_whole_dollars() {
+        let rows = [
+            ("auto.budgetUsd", 20_000, None, "playbook config set auto.budgetUsd 400"),
+            ("auto.agentBudgetUsd", 5_000, None, "playbook config set auto.agentBudgetUsd 100"),
+            ("auto.budgetUsd", 250, None, "playbook config set auto.budgetUsd 5"),
+            ("auto.budgetUsd", 1, None, "playbook config set auto.budgetUsd 1"),
+            ("auto.budgetUsd", 20_000, Some(40_000), "playbook config set auto.budgetUsd 400"),
+            (
+                "auto.budgetUsd",
+                20_000,
+                Some(30_000),
+                "playbook config set auto.sessionCeilingUsd 400 && playbook config set auto.budgetUsd 400",
+            ),
+        ];
+        for (key, cents, ceiling, want) in rows {
+            assert_eq!(
+                raise_command(key, cents, ceiling),
+                want,
+                "{cents} {ceiling:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_hook_defaults_match_the_config_defaults() {
+        let usd = |key| config::keys::default_value(key).and_then(|v| v.as_i64());
+        assert_eq!(usd("auto.budgetUsd"), Some(DEFAULT_BUDGET_CENTS / 100));
+        assert_eq!(
+            usd("auto.agentBudgetUsd"),
+            Some(DEFAULT_AGENT_BUDGET_CENTS / 100)
+        );
+    }
 
     #[test]
     fn the_interval_defaults_to_two_seconds_unless_the_env_value_is_a_number() {

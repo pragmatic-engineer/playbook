@@ -488,6 +488,47 @@ fn flatten_leaves(node: &Value, prefix: &str, out: &mut Vec<(String, Value)>) {
     }
 }
 
+/// Rewrites every stored `key` whose value is the number `old` to `new`, in
+/// every tier and scope, in one transaction. Any other value is left as it
+/// is, and a store that holds nothing is not created. Returns how many values
+/// changed.
+pub fn replace_number(root: &Path, key: &str, old: f64, new: &Value) -> Result<usize, ConfigError> {
+    if !has_data(root) {
+        return Ok(0);
+    }
+    let mut conn = open(root)?;
+    // Immediate, so a write by another process between the read and the
+    // first update waits on the busy timeout instead of failing the upgrade.
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(broken(root))?;
+    let rows = {
+        let mut stmt = tx
+            .prepare("SELECT tier, scope, value_json FROM config WHERE key = ?1")
+            .map_err(broken(root))?;
+        let rows = stmt
+            .query_map([key], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(broken(root))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(broken(root))?
+    };
+    let mut changed = 0;
+    for (tier, scope, raw) in rows {
+        let stored = serde_json::from_str::<Value>(&raw).ok();
+        if stored.as_ref().and_then(Value::as_f64) == Some(old) {
+            upsert(&tx, &tier, &scope, key, new).map_err(broken(root))?;
+            changed += 1;
+        }
+    }
+    tx.commit().map_err(broken(root))?;
+    Ok(changed)
+}
+
 /// The keys the global tier holds, sorted. Empty when there is no database.
 pub fn global_keys(root: &Path) -> Result<Vec<String>, ConfigError> {
     if !has_data(root) {

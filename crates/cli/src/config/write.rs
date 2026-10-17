@@ -31,6 +31,7 @@ pub fn set(
 ) -> Result<(), ConfigError> {
     validate_key_and_value(key, &value)?;
     require_global_for_user_key(key, tier == Tier::Global)?;
+    check_cap_order(tier, key, &value, home, repo_slug)?;
     let root = crate::common::paths::playbook_root_from(home);
     super::store::put(&root, tier, repo_slug, key, &value)
 }
@@ -170,6 +171,85 @@ fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
     Ok(())
 }
 
+const CEILING_KEY: &str = "auto.sessionCeilingUsd";
+const BUDGET_KEYS: [(&str, u32); 2] = [
+    ("auto.budgetUsd", keys::AUTO_BUDGET_USD),
+    ("auto.agentBudgetUsd", keys::AUTO_AGENT_BUDGET_USD),
+];
+
+/// Keep a set `auto.sessionCeilingUsd` at least as large as `auto.budgetUsd`
+/// and `auto.agentBudgetUsd`, since a lower ceiling parks every agent before
+/// its own cap is reached. Setting the ceiling checks it against both
+/// budgets; setting a budget checks only that budget against the ceiling. A
+/// ceiling of 0 means ten times `auto.budgetUsd` and is not checked. The
+/// other keys are read the way the spend hook reads them, as they resolve
+/// for `repo_slug`, and for a global write also as they resolve outside any
+/// repo, since a global value reaches every repo.
+fn check_cap_order(
+    tier: Tier,
+    key: &str,
+    value: &Value,
+    home: &Path,
+    repo_slug: Option<&str>,
+) -> Result<(), ConfigError> {
+    let Some(budget_default) = BUDGET_KEYS
+        .iter()
+        .find(|(budget_key, _)| *budget_key == key)
+        .map(|(_, default)| *default)
+        .or((key == CEILING_KEY).then_some(0))
+    else {
+        return Ok(());
+    };
+    let mut slugs = vec![repo_slug];
+    if tier == Tier::Global && repo_slug.is_some() {
+        slugs.push(None);
+    }
+    for slug in slugs {
+        let cents = |other: &str| {
+            super::resolve(other, home, slug)
+                .ok()
+                .and_then(|(value, _)| super::auto_cap_cents(&value))
+        };
+        let reason = if key == CEILING_KEY {
+            let Some(ceiling) = super::auto_cap_cents(value) else {
+                return Ok(());
+            };
+            BUDGET_KEYS.iter().find_map(|(budget_key, default)| {
+                let budget = cents(budget_key).unwrap_or(i64::from(*default) * 100);
+                (budget > ceiling).then(|| {
+                    format!(
+                        "it is below {budget_key} ({}). Set it to 0 (ten times auto.budgetUsd) or to at least {}",
+                        usd(budget),
+                        usd(budget)
+                    )
+                })
+            })
+        } else {
+            let budget = super::auto_cap_cents(value).unwrap_or(i64::from(budget_default) * 100);
+            cents(CEILING_KEY).filter(|ceiling| budget > *ceiling).map(|ceiling| {
+                format!(
+                    "it is above auto.sessionCeilingUsd ({}). Raise the ceiling first with `playbook config set auto.sessionCeilingUsd <usd>`, or set it to 0 (ten times auto.budgetUsd)",
+                    usd(ceiling)
+                )
+            })
+        };
+        if let Some(reason) = reason {
+            return Err(ConfigError::CapOrder {
+                key: key.to_string(),
+                value: value.to_string(),
+                reason,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Whole cents as dollars, without trailing zeros: 20000 is `200`, 250 `2.5`.
+fn usd(cents: i64) -> String {
+    let text = format!("{:.2}", cents as f64 / 100.0);
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 /// `auto.budgetUsd` and `auto.agentBudgetUsd` take any number of at least one cent, since the spend cap
 /// is held in whole cents, so a fractional budget works.
 /// `usage.budget.*Usd` takes any number from 0 (no budget).
@@ -187,7 +267,7 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
             value
                 .as_f64()
                 .is_some_and(|n| n.is_finite() && (n == 0.0 || n >= 0.01)),
-            "0 (ten times auto.budgetUsd) or a number of at least 0.01",
+            "0 (ten times auto.budgetUsd) or a number of at least 0.01 that is not below auto.budgetUsd or auto.agentBudgetUsd",
         ),
         "usage.budget.monthlyUsd" | "usage.budget.weeklyUsd" => (
             value

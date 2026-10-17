@@ -25,6 +25,8 @@ pub const DEAD_HOOKS_MIGRATION: &str = "0011-dead-hook-scripts";
 pub const ATTRIBUTION_MIGRATION: &str = "0015-attribution-off";
 /// The `Consent` item for the collector-service part (ADR 0043).
 pub const COLLECTOR_SERVICE_MIGRATION: &str = "0016-collector-service";
+/// The `Owned` move of stored auto budgets off the old $5 default (ADR 0028).
+pub const AUTO_BUDGET_MIGRATION: &str = "0017-auto-budget-defaults";
 
 /// What a migration needs to find the state it moves.
 pub struct Ctx {
@@ -230,6 +232,12 @@ pub fn registry() -> Vec<Migration> {
             },
             run: collector_service_by_setup,
         },
+        Migration {
+            id: AUTO_BUDGET_MIGRATION,
+            kind: Kind::Auto,
+            scope: Scope::Owned,
+            run: auto_budget_defaults,
+        },
     ]
 }
 
@@ -242,6 +250,64 @@ fn collector_service_pending(ctx: &Ctx) -> Option<String> {
 /// Setup's collector-service part installs the service after its question.
 fn collector_service_by_setup(_: &Ctx) -> Outcome {
     Outcome::Quiet
+}
+
+/// The default both auto budgets had before the 2026-10-17 amendment to ADR
+/// 0028, in US dollars.
+const OLD_AUTO_BUDGET_USD: f64 = 5.0;
+
+/// Moves a stored `auto.budgetUsd` or `auto.agentBudgetUsd` that holds the
+/// old default of 5 to the new default (ADR 0028, 2026-10-17 amendment). Any
+/// other stored value was chosen on purpose and stays. A key that is not
+/// stored already resolves to the new default, so nothing is written for it.
+/// A global `auto.sessionCeilingUsd` the user set below the new default caps
+/// the moved value, so the ceiling stays at or above both budgets.
+fn auto_budget_defaults(ctx: &Ctx) -> Outcome {
+    use crate::config::keys::{AUTO_AGENT_BUDGET_USD, AUTO_BUDGET_USD};
+    let root = playbook_root_from(&ctx.home);
+    let ceiling = crate::config::resolve("auto.sessionCeilingUsd", &ctx.home, None)
+        .ok()
+        .and_then(|(value, _)| crate::config::auto_cap_cents(&value));
+    let rows = [
+        ("auto.budgetUsd", AUTO_BUDGET_USD),
+        ("auto.agentBudgetUsd", AUTO_AGENT_BUDGET_USD),
+    ];
+    let mut moved = Vec::new();
+    for (key, default) in rows {
+        let new_value = match ceiling {
+            Some(cents) if cents < i64::from(default) * 100 => {
+                serde_json::Value::from(cents as f64 / 100.0)
+            }
+            _ => serde_json::Value::from(default),
+        };
+        match crate::config::store::replace_number(&root, key, OLD_AUTO_BUDGET_USD, &new_value) {
+            Ok(0) => {}
+            Ok(_) => moved.push(format!(
+                "{key} $5 to ${}",
+                new_value.to_string().trim_end_matches(".0")
+            )),
+            Err(err) => return Outcome::Failed(StepReport::failed("auto budget", err.to_string())),
+        }
+    }
+    if moved.is_empty() {
+        return Outcome::Done(StepReport::skipped(
+            "auto budget",
+            "no stored auto budget held the old $5 default",
+        ));
+    }
+    let capped = match ceiling {
+        Some(cents) if cents < i64::from(AUTO_BUDGET_USD) * 100 => {
+            " (held at your auto.sessionCeilingUsd; set it to 0 for ten times auto.budgetUsd)"
+        }
+        _ => "",
+    };
+    Outcome::Done(StepReport::wired(
+        "auto budget",
+        format!(
+            "raised the old default: {}{capped}. Run `playbook config set <key> <usd>` to pick another cap",
+            moved.join(", ")
+        ),
+    ))
 }
 
 /// `attribution` keys missing from settings.json (ADR 0042), unless the user
@@ -1534,6 +1600,6 @@ mod tests {
 
     #[test]
     fn the_schema_is_the_highest_registry_number() {
-        assert_eq!(schema(), 16);
+        assert_eq!(schema(), 17);
     }
 }

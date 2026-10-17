@@ -502,7 +502,8 @@ fn set_writes_valid_auto_and_fix_values_including_a_fractional_budget() {
         ("auto.budgetUsd", "2.5"),
         ("auto.agentBudgetUsd", "0.5"),
         ("auto.sessionCeilingUsd", "0"),
-        ("auto.sessionCeilingUsd", "40"),
+        ("auto.sessionCeilingUsd", "200"),
+        ("auto.sessionCeilingUsd", "4000"),
         ("auto.warnPct", "100"),
         ("fix.maxFiles", "99"),
         ("fix.maxLines", "1"),
@@ -517,6 +518,151 @@ fn set_writes_valid_auto_and_fix_values_including_a_fractional_budget() {
         assert!(out.status.success(), "{key} {value}: {}", stderr_of(&out));
         assert_eq!(stored(&home)["global"][key].to_string(), value, "{key}");
     }
+}
+
+#[test]
+fn set_keeps_a_set_session_ceiling_at_or_above_both_budgets() {
+    // Arrange: rows are (stored first, then the set, whether it is accepted,
+    // what a refusal must say). The defaults are 200 and 50.
+    type Row<'a> = (&'a [(&'a str, &'a str)], (&'a str, &'a str), bool, &'a str);
+    let rows: [Row; 8] = [
+        (
+            &[],
+            ("auto.sessionCeilingUsd", "199.99"),
+            false,
+            "below auto.budgetUsd (200)",
+        ),
+        (&[], ("auto.sessionCeilingUsd", "200"), true, ""),
+        (
+            &[("auto.budgetUsd", "10")],
+            ("auto.sessionCeilingUsd", "40"),
+            false,
+            "below auto.agentBudgetUsd (50)",
+        ),
+        (
+            &[("auto.budgetUsd", "10"), ("auto.agentBudgetUsd", "5")],
+            ("auto.sessionCeilingUsd", "40"),
+            true,
+            "",
+        ),
+        (
+            &[("auto.sessionCeilingUsd", "300")],
+            ("auto.budgetUsd", "301"),
+            false,
+            "Raise the ceiling first",
+        ),
+        (
+            &[("auto.sessionCeilingUsd", "300")],
+            ("auto.agentBudgetUsd", "300"),
+            true,
+            "",
+        ),
+        (
+            &[("auto.sessionCeilingUsd", "300")],
+            ("auto.agentBudgetUsd", "300.01"),
+            false,
+            "above auto.sessionCeilingUsd (300)",
+        ),
+        (
+            &[("auto.sessionCeilingUsd", "0")],
+            ("auto.budgetUsd", "5000"),
+            true,
+            "",
+        ),
+    ];
+    for (n, (before, (key, value), accepted, message)) in rows.into_iter().enumerate() {
+        let home = scratch_dir(&format!("cap-order-{n}"));
+        for (k, v) in before {
+            assert!(
+                set_global(&home, k, v).status.success(),
+                "{n}: seed {k} {v}"
+            );
+        }
+
+        // Act
+        let out = set_global(&home, key, value);
+
+        // Assert
+        let stderr = stderr_of(&out);
+        assert_eq!(
+            out.status.success(),
+            accepted,
+            "{n}: {key} {value}: {stderr}"
+        );
+        assert!(stderr.contains(message), "{n}: {key} {value}: {stderr}");
+        if !accepted {
+            assert!(
+                stored(&home)["global"].get(key).is_none(),
+                "{n}: nothing may be written"
+            );
+        }
+    }
+}
+
+#[test]
+fn setting_a_budget_checks_only_that_budget_against_the_ceiling() {
+    // Arrange: a ceiling of 30 stored before the check existed, below the
+    // default main budget of 200
+    let home = scratch_dir("cap-order-own-key");
+    let root = home.join(".config").join("playbook");
+    playbook::config::store::put(
+        &root,
+        playbook::config::write::Tier::Global,
+        None,
+        "auto.sessionCeilingUsd",
+        &serde_json::json!(30),
+    )
+    .expect("seed");
+
+    // Act
+    let lower_agent = set_global(&home, "auto.agentBudgetUsd", "10");
+    let lower_main = set_global(&home, "auto.budgetUsd", "10");
+
+    // Assert: lowering a budget under the ceiling always works
+    assert!(lower_agent.status.success(), "{}", stderr_of(&lower_agent));
+    assert!(lower_main.status.success(), "{}", stderr_of(&lower_main));
+}
+
+#[test]
+fn a_global_write_is_checked_inside_the_repo_and_outside_any_repo() {
+    // Arrange: this repo raises its own ceiling to 1000 and its budget to 300
+    let repo = seeded_repo("cap-order-tiers");
+    let home = scratch_dir("cap-order-tiers-home");
+    for (key, value) in [
+        ("auto.sessionCeilingUsd", "1000"),
+        ("auto.budgetUsd", "300"),
+    ] {
+        let out = run_playbook(&repo, &home, &["config", "set", key, value]);
+        assert!(out.status.success(), "{key}: {}", stderr_of(&out));
+    }
+    let global_ceiling = run_playbook(
+        &repo,
+        &home,
+        &["config", "set", "--global", "auto.sessionCeilingUsd", "250"],
+    );
+    let outside = set_global(&home, "auto.sessionCeilingUsd", "250");
+
+    // Act: a global budget above the global ceiling, written from the repo
+    let global_budget = run_playbook(
+        &repo,
+        &home,
+        &["config", "set", "--global", "auto.budgetUsd", "800"],
+    );
+
+    // Assert: the repo's own budget of 300 refuses a global ceiling of 250
+    // from inside it; outside any repo the default budget of 200 allows it
+    assert!(
+        !global_ceiling.status.success(),
+        "a repo budget of 300 is above 250"
+    );
+    assert!(stderr_of(&global_ceiling).contains("below auto.budgetUsd (300)"));
+    assert!(outside.status.success(), "{}", stderr_of(&outside));
+    // The repo ceiling of 1000 does not hide the global ceiling of 250
+    assert!(
+        !global_budget.status.success(),
+        "800 is above the global 250"
+    );
+    assert!(stderr_of(&global_budget).contains("above auto.sessionCeilingUsd (250)"));
 }
 
 #[test]

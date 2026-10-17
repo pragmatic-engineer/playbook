@@ -71,6 +71,14 @@ pub enum ConfigError {
         value: String,
         constraint: &'static str,
     },
+    /// A spend cap and the session ceiling would be out of order: a set
+    /// `auto.sessionCeilingUsd` below `auto.budgetUsd` or
+    /// `auto.agentBudgetUsd`. `reason` says which and how to fix it.
+    CapOrder {
+        key: String,
+        value: String,
+        reason: String,
+    },
     /// A write targeted the org or repo tier but no `repo_slug` was
     /// available to build that tier's path from.
     MissingRepoContext,
@@ -122,6 +130,9 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "config key {key} does not accept '{value}', must be {constraint}"
             ),
+            ConfigError::CapOrder { key, value, reason } => {
+                write!(f, "config key {key} does not accept '{value}': {reason}")
+            }
             ConfigError::MissingRepoContext => write!(
                 f,
                 "could not resolve a repo-scoped config location; repo_slug is unresolved, \
@@ -156,6 +167,18 @@ pub fn adopt_late_config(home: &Path) -> Vec<String> {
             .collect(),
         Err(_) => Vec::new(),
     }
+}
+
+/// An auto spend cap or ceiling in whole cents, the way the spend hook reads
+/// it: a number rounded to cents, kept only when it is above 0. `None` means
+/// the hook uses the built-in default instead (or, for the ceiling, ten times
+/// `auto.budgetUsd`).
+pub fn auto_cap_cents(value: &Value) -> Option<i64> {
+    value
+        .as_f64()
+        .filter(|usd| usd.is_finite())
+        .map(|usd| (usd * 100.0).round() as i64)
+        .filter(|cents| *cents > 0)
 }
 
 /// The default of a key that `resolve` already proved is known.

@@ -83,7 +83,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0025](adr/0025-self-improving-playbook.md) | A self improving playbook proposes config patches behind a staged trust ladder | Proposed | 2026-10-11 |
 | [0026](adr/0026-local-code-index-in-the-binary.md) | Ship a local code index in the binary, accepting about 5 MB of size | Accepted | 2026-10-12 |
 | [0027](adr/0027-anydoc-as-optional-local-tool.md) | Use anydoc as an optional local tool found on PATH, never vendored | Accepted | 2026-10-12 |
-| [0028](adr/0028-per-agent-auto-budget.md) | Budget auto mode per agent, with the closing steps allowed at a cap | Accepted | 2026-10-12 |
+| [0028](adr/0028-per-agent-auto-budget.md) | Budget auto mode per agent, with the closing steps allowed at a cap | Accepted, amended on 2026-10-17 | 2026-10-12 |
 | [0029](adr/0029-cargo-workspace-monorepo.md) | Keep the Rust crates in one Cargo workspace | Accepted, amended by 0030, 0038 and 0039 | 2026-10-13 |
 | [0030](adr/0030-skills-and-commands-in-their-own-repo.md) | Keep the skills, commands and agents in their own repository | Accepted, partly superseded by 0031 and 0032 | 2026-10-13 |
 | [0031](adr/0031-hooks-in-settings-json.md) | Put the hooks in settings.json | Accepted, amended by 0034 | 2026-10-14 |

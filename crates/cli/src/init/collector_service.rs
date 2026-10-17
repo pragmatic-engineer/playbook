@@ -30,7 +30,7 @@ pub const START_WAIT: Duration = Duration::from_secs(2);
 /// The state key that records a no, so the reminder stops.
 const DECLINED_KEY: &str = "collector-service/declined";
 
-/// The state key that records the one reminder of migration 0016.
+/// The state key that records the one reminder of migration 0017.
 const REMINDED_KEY: &str = "collector-service/reminded";
 
 /// What setup does with the part, decided from the flags and the answer.
@@ -252,7 +252,7 @@ pub fn preview(home: &Path, telemetry_on: bool, program: &Path) -> String {
     }
 }
 
-/// The `Consent` check of migration 0016: one line when telemetry points at
+/// The `Consent` check of migration 0017: one line when telemetry points at
 /// the collector and no service keeps it running. Nothing after the user
 /// said no or after the reminder was shown. It writes nothing, so a plan or
 /// a status read never uses up the reminder; see [`record_reminder`].
@@ -271,7 +271,7 @@ pub fn pending(home: &Path) -> Option<String> {
     )
 }
 
-/// Records that the reminder of migration 0016 was shown, so later checks
+/// Records that the reminder of migration 0017 was shown, so later checks
 /// stay quiet. The heal calls it after it printed the line.
 pub fn record_reminder(home: &Path) {
     let _ = crate::state::set(&root(home), REMINDED_KEY, "1");

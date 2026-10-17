@@ -7,6 +7,25 @@
 
 use serde_json::Value;
 
+/// The default `auto.budgetUsd`, the main session's spend cap in US dollars.
+/// Measured on 30 days of real sessions (ADR 0028, 2026-10-17 amendment): the
+/// main transcript of a session that spent $1 or more cost $199 at the 95th
+/// percentile.
+pub const AUTO_BUDGET_USD: u32 = 200;
+/// The default `auto.agentBudgetUsd`, each subagent's spend cap in US dollars.
+/// 3 of 3,083 measured subagents cost more than this.
+pub const AUTO_AGENT_BUDGET_USD: u32 = 50;
+/// With `auto.sessionCeilingUsd` at 0, the whole tree's ceiling is this many
+/// times `auto.budgetUsd`.
+pub const AUTO_CEILING_FACTOR: u32 = 10;
+
+// The default ceiling stays above both default budgets, so neither budget
+// can be reached only after the whole tree is parked.
+const _: () = assert!(
+    AUTO_BUDGET_USD * AUTO_CEILING_FACTOR > AUTO_BUDGET_USD
+        && AUTO_BUDGET_USD * AUTO_CEILING_FACTOR > AUTO_AGENT_BUDGET_USD
+);
+
 /// Every config key playbook resolves, in v1.
 pub const KNOWN_KEYS: &[&str] = &[
     "autoReview.enabled",
@@ -140,8 +159,8 @@ pub fn default_value(key: &str) -> Option<Value> {
         "agents.variants" => Some(Value::String("auto".to_string())),
         "models.haiku" | "models.sonnet" | "models.opus" => Some(Value::String(String::new())),
         "routing.escalate" => Some(Value::String("ask".to_string())),
-        "auto.budgetUsd" => Some(Value::Number(5.into())),
-        "auto.agentBudgetUsd" => Some(Value::Number(5.into())),
+        "auto.budgetUsd" => Some(Value::Number(AUTO_BUDGET_USD.into())),
+        "auto.agentBudgetUsd" => Some(Value::Number(AUTO_AGENT_BUDGET_USD.into())),
         "auto.sessionCeilingUsd" => Some(Value::Number(0.into())),
         "auto.warnPct" => Some(Value::Number(70.into())),
         "fix.maxFiles" => Some(Value::Number(3.into())),
@@ -238,6 +257,22 @@ pub fn model_override_error(key: &str, value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_auto_budgets_default_to_the_measured_caps_and_the_ceiling_to_zero() {
+        assert_eq!(
+            default_value("auto.sessionCeilingUsd"),
+            Some(Value::Number(0.into()))
+        );
+        assert_eq!(
+            default_value("auto.budgetUsd"),
+            Some(Value::Number(200.into()))
+        );
+        assert_eq!(
+            default_value("auto.agentBudgetUsd"),
+            Some(Value::Number(50.into()))
+        );
+    }
 
     #[test]
     fn the_theme_key_accepts_only_the_current_names() {

@@ -240,9 +240,10 @@ fn fresh_config_gets_fully_wired() {
             continue;
         }
         // `memory` has nothing to migrate on a fresh machine with no
-        // legacy `~/.claude/memory`.
+        // legacy `~/.claude/memory`, and `auto budget` no stored budget.
         if [
             "memory",
+            "auto budget",
             "trust",
             "path",
             "telemetry",
