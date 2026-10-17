@@ -39,7 +39,7 @@ Applying
 ------------------------------------------------------------
 [ok] hooks  wired the ported hooks into settings.json
 [=] statusline  already up to date
-[skip] aliases  not installed; pass --aliases to opt in
+[skip] short-name  pb is outside the install folder; run: ln -s ...
 [fail] trust  could not write ~/.claude.json
 
 1 done, 1 unchanged, 1 skipped, 1 failed
@@ -63,7 +63,7 @@ Before this wizard, the command (then called `init`) printed a flat plan and one
 
 ## The parts
 
-Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the default otherwise. `--yes` accepts every default.
+Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the default otherwise. `--yes` accepts every default, so it turns every part but the security defaults on. It keeps the system prompt off when `systemPrompt.enabled` is false or on an earlier install that had none, and the `pb` link off after a stored no. `--aliases` and `--claude-override` are retired: setup accepts them, prints a note and does nothing.
 
 | Part | Default | Flags | Files it edits |
 | :- | :- | :- | :- |
@@ -71,12 +71,10 @@ Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the
 | Status line | on | `--statusline`, `--no-statusline` | `~/.claude/settings.json` |
 | Security defaults | off | `--security`, `--no-security` | `~/.claude/settings.json` |
 | PATH block | on | `--path`, `--no-path` | your shell startup files |
-| Shell wrapper for `playbook cc` and `playbook ccd` | off | `--aliases`, `--no-aliases` | your shell rc file |
-| System prompt | off | `--system-prompt`, `--no-system-prompt` | `~/.config/playbook/prompts/SYSTEM_PROMPT.md` |
+| System prompt | on, asked | `--system-prompt`, `--no-system-prompt` | `~/.config/playbook/prompts/SYSTEM_PROMPT.md`, and `~/.config/playbook` (the `systemPrompt.enabled` key) |
 | Usage telemetry | on, asked | `--telemetry`, `--no-telemetry` | `~/.claude/settings.json` (the `env` block), `~/.config/playbook/telemetry-env.json` |
 | Collector service | on, asked | `--collector-service`, `--no-collector-service` | `~/Library/LaunchAgents/io.github.pragmatic-engineer.playbook.collector.plist` (macOS) or `~/.config/systemd/user/playbook-collector.service` (Linux) |
-| `pb` short name | off, asked | `--short-name`, `--no-short-name` | the `pb` symlink in the install folder, and `~/.config/playbook` (the `launcher.shortName` key) |
-| `claude` function | off, asked | `--claude-override`, `--no-claude-override` | `~/.config/playbook` (the `launcher.claudeOverride` key) |
+| `pb` short name | on, asked | `--short-name`, `--no-short-name` | the `pb` symlink in the install folder, and `~/.config/playbook` (the `launcher.shortName` key) |
 | Attribution off | on, asked | `--attribution-off`, `--no-attribution-off` | `~/.claude/settings.json` (the `attribution` key) |
 
 `--settings` and `--no-settings` no longer exist. Each option that part used to carry now sits behind the hooks, status line or security part, or is not shipped.
@@ -115,23 +113,19 @@ Off unless you pass `--security` or set `security.defaults` to true. When on, se
 
 Setup adds a block that starts with `# playbook binary` to your shell startup files, so hooks find the `playbook` binary. Hook commands run in a non-interactive shell that never reads `.zshrc`, so zsh gets `~/.zshenv`, bash gets `~/.bashrc` and its login file, and fish gets its own `conf.d` file. Other shells get `~/.profile`. Open a new terminal afterward. `playbook uninstall --remove-binary` removes the block.
 
-### Launcher shortcuts and shell-init
+### No shell line
 
-`--aliases` adds one line to your `.zshrc` or `.bashrc`: `eval "$(playbook shell-init)"`. That command prints one small `playbook` shell function, a few helpers it uses, and `ccc` and `ccd` stubs that tell you to run `playbook cc` and `playbook ccd`. For `playbook cc` and `playbook ccd` it calls `playbook cc launch`, which starts Claude Code with the playbook system prompt, the model chain and your effort ceiling. `playbook ccd` also skips permission prompts, so use it only where you would use `--dangerously-skip-permissions`. The functions use a temp file to move your shell into a worktree after a session. Older installs that sourced a script from the rc file get that line replaced with the `eval` line. See [the launcher](../internals/01-launcher-and-hooks.md).
+Setup writes no line to your `.zshrc` or `.bashrc`. `playbook cc`, `playbook ccd`, `pb cc` and `pb ccd` start Claude Code from the binary with the playbook system prompt, the model chain and your effort ceiling. `playbook ccd` also skips permission prompts, so use it only where you would use `--dangerously-skip-permissions`. After a session in a new worktree, `playbook cc` prints the `cd` command to run. Older setups wrote a launcher line: `playbook migrate` lists it, and a full `playbook setup` removes it after a backup (migration 0018). A hand-written `eval "$(playbook shell-init)"` stays, because `shell-init` now prints only a comment. See [the launcher](../internals/01-launcher-and-hooks.md).
 
 ### System prompt
 
-`--system-prompt` copies `SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/`. Claude Code uses it only when you start it through `playbook cc` or `playbook ccd`. If you already have a copy, setup refreshes it on every run, unless you edited it, in which case your copy stays. Without the flag and without an existing copy, nothing is placed.
+`--system-prompt` (on by default; `--yes` is a yes) copies `SYSTEM_PROMPT.md` to `~/.config/playbook/prompts/` and stores `systemPrompt.enabled` as true. Claude Code uses it only when you start it through `pb cc`, `playbook cc` or `playbook ccd`. A plain `claude` never loads it. A no, or `--no-system-prompt`, stores false, so `pb cc` starts with Claude Code's own prompt, and leaves an existing copy in place. Run setup again with a yes to turn it back on. If you already have a copy, setup refreshes it on every run, unless you edited it, in which case your copy stays. An earlier install without the prompt gets a `playbook migrate` item (migration 0019) until you answer.
 
 `--telemetry` (on by default; `--yes` is a yes) writes the OpenTelemetry variables that point Claude Code at a collector on 127.0.0.1 into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage` too. Setup first reads whether telemetry is on, off or not set, from your environment and every Claude Code settings file (user, project, local, managed). When it is already on, set up by you, or switched off by something setup will not change, setup says so in one line and asks nothing. When it is not set, or switched off by a lone off switch in `~/.claude/settings.json`, setup suggests turning it on as a yes or no question, and nothing is written without a yes. It writes nothing when your environment or any Claude Code settings file already names a telemetry variable, with one exception: a yes replaces an off switch that stands alone in `~/.claude/settings.json`. Any other setting you made, including values beside an off switch or in another file, is never overridden. Plain `--yes` never replaces an off switch you set; answer the question or run `playbook setup --only telemetry` for that. `DISABLE_TELEMETRY` and `DO_NOT_TRACK` are shown and left as they are, because they only turn off Anthropic's own analytics. Prompt text, tool content, emails and tokens are not sent, and the account id stays out of the metrics. The collector keeps one port (47318 unless that was taken on the first run) and the `session-init` hook starts it when settings point at it. Restart Claude Code after setup. `playbook uninstall` removes exactly the keys setup wrote, unless you changed them, and puts back an off switch that a yes replaced. See [telemetry by default](../internals/04-usage-dashboard.md#telemetry-by-default).
 
-### The `claude` function
-
-`--claude-override` asks whether a plain `claude` should load the playbook system prompt every time. A yes sets `launcher.claudeOverride` to `true` in playbook's own config. It changes no Claude Code setting and no memory. With the key on, `playbook shell-init` also defines a `claude` function that starts the launcher for a plain interactive session. Calls that use their own flags (`-p`, subcommands, `--settings`, your own prompt flags, piped or scripted use) and `PLAYBOOK_BYPASS=1` go straight to the real `claude`, and a `claude` you already defined as an alias or function is left alone. The function needs the `eval` line from `--aliases` in your rc file. Undo it with `playbook config set launcher.claudeOverride false`. See [the launcher](../internals/01-launcher-and-hooks.md#the-claude-function).
-
 ### The `pb` short name
 
-`--short-name` asks whether `pb` should be a short name for `playbook`. `install.sh` and the Homebrew formula already make a `pb` symlink, so on those installs the part only checks it. Otherwise, when no other `pb` is on your PATH and playbook sits in the install folder (`$PLAYBOOK_BIN_DIR`, default `~/.local/bin`), setup adds the relative symlink `pb -> playbook` there, the same link `install.sh` makes. It never replaces a `pb` that runs something else, and when playbook lives anywhere else it prints the `ln -s` command to run by hand. The answer is stored as `launcher.shortName`. `playbook uninstall --remove-binary` removes the link. See [the launcher](../internals/01-launcher-and-hooks.md#the-pb-short-name).
+`--short-name` asks whether `pb` should be a short name for `playbook`. `install.sh` and the Homebrew formula already make a `pb` symlink, so on those installs the part only checks it. Otherwise, when no other `pb` is on your PATH and playbook sits in the install folder (`$PLAYBOOK_BIN_DIR`, default `~/.local/bin`), setup adds the relative symlink `pb -> playbook` there, the same link `install.sh` makes. It never replaces a `pb` that runs something else, and when playbook lives anywhere else it prints the `ln -s` command to run by hand. The answer is stored as `launcher.shortName`, and a stored no keeps `--yes` from adding the link. `playbook uninstall --remove-binary` removes the link. See [the launcher](../internals/01-launcher-and-hooks.md#the-pb-short-name).
 
 ### Collector service
 
