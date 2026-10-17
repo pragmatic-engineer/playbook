@@ -230,9 +230,11 @@ pub fn collector_service_choice(flags: &Flags, on: bool, asked: bool) -> collect
 }
 
 /// What the short-name part does. A no or `--no-short-name` is recorded; a
-/// run that asked nothing is not.
-pub fn short_name_choice(flags: &Flags, on: bool, asked: bool) -> pb_link::Choice {
+/// run that asked nothing is not. A stored no (`declined`) wins over a default
+/// that no question or flag confirmed, as under `--yes`.
+pub fn short_name_choice(flags: &Flags, on: bool, asked: bool, declined: bool) -> pb_link::Choice {
     match (on, flags.no_short_name || asked) {
+        (true, _) if declined && !asked && !flags.short_name => pb_link::Choice::Skip,
         (true, _) => pb_link::Choice::Link,
         (false, true) => pb_link::Choice::Declined,
         (false, false) => pb_link::Choice::Skip,
@@ -493,6 +495,29 @@ mod tests {
             collector_service_choice(&Flags::default(), false, false),
             Skip
         );
+    }
+
+    #[test]
+    fn a_short_name_no_is_recorded_only_when_said_and_a_stored_no_wins_over_a_default() {
+        use pb_link::Choice::*;
+        let flags = |on, off| Flags {
+            short_name: on,
+            no_short_name: off,
+            ..Flags::default()
+        };
+        // (--short-name, --no-short-name, on, asked, stored no) -> choice
+        for (on_flag, off_flag, on, asked, declined, want) in [
+            (false, false, true, false, false, Link),
+            (false, false, true, false, true, Skip),
+            (true, false, true, false, true, Link),
+            (false, false, true, true, true, Link),
+            (false, false, false, true, false, Declined),
+            (false, true, false, false, false, Declined),
+            (false, false, false, false, false, Skip),
+        ] {
+            let got = short_name_choice(&flags(on_flag, off_flag), on, asked, declined);
+            assert_eq!(got, want, "{on_flag} {off_flag} {on} {asked} {declined}");
+        }
     }
 
     #[test]

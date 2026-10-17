@@ -49,7 +49,16 @@ pub fn declined(home: &Path) -> bool {
     )
 }
 
-fn record(home: &Path, yes: bool) -> Option<String> {
+/// Whether a yes is stored, so a later no leaves it alone (ADR 0044: a no
+/// removes nothing).
+fn stored_yes(home: &Path) -> bool {
+    matches!(
+        crate::config::resolve(KEY, home, None),
+        Ok((serde_json::Value::Bool(true), _))
+    )
+}
+
+fn record(home: &Path, yes: bool) -> Result<(), String> {
     crate::config::write::set(
         crate::config::write::Tier::Global,
         KEY,
@@ -57,8 +66,21 @@ fn record(home: &Path, yes: bool) -> Option<String> {
         home,
         None,
     )
-    .err()
-    .map(|err| format!("; could not record the answer: {err}"))
+    .map_err(|err| err.to_string())
+}
+
+/// The note a step adds when the answer could not be stored.
+fn record_note(home: &Path, yes: bool) -> String {
+    record(home, yes)
+        .err()
+        .map(|err| format!("; could not record the answer: {err}"))
+        .unwrap_or_default()
+}
+
+/// What `plan` found: nothing to write, or the link to create.
+enum Plan {
+    Done(StepReport),
+    Create(PathBuf),
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {
@@ -74,8 +96,14 @@ pub fn step(home: &Path, choice: Choice, target: Option<&Target>) -> StepReport 
         Choice::Skip => {
             return StepReport::skipped(PART, "not requested; pass --short-name to opt in")
         }
+        Choice::Declined if stored_yes(home) => {
+            return StepReport::skipped(
+                PART,
+                "you said no, so no `pb` link is added; launcher.shortName stays on, so an rc file that loads `playbook shell-init` keeps its `pb` function. To turn that off, run: playbook config set launcher.shortName false",
+            );
+        }
         Choice::Declined => {
-            let note = record(home, false).unwrap_or_default();
+            let note = record_note(home, false);
             return StepReport::skipped(
                 PART,
                 format!("you said no, so no `pb` link is added; to add it later, run: playbook setup --only short-name{note}"),
@@ -83,7 +111,7 @@ pub fn step(home: &Path, choice: Choice, target: Option<&Target>) -> StepReport 
         }
         Choice::Link => {}
     }
-    let note = record(home, true).unwrap_or_default();
+    let note = record_note(home, true);
     let Some(target) = target else {
         return StepReport::skipped(
             PART,
@@ -99,13 +127,19 @@ pub fn step(home: &Path, choice: Choice, target: Option<&Target>) -> StepReport 
 
 fn link(target: &Target) -> StepReport {
     let link = match plan(target) {
-        Ok(done) => return done,
-        Err(link) => link,
+        Plan::Done(done) => return done,
+        Plan::Create(link) => link,
+    };
+    let on_path = std::env::split_paths(&target.path_var).any(|dir| dir == target.install_dir);
+    let hint = if on_path {
+        "so `pb cc` works".to_string()
+    } else {
+        format!("add {} to PATH to use it", target.install_dir.display())
     };
     match make_link(&link) {
         Ok(()) => StepReport::wired(
             PART,
-            format!("linked {} to playbook, so `pb cc` works", link.display()),
+            format!("linked {} to playbook; {hint}", link.display()),
         ),
         Err(err) => StepReport::failed(PART, format!("could not create {}: {err}", link.display())),
     }
@@ -118,22 +152,22 @@ pub fn preview(choice: Choice, target: Option<&Target>) -> String {
         (Choice::Declined, _) => "records your no; no link is touched".to_string(),
         (Choice::Link, None) => "the location of the playbook binary is unknown".to_string(),
         (Choice::Link, Some(target)) => match plan(target) {
-            Ok(report) => report.detail,
-            Err(link) => format!("would link {} to playbook", link.display()),
+            Plan::Done(report) => report.detail,
+            Plan::Create(link) => format!("would link {} to playbook", link.display()),
         },
     }
 }
 
 /// The report when nothing needs writing, else the link to create.
-fn plan(target: &Target) -> Result<StepReport, PathBuf> {
+fn plan(target: &Target) -> Plan {
     if let Some(found) = crate::init::path::command_on_path("pb", &target.path_var) {
         if same_file(&found, &target.exe) {
-            return Ok(StepReport::already_correct(
+            return Plan::Done(StepReport::already_correct(
                 PART,
                 format!("`pb` at {} already runs playbook", found.display()),
             ));
         }
-        return Ok(StepReport::skipped(
+        return Plan::Done(StepReport::skipped(
             PART,
             format!(
                 "`pb` is already a command at {}; left alone, use `playbook` in full",
@@ -144,7 +178,7 @@ fn plan(target: &Target) -> Result<StepReport, PathBuf> {
     let link = target.install_dir.join("pb");
     if fs::symlink_metadata(&link).is_ok() {
         if same_file(&link, &target.exe) {
-            return Ok(StepReport::already_correct(
+            return Plan::Done(StepReport::already_correct(
                 PART,
                 format!(
                     "{} already runs playbook; add {} to PATH to use it",
@@ -153,13 +187,13 @@ fn plan(target: &Target) -> Result<StepReport, PathBuf> {
                 ),
             ));
         }
-        return Ok(StepReport::skipped(
+        return Plan::Done(StepReport::skipped(
             PART,
             format!("{} is not the playbook link; left alone", link.display()),
         ));
     }
     if !same_file(&target.install_dir.join("playbook"), &target.exe) {
-        return Ok(StepReport::skipped(
+        return Plan::Done(StepReport::skipped(
             PART,
             format!(
                 "playbook is not installed in {}, so no link was added; to add one, run: ln -s {} <a folder on your PATH>/pb",
@@ -168,7 +202,7 @@ fn plan(target: &Target) -> Result<StepReport, PathBuf> {
             ),
         ));
     }
-    Err(link)
+    Plan::Create(link)
 }
 
 #[cfg(unix)]
@@ -191,12 +225,57 @@ mod tests {
     use crate::init::run::StepStatus;
     use std::os::unix::fs::PermissionsExt;
 
-    fn exe_in(dir: &Path) -> PathBuf {
+    fn script(dir: &Path, name: &str) -> PathBuf {
         fs::create_dir_all(dir).unwrap();
-        let exe = dir.join("playbook");
-        fs::write(&exe, "#!/bin/sh\n").unwrap();
-        fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
-        exe
+        let path = dir.join(name);
+        fs::write(&path, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    fn exe_in(dir: &Path) -> PathBuf {
+        script(dir, "playbook")
+    }
+
+    #[test]
+    fn a_foreign_pb_in_the_install_folder_is_left_alone() {
+        let home = scratch_dir("pb-link-foreign");
+        let bin = home.join(".local/bin");
+        let exe = exe_in(&bin);
+        let theirs = script(&bin, "pb");
+        let target = Target {
+            exe,
+            install_dir: bin.clone(),
+            path_var: Default::default(),
+        };
+
+        let got = step(&home, Choice::Link, Some(&target));
+
+        assert_eq!(got.status, StepStatus::Skipped);
+        assert!(
+            got.detail.contains("not the playbook link"),
+            "{}",
+            got.detail
+        );
+        assert_eq!(fs::read_to_string(&theirs).unwrap(), "#!/bin/sh\n");
+        assert!(fs::symlink_metadata(&theirs).unwrap().file_type().is_file());
+    }
+
+    #[test]
+    fn a_no_keeps_a_stored_yes() {
+        let home = scratch_dir("pb-link-keep-yes");
+        fs::create_dir_all(&home).unwrap();
+        record(&home, true).unwrap();
+
+        let got = step(&home, Choice::Declined, None);
+
+        assert_eq!(got.status, StepStatus::Skipped);
+        assert!(
+            got.detail.contains("config set launcher.shortName false"),
+            "{}",
+            got.detail
+        );
+        assert!(!declined(&home));
     }
 
     #[test]

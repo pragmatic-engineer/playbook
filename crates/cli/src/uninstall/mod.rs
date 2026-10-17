@@ -334,6 +334,12 @@ fn settle(path: &Path, verb: &str, dry_run: bool, report: &mut Report, result: i
     }
 }
 
+/// The install directory from `$PLAYBOOK_BIN_DIR`, else `~/.local/bin`. Setup
+/// links `pb` only here, so uninstall finds every link setup made.
+pub fn install_dir(home: &Path) -> PathBuf {
+    default_bin_dir(home, std::env::var("PLAYBOOK_BIN_DIR").ok().as_deref())
+}
+
 /// The default install directory, overridable like the installer does.
 pub fn default_bin_dir(home: &Path, env: Option<&str>) -> PathBuf {
     match env {

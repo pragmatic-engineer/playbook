@@ -129,10 +129,10 @@ pub const PARTS: &[Part] = &[
         asked: true,
         default_on: false,
         flags: "--short-name, --no-short-name",
-        question: "Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? Nothing is written when a `pb` command already exists.",
-        does: "Makes `pb` run playbook, so `pb cc` starts a session. Passes when a `pb` on PATH already runs this binary, as after install.sh or Homebrew. Otherwise, when no other `pb` is on PATH and playbook sits in the install folder `playbook uninstall` knows, it adds the relative symlink `pb -> playbook` there. In any other case it prints the `ln -s` command to run by hand. A yes or no is stored as `launcher.shortName`.",
+        question: "Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists.",
+        does: "Makes `pb` run playbook, so `pb cc` starts a session. Passes when a `pb` on PATH already runs this binary, as after install.sh or Homebrew. Otherwise, when no other `pb` is on PATH and playbook sits in the install folder `playbook uninstall` knows, it adds the relative symlink `pb -> playbook` there. It leaves any other `pb` alone, and prints the `ln -s` command to run by hand when playbook sits outside the install folder. A yes or no is stored as `launcher.shortName`, and a stored no keeps `--yes` from adding the link.",
         changes: "the playbook install folder (the `pb` symlink) and ~/.config/playbook (the key `launcher.shortName`)",
-        undo: "`playbook uninstall --remove-binary` removes the link, or delete `pb` from the install folder.",
+        undo: "Delete `pb` from the install folder and run `playbook config set launcher.shortName false`. `playbook uninstall --remove-binary` also removes the link.",
     },
     Part {
         id: "attribution-off",

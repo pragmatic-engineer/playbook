@@ -359,10 +359,7 @@ fn main() {
         } => {
             let home = common::home_dir();
             let opts = playbook::uninstall::Options {
-                bin_dir: playbook::uninstall::default_bin_dir(
-                    &home,
-                    std::env::var("PLAYBOOK_BIN_DIR").ok().as_deref(),
-                ),
+                bin_dir: playbook::uninstall::install_dir(&home),
                 home,
                 remove_binary,
                 dry_run: dry_run || !yes,
@@ -602,10 +599,7 @@ fn main() {
                     .ok()
                     .map(|exe| init::pb_link::Target {
                         exe,
-                        install_dir: playbook::uninstall::default_bin_dir(
-                            &home,
-                            std::env::var("PLAYBOOK_BIN_DIR").ok().as_deref(),
-                        ),
+                        install_dir: playbook::uninstall::install_dir(&home),
                         path_var: std::env::var_os("PATH").unwrap_or_default(),
                     }),
                 home,
@@ -629,7 +623,12 @@ fn main() {
                 ),
                 only: only_run,
                 claude_override: choices.claude_override,
-                short_name: init::choices::short_name_choice(&flags, choices.short_name, asking),
+                short_name: init::choices::short_name_choice(
+                    &flags,
+                    choices.short_name,
+                    asking,
+                    init::pb_link::declined(&common::home_dir()),
+                ),
                 attribution: init::choices::attribution_choice(
                     &flags,
                     choices.attribution_off,
