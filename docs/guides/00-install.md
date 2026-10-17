@@ -42,7 +42,7 @@ It installs only the `playbook` binary, into `PLAYBOOK_BIN_DIR` (default `~/.loc
 
 When it replaces an older binary, it prints `playbook updated from A to B.`, then the breaking changes of the new release if there are any, then a link to the full release notes. Before 1.0 a breaking change can ship in any release, so read them.
 
-Then it asks "Run playbook setup now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the system prompt that `pb cc` loads (Enter means yes), then runs `playbook setup --yes`, which turns every part on: the hook entries, the status line and the telemetry variables (a collector on this machine) in `settings.json`, the system prompt, the `pb` link and the rest. A no to the prompt question passes `--no-system-prompt`. On no, or with no terminal and no `--yes`, it skips `setup` and prints the command to run later, with `--system-prompt` or `--no-system-prompt` if you passed one. Open a new terminal afterward.
+Then it asks "Run playbook setup now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the system prompt that `pb cc` loads (Enter means yes; with `--yes` setup decides, so an earlier no stays), then runs `playbook setup --yes`, which turns every part on: the hook entries, the status line and the telemetry variables (a collector on this machine) in `settings.json`, the system prompt, the `pb` link and the rest. A no to the prompt question passes `--no-system-prompt`. On no, or with no terminal and no `--yes`, it skips `setup` and prints the command to run later, with `--system-prompt` or `--no-system-prompt` if you passed one. Open a new terminal afterward.
 
 Pass `--yes` to say yes to every question, including `playbook setup`. Flags go after `-s --` when piping:
 
@@ -52,7 +52,7 @@ Pass `--yes` to say yes to every question, including `playbook setup`. Flags go 
 | `--no-init` | Install the binary only. Do not ask about `playbook setup`. |
 | `--system-prompt` | Install the system prompt without asking. |
 | `--no-system-prompt` | Keep `pb cc` on Claude Code's own prompt, without asking. |
-| `--binary-only` | Still offers `playbook setup`, but skips the system prompt question. |
+| `--binary-only` | Still offers `playbook setup`, but keeps the system prompt off (passes `--no-system-prompt`). |
 | `--ref <tag>` | Release tag, same as `PLAYBOOK_REF`. |
 
 `--skip-plugin`, `--no-setup`, `--skip-deps`, `--skip-shell` and `--aliases` are accepted and ignored, so older commands keep working. `--aliases` prints a warning, because `playbook cc` and `pb cc` need no shell line (ADR 0044). `--skills-only` is gone and exits with the plugin commands. The other `setup` options, such as `--short-name`, belong to `playbook setup`; run it yourself to pass them, and install.sh also links `pb` to `playbook` when the name is free.

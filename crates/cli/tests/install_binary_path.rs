@@ -297,31 +297,61 @@ fn the_system_prompt_flag_is_forwarded_and_the_retired_aliases_flag_is_not() {
     assert!(got.contains("--system-prompt"), "init received: '{got}'");
 }
 
+fn init_args(argv: &Path) -> Vec<String> {
+    fs::read_to_string(argv)
+        .expect("the stub records the init arguments")
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
 #[test]
 fn the_no_system_prompt_flag_is_forwarded() {
     let work = Work::new("bp-no-prompt");
     let (stub, argv) = recording_stub(&work);
     let (rc, _, log) = local_install(&work, &stub, &["--yes", "--no-system-prompt"], "nsp");
     assert_eq!(rc, 0, "{log}");
-    let got = fs::read_to_string(&argv).unwrap_or_default();
-    assert!(got.contains("--no-system-prompt"), "init received: '{got}'");
+    let got = init_args(&argv);
     assert!(
-        !got.contains("\n--system-prompt\n"),
-        "init received: '{got}'"
+        got.iter().any(|a| a == "--no-system-prompt"),
+        "init received: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|a| a == "--system-prompt"),
+        "init received: {got:?}"
     );
 }
 
 #[test]
-fn binary_only_does_not_opt_in_to_the_system_prompt() {
+fn yes_alone_passes_no_prompt_flag_so_setup_decides() {
+    let work = Work::new("bp-yes-alone");
+    let (stub, argv) = recording_stub(&work);
+    let (rc, _, log) = local_install(&work, &stub, &["--yes"], "ya");
+    assert_eq!(rc, 0, "{log}");
+    let got = init_args(&argv);
+    assert!(
+        !got.iter()
+            .any(|a| a == "--system-prompt" || a == "--no-system-prompt"),
+        "init received: {got:?}"
+    );
+}
+
+#[test]
+fn binary_only_keeps_the_system_prompt_off() {
     let work = Work::new("bp-binonly");
     let (stub, argv) = recording_stub(&work);
     let (rc, _, log) = local_install(&work, &stub, &["--yes", "--binary-only"], "bo");
     assert_eq!(rc, 0, "{log}");
     assert!(log.contains("Running playbook init"), "{log}");
-    let got = fs::read_to_string(&argv).expect("the stub records the init arguments");
+    let got = init_args(&argv);
     assert!(
-        !got.contains("--aliases") && !got.contains("--system-prompt"),
-        "init received: '{got}'"
+        got.iter().any(|a| a == "--no-system-prompt"),
+        "init received: {got:?}"
+    );
+    assert!(
+        !got.iter()
+            .any(|a| a == "--aliases" || a == "--system-prompt"),
+        "init received: {got:?}"
     );
 }
 

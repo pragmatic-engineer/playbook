@@ -296,20 +296,15 @@ fn layer3(env: &Env) -> Row {
 /// Whether a `pb` on PATH resolves to the running binary, as the short-name
 /// part checks it.
 fn pb_runs_this_binary(env: &Env) -> bool {
-    let same = |p: PathBuf| fs::canonicalize(p).ok();
-    let pb = on_path(env, "pb").and_then(same);
-    pb.is_some() && pb == std::env::current_exe().ok().and_then(same)
+    match (on_path(env, "pb"), std::env::current_exe()) {
+        (Some(pb), Ok(exe)) => crate::init::pb_link::same_file(&pb, &exe),
+        _ => false,
+    }
 }
 
 fn layer4(env: &Env) -> Row {
-    let file = crate::common::paths::playbook_root_from(&env.home)
-        .join("prompts")
-        .join("SYSTEM_PROMPT.md");
-    let enabled = !matches!(
-        config::resolve("systemPrompt.enabled", &env.home, None),
-        Ok((Value::Bool(false), _))
-    );
-    if !enabled {
+    let file = crate::init::system_prompt::path(&env.home);
+    if !crate::init::system_prompt::enabled(&env.home) {
         Row::new(
             "4",
             Level::Info,

@@ -61,6 +61,16 @@ impl Sandbox {
         assert!(out.status.success(), "config set failed: {}", text(&out));
     }
 
+    fn config_get(&self, key: &str) -> String {
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["config", "get", key])
+            .env("HOME", &self.home)
+            .current_dir(&self.home)
+            .output()
+            .expect("playbook should spawn");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
     fn path(&self, rel: &str) -> PathBuf {
         self.home.join(rel)
     }
@@ -297,6 +307,25 @@ fn yes_keeps_the_prompt_off_on_an_earlier_install_and_after_a_no() {
             "{said}"
         );
     }
+}
+
+#[test]
+fn no_system_prompt_stores_false_and_only_system_prompt_turns_it_back_on() {
+    let sb = Sandbox::new("prompt-no-then-yes");
+    let prompt = ".config/playbook/prompts/SYSTEM_PROMPT.md";
+
+    let off = sb.init("/bin/bash", &["--no-system-prompt"]);
+    let stored_off = sb.config_get("systemPrompt.enabled");
+    let file_after_no = sb.path(prompt).exists();
+    let on = sb.init("/bin/bash", &["--only", "system-prompt"]);
+    let stored_on = sb.config_get("systemPrompt.enabled");
+
+    assert!(off.status.success(), "{}", text(&off));
+    assert_eq!(stored_off, "systemPrompt.enabled: false (source: global)");
+    assert!(!file_after_no, "a no must not place the prompt");
+    assert!(on.status.success(), "{}", text(&on));
+    assert_eq!(stored_on, "systemPrompt.enabled: true (source: global)");
+    assert!(sb.path(prompt).exists(), "{}", text(&on));
 }
 
 #[test]

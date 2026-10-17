@@ -204,10 +204,7 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         all.push("--dangerously-skip-permissions".into());
     }
     let prompt = crate::common::paths::playbook_root().join(SYSTEM_PROMPT_REL);
-    let enabled = !matches!(
-        crate::config::resolve("systemPrompt.enabled", &crate::common::home_dir(), None),
-        Ok((serde_json::Value::Bool(false), _))
-    );
+    let enabled = crate::init::system_prompt::enabled(&crate::common::home_dir());
     {
         use std::io::IsTerminal;
         let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();

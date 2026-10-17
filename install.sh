@@ -159,7 +159,7 @@ Flags:
   --yes              say yes to every question, including running `playbook setup`
   --system-prompt    install the custom system prompt (setup --system-prompt) without asking
   --no-system-prompt keep pb cc on Claude Code's own prompt (setup --no-system-prompt)
-  --binary-only      still offers `playbook setup`, but skips the system prompt question
+  --binary-only      still offers `playbook setup`, but keeps the system prompt off
   --no-init          install the binary only: never ask about `playbook setup`
   --ref <tag>        same as PLAYBOOK_REF
   -h, --help         show this help
@@ -686,8 +686,13 @@ esac
 # prompt. With no terminal and no --yes it is skipped and the command is
 # printed.
 INIT_RAN=0
-if [ "$NO_INIT" -eq 0 ] && consent "Run playbook $SETUP_CMD now? It adds playbook's hook entries to ~/.claude/settings.json (your own entries stay), the status line and Claude Code telemetry to a collector on this machine (change it later with playbook $SETUP_CMD --only telemetry or undo it with playbook uninstall)."; then
-    if [ "$BINARY_ONLY" -eq 0 ] && [ "$OPT_SYSTEM_PROMPT" -eq 0 ] && [ "$OPT_NO_SYSTEM_PROMPT" -eq 0 ]; then
+if [ "$NO_INIT" -eq 0 ] && consent "Run playbook $SETUP_CMD now? It adds playbook's hook entries to ~/.claude/settings.json (your own entries stay), the status line, Claude Code telemetry to a collector on this machine, the system prompt that pb cc loads and the pb link (change it later with playbook $SETUP_CMD --only telemetry or undo it with playbook uninstall)."; then
+    # --binary-only keeps the prompt off. Under --yes with no prompt flag,
+    # setup decides, so it can keep an earlier no.
+    if [ "$BINARY_ONLY" -eq 1 ] && [ "$OPT_SYSTEM_PROMPT" -eq 0 ]; then
+        OPT_NO_SYSTEM_PROMPT=1
+    fi
+    if [ "$ASSUME_YES" -eq 0 ] && [ "$OPT_SYSTEM_PROMPT" -eq 0 ] && [ "$OPT_NO_SYSTEM_PROMPT" -eq 0 ]; then
         if ask "Install the custom system prompt, which pb cc loads? (recommended)" Y; then
             OPT_SYSTEM_PROMPT=1
         else

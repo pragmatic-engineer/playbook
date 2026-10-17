@@ -28,14 +28,10 @@ pub struct InitPaths {
     pub claude_home: PathBuf,
     /// The user's home directory.
     pub home: PathBuf,
-    /// Whether the user asked for `prompts/SYSTEM_PROMPT.md` via
-    /// `--system-prompt`. False still refreshes an already-installed copy;
-    /// see `init::system_prompt` for why installing one unasked would be a
-    /// behaviour change rather than a port.
-    pub system_prompt: bool,
-    /// The user said no to the system prompt, so `systemPrompt.enabled` is
-    /// stored as false. With neither this nor `system_prompt`, nothing is stored.
-    pub system_prompt_declined: bool,
+    /// The system prompt answer. `Yes` places the file and stores
+    /// `systemPrompt.enabled` as true, `No` stores false, and `Unasked` only
+    /// refreshes an installed copy; see `init::system_prompt`.
+    pub system_prompt: system_prompt::Answer,
     /// Whether to wire the hook entries into settings.json.
     pub hooks: bool,
     /// Whether init may set or change `statusLine` in settings.json. False
@@ -190,7 +186,11 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     // stderr.
     eprint!("{}", healed.notices.render());
 
-    let system_prompt_step = place_system_prompt_step(self_root, &paths.home, paths.system_prompt);
+    let system_prompt_step = place_system_prompt_step(
+        self_root,
+        &paths.home,
+        paths.system_prompt == system_prompt::Answer::Yes,
+    );
     if step_confirmed(&system_prompt_step) {
         migrate::record_system_prompt(&paths.home);
     }
@@ -234,7 +234,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 /// An `--only` run: just the parts that are on, nothing else.
 fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     let mut steps = Vec::new();
-    if paths.system_prompt {
+    if paths.system_prompt == system_prompt::Answer::Yes {
         let step = place_system_prompt_step(paths.self_root.as_deref(), &paths.home, true);
         if step_confirmed(&step) {
             migrate::record_system_prompt(&paths.home);
@@ -428,25 +428,18 @@ pub(crate) fn step_confirmed(step: &StepReport) -> bool {
 /// whether `pb cc` loads the prompt (ADR 0044). A run that asked nothing
 /// stores nothing.
 fn store_system_prompt_answer(paths: &InitPaths, step: StepReport) -> StepReport {
-    let on = match (paths.system_prompt, paths.system_prompt_declined) {
-        (true, _) => true,
-        (false, true) => false,
-        (false, false) => return step,
+    let on = match paths.system_prompt {
+        system_prompt::Answer::Yes => true,
+        system_prompt::Answer::No => false,
+        system_prompt::Answer::Unasked => return step,
     };
-    let stored = crate::config::write::set(
-        crate::config::write::Tier::Global,
-        system_prompt::KEY,
-        serde_json::Value::Bool(on),
-        &paths.home,
-        None,
-    );
-    match stored {
+    match system_prompt::record(&paths.home, on) {
         Err(err) => StepReport::failed(
             "system-prompt",
-            format!("could not store systemPrompt.enabled: {err}"),
+            format!("could not store {}: {err}", system_prompt::KEY),
         ),
-        Ok(_) if on => step,
-        Ok(_) => StepReport::skipped(
+        Ok(()) if on => step,
+        Ok(()) => StepReport::skipped(
             "system-prompt",
             "you said no, so `pb cc` starts with Claude Code's own prompt; to turn it on, run: playbook setup --only system-prompt",
         ),

@@ -66,8 +66,11 @@ fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
         self_root: Some(self_root()),
         claude_home: claude_home_of(home),
         home: home.to_path_buf(),
-        system_prompt,
-        system_prompt_declined: false,
+        system_prompt: if system_prompt {
+            playbook::init::system_prompt::Answer::Yes
+        } else {
+            playbook::init::system_prompt::Answer::Unasked
+        },
         hooks: true,
         statusline: true,
         security: false,

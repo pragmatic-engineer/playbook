@@ -135,10 +135,17 @@ pub fn items(flags: &Flags, security_on: bool) -> Vec<Item> {
 }
 
 /// [`items`] without the questions of the parts in `skip`, each a part id
-/// whose question setup replaced with one line.
-pub fn items_for(flags: &Flags, security_on: bool, skip: &[&str]) -> Vec<Item> {
+/// whose question setup replaced with one line. The parts in `off` start as
+/// no, because the user said no before.
+pub fn items_for(flags: &Flags, security_on: bool, skip: &[&str], off: &[&str]) -> Vec<Item> {
     let mut list = items(flags, security_on);
     list.retain(|i| !skip.contains(&i.choice.id.as_str()));
+    for item in list
+        .iter_mut()
+        .filter(|i| off.contains(&i.choice.id.as_str()))
+    {
+        item.default = false;
+    }
     list
 }
 
@@ -329,8 +336,8 @@ mod tests {
     fn the_telemetry_question_is_left_out_when_it_is_skipped() {
         let flags = Flags::default();
 
-        let skipped = items_for(&flags, false, &["telemetry", "collector-service"]);
-        let asked = items_for(&flags, false, &[]);
+        let skipped = items_for(&flags, false, &["telemetry", "collector-service"], &[]);
+        let asked = items_for(&flags, false, &[], &["system-prompt"]);
 
         assert!(!skipped.iter().any(|i| i.choice.id == "telemetry"));
         assert!(!skipped.iter().any(|i| i.choice.id == "collector-service"));

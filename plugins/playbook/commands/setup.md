@@ -51,7 +51,7 @@ The rest of this file calls the kept words the arguments. A part flag is any fla
 
 These runs ask no question in a terminal either, so pass the arguments straight to the binary:
 
-- The arguments hold `--dry-run` or `--explain`: run `playbook setup` with the arguments, print the output verbatim, and stop. Neither changes any part. When the arguments hold `--dry-run` and none of `--yes`, `-y`, `--defaults` or `--only`, add one line after the output: "This session has no terminal, so this preview shows the hooks, the status line, telemetry, the collector service and the attribution setting off unless a flag turns them on. Answering the questions with the defaults turns them on."
+- The arguments hold `--dry-run` or `--explain`: run `playbook setup` with the arguments, print the output verbatim, and stop. Neither changes any part. When the arguments hold `--dry-run` and none of `--yes`, `-y`, `--defaults` or `--only`, add one line after the output: "This session has no terminal, so this preview shows the hooks, the status line, the system prompt, telemetry, the collector service, the pb short name and the attribution setting off unless a flag turns them on. Answering the questions with the defaults turns them on."
 - The arguments hold `--yes`, `-y`, `--defaults` or `--only`, or `--telemetry` with no other part flag (a bare `--telemetry` means `--only telemetry`): the user already chose. Go to Step 6 with the arguments as they are.
 
 Otherwise go on to Step 4.

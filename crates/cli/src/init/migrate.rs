@@ -599,9 +599,7 @@ fn statusline_rust_command(ctx: &Ctx) -> Outcome {
 }
 
 fn system_prompt_path(home: &Path) -> PathBuf {
-    playbook_root_from(home)
-        .join("prompts")
-        .join("SYSTEM_PROMPT.md")
+    crate::init::system_prompt::path(home)
 }
 
 fn system_prompt_edited(ctx: &Ctx) -> Outcome {
