@@ -3,7 +3,8 @@
 
 //! `playbook shell-init`: retired by ADR 0044. It prints one comment line, so
 //! an rc file that still runs `eval "$(playbook shell-init)"` defines nothing
-//! and starts without an error. `playbook migrate` offers to remove that line.
+//! and starts without an error. `playbook setup` removes the line playbook
+//! wrote, and a hand-written one is safe to delete.
 
 use super::shim::ShellKind;
 
@@ -15,7 +16,7 @@ pub fn script(shell: ShellKind) -> String {
     };
     format!(
         "# playbook shell-init ({name}) is retired and defines nothing; \
-         `playbook migrate` removes this rc line (ADR 0044)\n"
+         delete this rc line, or run `playbook setup` (ADR 0044)\n"
     )
 }
 

@@ -491,13 +491,8 @@ fn worktree(cwd: &mut PathBuf, flags: &[String], tail: &[String]) -> i32 {
 }
 
 fn cd_hint(path: &Path) -> String {
-    let shown = path.display().to_string();
-    let quoted = if shown.contains(|c: char| c.is_whitespace() || "'\"$`\\".contains(c)) {
-        format!("'{}'", shown.replace('\'', "'\\''"))
-    } else {
-        shown
-    };
-    format!("-> cc: the session ran in a worktree; to go there, run: cd {quoted}")
+    let word = crate::common::shell::word(&path.to_string_lossy());
+    format!("-> cc: to go to the worktree, run: cd {word}")
 }
 
 /// A fresh 0600 file that fails rather than follow a planted path, standing
@@ -522,6 +517,7 @@ fn spawn(cwd: &Path, args: &[String], stderr: Option<Stdio>) -> i32 {
     cmd.args(args)
         .current_dir(cwd)
         .env("PWD", cwd)
+        // A shell that loaded the old `shell-init` function may still set it.
         .env_remove("PLAYBOOK_CC_CD_FILE");
     // Hooks inherit this PATH and read no rc file, so the session must be
     // able to find the binary that launched it even when the shell's PATH
@@ -573,8 +569,17 @@ fn short(sid: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::prompt_args;
+    use super::{cd_hint, prompt_args};
     use std::path::Path;
+
+    #[test]
+    fn the_cd_hint_quotes_a_path_with_shell_characters() {
+        assert_eq!(
+            cd_hint(Path::new("/r/.worktrees/a;id")),
+            "-> cc: to go to the worktree, run: cd '/r/.worktrees/a;id'"
+        );
+        assert!(cd_hint(Path::new("/r/.worktrees/x")).ends_with("run: cd /r/.worktrees/x"));
+    }
 
     fn v(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()

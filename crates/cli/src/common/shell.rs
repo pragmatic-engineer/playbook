@@ -204,6 +204,18 @@ pub fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
+/// `text` as one shell word, bare when every character is safe, else quoted.
+pub fn word(text: &str) -> String {
+    let plain = text
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/._-:@%+=".contains(c));
+    if plain && !text.is_empty() {
+        text.to_string()
+    } else {
+        quote(text)
+    }
+}
+
 /// Resolves backslash escapes the way `$'...'`, `printf` and `echo -e` do.
 /// An unknown escape is kept as written.
 pub fn unescape(text: &str) -> String {
@@ -981,6 +993,21 @@ mod tests {
         let got = commands(&format!("echo {}", quote(text)));
 
         assert_eq!(got[0].words[1], text);
+    }
+
+    #[test]
+    fn word_is_bare_only_when_every_character_is_safe() {
+        let cases = [
+            ("/repo/.worktrees/feat-x", "/repo/.worktrees/feat-x"),
+            ("/R&D/a b", "'/R&D/a b'"),
+            ("/x/a;id", "'/x/a;id'"),
+            ("/x/it's", "'/x/it'\\''s'"),
+            ("", "''"),
+        ];
+
+        for (text, want) in cases {
+            assert_eq!(word(text), want, "{text}");
+        }
     }
 
     #[test]

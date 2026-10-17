@@ -175,25 +175,13 @@ pub fn unload_commands(kind: Kind, uid: u32) -> Vec<(&'static str, Vec<String>)>
     }
 }
 
-/// One word for a shell line, in single quotes when it needs them.
-fn shell_word(word: &str) -> String {
-    let plain = word
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || "/._-:@%+=".contains(c));
-    if plain && !word.is_empty() {
-        word.to_string()
-    } else {
-        format!("'{}'", word.replace('\'', "'\\''"))
-    }
-}
-
 /// The load commands as one line a person can paste into a shell.
 pub fn load_hint(kind: Kind, file: &Path, uid: u32) -> String {
     load_commands(kind, file, uid)
         .into_iter()
         .map(|(program, args)| {
             std::iter::once(program.to_string())
-                .chain(args.iter().map(|a| shell_word(a)))
+                .chain(args.iter().map(|a| crate::common::shell::word(a)))
                 .collect::<Vec<_>>()
                 .join(" ")
         })
