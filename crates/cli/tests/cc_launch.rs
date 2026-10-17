@@ -92,10 +92,17 @@ impl Env {
         self.launch_with(&["--"], args, &[])
     }
     fn launch_with(&self, pre: &[&str], args: &[&str], extra: &[(&str, &str)]) -> Output {
+        let mut cmd = self.playbook(&["cc", "launch"]);
+        cmd.args(pre).args(args);
+        for (k, v) in extra {
+            cmd.env(k, v);
+        }
+        cmd.output().expect("run playbook")
+    }
+    /// The binary with `head` as its first arguments and the test env set.
+    fn playbook(&self, head: &[&str]) -> Command {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
-        cmd.args(["cc", "launch"])
-            .args(pre)
-            .args(args)
+        cmd.args(head)
             .current_dir(&self.work)
             .env("PWD", &self.work)
             .env("HOME", &self.home)
@@ -111,10 +118,7 @@ impl Env {
             .env("FAKE_LOG", self.log())
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null");
-        for (k, v) in extra {
-            cmd.env(k, v);
-        }
-        cmd.output().expect("run playbook")
+        cmd
     }
     /// Writes a transcript titled `proj` for the work dir.
     fn session(&self) -> PathBuf {
@@ -395,7 +399,7 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 #[test]
-fn worktree_launches_inside_the_new_tree_and_records_the_cd_target() {
+fn worktree_launches_inside_the_new_tree_and_prints_the_cd_to_run() {
     let e = env("worktree");
     for args in [
         vec!["init", "-q", "-b", "master"],
@@ -409,43 +413,30 @@ fn worktree_launches_inside_the_new_tree_and_records_the_cd_target() {
     git(&e.work, &["commit", "-q", "-m", "init"]);
     // A protected branch needs no `origin`, keeping the test hermetic.
     git(&e.work, &["branch", "develop"]);
-    let cd = e.root.join("cd-file");
 
     let out = e.launch_with(
         &["--skip-permissions", "--"],
         &["worktree", "develop"],
-        &[
-            ("PLAYBOOK_CC_CD_FILE", cd.to_str().unwrap()),
-            ("WORKTREE_NO_PUSH", "1"),
-        ],
+        &[("WORKTREE_NO_PUSH", "1")],
     );
 
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let target = fs::read_to_string(&cd).expect("cd file written");
-    let target = target.trim();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    let pwd = fs::read_to_string(format!("{}.pwd", e.log().display())).unwrap();
+    let target = pwd.trim();
     assert!(target.ends_with("develop"), "{target}");
     assert!(Path::new(target).is_dir());
-    let pwd = fs::read_to_string(format!("{}.pwd", e.log().display())).unwrap();
-    assert_eq!(pwd.trim(), target);
+    assert!(stderr.contains(&format!("run: cd {target}")), "{stderr}");
     assert_eq!(e.calls()[0], "--dangerously-skip-permissions -n develop");
 }
 
 #[test]
 fn worktree_outside_a_repo_fails_without_launching() {
     let e = env("worktree-norepo");
-    let cd = e.root.join("cd-file");
-    let out = e.launch_with(
-        &["--"],
-        &["worktree", "x"],
-        &[("PLAYBOOK_CC_CD_FILE", cd.to_str().unwrap())],
-    );
+    let out = e.launch_with(&["--"], &["worktree", "x"], &[]);
     assert_eq!(out.status.code(), Some(10));
     assert!(e.calls().is_empty());
-    assert!(!cd.exists());
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("run: cd"));
 }
 
 fn shell_init(shell: &str) -> String {
@@ -458,59 +449,31 @@ fn shell_init(shell: &str) -> String {
 }
 
 #[test]
-fn shell_init_defines_working_functions_in_every_available_shell() {
+fn shell_init_prints_a_comment_that_every_available_shell_loads_as_a_no_op() {
     for shell in ["bash", "zsh"] {
         if Command::new(shell).arg("--version").output().is_err() {
             eprintln!("SKIP: {shell} not available");
             continue;
         }
         let e = env(&format!("fn-{shell}"));
-        let target = e.root.join("elsewhere");
-        fs::create_dir_all(&target).unwrap();
-        // A fake playbook that records argv and names a cd target.
-        make_exec(
-            &e.root.join("bin/playbook"),
-            &format!(
-                "#!/bin/sh\necho \"$*\" > \"{}\"\nprintf '%s\\n' \"{}\" > \"$PLAYBOOK_CC_CD_FILE\"\nexit 3\n",
-                e.root.join("argv").display(),
-                target.display()
-            ),
-        );
         let script = format!(
-            "{}\nplaybook ccd one two; echo \"rc=$?\"; pwd -P",
+            "{}\ntype playbook >/dev/null 2>&1 && echo defined; echo rc=$?",
             shell_init(shell)
         );
 
         let out = Command::new(shell)
             .arg("-c")
             .arg(&script)
-            .current_dir(&e.work)
-            .env(
-                "PATH",
-                format!("{}:/usr/bin:/bin", e.root.join("bin").display()),
-            )
-            .env("TMPDIR", &e.root)
+            .env("PATH", "/usr/bin:/bin")
             .env("HOME", &e.home)
             .env("ZDOTDIR", &e.home)
             .output()
             .unwrap();
 
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(stdout.contains("rc=3"), "{shell}: {stdout}");
-        assert!(
-            stdout.trim_end().ends_with("elsewhere"),
-            "{shell}: {stdout}"
-        );
-        assert_eq!(
-            fs::read_to_string(e.root.join("argv")).unwrap().trim(),
-            "cc launch --skip-permissions -- one two"
-        );
-        let leftovers = fs::read_dir(&e.root)
-            .unwrap()
-            .flatten()
-            .filter(|f| f.file_name().to_string_lossy().starts_with("playbook-cc."))
-            .count();
-        assert_eq!(leftovers, 0, "{shell}: the cd temp file is removed");
+        assert!(out.status.success(), "{shell}: {stdout}");
+        assert!(!stdout.contains("defined"), "{shell}: {stdout}");
+        assert!(out.stderr.is_empty(), "{shell}: {:?}", out.stderr);
     }
 }
 
@@ -1088,56 +1051,28 @@ fn cc_starts_no_collector_without_a_usage_db_or_with_telemetry_off() {
 }
 
 #[test]
-fn the_wrapper_sends_cc_subcommands_to_the_binary_and_launch_modes_to_the_launcher() {
+fn cc_and_ccd_launch_from_the_binary_with_no_shell_function() {
     // Arrange
-    let cases = [
-        ("cc bust-cache", "cc bust-cache"),
-        ("cc list", "cc list"),
-        ("cc worktree b", "cc worktree b"),
-        ("cc fresh --model x", "cc launch -- fresh --model x"),
-        (
-            "cc launch --skip-permissions",
-            "cc launch --skip-permissions",
-        ),
-        ("doctor", "doctor"),
-    ];
-    for shell in ["bash", "zsh"] {
-        if Command::new(shell).arg("--version").output().is_err() {
-            continue;
-        }
-        for (typed, expected) in cases {
-            let e = env(&format!("route-{shell}"));
-            make_exec(
-                &e.root.join("bin/playbook"),
-                &format!(
-                    "#!/bin/sh\necho \"$*\" > \"{}\"\n",
-                    e.root.join("argv").display()
-                ),
-            );
-            let script = format!("{}\nplaybook {typed}", shell_init(shell));
+    let e = env("direct");
 
-            // Act
-            let out = Command::new(shell)
-                .arg("-c")
-                .arg(&script)
-                .current_dir(&e.work)
-                .env(
-                    "PATH",
-                    format!("{}:/usr/bin:/bin", e.root.join("bin").display()),
-                )
-                .env("TMPDIR", &e.root)
-                .env("HOME", &e.home)
-                .env("ZDOTDIR", &e.home)
-                .output()
-                .unwrap();
+    // Act
+    let cc = e
+        .playbook(&["cc", "fresh", "--model", "x"])
+        .output()
+        .unwrap();
+    let ccd = e.playbook(&["ccd", "fresh"]).output().unwrap();
 
-            // Assert
-            assert!(out.status.success(), "{shell} {typed}");
-            assert_eq!(
-                fs::read_to_string(e.root.join("argv")).unwrap().trim(),
-                expected,
-                "{shell} {typed}"
-            );
-        }
-    }
+    // Assert
+    assert!(cc.status.success(), "{cc:?}");
+    assert!(ccd.status.success(), "{ccd:?}");
+    let calls = e.calls();
+    assert!(calls[0].contains("--model x"), "{calls:?}");
+    assert!(
+        !calls[0].contains("--dangerously-skip-permissions"),
+        "{calls:?}"
+    );
+    assert!(
+        calls[1].contains("--dangerously-skip-permissions"),
+        "{calls:?}"
+    );
 }

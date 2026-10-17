@@ -49,15 +49,6 @@ pub fn declined(home: &Path) -> bool {
     )
 }
 
-/// Whether a yes is stored, so a later no leaves it alone (ADR 0044: a no
-/// removes nothing).
-fn stored_yes(home: &Path) -> bool {
-    matches!(
-        crate::config::resolve(KEY, home, None),
-        Ok((serde_json::Value::Bool(true), _))
-    )
-}
-
 fn record(home: &Path, yes: bool) -> Result<(), String> {
     crate::config::write::set(
         crate::config::write::Tier::Global,
@@ -95,12 +86,6 @@ pub fn step(home: &Path, choice: Choice, target: Option<&Target>) -> StepReport 
     match choice {
         Choice::Skip => {
             return StepReport::skipped(PART, "not requested; pass --short-name to opt in")
-        }
-        Choice::Declined if stored_yes(home) => {
-            return StepReport::skipped(
-                PART,
-                "you said no, so no `pb` link is added; launcher.shortName stays on, so an rc file that loads `playbook shell-init` keeps its `pb` function. To turn that off, run: playbook config set launcher.shortName false",
-            );
         }
         Choice::Declined => {
             let note = record_note(home, false);
@@ -262,20 +247,15 @@ mod tests {
     }
 
     #[test]
-    fn a_no_keeps_a_stored_yes() {
-        let home = scratch_dir("pb-link-keep-yes");
+    fn a_no_replaces_a_stored_yes() {
+        let home = scratch_dir("pb-link-replace-yes");
         fs::create_dir_all(&home).unwrap();
         record(&home, true).unwrap();
 
         let got = step(&home, Choice::Declined, None);
 
         assert_eq!(got.status, StepStatus::Skipped);
-        assert!(
-            got.detail.contains("config set launcher.shortName false"),
-            "{}",
-            got.detail
-        );
-        assert!(!declined(&home));
+        assert!(declined(&home));
     }
 
     #[test]

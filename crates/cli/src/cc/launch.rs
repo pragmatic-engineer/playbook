@@ -1,19 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook cc launch`: the launcher the `playbook cc` and `playbook ccd` shell functions call.
+//! `playbook cc launch`: the launcher behind `playbook cc` and `playbook ccd`.
 //!
 //! Subcommands: (none) resume or start, `clean`, `fresh`, `raw [sid]`, `list`,
-//! `prune`, `worktree <branch>`. The shell function only wraps this and `cd`s
-//! to the path written to `$PLAYBOOK_CC_CD_FILE`, the one thing a child cannot do.
+//! `prune`, `worktree <branch>`. A child cannot change its parent shell's
+//! directory, so after a session in a new worktree it prints the `cd` to run.
 
 use super::{bust_cache, clean_resume, config_drift, retention, sessions, worktree_run};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-
-/// Env var naming the file the launcher writes the entered worktree path to.
-const CD_FILE_ENV: &str = "PLAYBOOK_CC_CD_FILE";
 
 const SYSTEM_PROMPT_REL: &str = "prompts/SYSTEM_PROMPT.md";
 
@@ -487,15 +484,20 @@ fn worktree(cwd: &mut PathBuf, flags: &[String], tail: &[String]) -> i32 {
         }
         Err(code) => return code,
     };
-    record_cd(&path);
     *cwd = path;
-    dispatch(cwd, flags)
+    let rc = dispatch(cwd, flags);
+    eprintln!("{}", cd_hint(cwd));
+    rc
 }
 
-fn record_cd(path: &Path) {
-    if let Some(file) = std::env::var_os(CD_FILE_ENV).filter(|f| !f.is_empty()) {
-        let _ = fs::write(file, format!("{}\n", path.display()));
-    }
+fn cd_hint(path: &Path) -> String {
+    let shown = path.display().to_string();
+    let quoted = if shown.contains(|c: char| c.is_whitespace() || "'\"$`\\".contains(c)) {
+        format!("'{}'", shown.replace('\'', "'\\''"))
+    } else {
+        shown
+    };
+    format!("-> cc: the session ran in a worktree; to go there, run: cd {quoted}")
 }
 
 /// A fresh 0600 file that fails rather than follow a planted path, standing
@@ -520,7 +522,7 @@ fn spawn(cwd: &Path, args: &[String], stderr: Option<Stdio>) -> i32 {
     cmd.args(args)
         .current_dir(cwd)
         .env("PWD", cwd)
-        .env_remove(CD_FILE_ENV);
+        .env_remove("PLAYBOOK_CC_CD_FILE");
     // Hooks inherit this PATH and read no rc file, so the session must be
     // able to find the binary that launched it even when the shell's PATH
     // does not list its directory.

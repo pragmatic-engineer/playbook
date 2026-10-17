@@ -334,12 +334,8 @@ pub enum Command {
         #[arg(long)]
         remove_binary: bool,
     },
-    /// Print the shell function that lets `playbook cc` and `playbook ccd` change directory
-    ///
-    /// A program cannot change its parent shell's directory, so this wraps
-    /// `playbook` to `cd` into a worktree that `playbook cc launch worktree <branch>`
-    /// creates (the old `ccc worktree <branch>`). Load it from your rc file with
-    /// `eval "$(playbook shell-init)"`.
+    /// Retired: prints one comment line so an old rc line still loads (ADR 0044)
+    #[command(hide = true)]
     ShellInit {
         /// Target shell (default: the one named by `$SHELL`)
         #[arg(long, value_parser = ["bash", "zsh"])]
@@ -2472,7 +2468,7 @@ mod tests {
         // Assert
         let mut hidden = hidden;
         hidden.sort();
-        assert_eq!(hidden, ["hook", "init", "json"]);
+        assert_eq!(hidden, ["hook", "init", "json", "shell-init"]);
         assert!(Cli::command()
             .try_get_matches_from(["playbook", "json", "array-length"])
             .is_ok());
