@@ -29,6 +29,8 @@ pub const COLLECTOR_SERVICE_MIGRATION: &str = "0016-collector-service";
 pub const AUTO_BUDGET_MIGRATION: &str = "0017-auto-budget-defaults";
 /// The `Consent` removal of the retired launcher rc lines (ADR 0044).
 pub const RC_LINE_MIGRATION: &str = "0018-retired-launcher-rc-line";
+/// The `Consent` question about the system prompt now on by default (ADR 0044).
+pub const PROMPT_DEFAULT_MIGRATION: &str = "0019-system-prompt-default-on";
 
 /// What a migration needs to find the state it moves.
 pub struct Ctx {
@@ -249,7 +251,29 @@ pub fn registry() -> Vec<Migration> {
             },
             run: retired_rc_line,
         },
+        Migration {
+            id: PROMPT_DEFAULT_MIGRATION,
+            kind: Kind::Idempotent,
+            scope: Scope::Consent {
+                check: system_prompt_default_pending,
+                command: "playbook setup --only system-prompt",
+            },
+            run: system_prompt_default_by_setup,
+        },
     ]
+}
+
+/// An earlier install without the prompt, now that `pb cc` loads it by
+/// default. A stored answer keeps it quiet (ADR 0044 decision 8).
+fn system_prompt_default_pending(ctx: &Ctx) -> Option<String> {
+    crate::init::system_prompt::earlier_install_without_prompt(&ctx.home, &ctx.claude_home).then(|| {
+        "pb cc now loads the playbook system prompt by default and none is installed; to keep it off, run: playbook config set systemPrompt.enabled false".to_string()
+    })
+}
+
+/// Setup's system-prompt part places the file and stores the answer.
+fn system_prompt_default_by_setup(_: &Ctx) -> Outcome {
+    Outcome::Quiet
 }
 
 /// Writable rc files that still hold a line the retired launcher wrote.
@@ -1248,6 +1272,42 @@ mod tests {
         assert!(second.steps.is_empty());
     }
 
+    #[test]
+    fn the_prompt_default_item_is_open_for_an_earlier_install_until_an_answer_is_stored() {
+        // Arrange
+        let h = home("prompt-default");
+        let fresh = home("prompt-default-fresh");
+        settings_with(&h, "playbook statusline");
+
+        // Act
+        let open = open_items(&ctx(&h), None);
+        let on_fresh = open_items(&ctx(&fresh), None);
+        crate::config::write::set(
+            crate::config::write::Tier::Global,
+            "systemPrompt.enabled",
+            serde_json::Value::Bool(false),
+            &h,
+            None,
+        )
+        .unwrap();
+        let after_no = open_items(&ctx(&h), None);
+
+        // Assert
+        let item = |items: &[OpenItem]| {
+            items
+                .iter()
+                .find(|i| i.id == PROMPT_DEFAULT_MIGRATION)
+                .cloned()
+        };
+        let got = item(&open).expect("open for an earlier install");
+        assert_eq!(got.command, Some("playbook setup --only system-prompt"));
+        assert!(got
+            .message
+            .contains("config set systemPrompt.enabled false"));
+        assert!(item(&on_fresh).is_none());
+        assert!(item(&after_no).is_none());
+    }
+
     fn settings_with(h: &Path, command: &str) -> PathBuf {
         let path = h.join(".claude").join("settings.json");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1644,6 +1704,6 @@ mod tests {
 
     #[test]
     fn the_schema_is_the_highest_registry_number() {
-        assert_eq!(schema(), 18);
+        assert_eq!(schema(), 19);
     }
 }

@@ -213,7 +213,7 @@ fn recording_stub(work: &Work) -> (PathBuf, PathBuf) {
     shift
     printf '%s\n' "$@" > "{}"
     if [ "${{1:-}}" = "--help" ]; then
-      printf -- '--system-prompt\n'
+      printf -- '--system-prompt\n--no-system-prompt\n'
       exit 0
     fi
     home="${{CLAUDE_HOME:-$HOME/.claude}}"
@@ -295,6 +295,20 @@ fn the_system_prompt_flag_is_forwarded_and_the_retired_aliases_flag_is_not() {
     let got = fs::read_to_string(&argv).unwrap_or_default();
     assert!(!got.contains("--aliases"), "init received: '{got}'");
     assert!(got.contains("--system-prompt"), "init received: '{got}'");
+}
+
+#[test]
+fn the_no_system_prompt_flag_is_forwarded() {
+    let work = Work::new("bp-no-prompt");
+    let (stub, argv) = recording_stub(&work);
+    let (rc, _, log) = local_install(&work, &stub, &["--yes", "--no-system-prompt"], "nsp");
+    assert_eq!(rc, 0, "{log}");
+    let got = fs::read_to_string(&argv).unwrap_or_default();
+    assert!(got.contains("--no-system-prompt"), "init received: '{got}'");
+    assert!(
+        !got.contains("\n--system-prompt\n"),
+        "init received: '{got}'"
+    );
 }
 
 #[test]

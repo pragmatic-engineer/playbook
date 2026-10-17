@@ -44,7 +44,7 @@ pub struct Flags {
     /// Install the playbook system prompt (an existing copy is refreshed either way)
     #[arg(long, overrides_with = "no_system_prompt")]
     pub system_prompt: bool,
-    /// Do not install the system prompt
+    /// Do not install the system prompt, and store `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
     #[arg(long, overrides_with = "system_prompt")]
     pub no_system_prompt: bool,
     /// Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
@@ -332,7 +332,7 @@ pub fn resolve_with(
             flags.system_prompt,
             flags.no_system_prompt,
             catalog::question("system-prompt"),
-            false,
+            settings_default,
         ),
         telemetry: decide(
             flags.telemetry,
@@ -350,7 +350,7 @@ pub fn resolve_with(
             flags.short_name,
             flags.no_short_name,
             catalog::question("short-name"),
-            false,
+            settings_default,
         ),
         attribution_off: decide(
             flags.attribution_off,
@@ -377,13 +377,14 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
         (flags.system_prompt, flags.no_system_prompt),
         (flags.telemetry, flags.no_telemetry),
         (flags.collector_service, flags.no_collector_service),
+        (flags.short_name, flags.no_short_name),
         (flags.attribution_off, flags.no_attribution_off),
     ]
     .iter()
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
         "setup: output is not a terminal, so no questions were asked; the hooks, status line, \
-         telemetry, collector-service and attribution-off parts stay off and the other defaults apply; pass --yes to accept all defaults or the \
+         system-prompt, telemetry, collector-service, short-name and attribution-off parts stay off and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
 }
@@ -409,6 +410,7 @@ mod tests {
             system_prompt: true,
             no_telemetry: true,
             no_collector_service: true,
+            no_short_name: true,
             no_attribution_off: true,
             ..Flags::default()
         };
@@ -566,13 +568,26 @@ mod tests {
     }
 
     #[test]
-    fn yes_skips_every_question() {
+    fn yes_skips_every_question_and_turns_every_asked_part_on() {
         let flags = Flags {
             yes: true,
             ..Flags::default()
         };
         let c = resolve(&flags, true, false, &mut never);
-        assert!(c.hooks && c.statusline && c.path && !c.system_prompt);
+        assert_eq!(
+            c,
+            Choices {
+                hooks: true,
+                statusline: true,
+                security: false,
+                path: true,
+                system_prompt: true,
+                telemetry: true,
+                collector_service: true,
+                short_name: true,
+                attribution_off: true
+            }
+        );
     }
 
     #[test]

@@ -40,6 +40,7 @@ fn paths(home: &Path, root: &Path, repo: Option<(PathBuf, PathBuf)>) -> InitPath
         claude_home: home.join(".claude"),
         home: home.to_path_buf(),
         system_prompt: true,
+        system_prompt_declined: false,
         hooks: true,
         statusline: true,
         security: false,

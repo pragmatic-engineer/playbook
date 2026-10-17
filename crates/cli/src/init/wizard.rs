@@ -76,7 +76,7 @@ pub fn decline_line(id: &str) -> &'static str {
         "hooks" => "No hooks are added. The safety guards, session helpers and usage warm-up do not run.",
         "statusline" => "Your status line stays as it is.",
         "path" => "Your shell files are not touched. Hooks may not find playbook unless it is already on PATH.",
-        "system-prompt" => "No file is copied. The launchers start without the playbook prompt.",
+        "system-prompt" => "No file is copied, and `systemPrompt.enabled` is set to false, so `pb cc` starts with Claude Code's own prompt.",
         "telemetry" => "No variables are written. `playbook usage` reads transcripts instead.",
         "collector-service" => "No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`.",
         "short-name" => "No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing.",
@@ -318,10 +318,10 @@ mod tests {
             guided_answer(&guided, q, d)
         });
         assert!(!c.hooks && !c.statusline && !c.path);
-        assert!(c.system_prompt && c.short_name);
+        assert!(!c.system_prompt && !c.short_name);
         assert!(
             !c.telemetry && !c.collector_service && !c.attribution_off,
-            "telemetry, collector-service and attribution-off are on by default, so a no flips them off"
+            "every asked part is on by default, so a no flips it off"
         );
     }
 

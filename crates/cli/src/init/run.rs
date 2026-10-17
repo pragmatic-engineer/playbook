@@ -33,6 +33,9 @@ pub struct InitPaths {
     /// see `init::system_prompt` for why installing one unasked would be a
     /// behaviour change rather than a port.
     pub system_prompt: bool,
+    /// The user said no to the system prompt, so `systemPrompt.enabled` is
+    /// stored as false. With neither this nor `system_prompt`, nothing is stored.
+    pub system_prompt_declined: bool,
     /// Whether to wire the hook entries into settings.json.
     pub hooks: bool,
     /// Whether init may set or change `statusLine` in settings.json. False
@@ -191,6 +194,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     if step_confirmed(&system_prompt_step) {
         migrate::record_system_prompt(&paths.home);
     }
+    let system_prompt_step = store_system_prompt_answer(paths, system_prompt_step);
     if let Some(root) = &skills_root {
         migrate::record_skills(&paths.home, root);
     }
@@ -235,7 +239,7 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
         if step_confirmed(&step) {
             migrate::record_system_prompt(&paths.home);
         }
-        steps.push(step);
+        steps.push(store_system_prompt_answer(paths, step));
     }
     if paths.hooks || paths.statusline || paths.security {
         let (settings_step, hooks_step) = settings_and_hooks_steps(paths, epoch);
@@ -418,6 +422,35 @@ fn trust_config_dir_step(home: &Path) -> StepReport {
 /// means the destination's state is unconfirmed, not verified complete.
 pub(crate) fn step_confirmed(step: &StepReport) -> bool {
     matches!(step.status, StepStatus::Wired | StepStatus::AlreadyCorrect)
+}
+
+/// Stores the system prompt answer in `systemPrompt.enabled`, which decides
+/// whether `pb cc` loads the prompt (ADR 0044). A run that asked nothing
+/// stores nothing.
+fn store_system_prompt_answer(paths: &InitPaths, step: StepReport) -> StepReport {
+    let on = match (paths.system_prompt, paths.system_prompt_declined) {
+        (true, _) => true,
+        (false, true) => false,
+        (false, false) => return step,
+    };
+    let stored = crate::config::write::set(
+        crate::config::write::Tier::Global,
+        system_prompt::KEY,
+        serde_json::Value::Bool(on),
+        &paths.home,
+        None,
+    );
+    match stored {
+        Err(err) => StepReport::failed(
+            "system-prompt",
+            format!("could not store systemPrompt.enabled: {err}"),
+        ),
+        Ok(_) if on => step,
+        Ok(_) => StepReport::skipped(
+            "system-prompt",
+            "you said no, so `pb cc` starts with Claude Code's own prompt; to turn it on, run: playbook setup --only system-prompt",
+        ),
+    }
 }
 
 /// Step 6: place `prompts/SYSTEM_PROMPT.md`, which is opt-in. See

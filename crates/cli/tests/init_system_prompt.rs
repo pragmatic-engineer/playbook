@@ -67,6 +67,7 @@ fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
         claude_home: claude_home_of(home),
         home: home.to_path_buf(),
         system_prompt,
+        system_prompt_declined: false,
         hooks: true,
         statusline: true,
         security: false,

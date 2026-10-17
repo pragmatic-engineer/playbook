@@ -32,6 +32,37 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// The per-user key that decides whether `pb cc` loads the prompt (ADR 0044).
+pub const KEY: &str = "systemPrompt.enabled";
+
+/// Why `--yes` leaves the system prompt off, or `None` when it may turn it
+/// on (ADR 0044 decision 5).
+pub fn held_off(home: &Path, claude_home: &Path) -> Option<&'static str> {
+    match crate::config::resolve(KEY, home, None) {
+        Ok((serde_json::Value::Bool(false), _)) => Some("systemPrompt.enabled is false"),
+        _ if earlier_install_without_prompt(home, claude_home) => {
+            Some("this install had no system prompt before")
+        }
+        _ => None,
+    }
+}
+
+/// The key is not stored, the prompt file is missing, and settings.json
+/// shows an earlier setup run: a playbook hook or the playbook status line.
+pub fn earlier_install_without_prompt(home: &Path, claude_home: &Path) -> bool {
+    let unset = matches!(
+        crate::config::resolve(KEY, home, None),
+        Ok((_, crate::config::Source::Default))
+    );
+    let file = crate::common::paths::playbook_root_from(home)
+        .join("prompts")
+        .join("SYSTEM_PROMPT.md");
+    let settings = fs::read_to_string(claude_home.join("settings.json")).unwrap_or_default();
+    unset
+        && !file.exists()
+        && (settings.contains("playbook hook") || settings.contains("\"playbook statusline\""))
+}
+
 /// How `place_system_prompt` landed. Every variant carries the path it acted
 /// on (or would have) so the caller can render a line naming a real location
 /// rather than a generic message.

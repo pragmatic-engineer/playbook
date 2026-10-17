@@ -256,44 +256,78 @@ fn layer2(env: &Env) -> Row {
 }
 
 fn layer3(env: &Env) -> Row {
-    let rc = match env.shell.rsplit('/').next().unwrap_or("") {
-        "zsh" => ".zshrc",
-        "bash" => ".bashrc",
-        _ => {
-            return Row::new(
-                "3",
-                Level::Info,
-                "shell not detected, launcher check skipped",
-            )
-        }
+    let (writable, stuck): (Vec<_>, Vec<_>) = crate::init::shim::retired_rc_entries(&env.home)
+        .into_iter()
+        .partition(|r| r.writable);
+    let names = |list: &[crate::init::shim::RetiredRc]| {
+        list.iter()
+            .map(|r| r.rc_file.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     };
-    let text = fs::read_to_string(env.home.join(rc)).unwrap_or_default();
-    if text.contains("shell/zsh/cc.zsh") || text.contains("shell/bash/cc.sh") {
-        return Row::new(
-            "3",
-            Level::Info,
-            "old launcher line in the rc file; `playbook cc` no longer needs it (ADR 0044)",
-        );
-    }
-    Row::new("3", Level::Pass, "no shell line needed for `playbook cc`")
+    let hint = match (writable.is_empty(), stuck.is_empty()) {
+        (true, true) => {
+            let row = Row::new("3", Level::Pass, "no shell line needed for `playbook cc`");
+            return if pb_runs_this_binary(env) {
+                row
+            } else {
+                row.hint("no `pb` on PATH runs playbook; run: playbook setup --only short-name")
+            };
+        }
+        (false, true) => "run `playbook setup` to remove it after a backup".to_string(),
+        (true, false) => {
+            "the file is read-only; delete the playbook launcher lines by hand".to_string()
+        }
+        (false, false) => format!(
+            "run `playbook setup` for {}; delete the lines by hand in {}, which is read-only",
+            names(&writable),
+            names(&stuck)
+        ),
+    };
+    let all: Vec<_> = writable.into_iter().chain(stuck).collect();
+    Row::new(
+        "3",
+        Level::Warn,
+        format!("retired launcher line in {}", names(&all)),
+    )
+    .hint(hint)
+}
+
+/// Whether a `pb` on PATH resolves to the running binary, as the short-name
+/// part checks it.
+fn pb_runs_this_binary(env: &Env) -> bool {
+    let same = |p: PathBuf| fs::canonicalize(p).ok();
+    let pb = on_path(env, "pb").and_then(same);
+    pb.is_some() && pb == std::env::current_exe().ok().and_then(same)
 }
 
 fn layer4(env: &Env) -> Row {
     let file = crate::common::paths::playbook_root_from(&env.home)
         .join("prompts")
         .join("SYSTEM_PROMPT.md");
-    if file.is_file() && std::fs::File::open(&file).is_err() {
+    let enabled = !matches!(
+        config::resolve("systemPrompt.enabled", &env.home, None),
+        Ok((Value::Bool(false), _))
+    );
+    if !enabled {
+        Row::new(
+            "4",
+            Level::Info,
+            "`pb cc` starts with Claude Code's own prompt (systemPrompt.enabled is false)",
+        )
+        .hint("to load the playbook prompt, run: playbook setup --only system-prompt")
+    } else if file.is_file() && std::fs::File::open(&file).is_err() {
         Row::new("4", Level::Warn, "system prompt file is not readable")
             .hint("fix the file permissions on ~/.config/playbook/prompts/SYSTEM_PROMPT.md")
     } else if file.is_file() {
-        Row::new("4", Level::Pass, "system prompt installed")
+        Row::new("4", Level::Pass, "`pb cc` loads the playbook system prompt")
     } else {
         Row::new(
             "4",
             Level::Info,
-            "system prompt not installed (opt-in, recommended)",
+            "system prompt not installed, so `pb cc` starts with Claude Code's own",
         )
-        .hint("run /playbook:setup and choose Yes for the system prompt question")
+        .hint("run: playbook setup --only system-prompt")
     }
 }
 

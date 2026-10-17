@@ -76,6 +76,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `docs.anydocPath` | empty | see the config keys guide |
 | `launcher.claudeOverride` | `false` | `true`, `false` |
 | `launcher.shortName` | `false` | `true`, `false` |
+| `systemPrompt.enabled` | `true` | `true`, `false` |
 | `hooks.rmGuard.allowedRoots` | `[]` | see the config keys guide |
 | `hooks.proseLint.mode` | `warn` | `warn`, `block`, `off` |
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
@@ -1348,7 +1349,7 @@ Example: `playbook setup --no-hooks --system-prompt`
 - `--path`: Put the playbook binary on PATH for every shell start
 - `--no-path`: Do not edit shell files for PATH
 - `--system-prompt`: Install the playbook system prompt (an existing copy is refreshed either way)
-- `--no-system-prompt`: Do not install the system prompt
+- `--no-system-prompt`: Do not install the system prompt, and store `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
 - `--telemetry`: Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
 - `--no-telemetry`: Do not write telemetry variables into settings.json
 - `--collector-service`: Keep the usage collector running in a per-user background service (launchd agent or systemd user unit), when telemetry points at it

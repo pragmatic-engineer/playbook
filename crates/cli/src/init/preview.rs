@@ -186,6 +186,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         claude_home: sh.join(".claude"),
         home: sh.clone(),
         system_prompt: false,
+        system_prompt_declined: false,
         hooks: paths.hooks,
         statusline: paths.statusline,
         security: paths.security,

@@ -129,7 +129,7 @@ The same flags as `playbook setup`, with the same text as `playbook setup --help
 | `--path` | Put the playbook binary on PATH for every shell start |
 | `--no-path` | Do not edit shell files for PATH |
 | `--system-prompt` | Install the playbook system prompt (an existing copy is refreshed either way) |
-| `--no-system-prompt` | Do not install the system prompt |
+| `--no-system-prompt` | Do not install the system prompt, and store `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own |
 | `--telemetry` | Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry` |
 | `--no-telemetry` | Do not write telemetry variables into settings.json |
 | `--collector-service` | Keep the usage collector running in a per-user background service (launchd agent or systemd user unit), when telemetry points at it |
@@ -155,10 +155,10 @@ The questions `playbook setup` asks in a terminal, in its order, with its defaul
 | 1 | `hooks` | Hooks | Wire the playbook hooks into ~/.claude/settings.json? (see them with `playbook hooks list`) | Yes | No hooks are added. The safety guards, session helpers and usage warm-up do not run. |
 | 2 | `statusline` | Status line | Set the status line in ~/.claude/settings.json to `playbook statusline`? | Yes | Your status line stays as it is. |
 | 3 | `path` | PATH | Add the playbook binary's directory to PATH in your shell startup files (~/.zshenv for zsh, ~/.bashrc and a login file for bash)? | Yes | Your shell files are not touched. Hooks may not find playbook unless it is already on PATH. |
-| 4 | `system-prompt` | Prompt | Copy the playbook system prompt to ~/.config/playbook/prompts/SYSTEM_PROMPT.md? | No | No file is copied. The launchers start without the playbook prompt. |
+| 4 | `system-prompt` | Prompt | Copy the playbook system prompt to ~/.config/playbook/prompts/SYSTEM_PROMPT.md? | Yes | No file is copied, and `systemPrompt.enabled` is set to false, so `pb cc` starts with Claude Code's own prompt. |
 | 5 | `telemetry` | Telemetry | Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting that `playbook setup` will not change) | Yes | No variables are written. `playbook usage` reads transcripts instead. |
 | 6 | `collector-service` | Collector | Keep the usage collector (`playbook usage collect`) running in the background, so telemetry has a receiver after every login? This installs a per-user service: a launchd agent in ~/Library/LaunchAgents on macOS, a systemd user unit on Linux. It acts only when telemetry points at the playbook collector. | Yes | No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`. |
-| 7 | `short-name` | Short name | Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists. | No | No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing. |
+| 7 | `short-name` | Short name | Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists. | Yes | No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing. |
 | 8 | `attribution-off` | Attribution | Turn off the attribution Claude Code adds to commits and pull requests (the Co-Authored-By trailer, the generated-by line and the claude.ai session link) by setting `attribution` in ~/.claude/settings.json? | Yes | Claude Code keeps adding its attribution. The commit-message-sanitizer hook still strips it from commits and PRs when the hooks are on. |
 
 The security part is never asked about, in a terminal or here. It runs only with `--security` or when `security.defaults` is true.

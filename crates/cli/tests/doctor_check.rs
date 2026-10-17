@@ -296,29 +296,78 @@ fn l3_and_l4_are_opt_in_and_never_fail() {
     assert_eq!(layer(&rows, "3")[0]["level"], "PASS");
     assert_eq!(layer(&rows, "4")[0]["level"], "INFO");
     let rows = b.run(&[], "/usr/bin/fish", None);
-    assert!(text(&layer(&rows, "3")).contains("shell not detected"));
+    assert_eq!(layer(&rows, "3")[0]["level"], "PASS");
 }
 
 #[test]
-fn l3_passes_with_an_old_shell_init_line() {
+fn l3_passes_with_a_bare_shell_init_line_and_notes_a_missing_pb() {
     let b = Box::new("l3p");
     fs::write(b.home().join(".zshrc"), "eval \"$(playbook shell-init)\"\n").unwrap();
     let bin = b.stub("bin1", "0.19.0", true);
     let rows = b.run(&[&bin], "/bin/zsh", None);
     assert_eq!(layer(&rows, "3")[0]["level"], "PASS");
+    let hint = |rows: &[Value]| layer(rows, "3")[0]["hint"].as_str().map(str::to_string);
+    assert!(hint(&rows).is_some_and(|h| h.contains("--only short-name")));
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_playbook"), bin.join("pb")).unwrap();
+    let rows = b.run(&[&bin], "/bin/zsh", None);
+    assert_eq!(hint(&rows), None);
 }
 
 #[test]
-fn l3_an_old_source_line_is_reported_as_not_needed() {
+fn l3_warns_on_a_retired_line_and_names_setup() {
     let b = Box::new("l3o");
     fs::write(
-        b.home().join(".zshrc"),
-        "source ~/.config/playbook/shell/zsh/cc.zsh\n",
+        b.home().join(".bashrc"),
+        "source ~/.config/playbook/shell/bash/cc.sh\n",
     )
     .unwrap();
-    let t = text(&layer(&b.run(&[], "/bin/zsh", None), "3"));
-    assert!(t.contains("old launcher line"), "{t}");
-    assert!(!t.contains("playbook setup"), "{t}");
+    let rows = b.run(&[], "/bin/zsh", None);
+    assert_eq!(layer(&rows, "3")[0]["level"], "WARN");
+    let row = layer(&rows, "3")[0];
+    assert!(
+        row["message"].as_str().unwrap().contains(".bashrc"),
+        "{row}"
+    );
+    assert!(
+        row["hint"].as_str().unwrap().contains("playbook setup"),
+        "{row}"
+    );
+}
+
+#[test]
+fn l3_names_both_files_when_one_is_read_only_and_one_is_not() {
+    let b = Box::new("l3m");
+    let zsh = b.home().join(".zshrc");
+    fs::write(&zsh, "# playbook launchers (ccc/ccd)\n").unwrap();
+    fs::set_permissions(&zsh, fs::Permissions::from_mode(0o444)).unwrap();
+    fs::write(b.home().join(".bashrc"), "# playbook launchers (ccc/ccd)\n").unwrap();
+    let rows = b.run(&[], "/bin/zsh", None);
+    let row = layer(&rows, "3")[0];
+    let message = row["message"].as_str().unwrap();
+    let hint = row["hint"].as_str().unwrap();
+    assert!(
+        message.contains(".zshrc") && message.contains(".bashrc"),
+        "{row}"
+    );
+    assert!(
+        hint.contains("playbook setup") && hint.contains("read-only"),
+        "{row}"
+    );
+}
+
+#[test]
+fn l3_warns_on_a_read_only_rc_with_a_permissions_hint() {
+    let b = Box::new("l3r");
+    let rc = b.home().join(".zshrc");
+    fs::write(&rc, "# playbook launchers (ccc/ccd)\n").unwrap();
+    fs::set_permissions(&rc, fs::Permissions::from_mode(0o444)).unwrap();
+    let rows = b.run(&[], "/bin/zsh", None);
+    assert_eq!(layer(&rows, "3")[0]["level"], "WARN");
+    let hint = layer(&rows, "3")[0]["hint"].as_str().unwrap().to_string();
+    assert!(
+        hint.contains("read-only") && !hint.contains("playbook setup"),
+        "{hint}"
+    );
 }
 
 #[test]
@@ -331,6 +380,32 @@ fn l4_passes_when_the_system_prompt_is_placed() {
         layer(&b.run(&[], "/bin/zsh", None), "4")[0]["level"],
         "PASS"
     );
+}
+
+#[test]
+fn l4_is_info_when_the_prompt_is_off_or_missing() {
+    let b = Box::new("l4off");
+    let missing = b.run(&[], "/bin/zsh", None);
+    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["config", "set", "systemPrompt.enabled", "false"])
+        .env("HOME", b.home())
+        .output()
+        .unwrap();
+    let off = b.run(&[], "/bin/zsh", None);
+
+    assert!(set.status.success(), "{set:?}");
+    let row = layer(&missing, "4")[0];
+    assert_eq!(row["level"], "INFO");
+    assert!(row["hint"]
+        .as_str()
+        .unwrap()
+        .contains("--only system-prompt"));
+    let row = layer(&off, "4")[0];
+    assert_eq!(row["level"], "INFO");
+    assert!(row["message"]
+        .as_str()
+        .unwrap()
+        .contains("systemPrompt.enabled is false"));
 }
 
 #[cfg(unix)]

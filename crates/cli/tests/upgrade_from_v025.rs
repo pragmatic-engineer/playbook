@@ -142,6 +142,7 @@ impl V025Home {
             claude_home: self.home.join(".claude"),
             home: self.home.clone(),
             system_prompt: false,
+            system_prompt_declined: false,
             hooks: true,
             statusline: true,
             security: false,
@@ -258,7 +259,11 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     assert_eq!(fs::read(h.settings()).unwrap(), after_init);
     assert_eq!(h.user_files()[2..], user_files[2..]);
     let settled = h.session_message();
-    assert!(!settled.contains("playbook setup"), "{settled}");
+    assert!(!settled.contains("`playbook setup`"), "{settled}");
+    assert!(
+        settled.contains("need `playbook setup --only system-prompt`"),
+        "an earlier install keeps the prompt question open: {settled}"
+    );
     assert!(settled.contains("2 item(s) need you"), "{settled}");
 }
 

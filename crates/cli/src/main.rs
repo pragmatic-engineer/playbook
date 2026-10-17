@@ -518,7 +518,7 @@ fn main() {
                 }
             }
             let terminal = init::choices::stdio_is_interactive();
-            let choices = only.unwrap_or_else(|| {
+            let mut choices = only.unwrap_or_else(|| {
                 init::choices::resolve_with(
                     &flags,
                     asking,
@@ -530,6 +530,18 @@ fn main() {
                 )
             });
             let only_run = only.is_some();
+            // --yes takes the default, which an earlier no or install without
+            // the prompt keeps off (ADR 0044 decision 5).
+            if choices.system_prompt && !asking && !only_run && !flags.system_prompt {
+                if let Some(reason) =
+                    init::system_prompt::held_off(&home_dir, &home_dir.join(".claude"))
+                {
+                    choices.system_prompt = false;
+                    eprintln!(
+                        "setup: the system prompt stays off because {reason}; to turn it on, run: playbook setup --only system-prompt"
+                    );
+                }
+            }
             if only_run && choices.telemetry {
                 println!("playbook setup --only: this run changes only the parts you named.");
                 if let Some(line) = skip_telemetry_question {
@@ -558,6 +570,23 @@ fn main() {
                 {
                     eprintln!(
                         "setup: no terminal and no --yes, so telemetry was not turned on. To turn it on, run: playbook setup --only telemetry"
+                    );
+                }
+                let extras: Vec<&str> = [
+                    (
+                        "the system prompt",
+                        flags.system_prompt || flags.no_system_prompt,
+                    ),
+                    ("the pb link", flags.short_name || flags.no_short_name),
+                ]
+                .into_iter()
+                .filter_map(|(name, set)| (!set).then_some(name))
+                .collect();
+                if !extras.is_empty() {
+                    eprintln!(
+                        "setup: no terminal and no --yes, so {} {} not added; run: playbook setup --yes",
+                        extras.join(" and "),
+                        if extras.len() == 1 { "was" } else { "were" }
                     );
                 }
                 if let Some((last, rest)) = left_off.split_last() {
@@ -611,6 +640,8 @@ fn main() {
                     }),
                 home,
                 system_prompt,
+                system_prompt_declined: !system_prompt
+                    && (flags.no_system_prompt || (asking && !only_run)),
                 path_setup,
                 hooks: choices.hooks,
                 statusline: choices.statusline,

@@ -101,7 +101,11 @@ impl Env {
     }
     /// The binary with `head` as its first arguments and the test env set.
     fn playbook(&self, head: &[&str]) -> Command {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+        self.run_as(Path::new(env!("CARGO_BIN_EXE_playbook")), head)
+    }
+    /// Like `playbook`, started through `program`, such as a `pb` symlink.
+    fn run_as(&self, program: &Path, head: &[&str]) -> Command {
+        let mut cmd = Command::new(program);
         cmd.args(head)
             .current_dir(&self.work)
             .env("PWD", &self.work)
@@ -1048,6 +1052,42 @@ fn cc_starts_no_collector_without_a_usage_db_or_with_telemetry_off() {
     let seen = fs::read_to_string(e.root.join("claude.log.otel")).unwrap();
     assert_eq!(seen, "unset\nunset\n");
     assert!(!usage.join("collector.json").exists());
+}
+
+#[test]
+fn pb_cc_loads_the_system_prompt_by_default_and_not_when_it_is_off() {
+    // Arrange
+    let e = env("pb-prompt");
+    let prompt = e.home.join(".config/playbook/prompts/SYSTEM_PROMPT.md");
+    fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+    fs::write(&prompt, "prompt\n").unwrap();
+    let pb = e.root.join("pbbin/pb");
+    fs::create_dir_all(pb.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_playbook"), &pb).unwrap();
+
+    // Act
+    let on = e.run_as(&pb, &["cc", "fresh"]).output().unwrap();
+    let off_set = e
+        .playbook(&["config", "set", "systemPrompt.enabled", "false"])
+        .output()
+        .unwrap();
+    let off = e.run_as(&pb, &["cc", "fresh"]).output().unwrap();
+    let append = e
+        .run_as(&pb, &["cc", "--append-system-prompt=x", "fresh"])
+        .output()
+        .unwrap();
+
+    // Assert
+    for out in [&on, &off_set, &off, &append] {
+        assert!(out.status.success(), "{out:?}");
+    }
+    let calls = e.calls();
+    assert_eq!(
+        calls[0],
+        format!("--system-prompt-file {} -n proj", prompt.display())
+    );
+    assert_eq!(calls[1], "-n proj");
+    assert_eq!(calls[2], "--append-system-prompt=x -n proj");
 }
 
 #[test]
