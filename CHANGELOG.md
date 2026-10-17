@@ -2,6 +2,23 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.37.0
+
+### Breaking changes
+
+- **setup**: \`playbook setup --aliases\` and \`--claude-override\` do ([#1119](https://github.com/pragmatic-engineer/playbook/pull/1119))
+- **cc**: the playbook, claude and pb shell functions are gone. ([#1120](https://github.com/pragmatic-engineer/playbook/pull/1120))
+- **setup**: \`setup --yes\` now installs the system prompt and links ([#1122](https://github.com/pragmatic-engineer/playbook/pull/1122))
+
+### Features
+
+- **setup**: link pb from the short-name part ([#1118](https://github.com/pragmatic-engineer/playbook/pull/1118))
+- **setup**: remove the retired launcher rc line with consent ([#1121](https://github.com/pragmatic-engineer/playbook/pull/1121))
+
+### Other changes
+
+- docs: describe pb cc without the shell launcher ([#1123](https://github.com/pragmatic-engineer/playbook/pull/1123))
+
 ## playbook 0.36.0
 
 ### Features

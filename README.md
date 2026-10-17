@@ -52,7 +52,7 @@ A Homebrew install updates with `brew upgrade playbook`. On a brew-managed insta
 
 Optional: `pbtop`, the standalone usage dashboard for a machine without playbook. See [pbtop](#pbtop).
 
-Pin a version with `PLAYBOOK_REF=v0.36.0`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
+Pin a version with `PLAYBOOK_REF=v0.37.0`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
 
 | Mode | What you get | Commands |
 |---|---|---|
