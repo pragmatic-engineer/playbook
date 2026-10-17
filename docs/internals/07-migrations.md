@@ -33,11 +33,12 @@ Each migration has an id such as `0006-statusline-rust-command`. Ids are append 
 | `0004-skills-edited` | Manual | Warns when you edited a cached plugin skill. |
 | `0005-statusline-edited` | Manual | Warns when you edited the old status line script. |
 | `0006-statusline-rust-command` | Idempotent | Points `statusLine.command` at `playbook statusline`. |
-| `0007-shell-init-rc-line` | Idempotent | Rewrites an old `source .../cc.sh` rc line to `eval "$(playbook shell-init)"`. |
+| `0007-shell-init-rc-line` | Idempotent | Retired by [ADR 0044](../adr/0044-drop-the-shell-launcher.md). It reports nothing and changes nothing. |
 | `0008-remove-config-hash-script` | Idempotent | Removes the `hooks/lib/config-hash.sh` copy older installs placed under `~/.config/playbook`. The hash is computed inside the binary now. |
 | `0009-adopt-late-config-json` | Idempotent | Adopts a `config.json` written after the SQLite import when it agrees with the store, and warns with its path when it does not. |
 | `0010-state-files-to-sqlite` | Idempotent | Moves `migrations.state` and the worktree sweep markers into the `state` table. See [State store](08-state-store.md). |
 | `0017-auto-budget-defaults` | Auto | Moves a stored `auto.budgetUsd` or `auto.agentBudgetUsd` of exactly 5, the old default, to the new default once, held at a set global `auto.sessionCeilingUsd`. See [ADR 0028](../adr/0028-per-agent-auto-budget.md). |
+| `0018-retired-launcher-rc-line` | Idempotent, Consent | Removes the launcher lines older setups wrote to `~/.zshrc` and `~/.bashrc`, after a copy to `<rc>.bak-<time>`. `playbook migrate` lists it with `playbook setup`, which applies it. A hand-written `eval "$(playbook shell-init)"` stays. See [ADR 0044](../adr/0044-drop-the-shell-launcher.md). |
 
 ## How playbook knows you edited a file
 

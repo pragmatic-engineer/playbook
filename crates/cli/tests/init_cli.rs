@@ -177,6 +177,32 @@ fn the_retired_launcher_flags_are_accepted_and_write_no_rc_file() {
 }
 
 #[test]
+fn migrate_lists_the_old_rc_block_and_setup_removes_it_after_a_backup() {
+    // Arrange
+    let sb = Sandbox::new("rc-block");
+    let before = "export EDITOR=vim\n\n# playbook launchers (ccc/ccd)\ncommand -v playbook >/dev/null 2>&1 && eval \"$(playbook shell-init)\"\n";
+    sb.write(".zshrc", before);
+
+    // Act
+    let migrate = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .arg("migrate")
+        .env("HOME", &sb.home)
+        .current_dir(&sb.home)
+        .output()
+        .unwrap();
+    let listed = text(&migrate);
+    let untouched = sb.read(".zshrc");
+    sb.init("/bin/zsh", &[]);
+
+    // Assert
+    assert!(listed.contains(".zshrc still loads the retired"), "{listed}");
+    assert!(listed.contains("(run `playbook setup`)"), "{listed}");
+    assert_eq!(untouched, before);
+    assert_eq!(sb.read(".zshrc"), "export EDITOR=vim\n");
+    assert_eq!(sb.count("", ".zshrc.bak-"), 1);
+}
+
+#[test]
 fn only_a_retired_part_runs_nothing() {
     let sb = Sandbox::new("retired-only");
 

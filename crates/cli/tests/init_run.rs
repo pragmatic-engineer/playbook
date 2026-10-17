@@ -1086,12 +1086,9 @@ fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift(
             .collect::<Vec<_>>()
     );
 
-    // Setup no longer rewrites the old launcher line into a new one (ADR 0044).
+    // Migration 0018 removes the old launcher block after a backup (ADR 0044).
     let rc = fs::read_to_string(home.join(".bashrc")).unwrap();
-    assert_eq!(
-        rc,
-        "export EDITOR=vim\n\n# playbook launchers (cc/ccd)\nsource \"$HOME/.claude/shell/bash/cc.sh\"\n"
-    );
+    assert_eq!(rc, "export EDITOR=vim\n");
 
     // Doctor Layer 5 shape: the Rust command.
     let settings_path = claude_home.join("settings.json");

@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wires the rc file to load the `playbook cc` cd wrapper with
-//! `eval "$(playbook shell-init)"`, and upgrades the legacy `source` lines.
+//! Finds and removes the rc-file lines older playbook versions wrote for the
+//! retired shell launcher (ADR 0044), and the installer's `PATH` block.
 
 use std::fs;
 use std::io;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Which shell family the rc-file wiring targets.
@@ -28,7 +27,7 @@ impl ShellKind {
     }
 
     /// The rc file this shell reads on startup, relative to `$HOME`.
-    fn rc_file_name(self) -> &'static str {
+    pub fn rc_file_name(self) -> &'static str {
         match self {
             ShellKind::Bash => ".bashrc",
             ShellKind::Zsh => ".zshrc",
@@ -58,103 +57,18 @@ impl ShellKind {
     const ALL: [ShellKind; 2] = [ShellKind::Bash, ShellKind::Zsh];
 }
 
-/// The line a new or migrated install runs, guarded so a shell started
-/// without `playbook` on PATH still comes up.
+/// The guarded line setup wrote before ADR 0044.
 pub const SOURCE_LINE: &str =
     "command -v playbook >/dev/null 2>&1 && eval \"$(playbook shell-init)\"";
 
-/// Comment line that opens the managed block; uninstall keys on it too, and
-/// still strips the older `(cc/ccd)` wording. The text is kept so existing rc files match.
-const BLOCK_COMMENT: &str = "# playbook launchers (ccc/ccd)";
+/// The comment setup wrote above `SOURCE_LINE`, in its current and older wording.
+const BLOCK_COMMENTS: [&str; 2] = [
+    "# playbook launchers (ccc/ccd)",
+    "# playbook launchers (cc/ccd)",
+];
 
-/// What `rewire_rc_file` did, for a caller to report to the user.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShimOutcome {
-    /// The rc file that was checked (and possibly changed).
-    pub rc_file: PathBuf,
-    /// Whether this call changed the rc file, appended or replaced in place.
-    pub appended: bool,
-    /// The rc file needed a change but lacks the owner write bit, so it was
-    /// left untouched.
-    pub unwritable: bool,
-}
-
-/// Make sure `home`'s rc file for `shell_kind` sources the current launcher
-/// location exactly once: every legacy source line is removed, the first one
-/// replaced in place when the current line is missing, else the current line
-/// is appended. Works on bytes so a non-UTF-8 rc file is never mistaken for
-/// an empty one.
-pub fn rewire_rc_file(home: &Path, shell_kind: ShellKind) -> io::Result<ShimOutcome> {
-    let rc_file = home.join(shell_kind.rc_file_name());
-    let existing = match fs::read(&rc_file) {
-        Ok(bytes) => Some(bytes),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
-        Err(err) => return Err(err),
-    };
-    let unchanged = ShimOutcome {
-        rc_file: rc_file.clone(),
-        appended: false,
-        unwritable: false,
-    };
-
-    let Some(existing) = existing else {
-        append_source_line(&rc_file)?;
-        return Ok(ShimOutcome {
-            appended: true,
-            ..unchanged
-        });
-    };
-
-    let rewritten = rewrite_legacy_lines(&existing, shell_kind);
-    if rewritten.is_none() && has_current_line(&existing) {
-        return Ok(unchanged);
-    }
-    if !owner_can_write(&rc_file) {
-        return Ok(ShimOutcome {
-            unwritable: true,
-            ..unchanged
-        });
-    }
-    match rewritten {
-        Some(content) => atomic_write_rc_file(&rc_file, &content)?,
-        None => append_source_line(&rc_file)?,
-    }
-    Ok(ShimOutcome {
-        appended: true,
-        ..unchanged
-    })
-}
-
-/// Rewrite the legacy `source` launcher lines in every shell's rc file under
-/// `home` to the `shell-init` line. Files without a legacy line are not
-/// touched. Returns the rc files changed.
-pub fn upgrade_legacy_rc_files(home: &Path) -> io::Result<Vec<PathBuf>> {
-    let mut changed = Vec::new();
-    for (rc_file, content) in legacy_rewrites(home) {
-        atomic_write_rc_file(&rc_file, &content)?;
-        changed.push(rc_file);
-    }
-    Ok(changed)
-}
-
-/// The rc files `upgrade_legacy_rc_files` would rewrite. Reads only.
-pub fn legacy_rc_files(home: &Path) -> Vec<PathBuf> {
-    legacy_rewrites(home).into_iter().map(|(f, _)| f).collect()
-}
-
-/// Each writable rc file under `home` with a legacy launcher line, and its
-/// rewritten content.
-fn legacy_rewrites(home: &Path) -> Vec<(PathBuf, Vec<u8>)> {
-    ShellKind::ALL
-        .into_iter()
-        .filter_map(|kind| {
-            let rc_file = home.join(kind.rc_file_name());
-            let existing = fs::read(&rc_file).ok()?;
-            let content = rewrite_legacy_lines(&existing, kind)?;
-            owner_can_write(&rc_file).then_some((rc_file, content))
-        })
-        .collect()
-}
+/// The `eval` line without the guard, as a user may write it by hand.
+const BARE_EVAL: &str = "eval \"$(playbook shell-init)\"";
 
 /// One rc file `strip_rc_files` changed, or would change on a dry run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,89 +82,113 @@ pub struct RcStrip {
     pub error: Option<String>,
 }
 
-/// Remove the managed launcher block (and legacy `source` lines) from every
-/// shell's rc file under `home`, and with `binary_path` also the `PATH` block
-/// the installer appends. Anything else in the file is kept byte for byte.
-/// A changed file is first copied to `<rc>.bak-<stamp>`.
+/// Remove the launcher lines, the bare `eval` included, from every shell's
+/// rc file under `home`, and with `binary_path` also the `PATH` block the
+/// installer appends. Anything else in the file is kept byte for byte. A
+/// changed file is first copied to `<rc>.bak-<stamp>`.
 pub fn strip_rc_files(home: &Path, stamp: u64, binary_path: bool, dry_run: bool) -> Vec<RcStrip> {
-    let mut changed = Vec::new();
-    for kind in ShellKind::ALL {
-        let rc_file = home.join(kind.rc_file_name());
-        let Ok(existing) = fs::read(&rc_file) else {
-            continue;
-        };
-        let mut content = strip_launcher(&existing, kind);
-        if binary_path {
-            let base = content.as_deref().unwrap_or(&existing);
-            content = strip_binary_path(base).or(content);
-        }
-        let Some(content) = content else { continue };
-        let mut entry = RcStrip {
-            rc_file: rc_file.clone(),
-            backup: None,
-            unwritable: false,
-            error: None,
-        };
-        if !owner_can_write(&rc_file) {
-            entry.unwritable = true;
-        } else if !dry_run {
-            let name = rc_file.file_name().unwrap_or_default().to_string_lossy();
-            let backup = rc_file.with_file_name(format!("{name}.bak-{stamp}"));
-            match fs::copy(&rc_file, &backup).and_then(|_| atomic_write_rc_file(&rc_file, &content))
-            {
-                Ok(()) => entry.backup = Some(backup),
-                Err(err) => entry.error = Some(err.to_string()),
+    ShellKind::ALL
+        .into_iter()
+        .filter_map(|kind| {
+            let rc_file = home.join(kind.rc_file_name());
+            let existing = fs::read(&rc_file).ok()?;
+            let mut content = strip_launcher(&existing, kind, true);
+            if binary_path {
+                let base = content.as_deref().unwrap_or(&existing);
+                content = strip_binary_path(base).or(content);
             }
-        }
-        changed.push(entry);
-    }
-    changed
+            Some(apply(rc_file, &content?, stamp, dry_run))
+        })
+        .collect()
+}
+
+/// The writable rc files under `home` that hold a line migration 0018
+/// removes. Reads only.
+pub fn retired_rc_files(home: &Path) -> Vec<PathBuf> {
+    retired_rewrites(home)
+        .into_iter()
+        .filter(|(rc_file, _)| owner_can_write(rc_file))
+        .map(|(rc_file, _)| rc_file)
+        .collect()
+}
+
+/// Each rc file under `home`, writable or not, that holds a retired launcher
+/// line, for doctor.
+pub fn rc_files_with_retired_lines(home: &Path) -> Vec<PathBuf> {
+    retired_rewrites(home).into_iter().map(|(f, _)| f).collect()
+}
+
+/// Remove the retired launcher lines from each writable rc file under
+/// `home`, after a copy to `<rc>.bak-<stamp>`. A bare hand-written `eval`
+/// stays. Files without the write bit are skipped.
+pub fn strip_retired_rc_lines(home: &Path, stamp: u64) -> Vec<RcStrip> {
+    retired_rewrites(home)
+        .into_iter()
+        .filter(|(rc_file, _)| owner_can_write(rc_file))
+        .map(|(rc_file, content)| apply(rc_file, &content, stamp, false))
+        .collect()
+}
+
+fn retired_rewrites(home: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    ShellKind::ALL
+        .into_iter()
+        .filter_map(|kind| {
+            let rc_file = home.join(kind.rc_file_name());
+            let existing = fs::read(&rc_file).ok()?;
+            Some((rc_file, strip_launcher(&existing, kind, false)?))
+        })
+        .collect()
 }
 
 /// `strip_binary_path` over each of `files` that exists. A changed file is
 /// first copied to `<file>.bak-<stamp>`. Used for the files outside the two
 /// rc files `strip_rc_files` walks.
 pub fn strip_binary_path_files(files: &[PathBuf], stamp: u64, dry_run: bool) -> Vec<RcStrip> {
-    let mut changed = Vec::new();
-    for rc_file in files {
-        let Ok(existing) = fs::read(rc_file) else {
-            continue;
-        };
-        let Some(content) = strip_binary_path(&existing) else {
-            continue;
-        };
-        let mut entry = RcStrip {
-            rc_file: rc_file.clone(),
-            backup: None,
-            unwritable: false,
-            error: None,
-        };
-        if !owner_can_write(rc_file) {
-            entry.unwritable = true;
-        } else if !dry_run {
-            let name = rc_file.file_name().unwrap_or_default().to_string_lossy();
-            let backup = rc_file.with_file_name(format!("{name}.bak-{stamp}"));
-            match fs::copy(rc_file, &backup).and_then(|_| atomic_write_rc_file(rc_file, &content)) {
-                Ok(()) => entry.backup = Some(backup),
-                Err(err) => entry.error = Some(err.to_string()),
-            }
-        }
-        changed.push(entry);
-    }
-    changed
+    files
+        .iter()
+        .filter_map(|rc_file| {
+            let content = strip_binary_path(&fs::read(rc_file).ok()?)?;
+            Some(apply(rc_file.clone(), &content, stamp, dry_run))
+        })
+        .collect()
 }
 
-/// `content` without the launcher line(s) and the comment right above each.
-/// `None` when there was nothing to remove.
-fn strip_launcher(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>> {
+/// Write `content` to `rc_file` after a copy to `<rc>.bak-<stamp>`, unless
+/// this is a dry run or the file lacks the owner write bit.
+fn apply(rc_file: PathBuf, content: &[u8], stamp: u64, dry_run: bool) -> RcStrip {
+    let mut entry = RcStrip {
+        rc_file,
+        backup: None,
+        unwritable: false,
+        error: None,
+    };
+    if !owner_can_write(&entry.rc_file) {
+        entry.unwritable = true;
+    } else if !dry_run {
+        let rc_file = &entry.rc_file;
+        let name = rc_file.file_name().unwrap_or_default().to_string_lossy();
+        let backup = rc_file.with_file_name(format!("{name}.bak-{stamp}"));
+        match fs::copy(rc_file, &backup).and_then(|_| atomic_write_rc_file(rc_file, content)) {
+            Ok(()) => entry.backup = Some(backup),
+            Err(err) => entry.error = Some(err.to_string()),
+        }
+    }
+    entry
+}
+
+/// `content` without the launcher lines, a lone marker comment, and the
+/// comment right above a removed line. With `bare_eval` the unguarded `eval`
+/// goes too. `None` when there was nothing to remove.
+fn strip_launcher(content: &[u8], shell_kind: ShellKind, bare_eval: bool) -> Option<Vec<u8>> {
     strip_lines(
         content,
         |lines, i| {
             let line = lines[i];
             let trimmed = line.trim_ascii();
-            let current =
-                trimmed == SOURCE_LINE.as_bytes() || trimmed == b"eval \"$(playbook shell-init)\"";
-            usize::from(current || is_legacy_source_line(line, shell_kind))
+            let ours = trimmed == SOURCE_LINE.as_bytes()
+                || (bare_eval && trimmed == BARE_EVAL.as_bytes())
+                || is_block_comment(line);
+            usize::from(ours || is_legacy_source_line(line, shell_kind))
         },
         |prev| {
             let prev = prev.trim_ascii();
@@ -325,59 +263,10 @@ fn strip_lines(
     Some(out.concat())
 }
 
-/// Whether `line` is the managed block's comment, in its current or older wording.
+/// Whether `line` is the marker comment, in its current or older wording.
 fn is_block_comment(line: &[u8]) -> bool {
     let line = line.trim_ascii();
-    line == BLOCK_COMMENT.as_bytes() || line == b"# playbook launchers (cc/ccd)"
-}
-
-/// Whether some line of `content` trims to exactly `wanted`.
-fn has_line(content: &[u8], wanted: &str) -> bool {
-    content
-        .split(|&b| b == b'\n')
-        .any(|line| line.trim_ascii() == wanted.as_bytes())
-}
-
-/// Drop every legacy source line (and the managed comment right above it)
-/// from `content`, then append the current block at the end unless it is
-/// already there. At the end, so the line runs after any `PATH` export the
-/// installer appended below the old `source` line. `None` if there was no
-/// legacy line to touch.
-fn rewrite_legacy_lines(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>> {
-    let mut lines: Vec<&[u8]> = Vec::new();
-    let mut touched = false;
-    for line in content.split_inclusive(|&b| b == b'\n') {
-        if !is_legacy_source_line(line, shell_kind) {
-            lines.push(line);
-            continue;
-        }
-        touched = true;
-        if lines.last().is_some_and(|prev| is_block_comment(prev)) {
-            lines.pop();
-        }
-    }
-    if !touched {
-        return None;
-    }
-    let mut out: Vec<u8> = lines.concat();
-    if !has_current_line(&out) {
-        while out.ends_with(b"\n\n") {
-            out.pop();
-        }
-        if !out.is_empty() && !out.ends_with(b"\n") {
-            out.push(b'\n');
-        }
-        if !out.is_empty() {
-            out.push(b'\n');
-        }
-        out.extend_from_slice(format!("{BLOCK_COMMENT}\n{SOURCE_LINE}\n").as_bytes());
-    }
-    Some(out)
-}
-
-/// The guarded line, or the bare `eval` a user may have written by hand.
-fn has_current_line(content: &[u8]) -> bool {
-    has_line(content, SOURCE_LINE) || has_line(content, "eval \"$(playbook shell-init)\"")
+    BLOCK_COMMENTS.iter().any(|c| line == c.as_bytes())
 }
 
 /// A non-comment line that sources (`source` or `.`) a legacy launcher path,
@@ -432,18 +321,4 @@ pub(crate) fn owner_can_write(path: &Path) -> bool {
 fn atomic_write_rc_file(rc_file: &Path, content: &[u8]) -> io::Result<()> {
     let target = fs::canonicalize(rc_file)?;
     crate::common::atomic::write_atomic(&target, content)
-}
-
-/// Append the `shell-init` line to `rc_file`, creating it if needed.
-fn append_source_line(rc_file: &Path) -> io::Result<()> {
-    if let Some(parent) = rc_file.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
-        }
-    }
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(rc_file)?;
-    write!(file, "\n{BLOCK_COMMENT}\n{SOURCE_LINE}\n")
 }

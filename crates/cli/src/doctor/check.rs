@@ -256,26 +256,35 @@ fn layer2(env: &Env) -> Row {
 }
 
 fn layer3(env: &Env) -> Row {
-    let rc = match env.shell.rsplit('/').next().unwrap_or("") {
-        "zsh" => ".zshrc",
-        "bash" => ".bashrc",
-        _ => {
-            return Row::new(
-                "3",
-                Level::Info,
-                "shell not detected, launcher check skipped",
-            )
-        }
-    };
-    let text = fs::read_to_string(env.home.join(rc)).unwrap_or_default();
-    if text.contains("shell/zsh/cc.zsh") || text.contains("shell/bash/cc.sh") {
+    let files = crate::init::shim::rc_files_with_retired_lines(&env.home);
+    if let Some(stuck) = files
+        .iter()
+        .find(|f| !crate::init::shim::owner_can_write(f))
+    {
         return Row::new(
             "3",
-            Level::Info,
-            "old launcher line in the rc file; `playbook cc` no longer needs it (ADR 0044)",
-        );
+            Level::Warn,
+            format!("retired launcher line in {}", stuck.display()),
+        )
+        .hint("the file is read-only; delete the playbook launcher lines by hand");
     }
-    Row::new("3", Level::Pass, "no shell line needed for `playbook cc`")
+    if !files.is_empty() {
+        let names: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+        return Row::new(
+            "3",
+            Level::Warn,
+            format!("retired launcher line in {}", names.join(", ")),
+        )
+        .hint("run `playbook setup` to remove it after a backup");
+    }
+    let row = Row::new("3", Level::Pass, "no shell line needed for `playbook cc`");
+    let same = |p: PathBuf| fs::canonicalize(p).ok();
+    let pb = on_path(env, "pb").and_then(same);
+    if pb.is_some() && pb == on_path(env, "playbook").and_then(same) {
+        row
+    } else {
+        row.hint("no `pb` on PATH runs playbook; run: playbook setup --only short-name")
+    }
 }
 
 fn layer4(env: &Env) -> Row {
