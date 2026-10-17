@@ -241,8 +241,10 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
         .collect();
     assert!(!backups.is_empty());
     let zshrc = fs::read_to_string(h.home.join(".zshrc")).unwrap();
-    assert!(zshrc.starts_with("export EDITOR=vim\n"), "{zshrc}");
-    assert!(!zshrc.contains("playbook shell-init"), "{zshrc}");
+    assert_eq!(
+        zshrc,
+        "export EDITOR=vim\nsource ~/.claude/shell/zsh/cc.zsh\n"
+    );
     assert_eq!(
         fs::read(h.home.join("notes.md")).unwrap(),
         b"my own notes\n"

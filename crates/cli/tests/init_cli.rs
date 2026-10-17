@@ -177,6 +177,18 @@ fn the_retired_launcher_flags_are_accepted_and_write_no_rc_file() {
 }
 
 #[test]
+fn only_a_retired_part_runs_nothing() {
+    let sb = Sandbox::new("retired-only");
+
+    let out = sb.init("/bin/bash", &["--only", "aliases"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!sb.path(".claude/settings.json").exists());
+    assert!(!sb.path(".bashrc").exists());
+    assert!(!sb.path(".zshrc").exists());
+}
+
+#[test]
 fn the_system_prompt_flag_places_the_prompt_where_the_launcher_reads_it() {
     let sb = Sandbox::new("prompt");
     sb.init("/bin/bash", &["--system-prompt"]);

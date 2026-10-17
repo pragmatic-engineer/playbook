@@ -135,21 +135,15 @@ pub const RETIRED_PARTS: [&str; 2] = ["aliases", "claude-override"];
 
 /// One stderr line per retired flag or `--only` name in use, for a terminal.
 pub fn retired_notes(flags: &Flags) -> Vec<String> {
-    let mut used: Vec<&str> = Vec::new();
-    for (id, on, off) in [
-        ("aliases", flags.aliases, flags.no_aliases),
-        (
-            "claude-override",
-            flags.claude_override,
-            flags.no_claude_override,
-        ),
-    ] {
-        if on || off || flags.only.iter().any(|n| n == id) {
-            used.push(id);
-        }
-    }
-    used.into_iter()
-        .map(|id| {
+    let set_by_flag = [
+        flags.aliases || flags.no_aliases,
+        flags.claude_override || flags.no_claude_override,
+    ];
+    RETIRED_PARTS
+        .iter()
+        .zip(set_by_flag)
+        .filter(|(id, flag)| *flag || flags.only.iter().any(|n| n == *id))
+        .map(|(id, _)| {
             format!(
                 "playbook setup: `{id}` is retired and does nothing; `playbook cc` and `pb cc` need no shell line (ADR 0044)"
             )
@@ -157,16 +151,20 @@ pub fn retired_notes(flags: &Flags) -> Vec<String> {
         .collect()
 }
 
+/// Whether `--only` names only retired parts, so setup has nothing to run.
+pub fn only_retired(flags: &Flags) -> bool {
+    !flags.only.is_empty()
+        && flags
+            .only
+            .iter()
+            .all(|n| RETIRED_PARTS.contains(&n.as_str()))
+}
+
 /// The parts `--only` selects. A bare `--telemetry` (no other part flag and
 /// no `--yes`) means `--only telemetry`, so it never runs unrelated parts.
 pub fn only_parts(flags: &Flags) -> Vec<String> {
     if !flags.only.is_empty() {
-        return flags
-            .only
-            .iter()
-            .filter(|n| !RETIRED_PARTS.contains(&n.as_str()))
-            .cloned()
-            .collect();
+        return flags.only.clone();
     }
     let others = catalog::ids()
         .iter()
@@ -180,7 +178,10 @@ pub fn only_parts(flags: &Flags) -> Vec<String> {
 /// The choices for an `--only` run: the named parts on, every other part off.
 /// `Ok(None)` when `--only` is not in play.
 pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
-    let named = only_parts(flags);
+    let named: Vec<String> = only_parts(flags)
+        .into_iter()
+        .filter(|n| !RETIRED_PARTS.contains(&n.as_str()))
+        .collect();
     if named.is_empty() && flags.only.is_empty() {
         return Ok(None);
     }
@@ -203,7 +204,7 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         if !chosen && on && !flags.only.is_empty() {
             return Err(format!(
                 "--{id} is not in --only {}; add it to --only or drop the flag",
-                named.join(",")
+                flags.only.join(",")
             ));
         }
     }
@@ -690,6 +691,24 @@ mod tests {
         };
         assert_eq!(retired_notes(&no_flag).len(), 1);
         assert!(resolve(&no_flag, false, false, &mut never).path);
+        assert!(only_retired(&flags));
+        assert!(!only_retired(&Flags {
+            only: vec!["aliases".into(), "hooks".into()],
+            ..Flags::default()
+        }));
+    }
+
+    #[test]
+    fn a_part_flag_outside_a_retired_only_names_what_was_typed() {
+        let flags = Flags {
+            only: vec!["aliases".into()],
+            hooks: true,
+            ..Flags::default()
+        };
+
+        let err = only_choices(&flags).unwrap_err();
+
+        assert!(err.contains("--hooks is not in --only aliases;"), "{err}");
     }
 
     #[test]

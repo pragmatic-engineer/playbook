@@ -41,7 +41,8 @@ playbook setup --help >/dev/null 2>&1 && echo setup || echo init
 Take `$ARGUMENTS` word by word:
 
 - Drop `--auto` and `--ask`. Step 0 read them, and the binary does not take them.
-- Replace the old names this command used: `--install-aliases` becomes `--yes`, since the shell line it added is retired (ADR 0044), and `--use-system-prompt` becomes `--yes --system-prompt`. Say so in one line.
+- Replace the old name `--use-system-prompt` with `--yes --system-prompt`. Say so in one line.
+- Drop the retired words `--install-aliases`, `--aliases`, `--no-aliases`, `--claude-override` and `--no-claude-override`, and the names `aliases` and `claude-override` inside an `--only` value. Say in one line that they are retired and that `playbook cc` and `pb cc` need no shell line (ADR 0044). When an `--only` value had only retired names, stop there and run nothing.
 - Every other word must be a flag from the Flags table below, or the value after `--only` or `--explain`. A value is part names from the Questions table or `security`, joined by commas. When a word is neither, stop with one line that names it and points to `/playbook:setup --help`. Ask nothing and run nothing.
 
 The rest of this file calls the kept words the arguments. A part flag is any flag in the Flags table from `--hooks` to `--no-attribution-off`. When you build a command, put each argument in single quotes.
@@ -143,7 +144,7 @@ The same flags as `playbook setup`, with the same text as `playbook setup --help
 | `--explain [<PART>]` | Describe a part, or every part when none is named, and change nothing |
 | `-h`, `--help` | Print help (see a summary with '-h') |
 
-This command also reads `--auto` and `--ask` (the run mode, Step 0), and the old names `--install-aliases` and `--use-system-prompt` (Step 2), which it turns into the flags they stood for. It passes none of these four to the binary.
+This command also reads `--auto` and `--ask` (the run mode, Step 0), the old name `--use-system-prompt`, which it turns into the flags it stood for, and the retired launcher words (Step 2), which it drops. It passes none of these to the binary.
 
 ## Questions
 

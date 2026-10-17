@@ -43,7 +43,6 @@ SKILLS_INSTALL_CMD="$SKILLS_INSTALL_CMD && claude plugin install playbook@pragma
 PLAYBOOK_CONFIG_DIR="$HOME/.config/playbook"
 PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
 REF="${PLAYBOOK_REF:-}"
-OPT_ALIASES=0
 OPT_SYSTEM_PROMPT=0
 ASSUME_YES=0
 BINARY_ONLY=0
@@ -157,16 +156,14 @@ Env:
 
 Flags:
   --yes              say yes to every question, including running `playbook setup`
-  --aliases          add the `playbook` shell wrapper (setup --aliases) without asking
   --system-prompt    install the custom system prompt (setup --system-prompt) without asking
-  --binary-only      still offers `playbook setup`, but skips the wrapper and system
-                     prompt questions
+  --binary-only      still offers `playbook setup`, but skips the system prompt question
   --no-init          install the binary only: never ask about `playbook setup`
   --ref <tag>        same as PLAYBOOK_REF
   -h, --help         show this help
 
 Accepted and ignored, so older commands keep working: --skip-plugin, --no-setup,
---skip-deps, --skip-shell.
+--skip-deps, --skip-shell, --aliases.
 EOF
 }
 
@@ -174,8 +171,8 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --yes|-y)        ASSUME_YES=1 ;;
         --skip-plugin|--no-setup|--skip-deps|--skip-shell) ;; # accepted, ignored
-        --aliases)       OPT_ALIASES=1 ;;
-        --system-prompt) OPT_SYSTEM_PROMPT=1; OPT_ALIASES=1 ;;
+        --aliases)       warn "--aliases is retired: playbook cc and pb cc need no shell line" ;;
+        --system-prompt) OPT_SYSTEM_PROMPT=1 ;;
         --binary-only)   BINARY_ONLY=1 ;;
         --no-init)       NO_INIT=1 ;;
         --pbtop)         ONLY_PBTOP=1
@@ -686,13 +683,8 @@ esac
 # prompt. With no terminal and no --yes it is skipped and the command is
 # printed.
 INIT_RAN=0
-if [ "$NO_INIT" -eq 0 ] && consent "Run playbook $SETUP_CMD now? It adds playbook's hook entries to ~/.claude/settings.json (your own entries stay), the status line, the shell integration and Claude Code telemetry to a collector on this machine (change it later with playbook $SETUP_CMD --only telemetry or undo it with playbook uninstall)."; then
-    if [ "$BINARY_ONLY" -eq 0 ] && [ "$OPT_ALIASES" -eq 0 ]; then
-        if ask "Add the playbook shell wrapper, so playbook cc can leave you in a new worktree? Bash and zsh both supported." Y; then
-            OPT_ALIASES=1
-        fi
-    fi
-    if [ "$BINARY_ONLY" -eq 0 ] && [ "$OPT_ALIASES" -eq 1 ] && [ "$OPT_SYSTEM_PROMPT" -eq 0 ]; then
+if [ "$NO_INIT" -eq 0 ] && consent "Run playbook $SETUP_CMD now? It adds playbook's hook entries to ~/.claude/settings.json (your own entries stay), the status line and Claude Code telemetry to a collector on this machine (change it later with playbook $SETUP_CMD --only telemetry or undo it with playbook uninstall)."; then
+    if [ "$BINARY_ONLY" -eq 0 ] && [ "$OPT_SYSTEM_PROMPT" -eq 0 ]; then
         if ask "Install the custom system prompt? (recommended)" Y; then
             OPT_SYSTEM_PROMPT=1
         fi
@@ -712,7 +704,7 @@ if [ "$NO_INIT" -eq 0 ] && consent "Run playbook $SETUP_CMD now? It adds playboo
     # The help text is captured first and matched with `case`, not piped into
     # `grep -q`. grep -q exits on its first match, which closes the pipe while
     # the binary is still writing; under `set -o pipefail` that SIGPIPE made
-    # the probe report "unsupported" at random, so --aliases was sometimes
+    # the probe report "unsupported" at random, so a flag was sometimes
     # dropped.
     _init_help="$("$PLAYBOOK_BIN_DIR/playbook" "$SETUP_CMD" --help 2>/dev/null || true)"
     _init_supports() {
@@ -723,14 +715,6 @@ if [ "$NO_INIT" -eq 0 ] && consent "Run playbook $SETUP_CMD now? It adds playboo
     }
 
     _INIT_ARGS=""
-    if [ "$OPT_ALIASES" -eq 1 ]; then
-        if _init_supports --aliases; then
-            _INIT_ARGS="$_INIT_ARGS --aliases"
-        else
-            warn "the installed playbook $( "$PLAYBOOK_BIN_DIR/playbook" --version 2>/dev/null | awk '{print $NF}' ) does not support --aliases; skipping it. Re-run this installer once a release includes it."
-            OPT_ALIASES=0
-        fi
-    fi
     if [ "$OPT_SYSTEM_PROMPT" -eq 1 ]; then
         if _init_supports --system-prompt; then
             _INIT_ARGS="$_INIT_ARGS --system-prompt"
@@ -763,21 +747,7 @@ printf 'Installed playbook to: %s\n' "$PLAYBOOK_BIN_DIR/playbook"
 printf '\nNext steps:\n'
 if [ "$INIT_RAN" -eq 0 ]; then
     INIT_CMD="playbook $SETUP_CMD"
-    [ "$OPT_ALIASES" -eq 1 ] && INIT_CMD="$INIT_CMD --aliases"
     [ "$OPT_SYSTEM_PROMPT" -eq 1 ] && INIT_CMD="$INIT_CMD --system-prompt"
     printf '  - Run: %s   (adds the hook entries to ~/.claude/settings.json, asks first)\n' "$INIT_CMD"
 fi
 printf '  - Skills (optional, they work without the binary): %s\n' "$SKILLS_INSTALL_CMD"
-if [ "$INIT_RAN" -eq 1 ] && [ "$OPT_ALIASES" -eq 1 ]; then
-    printf '  - Shell wrapper installed. Open a new terminal or source the rc file; start sessions with playbook cc or playbook ccd.\n'
-fi
-
-# Drop into a fresh login shell so the new config is active immediately.
-# Only when interactive and the aliases were installed. Reconnect stdin to the
-# terminal (</dev/tty) so this works under `curl ... | bash`, where stdin is
-# the pipe. exec replaces this process, so nothing runs after it.
-if [ "$INIT_RAN" -eq 1 ] && [ "$OPT_ALIASES" -eq 1 ] && [ -t 1 ] && have_tty; then
-    USER_SHELL="${SHELL:-/bin/zsh}"
-    log "Reloading your shell ($USER_SHELL)"
-    exec "$USER_SHELL" -l </dev/tty
-fi

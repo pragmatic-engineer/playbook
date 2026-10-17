@@ -394,8 +394,17 @@ fn main() {
         Command::Version => print!("{}", Cli::command().render_version()),
         Command::Setup { flags } | Command::Init { flags } if flags.explain.is_some() => {
             let which = flags.explain.as_ref().and_then(|w| w.as_deref());
-            let named = init::choices::only_parts(&flags);
+            if std::io::stderr().is_terminal() {
+                for note in init::choices::retired_notes(&flags) {
+                    eprintln!("{note}");
+                }
+            }
+            let named: Vec<String> = init::choices::only_parts(&flags)
+                .into_iter()
+                .filter(|n| !init::choices::RETIRED_PARTS.contains(&n.as_str()))
+                .collect();
             let texts: Vec<Result<String, String>> = match (which, named.is_empty()) {
+                (None, _) if init::choices::only_retired(&flags) => Vec::new(),
                 (None, false) => named
                     .iter()
                     .map(|n| init::catalog::explain(Some(n)))

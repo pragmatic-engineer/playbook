@@ -1088,7 +1088,10 @@ fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift(
 
     // Setup no longer rewrites the old launcher line into a new one (ADR 0044).
     let rc = fs::read_to_string(home.join(".bashrc")).unwrap();
-    assert!(!rc.contains("playbook shell-init"), "{rc}");
+    assert_eq!(
+        rc,
+        "export EDITOR=vim\n\n# playbook launchers (cc/ccd)\nsource \"$HOME/.claude/shell/bash/cc.sh\"\n"
+    );
 
     // Doctor Layer 5 shape: the Rust command.
     let settings_path = claude_home.join("settings.json");
