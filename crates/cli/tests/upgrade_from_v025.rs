@@ -199,7 +199,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     );
     for message in [&first, &second] {
         for part in [
-            "3 change(s) to your settings or shell files need `playbook setup --hooks` and `playbook setup --only attribution-off` and `playbook setup --statusline`",
+            "4 change(s) to your settings or shell files need `playbook setup` and `playbook setup --hooks` and `playbook setup --only attribution-off` and `playbook setup --statusline`",
             "2 item(s) need you: run `playbook migrate`",
         ] {
             assert!(message.contains(part), "{message}");
@@ -224,7 +224,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     h.init();
 
     // Assert: dead entries gone, the user's own hook kept, settings backed up,
-    // no shell-init line written, and a second init changes nothing.
+    // the legacy launcher line removed, and a second init changes nothing.
     let commands = hook_commands(&h.settings());
     assert!(commands.iter().any(|c| c == MINE), "{commands:?}");
     assert!(!commands
@@ -241,8 +241,14 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
         .collect();
     assert!(!backups.is_empty());
     let zshrc = fs::read_to_string(h.home.join(".zshrc")).unwrap();
+    assert_eq!(zshrc, "export EDITOR=vim\n");
+    let rc_backup = fs::read_dir(&h.home)
+        .unwrap()
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().starts_with(".zshrc.bak-"))
+        .expect("the rc file is backed up first");
     assert_eq!(
-        zshrc,
+        fs::read_to_string(rc_backup.path()).unwrap(),
         "export EDITOR=vim\nsource ~/.claude/shell/zsh/cc.zsh\n"
     );
     assert_eq!(
@@ -468,7 +474,7 @@ fn the_first_run_step_heals_once_before_any_command_and_keeps_stdout_clean() {
             "{class}: {notice}"
         );
         assert_eq!(
-            notice.contains("need `playbook setup --hooks`"),
+            notice.contains("`playbook setup --hooks`"),
             heals,
             "{class}: {notice}"
         );

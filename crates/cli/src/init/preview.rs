@@ -302,7 +302,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         }
     }
     out.push_str(
-        "\nA backup of settings.json is saved before any change. One-time migrations are not simulated.\n",
+        "\nA backup of settings.json, and of an rc file setup edits, is saved before any change. One-time migrations are not simulated.\n",
     );
     if paths.self_root.is_none() {
         out.push_str(
@@ -409,6 +409,14 @@ fn always_lines(paths: &InitPaths) -> Vec<String> {
             other => format!("{other}: runs"),
         };
         lines.push(format!("{}: {text}", part.id));
+    }
+    let retired = crate::init::shim::retired_rc_files(&paths.home);
+    if !retired.is_empty() {
+        let names: Vec<String> = retired.iter().map(|f| f.display().to_string()).collect();
+        lines.push(format!(
+            "rc-line: {}: remove the retired launcher lines, after a backup",
+            names.join(", ")
+        ));
     }
     lines
 }

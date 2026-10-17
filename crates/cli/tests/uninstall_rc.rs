@@ -118,7 +118,7 @@ fn bash_loses_only_its_own_block_and_zsh_keeps_its_own() {
     strip_rc_files(&h, 1, false, false);
     assert_eq!(
         fs::read(h.join(".bashrc")).unwrap(),
-        b"# BEFORE\n# playbook launchers (cc/ccd)\nsource \"$HOME/.claude/shell/zsh/cc.zsh\"\n# AFTER\n"
+        b"# BEFORE\nsource \"$HOME/.claude/shell/zsh/cc.zsh\"\n# AFTER\n"
     );
 }
 

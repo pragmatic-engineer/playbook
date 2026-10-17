@@ -27,6 +27,8 @@ pub const ATTRIBUTION_MIGRATION: &str = "0015-attribution-off";
 pub const COLLECTOR_SERVICE_MIGRATION: &str = "0016-collector-service";
 /// The `Owned` move of stored auto budgets off the old $5 default (ADR 0028).
 pub const AUTO_BUDGET_MIGRATION: &str = "0017-auto-budget-defaults";
+/// The `Consent` removal of the retired launcher rc lines (ADR 0044).
+pub const RC_LINE_MIGRATION: &str = "0018-retired-launcher-rc-line";
 
 /// What a migration needs to find the state it moves.
 pub struct Ctx {
@@ -238,7 +240,57 @@ pub fn registry() -> Vec<Migration> {
             scope: Scope::Owned,
             run: auto_budget_defaults,
         },
+        Migration {
+            id: RC_LINE_MIGRATION,
+            kind: Kind::Idempotent,
+            scope: Scope::Consent {
+                check: retired_rc_line_pending,
+                command: "playbook setup",
+            },
+            run: retired_rc_line,
+        },
     ]
+}
+
+/// Writable rc files that still hold a line the retired launcher wrote.
+fn retired_rc_line_pending(ctx: &Ctx) -> Option<String> {
+    let files = crate::init::shim::retired_rc_files(&ctx.home);
+    (!files.is_empty()).then(|| {
+        format!(
+            "{} still loads the retired playbook launcher; setup removes those lines after a backup",
+            join_paths(&files)
+        )
+    })
+}
+
+/// Removes the retired launcher lines after a backup (ADR 0044 decision 6).
+fn retired_rc_line(ctx: &Ctx) -> Outcome {
+    let changed = crate::init::shim::strip_retired_rc_lines(&ctx.home, ctx.epoch);
+    let backups: Vec<PathBuf> = changed.iter().filter_map(|c| c.backup.clone()).collect();
+    let failed: Vec<String> = changed
+        .iter()
+        .filter_map(|c| Some(format!("{}: {}", c.rc_file.display(), c.error.as_deref()?)))
+        .collect();
+    let done = (!backups.is_empty()).then(|| {
+        format!(
+            "removed the retired launcher line, backup at {}",
+            join_paths(&backups)
+        )
+    });
+    if !failed.is_empty() {
+        let mut detail = format!(
+            "could not remove the retired launcher line from {}",
+            failed.join("; ")
+        );
+        if let Some(done) = done {
+            detail.push_str(&format!("; {done}"));
+        }
+        return Outcome::Failed(StepReport::failed("rc-line", detail));
+    }
+    match done {
+        Some(done) => Outcome::Repeat(StepReport::wired("rc-line", done)),
+        None => Outcome::Quiet,
+    }
 }
 
 /// Telemetry points at the collector and no service keeps it running (ADR
@@ -1546,6 +1598,7 @@ mod tests {
             None,
             "retired by ADR 0044"
         );
+        assert_eq!(command(RC_LINE_MIGRATION), Some("playbook setup"));
         assert_eq!(
             command(DEAD_HOOKS_MIGRATION),
             Some("playbook setup --hooks")
@@ -1591,6 +1644,6 @@ mod tests {
 
     #[test]
     fn the_schema_is_the_highest_registry_number() {
-        assert_eq!(schema(), 17);
+        assert_eq!(schema(), 18);
     }
 }
