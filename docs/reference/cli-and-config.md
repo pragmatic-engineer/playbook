@@ -90,7 +90,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `breaking`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `shell-init`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `breaking`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -1361,14 +1361,6 @@ Example: `playbook setup --no-hooks --system-prompt`
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing
-
-### `playbook shell-init`
-
-Print the shell function that lets `playbook cc` and `playbook ccd` change directory
-
-A program cannot change its parent shell's directory, so this wraps `playbook` to `cd` into a worktree that `playbook cc launch worktree <branch>` creates (the old `ccc worktree <branch>`). Load it from your rc file with `eval "$(playbook shell-init)"`.
-
-- `--shell <SHELL>`: Target shell (default: the one named by `$SHELL`) (one of `bash`, `zsh`)
 
 ### `playbook state`
 

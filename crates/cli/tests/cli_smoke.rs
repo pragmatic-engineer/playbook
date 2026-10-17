@@ -496,7 +496,7 @@ fn table() -> Vec<Case> {
         case("uninstall", &["uninstall"]).code(1).err("nothing was changed"),
         case("uninstall", &["uninstall", "--dry-run"]).pre(&["setup", "--yes"]),
         case("uninstall", &["uninstall", "--yes"]).pre(&["setup", "--yes"]).writes(),
-        case("shell-init", &["shell-init"]).out("_playbook_cc").plain(),
+        case("shell-init", &["shell-init"]).out("retired").plain(),
         case("update", &["update", "--check"]).code(1).err("could not read the release list"),
         case("effort", &["effort"]).writes(),
         case("effort", &["effort", "high"]).grows(),
