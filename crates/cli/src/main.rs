@@ -487,7 +487,14 @@ fn main() {
                 .into_iter()
                 .filter_map(|(id, skip)| skip.then_some(id))
                 .collect();
-                let items = init::wizard::items_for(&flags, security_on, &skipped);
+                let said_no: Vec<&str> = [
+                    ("system-prompt", !init::system_prompt::enabled(&home_dir)),
+                    ("short-name", init::pb_link::declined(&home_dir)),
+                ]
+                .into_iter()
+                .filter_map(|(id, no)| no.then_some(id))
+                .collect();
+                let items = init::wizard::items_for(&flags, security_on, &skipped, &said_no);
                 print!("{}", init::wizard::welcome(&caps));
                 let stdin = std::io::stdin();
                 let mut input = stdin.lock();
@@ -518,7 +525,7 @@ fn main() {
                 }
             }
             let terminal = init::choices::stdio_is_interactive();
-            let choices = only.unwrap_or_else(|| {
+            let mut choices = only.unwrap_or_else(|| {
                 init::choices::resolve_with(
                     &flags,
                     asking,
@@ -530,6 +537,23 @@ fn main() {
                 )
             });
             let only_run = only.is_some();
+            // --yes takes the default, which an earlier no or install without
+            // the prompt keeps off (ADR 0044 decision 5).
+            if init::choices::prompt_may_be_held_off(
+                &flags,
+                choices.system_prompt,
+                asking,
+                only_run,
+            ) {
+                if let Some(reason) =
+                    init::system_prompt::held_off(&home_dir, &home_dir.join(".claude"))
+                {
+                    choices.system_prompt = false;
+                    eprintln!(
+                        "setup: the system prompt stays off because {reason}; to turn it on, run: playbook setup --only system-prompt"
+                    );
+                }
+            }
             if only_run && choices.telemetry {
                 println!("playbook setup --only: this run changes only the parts you named.");
                 if let Some(line) = skip_telemetry_question {
@@ -541,38 +565,25 @@ fn main() {
                 }
             }
             if !only_run && init::choices::unattended(&flags, terminal) && !flags.dry_run {
-                let mut left_off = Vec::new();
-                if !choices.hooks && !flags.hooks && !flags.no_hooks {
-                    left_off.push("hooks");
-                }
-                if !choices.statusline && !flags.statusline && !flags.no_statusline {
-                    left_off.push("status line");
-                }
-                if !choices.attribution_off && !flags.attribution_off && !flags.no_attribution_off {
-                    left_off.push("attribution-off");
-                }
-                if !choices.telemetry
-                    && !flags.telemetry
-                    && !flags.no_telemetry
-                    && skip_telemetry_question.is_none()
-                {
-                    eprintln!(
-                        "setup: no terminal and no --yes, so telemetry was not turned on. To turn it on, run: playbook setup --only telemetry"
-                    );
-                }
-                if let Some((last, rest)) = left_off.split_last() {
-                    let list = if rest.is_empty() {
-                        (*last).to_string()
-                    } else {
-                        format!("{} and {last}", rest.join(", "))
-                    };
-                    eprintln!(
-                        "setup: no terminal and no --yes, so these were left out of your Claude Code \
-                         settings: {list}. To add them, run: playbook setup --yes"
-                    );
+                let left = init::choices::LeftOff {
+                    telemetry_skipped: skip_telemetry_question.is_some(),
+                    prompt_missing: !init::system_prompt::enabled(&home_dir)
+                        || !init::system_prompt::path(&home_dir).is_file(),
+                    pb_missing: init::path::command_on_path(
+                        "pb",
+                        &std::env::var_os("PATH").unwrap_or_default(),
+                    )
+                    .is_none(),
+                };
+                for line in init::choices::unattended_lines(&flags, &choices, &left) {
+                    eprintln!("{line}");
                 }
             }
-            let system_prompt = choices.system_prompt;
+            let system_prompt = init::choices::system_prompt_answer(
+                &flags,
+                choices.system_prompt,
+                asking && !only_run,
+            );
             let home = common::home_dir();
             let claude_home = home.join(".claude");
             let plugin_root = std::env::var("CLAUDE_PLUGIN_ROOT").ok();

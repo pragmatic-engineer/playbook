@@ -76,7 +76,7 @@ pub fn decline_line(id: &str) -> &'static str {
         "hooks" => "No hooks are added. The safety guards, session helpers and usage warm-up do not run.",
         "statusline" => "Your status line stays as it is.",
         "path" => "Your shell files are not touched. Hooks may not find playbook unless it is already on PATH.",
-        "system-prompt" => "No file is copied. The launchers start without the playbook prompt.",
+        "system-prompt" => "No file is copied, and `systemPrompt.enabled` is set to false, so `pb cc` starts with Claude Code's own prompt.",
         "telemetry" => "No variables are written. `playbook usage` reads transcripts instead.",
         "collector-service" => "No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`.",
         "short-name" => "No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing.",
@@ -135,10 +135,17 @@ pub fn items(flags: &Flags, security_on: bool) -> Vec<Item> {
 }
 
 /// [`items`] without the questions of the parts in `skip`, each a part id
-/// whose question setup replaced with one line.
-pub fn items_for(flags: &Flags, security_on: bool, skip: &[&str]) -> Vec<Item> {
+/// whose question setup replaced with one line. The parts in `off` start as
+/// no, because the user said no before.
+pub fn items_for(flags: &Flags, security_on: bool, skip: &[&str], off: &[&str]) -> Vec<Item> {
     let mut list = items(flags, security_on);
     list.retain(|i| !skip.contains(&i.choice.id.as_str()));
+    for item in list
+        .iter_mut()
+        .filter(|i| off.contains(&i.choice.id.as_str()))
+    {
+        item.default = false;
+    }
     list
 }
 
@@ -318,10 +325,10 @@ mod tests {
             guided_answer(&guided, q, d)
         });
         assert!(!c.hooks && !c.statusline && !c.path);
-        assert!(c.system_prompt && c.short_name);
+        assert!(!c.system_prompt && !c.short_name);
         assert!(
             !c.telemetry && !c.collector_service && !c.attribution_off,
-            "telemetry, collector-service and attribution-off are on by default, so a no flips them off"
+            "every asked part is on by default, so a no flips it off"
         );
     }
 
@@ -329,8 +336,8 @@ mod tests {
     fn the_telemetry_question_is_left_out_when_it_is_skipped() {
         let flags = Flags::default();
 
-        let skipped = items_for(&flags, false, &["telemetry", "collector-service"]);
-        let asked = items_for(&flags, false, &[]);
+        let skipped = items_for(&flags, false, &["telemetry", "collector-service"], &[]);
+        let asked = items_for(&flags, false, &[], &["system-prompt"]);
 
         assert!(!skipped.iter().any(|i| i.choice.id == "telemetry"));
         assert!(!skipped.iter().any(|i| i.choice.id == "collector-service"));

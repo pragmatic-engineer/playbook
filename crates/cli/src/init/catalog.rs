@@ -77,12 +77,12 @@ pub const PARTS: &[Part] = &[
     Part {
         id: "system-prompt",
         asked: true,
-        default_on: false,
+        default_on: true,
         flags: "--system-prompt, --no-system-prompt",
         question: "Copy the playbook system prompt to ~/.config/playbook/prompts/SYSTEM_PROMPT.md?",
-        does: "Copies the system prompt `playbook cc` and `playbook ccd` use. An existing copy is refreshed on every run, unless you edited it.",
-        changes: "~/.config/playbook/prompts/SYSTEM_PROMPT.md",
-        undo: "`playbook uninstall` removes the file.",
+        does: "Copies the system prompt `pb cc`, `playbook cc` and `playbook ccd` load, and stores the answer as `systemPrompt.enabled`. A no stores false, so `pb cc` starts with Claude Code's own prompt. An existing copy is refreshed on every run, unless you edited it. A plain `claude` never loads it. `--yes` leaves it off when `systemPrompt.enabled` is false, or on an earlier install that had none.",
+        changes: "~/.config/playbook/prompts/SYSTEM_PROMPT.md and ~/.config/playbook (the key `systemPrompt.enabled`)",
+        undo: "Run `playbook config set systemPrompt.enabled false`. `playbook uninstall` removes the file.",
     },
     Part {
         id: "telemetry",
@@ -107,7 +107,7 @@ pub const PARTS: &[Part] = &[
     Part {
         id: "short-name",
         asked: true,
-        default_on: false,
+        default_on: true,
         flags: "--short-name, --no-short-name",
         question: "Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists.",
         does: "Makes `pb` run playbook, so `pb cc` starts a session. Passes when a `pb` on PATH already runs this binary, as after install.sh or Homebrew. Otherwise, when no other `pb` is on PATH and playbook sits in the install folder `playbook uninstall` knows, it adds the relative symlink `pb -> playbook` there. It leaves any other `pb` alone, and prints the `ln -s` command to run by hand when playbook sits outside the install folder. A yes or no is stored as `launcher.shortName`, and a stored no keeps `--yes` from adding the link.",

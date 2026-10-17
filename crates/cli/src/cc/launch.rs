@@ -85,12 +85,16 @@ fn has_flag(args: &[String], flags: &[&str]) -> bool {
 /// Rule: playbook always replaces Claude Code's prompt with its own file and
 /// never appends. A replace flag from the user wins and playbook adds none
 /// (one stderr line, interactive runs only). An append flag from the user is
-/// refused with exit code 2.
+/// refused with exit code 2. With `systemPrompt.enabled` off (`prompt` is
+/// `None`) playbook adds nothing and refuses nothing.
 fn prompt_args(
     args: &[String],
-    prompt: &Path,
+    prompt: Option<&Path>,
     interactive: bool,
 ) -> Result<(Vec<String>, Option<String>), i32> {
+    let Some(prompt) = prompt else {
+        return Ok((Vec::new(), None));
+    };
     if has_flag(args, &APPEND_FLAGS) {
         eprintln!(
             "playbook: --append-system-prompt and --append-system-prompt-file are not allowed here. \
@@ -200,10 +204,11 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
         all.push("--dangerously-skip-permissions".into());
     }
     let prompt = crate::common::paths::playbook_root().join(SYSTEM_PROMPT_REL);
+    let enabled = crate::init::system_prompt::enabled(&crate::common::home_dir());
     {
         use std::io::IsTerminal;
         let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
-        match prompt_args(args, &prompt, interactive) {
+        match prompt_args(args, enabled.then_some(prompt.as_path()), interactive) {
             Ok((extra, note)) => {
                 all.extend(extra);
                 note.into_iter().for_each(hold_notice);
@@ -587,7 +592,7 @@ mod tests {
 
     #[test]
     fn the_notice_is_only_for_interactive_runs() {
-        let missing = Path::new("/nonexistent/SYSTEM_PROMPT.md");
+        let missing = Some(Path::new("/nonexistent/SYSTEM_PROMPT.md"));
         let (_, quiet) = prompt_args(&[], missing, false).unwrap_or_default();
         assert!(quiet.is_none());
         let (_, loud) = prompt_args(&[], missing, true).unwrap_or_default();
@@ -602,12 +607,19 @@ mod tests {
 
     #[test]
     fn append_flags_after_a_double_dash_are_prompt_text() {
-        let missing = Path::new("/nonexistent/SYSTEM_PROMPT.md");
+        let missing = Some(Path::new("/nonexistent/SYSTEM_PROMPT.md"));
         assert_eq!(
             prompt_args(&v(&["--append-system-prompt=x"]), missing, false),
             Err(2)
         );
         assert!(prompt_args(&v(&["--", "--append-system-prompt"]), missing, false).is_ok());
+    }
+
+    #[test]
+    fn with_the_prompt_off_nothing_is_added_or_refused() {
+        let got = prompt_args(&v(&["--append-system-prompt=x"]), None, true);
+
+        assert_eq!(got, Ok((Vec::new(), None)));
     }
 
     use super::*;

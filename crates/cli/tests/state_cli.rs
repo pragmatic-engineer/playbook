@@ -78,6 +78,7 @@ fn init_imports_the_old_files_once_and_keeps_them_renamed() {
             "--no-hooks",
             "--no-statusline",
             "--no-path",
+            "--no-system-prompt",
         ],
     );
     assert!(out.status.success(), "{}", text(&out));
@@ -106,6 +107,7 @@ fn init_imports_the_old_files_once_and_keeps_them_renamed() {
             "--no-hooks",
             "--no-statusline",
             "--no-path",
+            "--no-system-prompt",
         ],
     );
     assert!(!text(&again).contains("imported"), "{}", text(&again));

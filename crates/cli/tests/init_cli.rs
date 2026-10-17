@@ -61,6 +61,16 @@ impl Sandbox {
         assert!(out.status.success(), "config set failed: {}", text(&out));
     }
 
+    fn config_get(&self, key: &str) -> String {
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["config", "get", key])
+            .env("HOME", &self.home)
+            .current_dir(&self.home)
+            .output()
+            .expect("playbook should spawn");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
     fn path(&self, rel: &str) -> PathBuf {
         self.home.join(rel)
     }
@@ -138,7 +148,7 @@ fn a_contested_key_matches_the_golden_bytes_and_leaves_a_skip_report() {
 }
 
 #[test]
-fn a_plain_run_places_settings_and_guards_and_touches_no_rc_or_launcher() {
+fn a_yes_run_places_settings_guards_and_the_prompt_and_touches_no_rc_file() {
     let sb = Sandbox::new("plain");
     sb.init("/bin/zsh", &[]);
     let settings = json(&sb.read(".claude/settings.json"));
@@ -156,9 +166,9 @@ fn a_plain_run_places_settings_and_guards_and_touches_no_rc_or_launcher() {
     assert!(!sb.path(".bashrc").exists());
     assert!(!sb.path(".claude/shell").exists());
     assert!(!sb.path(".config/playbook/shell").exists());
-    assert!(!sb
+    assert!(sb
         .path(".config/playbook/prompts/SYSTEM_PROMPT.md")
-        .exists());
+        .is_file());
 }
 
 #[test]
@@ -218,6 +228,107 @@ fn an_only_run_leaves_the_old_rc_block_alone() {
 }
 
 #[test]
+fn yes_turns_every_part_on_in_a_scratch_home() {
+    // Arrange: a copy of the binary in the install folder, so the short-name
+    // part can link `pb` next to it.
+    let sb = Sandbox::new("yes-all");
+    let bin = sb.path(".local/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let exe = bin.join("playbook");
+    fs::copy(env!("CARGO_BIN_EXE_playbook"), &exe).unwrap();
+
+    // Act
+    let out = Command::new(&exe)
+        .args(["setup", "--yes"])
+        .env("HOME", &sb.home)
+        .env("SHELL", "/bin/zsh")
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("PLAYBOOK_BIN_DIR", &bin)
+        .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
+        .env_remove("CLAUDE_CODE_ENABLE_TELEMETRY")
+        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .env_remove("OTEL_LOGS_EXPORTER")
+        .env_remove("OTEL_METRICS_EXPORTER")
+        .current_dir(&sb.home)
+        .output()
+        .unwrap();
+    let config = Command::new(&exe)
+        .args(["config", "get", "systemPrompt.enabled"])
+        .env("HOME", &sb.home)
+        .output()
+        .unwrap();
+
+    // Assert
+    assert!(out.status.success(), "{}", text(&out));
+    let settings = sb.read(".claude/settings.json");
+    assert!(settings.contains("playbook hook"), "hooks");
+    assert!(settings.contains("playbook statusline"), "status line");
+    assert!(
+        settings.contains("OTEL_EXPORTER_OTLP_ENDPOINT"),
+        "telemetry"
+    );
+    assert!(settings.contains("\"attribution\""), "attribution-off");
+    assert!(sb.path(".zshenv").is_file(), "path: {}", text(&out));
+    assert!(sb
+        .path(".config/playbook/prompts/SYSTEM_PROMPT.md")
+        .is_file());
+    assert!(String::from_utf8_lossy(&config.stdout).contains("true (source: global)"));
+    assert_eq!(
+        fs::read_link(bin.join("pb")).unwrap(),
+        Path::new("playbook")
+    );
+    assert!(text(&out).contains("collector-service"), "{}", text(&out));
+}
+
+#[test]
+fn yes_keeps_the_prompt_off_on_an_earlier_install_and_after_a_no() {
+    let earlier = Sandbox::new("yes-earlier");
+    earlier.write(
+        ".claude/settings.json",
+        r#"{"statusLine":{"type":"command","command":"playbook statusline"}}"#,
+    );
+    let said_no = Sandbox::new("yes-said-no");
+    said_no.config_set("systemPrompt.enabled", "false");
+
+    let first = earlier.init("/bin/zsh", &[]);
+    let second = said_no.init("/bin/zsh", &[]);
+
+    for (sb, out, reason) in [
+        (&earlier, &first, "this install had no system prompt before"),
+        (&said_no, &second, "systemPrompt.enabled is false"),
+    ] {
+        assert!(!sb
+            .path(".config/playbook/prompts/SYSTEM_PROMPT.md")
+            .exists());
+        let said = text(out);
+        assert!(said.contains(reason), "{said}");
+        assert!(
+            said.contains("playbook setup --only system-prompt"),
+            "{said}"
+        );
+    }
+}
+
+#[test]
+fn no_system_prompt_stores_false_and_only_system_prompt_turns_it_back_on() {
+    let sb = Sandbox::new("prompt-no-then-yes");
+    let prompt = ".config/playbook/prompts/SYSTEM_PROMPT.md";
+
+    let off = sb.init("/bin/bash", &["--no-system-prompt"]);
+    let stored_off = sb.config_get("systemPrompt.enabled");
+    let file_after_no = sb.path(prompt).exists();
+    let on = sb.init("/bin/bash", &["--only", "system-prompt"]);
+    let stored_on = sb.config_get("systemPrompt.enabled");
+
+    assert!(off.status.success(), "{}", text(&off));
+    assert_eq!(stored_off, "systemPrompt.enabled: false (source: global)");
+    assert!(!file_after_no, "a no must not place the prompt");
+    assert!(on.status.success(), "{}", text(&on));
+    assert_eq!(stored_on, "systemPrompt.enabled: true (source: global)");
+    assert!(sb.path(prompt).exists(), "{}", text(&on));
+}
+
+#[test]
 fn only_a_retired_part_runs_nothing() {
     let sb = Sandbox::new("retired-only");
 
@@ -244,7 +355,7 @@ fn the_system_prompt_flag_places_the_prompt_where_the_launcher_reads_it() {
 }
 
 #[test]
-fn a_plain_run_refreshes_an_installed_prompt_and_never_adds_one() {
+fn a_run_refreshes_an_installed_prompt_and_an_unattended_one_adds_none() {
     let sb = Sandbox::new("prompt-refresh");
     sb.write(
         ".config/playbook/prompts/SYSTEM_PROMPT.md",
@@ -260,7 +371,7 @@ fn a_plain_run_refreshes_an_installed_prompt_and_never_adds_one() {
     );
 
     let fresh = Sandbox::new("prompt-absent");
-    fresh.init("/bin/bash", &[]);
+    fresh.init_raw("/bin/bash", &["--no-telemetry"]);
     assert!(!fresh
         .path(".config/playbook/prompts/SYSTEM_PROMPT.md")
         .exists());

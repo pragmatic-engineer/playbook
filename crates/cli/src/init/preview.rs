@@ -185,7 +185,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         self_root: paths.self_root.clone(),
         claude_home: sh.join(".claude"),
         home: sh.clone(),
-        system_prompt: false,
+        system_prompt: crate::init::system_prompt::Answer::Unasked,
         hooks: paths.hooks,
         statusline: paths.statusline,
         security: paths.security,

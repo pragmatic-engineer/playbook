@@ -4,7 +4,7 @@
 //! The optional parts of `playbook setup` and how each one gets decided: a flag
 //! wins, else a question in a terminal, else the default.
 
-use crate::init::{attribution, catalog, collector_service, pb_link};
+use crate::init::{attribution, catalog, collector_service, pb_link, system_prompt};
 use clap::Args;
 use std::io::{self, IsTerminal};
 
@@ -44,7 +44,7 @@ pub struct Flags {
     /// Install the playbook system prompt (an existing copy is refreshed either way)
     #[arg(long, overrides_with = "no_system_prompt")]
     pub system_prompt: bool,
-    /// Do not install the system prompt
+    /// Do not install the system prompt, and store `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
     #[arg(long, overrides_with = "system_prompt")]
     pub no_system_prompt: bool,
     /// Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
@@ -268,6 +268,90 @@ pub fn short_name_choice(flags: &Flags, on: bool, asked: bool, declined: bool) -
     }
 }
 
+/// The system prompt answer setup stores: a yes, an explicit no from the
+/// flag or the wizard, or nothing asked.
+pub fn system_prompt_answer(flags: &Flags, on: bool, asked: bool) -> system_prompt::Answer {
+    match (on, flags.no_system_prompt || asked) {
+        (true, _) => system_prompt::Answer::Yes,
+        (false, true) => system_prompt::Answer::No,
+        (false, false) => system_prompt::Answer::Unasked,
+    }
+}
+
+/// Whether an earlier no or an install without the prompt may keep it off:
+/// a run that asks nothing and took the default (ADR 0044 decision 5).
+pub fn prompt_may_be_held_off(flags: &Flags, on: bool, asked: bool, only_run: bool) -> bool {
+    on && !asked && !only_run && !flags.system_prompt
+}
+
+/// What an unattended run found about the parts it leaves off.
+pub struct LeftOff {
+    /// Setup already printed why telemetry is not asked about.
+    pub telemetry_skipped: bool,
+    /// `pb cc` would start without the playbook prompt.
+    pub prompt_missing: bool,
+    /// No `pb` command is on PATH.
+    pub pb_missing: bool,
+}
+
+/// The stderr lines for a run with no terminal and no `--yes`, one per
+/// part it left off that a flag did not decide.
+pub fn unattended_lines(flags: &Flags, choices: &Choices, left: &LeftOff) -> Vec<String> {
+    let undecided = |on: bool, yes: bool, no: bool| !on && !yes && !no;
+    let mut lines = Vec::new();
+    let only = |what: &str, part: &str| {
+        format!("setup: no terminal and no --yes, so {what}. To add it, run: playbook setup --only {part}")
+    };
+    if undecided(choices.telemetry, flags.telemetry, flags.no_telemetry) && !left.telemetry_skipped
+    {
+        lines.push(only("telemetry was not turned on", "telemetry"));
+    }
+    if undecided(
+        choices.system_prompt,
+        flags.system_prompt,
+        flags.no_system_prompt,
+    ) && left.prompt_missing
+    {
+        lines.push(only("the system prompt was not added", "system-prompt"));
+    }
+    if undecided(choices.short_name, flags.short_name, flags.no_short_name) && left.pb_missing {
+        lines.push(only("the pb link was not added", "short-name"));
+    }
+    let left_off: Vec<&str> = [
+        (
+            "hooks",
+            undecided(choices.hooks, flags.hooks, flags.no_hooks),
+        ),
+        (
+            "status line",
+            undecided(choices.statusline, flags.statusline, flags.no_statusline),
+        ),
+        (
+            "attribution-off",
+            undecided(
+                choices.attribution_off,
+                flags.attribution_off,
+                flags.no_attribution_off,
+            ),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(name, off)| off.then_some(name))
+    .collect();
+    if let Some((last, rest)) = left_off.split_last() {
+        let list = if rest.is_empty() {
+            (*last).to_string()
+        } else {
+            format!("{} and {last}", rest.join(", "))
+        };
+        lines.push(format!(
+            "setup: no terminal and no --yes, so these were left out of your Claude Code \
+             settings: {list}. To add them, run: playbook setup --yes"
+        ));
+    }
+    lines
+}
+
 /// True when there is no terminal to ask on and the user did not pass `--yes`.
 pub fn unattended(flags: &Flags, terminal: bool) -> bool {
     !terminal && !flags.yes
@@ -332,7 +416,7 @@ pub fn resolve_with(
             flags.system_prompt,
             flags.no_system_prompt,
             catalog::question("system-prompt"),
-            false,
+            settings_default,
         ),
         telemetry: decide(
             flags.telemetry,
@@ -350,7 +434,7 @@ pub fn resolve_with(
             flags.short_name,
             flags.no_short_name,
             catalog::question("short-name"),
-            false,
+            settings_default,
         ),
         attribution_off: decide(
             flags.attribution_off,
@@ -377,13 +461,14 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
         (flags.system_prompt, flags.no_system_prompt),
         (flags.telemetry, flags.no_telemetry),
         (flags.collector_service, flags.no_collector_service),
+        (flags.short_name, flags.no_short_name),
         (flags.attribution_off, flags.no_attribution_off),
     ]
     .iter()
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
         "setup: output is not a terminal, so no questions were asked; the hooks, status line, \
-         telemetry, collector-service and attribution-off parts stay off and the other defaults apply; pass --yes to accept all defaults or the \
+         system-prompt, telemetry, collector-service, short-name and attribution-off parts stay off and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
 }
@@ -409,6 +494,7 @@ mod tests {
             system_prompt: true,
             no_telemetry: true,
             no_collector_service: true,
+            no_short_name: true,
             no_attribution_off: true,
             ..Flags::default()
         };
@@ -566,13 +652,26 @@ mod tests {
     }
 
     #[test]
-    fn yes_skips_every_question() {
+    fn yes_skips_every_question_and_turns_every_asked_part_on() {
         let flags = Flags {
             yes: true,
             ..Flags::default()
         };
         let c = resolve(&flags, true, false, &mut never);
-        assert!(c.hooks && c.statusline && c.path && !c.system_prompt);
+        assert_eq!(
+            c,
+            Choices {
+                hooks: true,
+                statusline: true,
+                security: false,
+                path: true,
+                system_prompt: true,
+                telemetry: true,
+                collector_service: true,
+                short_name: true,
+                attribution_off: true
+            }
+        );
     }
 
     #[test]
@@ -786,5 +885,83 @@ mod tests {
         assert!(replace_off_ok(&yes_flag, true, false));
         assert!(replace_off_ok(&yes, true, true));
         assert!(!replace_off_ok(&plain, false, false));
+    }
+
+    fn all_off() -> Choices {
+        Choices {
+            hooks: false,
+            statusline: false,
+            security: false,
+            path: false,
+            system_prompt: false,
+            telemetry: false,
+            collector_service: false,
+            short_name: false,
+            attribution_off: false,
+        }
+    }
+
+    #[test]
+    fn the_prompt_answer_is_yes_when_on_no_when_declined_and_unasked_otherwise() {
+        let plain = Flags::default();
+        let declined = Flags {
+            no_system_prompt: true,
+            ..Flags::default()
+        };
+
+        assert_eq!(
+            system_prompt_answer(&plain, true, false),
+            system_prompt::Answer::Yes
+        );
+        assert_eq!(
+            system_prompt_answer(&declined, false, false),
+            system_prompt::Answer::No
+        );
+        assert_eq!(
+            system_prompt_answer(&plain, false, true),
+            system_prompt::Answer::No
+        );
+        assert_eq!(
+            system_prompt_answer(&plain, false, false),
+            system_prompt::Answer::Unasked
+        );
+    }
+
+    #[test]
+    fn an_unattended_run_names_each_undecided_part_it_left_off() {
+        let left = LeftOff {
+            telemetry_skipped: false,
+            prompt_missing: true,
+            pb_missing: true,
+        };
+
+        let lines = unattended_lines(&Flags::default(), &all_off(), &left);
+
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        assert!(lines[0].contains("--only telemetry"), "{lines:?}");
+        assert!(lines[1].contains("--only system-prompt"), "{lines:?}");
+        assert!(lines[2].contains("--only short-name"), "{lines:?}");
+        assert!(
+            lines[3].contains("hooks, status line and attribution-off"),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn an_unattended_run_stays_quiet_about_parts_a_flag_or_the_disk_decided() {
+        let flags = Flags {
+            no_telemetry: true,
+            no_hooks: true,
+            no_statusline: true,
+            no_attribution_off: true,
+            ..Flags::default()
+        };
+        let left = LeftOff {
+            telemetry_skipped: false,
+            prompt_missing: false,
+            pb_missing: false,
+        };
+
+        assert!(unattended_lines(&flags, &all_off(), &left).is_empty());
     }
 }

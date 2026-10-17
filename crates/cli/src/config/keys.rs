@@ -91,6 +91,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "docs.anydocPath",
     "launcher.claudeOverride",
     "launcher.shortName",
+    "systemPrompt.enabled",
     "hooks.rmGuard.allowedRoots",
     "hooks.proseLint.mode",
     "update.mode",
@@ -98,7 +99,11 @@ pub const KNOWN_KEYS: &[&str] = &[
 ];
 
 /// The per-user settings, which live only in the global tier.
-pub const USER_KEYS: &[&str] = &["update.mode", "update.checkIntervalHours"];
+pub const USER_KEYS: &[&str] = &[
+    "update.mode",
+    "update.checkIntervalHours",
+    "systemPrompt.enabled",
+];
 
 /// Whether `key` is a per-user setting. `config set` writes it to the global
 /// tier without `--global` and refuses `--org`, and `config import` refuses
@@ -194,6 +199,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "docs.maxMemoryMb" => Some(Value::Number(1024.into())),
         "docs.anydocPath" => Some(Value::String(String::new())),
         "launcher.claudeOverride" | "launcher.shortName" => Some(Value::Bool(false)),
+        "systemPrompt.enabled" => Some(Value::Bool(true)),
         "hooks.rmGuard.allowedRoots" => Some(Value::Array(Vec::new())),
         "hooks.proseLint.mode" => Some(Value::String("warn".to_string())),
         "update.mode" => Some(Value::String("notify".to_string())),

@@ -185,7 +185,7 @@ fn base_paths(home: &Path) -> InitPaths {
         self_root: Some(self_root()),
         claude_home: claude_home_of(home),
         home: home.to_path_buf(),
-        system_prompt: false,
+        system_prompt: playbook::init::system_prompt::Answer::Unasked,
         hooks: true,
         statusline: true,
         security: false,
@@ -832,7 +832,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         self_root: None,
         claude_home: claude_home_of(&home),
         home: home.clone(),
-        system_prompt: false,
+        system_prompt: playbook::init::system_prompt::Answer::Unasked,
         hooks: true,
         statusline: true,
         security: false,
@@ -1197,7 +1197,7 @@ fn init_warns_when_the_installed_system_prompt_was_edited() {
     // Arrange
     let home = scratch_home("prompt-edited");
     let mut paths = base_paths(&home);
-    paths.system_prompt = true;
+    paths.system_prompt = playbook::init::system_prompt::Answer::Yes;
     let first = run(&paths);
     assert!(first.warnings.is_empty());
     let prompt = home.join(".config/playbook/prompts/SYSTEM_PROMPT.md");

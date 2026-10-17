@@ -42,7 +42,7 @@ It installs only the `playbook` binary, into `PLAYBOOK_BIN_DIR` (default `~/.loc
 
 When it replaces an older binary, it prints `playbook updated from A to B.`, then the breaking changes of the new release if there are any, then a link to the full release notes. Before 1.0 a breaking change can ship in any release, so read them.
 
-Then it asks "Run playbook setup now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the system prompt (Enter means yes), then runs `playbook setup --yes`, which adds the hook entries, the status line and the telemetry variables (a collector on this machine) to `settings.json`. On no, or with no terminal and no `--yes`, it skips `setup` and prints the command to run later, with `--system-prompt` if you passed it. Open a new terminal afterward.
+Then it asks "Run playbook setup now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the system prompt that `pb cc` loads (Enter means yes; with `--yes` setup decides, so an earlier no stays), then runs `playbook setup --yes`, which turns every part on: the hook entries, the status line and the telemetry variables (a collector on this machine) in `settings.json`, the system prompt, the `pb` link and the rest. A no to the prompt question passes `--no-system-prompt`. On no, or with no terminal and no `--yes`, it skips `setup` and prints the command to run later, with `--system-prompt` or `--no-system-prompt` if you passed one. Open a new terminal afterward.
 
 Pass `--yes` to say yes to every question, including `playbook setup`. Flags go after `-s --` when piping:
 
@@ -51,7 +51,8 @@ Pass `--yes` to say yes to every question, including `playbook setup`. Flags go 
 | `--yes`, `-y` | Say yes to every question, including running `playbook setup`. |
 | `--no-init` | Install the binary only. Do not ask about `playbook setup`. |
 | `--system-prompt` | Install the system prompt without asking. |
-| `--binary-only` | Still offers `playbook setup`, but skips the system prompt question. |
+| `--no-system-prompt` | Keep `pb cc` on Claude Code's own prompt, without asking. |
+| `--binary-only` | Still offers `playbook setup`, but keeps the system prompt off (passes `--no-system-prompt`). |
 | `--ref <tag>` | Release tag, same as `PLAYBOOK_REF`. |
 
 `--skip-plugin`, `--no-setup`, `--skip-deps`, `--skip-shell` and `--aliases` are accepted and ignored, so older commands keep working. `--aliases` prints a warning, because `playbook cc` and `pb cc` need no shell line (ADR 0044). `--skills-only` is gone and exits with the plugin commands. The other `setup` options, such as `--short-name`, belong to `playbook setup`; run it yourself to pass them, and install.sh also links `pb` to `playbook` when the name is free.
@@ -199,7 +200,7 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 ## Setup flags
 
-`playbook setup` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--system-prompt`, `--telemetry`, `--collector-service`, `--short-name` and `--attribution-off`, each with a `--no-` form. `--aliases` and `--claude-override` are retired: setup accepts them, prints a note and does nothing. With `--yes` or in a terminal, hooks, status line, `PATH`, telemetry, the collector service and attribution-off are on by default. Without a terminal and without `--yes`, hooks, the status line, telemetry, the collector service and attribution-off stay off unless their flag is passed. `--only <part>[,<part>]` runs just the named parts, so `playbook setup --only telemetry` turns telemetry on and touches nothing else. A bare `--telemetry` (no `--yes` and no other part flag) means the same. The permissions rules (`--security`), launcher and system prompt are off.
+`playbook setup` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--system-prompt`, `--telemetry`, `--collector-service`, `--short-name` and `--attribution-off`, each with a `--no-` form. `--aliases` and `--claude-override` are retired: setup accepts them, prints a note and does nothing. With `--yes` or in a terminal, every part but `--security` is on by default. `--yes` keeps the system prompt off when `systemPrompt.enabled` is false or on an earlier install that had none, and keeps the `pb` link off after a stored no. Without a terminal and without `--yes`, hooks, the status line, the system prompt, telemetry, the collector service, the `pb` link and attribution-off stay off unless their flag is passed. `--only <part>[,<part>]` runs just the named parts, so `playbook setup --only telemetry` turns telemetry on and touches nothing else. A bare `--telemetry` (no `--yes` and no other part flag) means the same. The permissions rules (`--security`) stay off unless you pass the flag or set `security.defaults`.
 
 ## Skills without the binary
 

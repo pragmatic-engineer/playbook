@@ -44,6 +44,7 @@ PLAYBOOK_CONFIG_DIR="$HOME/.config/playbook"
 PLAYBOOK_BIN_DIR="${PLAYBOOK_BIN_DIR:-$HOME/.local/bin}"
 REF="${PLAYBOOK_REF:-}"
 OPT_SYSTEM_PROMPT=0
+OPT_NO_SYSTEM_PROMPT=0
 ASSUME_YES=0
 BINARY_ONLY=0
 NO_INIT=0
@@ -157,7 +158,8 @@ Env:
 Flags:
   --yes              say yes to every question, including running `playbook setup`
   --system-prompt    install the custom system prompt (setup --system-prompt) without asking
-  --binary-only      still offers `playbook setup`, but skips the system prompt question
+  --no-system-prompt keep pb cc on Claude Code's own prompt (setup --no-system-prompt)
+  --binary-only      still offers `playbook setup`, but keeps the system prompt off
   --no-init          install the binary only: never ask about `playbook setup`
   --ref <tag>        same as PLAYBOOK_REF
   -h, --help         show this help
@@ -172,7 +174,8 @@ while [ $# -gt 0 ]; do
         --yes|-y)        ASSUME_YES=1 ;;
         --skip-plugin|--no-setup|--skip-deps|--skip-shell) ;; # accepted, ignored
         --aliases)       warn "--aliases is retired: playbook cc and pb cc need no shell line" ;;
-        --system-prompt) OPT_SYSTEM_PROMPT=1 ;;
+        --system-prompt) OPT_SYSTEM_PROMPT=1; OPT_NO_SYSTEM_PROMPT=0 ;;
+        --no-system-prompt) OPT_NO_SYSTEM_PROMPT=1; OPT_SYSTEM_PROMPT=0 ;;
         --binary-only)   BINARY_ONLY=1 ;;
         --no-init)       NO_INIT=1 ;;
         --pbtop)         ONLY_PBTOP=1
@@ -683,10 +686,17 @@ esac
 # prompt. With no terminal and no --yes it is skipped and the command is
 # printed.
 INIT_RAN=0
-if [ "$NO_INIT" -eq 0 ] && consent "Run playbook $SETUP_CMD now? It adds playbook's hook entries to ~/.claude/settings.json (your own entries stay), the status line and Claude Code telemetry to a collector on this machine (change it later with playbook $SETUP_CMD --only telemetry or undo it with playbook uninstall)."; then
-    if [ "$BINARY_ONLY" -eq 0 ] && [ "$OPT_SYSTEM_PROMPT" -eq 0 ]; then
-        if ask "Install the custom system prompt? (recommended)" Y; then
+if [ "$NO_INIT" -eq 0 ] && consent "Run playbook $SETUP_CMD now? It adds playbook's hook entries to ~/.claude/settings.json (your own entries stay), the status line, Claude Code telemetry to a collector on this machine, the system prompt that pb cc loads and the pb link (change it later with playbook $SETUP_CMD --only telemetry or undo it with playbook uninstall)."; then
+    # --binary-only keeps the prompt off. Under --yes with no prompt flag,
+    # setup decides, so it can keep an earlier no.
+    if [ "$BINARY_ONLY" -eq 1 ] && [ "$OPT_SYSTEM_PROMPT" -eq 0 ]; then
+        OPT_NO_SYSTEM_PROMPT=1
+    fi
+    if [ "$ASSUME_YES" -eq 0 ] && [ "$OPT_SYSTEM_PROMPT" -eq 0 ] && [ "$OPT_NO_SYSTEM_PROMPT" -eq 0 ]; then
+        if ask "Install the custom system prompt, which pb cc loads? (recommended)" Y; then
             OPT_SYSTEM_PROMPT=1
+        else
+            OPT_NO_SYSTEM_PROMPT=1
         fi
     fi
 
@@ -722,6 +732,9 @@ if [ "$NO_INIT" -eq 0 ] && consent "Run playbook $SETUP_CMD now? It adds playboo
             warn "the installed playbook $( "$PLAYBOOK_BIN_DIR/playbook" --version 2>/dev/null | awk '{print $NF}' ) does not support --system-prompt; skipping it. Re-run this installer once a release includes it."
         fi
     fi
+    if [ "$OPT_NO_SYSTEM_PROMPT" -eq 1 ] && _init_supports --no-system-prompt; then
+        _INIT_ARGS="$_INIT_ARGS --no-system-prompt"
+    fi
     # The installer has already asked its own questions, so setup must not ask again.
     if _init_supports --yes; then
         _INIT_ARGS="$_INIT_ARGS --yes"
@@ -748,6 +761,7 @@ printf '\nNext steps:\n'
 if [ "$INIT_RAN" -eq 0 ]; then
     INIT_CMD="playbook $SETUP_CMD"
     [ "$OPT_SYSTEM_PROMPT" -eq 1 ] && INIT_CMD="$INIT_CMD --system-prompt"
+    [ "$OPT_NO_SYSTEM_PROMPT" -eq 1 ] && INIT_CMD="$INIT_CMD --no-system-prompt"
     printf '  - Run: %s   (adds the hook entries to ~/.claude/settings.json, asks first)\n' "$INIT_CMD"
 fi
 printf '  - Skills (optional, they work without the binary): %s\n' "$SKILLS_INSTALL_CMD"
