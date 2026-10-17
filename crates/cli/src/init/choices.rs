@@ -4,7 +4,7 @@
 //! The optional parts of `playbook setup` and how each one gets decided: a flag
 //! wins, else a question in a terminal, else the default.
 
-use crate::init::{attribution, catalog, collector_service};
+use crate::init::{attribution, catalog, collector_service, pb_link};
 use clap::Args;
 use std::io::{self, IsTerminal};
 
@@ -65,7 +65,7 @@ pub struct Flags {
     /// Do not turn on the `claude` shell function
     #[arg(long, overrides_with = "claude_override")]
     pub no_claude_override: bool,
-    /// Add `pb` as a short name for `playbook`, only when `pb` is free (recorded in playbook own config)
+    /// Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
     #[arg(long, overrides_with = "no_short_name")]
     pub short_name: bool,
     /// Do not add the `pb` short name
@@ -226,6 +226,16 @@ pub fn collector_service_choice(flags: &Flags, on: bool, asked: bool) -> collect
         (true, _) => collector_service::Choice::Install,
         (false, true) => collector_service::Choice::Declined,
         (false, false) => collector_service::Choice::Skip,
+    }
+}
+
+/// What the short-name part does. A no or `--no-short-name` is recorded; a
+/// run that asked nothing is not.
+pub fn short_name_choice(flags: &Flags, on: bool, asked: bool) -> pb_link::Choice {
+    match (on, flags.no_short_name || asked) {
+        (true, _) => pb_link::Choice::Link,
+        (false, true) => pb_link::Choice::Declined,
+        (false, false) => pb_link::Choice::Skip,
     }
 }
 

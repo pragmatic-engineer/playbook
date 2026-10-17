@@ -75,7 +75,7 @@ Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the
 | System prompt | off | `--system-prompt`, `--no-system-prompt` | `~/.config/playbook/prompts/SYSTEM_PROMPT.md` |
 | Usage telemetry | on, asked | `--telemetry`, `--no-telemetry` | `~/.claude/settings.json` (the `env` block), `~/.config/playbook/telemetry-env.json` |
 | Collector service | on, asked | `--collector-service`, `--no-collector-service` | `~/Library/LaunchAgents/io.github.pragmatic-engineer.playbook.collector.plist` (macOS) or `~/.config/systemd/user/playbook-collector.service` (Linux) |
-| `pb` short name | off, asked | `--short-name`, `--no-short-name` | `~/.config/playbook` (the `launcher.shortName` key) |
+| `pb` short name | off, asked | `--short-name`, `--no-short-name` | the `pb` symlink in the install folder, and `~/.config/playbook` (the `launcher.shortName` key) |
 | `claude` function | off, asked | `--claude-override`, `--no-claude-override` | `~/.config/playbook` (the `launcher.claudeOverride` key) |
 | Attribution off | on, asked | `--attribution-off`, `--no-attribution-off` | `~/.claude/settings.json` (the `attribution` key) |
 
@@ -131,7 +131,7 @@ Setup adds a block that starts with `# playbook binary` to your shell startup fi
 
 ### The `pb` short name
 
-`--short-name` asks whether `pb` should be a short name for `playbook`. A yes sets `launcher.shortName` to `true` in playbook's own config, and nothing else changes. Setup looks for a command named `pb` on your PATH first and writes nothing when it finds one. With the key on, `playbook shell-init` defines `pb` only when no command, alias, function or builtin of that name exists in your shell at that moment, so a `pb` you install or define later always wins and playbook never overwrites it. The function needs the `eval` line from `--aliases` in your rc file. Undo it with `playbook config set launcher.shortName false`. See [the launcher](../internals/01-launcher-and-hooks.md#the-pb-short-name).
+`--short-name` asks whether `pb` should be a short name for `playbook`. `install.sh` and the Homebrew formula already make a `pb` symlink, so on those installs the part only checks it. Otherwise, when no other `pb` is on your PATH and playbook sits in the install folder (`$PLAYBOOK_BIN_DIR`, default `~/.local/bin`), setup adds the relative symlink `pb -> playbook` there, the same link `install.sh` makes. It never replaces a `pb` that runs something else, and when playbook lives anywhere else it prints the `ln -s` command to run by hand. The answer is stored as `launcher.shortName`. `playbook uninstall --remove-binary` removes the link. See [the launcher](../internals/01-launcher-and-hooks.md#the-pb-short-name).
 
 ### Collector service
 

@@ -67,12 +67,12 @@ fn extra_lines(id: &str) -> Vec<String> {
             ]
         }
         "short-name" => vec![
-            "Runs the equivalent of `playbook config set launcher.shortName true`, only when `pb` is free on your PATH."
+            "Adds the same link install.sh makes: pb -> playbook, in the playbook install folder."
                 .to_string(),
         ],
-        "attribution-off" => vec![
-            "Claude Code reads the key in every session it starts after this.".to_string(),
-        ],
+        "attribution-off" => {
+            vec!["Claude Code reads the key in every session it starts after this.".to_string()]
+        }
         _ => Vec::new(),
     }
 }
@@ -89,7 +89,7 @@ pub fn decline_line(id: &str) -> &'static str {
         "telemetry" => "No variables are written. `playbook usage` reads transcripts instead.",
         "collector-service" => "No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`.",
         "claude-override" => "`claude` stays the plain Claude Code command.",
-        "short-name" => "`pb` is not defined. Use `playbook` in full.",
+        "short-name" => "No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing.",
         "attribution-off" => "Claude Code keeps adding its attribution. The commit-message-sanitizer hook still strips it from commits and PRs when the hooks are on.",
         _ => "Nothing changes for this part.",
     }

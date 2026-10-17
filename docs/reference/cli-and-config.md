@@ -1357,7 +1357,7 @@ Example: `playbook setup --no-hooks --aliases`
 - `--no-collector-service`: Do not install the background service for the usage collector
 - `--claude-override`: Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config)
 - `--no-claude-override`: Do not turn on the `claude` shell function
-- `--short-name`: Add `pb` as a short name for `playbook`, only when `pb` is free (recorded in playbook own config)
+- `--short-name`: Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
 - `--no-short-name`: Do not add the `pb` short name
 - `--attribution-off`: Turn off the commit, PR and session link attribution Claude Code adds (sets `attribution` in settings.json)
 - `--no-attribution-off`: Do not set or change attribution in settings.json

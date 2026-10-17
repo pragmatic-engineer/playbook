@@ -198,7 +198,8 @@ fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
         telemetry_replace_off: false,
         collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
-        short_name: false,
+        short_name: playbook::init::pb_link::Choice::Skip,
+        pb_target: None,
         attribution: playbook::init::attribution::Choice::AddMissing,
         path_setup: None,
         repo: None,
@@ -851,7 +852,8 @@ fn missing_self_root_skips_template_dependent_steps() {
         telemetry_replace_off: false,
         collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
-        short_name: false,
+        short_name: playbook::init::pb_link::Choice::Skip,
+        pb_target: None,
         attribution: playbook::init::attribution::Choice::Skip,
         path_setup: None,
         repo: None,
@@ -914,7 +916,8 @@ fn aliases_false_skips_shim_entirely() {
         telemetry_replace_off: false,
         collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
-        short_name: false,
+        short_name: playbook::init::pb_link::Choice::Skip,
+        pb_target: None,
         attribution: playbook::init::attribution::Choice::Skip,
         path_setup: None,
         repo: None,
@@ -1452,6 +1455,41 @@ fn claude_override_is_written_only_with_consent_and_never_touches_claude_setting
     assert_eq!(
         std::fs::read_to_string(claude_home.join("settings.json")).ok(),
         settings_before
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_links_pb_in_the_install_folder_once() {
+    use std::os::unix::fs::PermissionsExt;
+    // Arrange: a binary in the install folder and no `pb` anywhere.
+    let home = scratch_home("short-name");
+    let bin = home.join(".local/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let exe = bin.join("playbook");
+    write_text(&exe, "#!/bin/sh\n");
+    fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    paths.short_name = playbook::init::pb_link::Choice::Link;
+    paths.pb_target = Some(playbook::init::pb_link::Target {
+        exe,
+        install_dir: bin.clone(),
+        path_var: Default::default(),
+    });
+
+    // Act
+    let first = run(&paths);
+    let second = run(&paths);
+
+    // Assert
+    assert_eq!(find_step(&first, "short-name").status, StepStatus::Wired);
+    assert_eq!(
+        find_step(&second, "short-name").status,
+        StepStatus::AlreadyCorrect
+    );
+    assert_eq!(
+        fs::read_link(bin.join("pb")).unwrap(),
+        Path::new("playbook")
     );
 }
 

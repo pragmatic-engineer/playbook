@@ -209,9 +209,37 @@ pub fn strip(home: &Path, stamp: u64, dry_run: bool) -> Vec<RcStrip> {
     changed
 }
 
+/// The first executable file called `name` in the directories of `path`, the
+/// way a shell would find a command. Used by setup to see whether `pb` is taken.
+pub fn command_on_path(name: &str, path: &std::ffi::OsStr) -> Option<std::path::PathBuf> {
+    std::env::split_paths(path)
+        .map(|dir| dir.join(name))
+        .find(|p| p.metadata().is_ok_and(|m| m.is_file() && is_executable(&m)))
+}
+
+#[cfg(unix)]
+fn is_executable(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(_meta: &std::fs::Metadata) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_non_executable_file_named_pb_is_not_a_command() {
+        let bin = crate::common::test_support::scratch_dir("path-plain-pb");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("pb"), "data").unwrap();
+        assert!(command_on_path("pb", bin.as_os_str()).is_none());
+    }
     use crate::common::test_support::scratch_dir as raw_scratch;
 
     fn scratch_dir(tag: &str) -> PathBuf {
