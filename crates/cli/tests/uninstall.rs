@@ -44,13 +44,7 @@ impl Sandbox {
     }
 
     fn init(&self) {
-        let out = self.run(&[
-            "setup",
-            "--yes",
-            "--no-telemetry",
-            "--aliases",
-            "--system-prompt",
-        ]);
+        let out = self.run(&["setup", "--yes", "--no-telemetry", "--system-prompt"]);
         assert!(out.status.success(), "init failed: {}", text(&out));
         // Init no longer places statusline.sh. Seed the copy an older install
         // left, recorded the way that install recorded it.
@@ -63,6 +57,10 @@ impl Sandbox {
             "statusline",
             &self.path(".config/playbook/statusline.sh"),
         );
+        // Setup no longer writes a shell line (ADR 0044). Seed the block an
+        // older setup left, so uninstall still has one to remove.
+        let rc = self.read(".zshrc");
+        self.write(".zshrc", &format!("{rc}{OLD_RC_BLOCK}"));
     }
 
     fn path(&self, rel: &str) -> PathBuf {
@@ -127,6 +125,8 @@ fn hook_commands(settings: &serde_json::Value) -> Vec<String> {
 }
 
 const USER_RC: &str = "export A=1\n";
+
+const OLD_RC_BLOCK: &str = "\n# playbook launchers (ccc/ccd)\ncommand -v playbook >/dev/null 2>&1 && eval \"$(playbook shell-init)\"\n";
 
 #[test]
 fn removes_everything_init_placed_and_keeps_the_users_own_content() {

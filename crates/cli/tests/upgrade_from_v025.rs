@@ -7,7 +7,6 @@
 //! changes settings.json and the shell rc file.
 
 use playbook::init::run::{run, InitPaths};
-use playbook::init::shim::ShellKind;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -142,14 +141,11 @@ impl V025Home {
             self_root: Some(PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))),
             claude_home: self.home.join(".claude"),
             home: self.home.clone(),
-            shell_kind: Some(ShellKind::Zsh),
             system_prompt: false,
-            aliases: true,
             hooks: true,
             statusline: true,
             security: false,
             telemetry: false,
-            claude_override: false,
             telemetry_replace_off: false,
             collector_service: playbook::init::collector_service::Choice::Skip,
             only: false,
@@ -203,7 +199,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     );
     for message in [&first, &second] {
         for part in [
-            "4 change(s) to your settings or shell files need `playbook setup` and `playbook setup --hooks` and `playbook setup --only attribution-off` and `playbook setup --statusline`",
+            "3 change(s) to your settings or shell files need `playbook setup --hooks` and `playbook setup --only attribution-off` and `playbook setup --statusline`",
             "2 item(s) need you: run `playbook migrate`",
         ] {
             assert!(message.contains(part), "{message}");
@@ -228,7 +224,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     h.init();
 
     // Assert: dead entries gone, the user's own hook kept, settings backed up,
-    // the old launcher line rewritten, and a second init changes nothing.
+    // no shell-init line written, and a second init changes nothing.
     let commands = hook_commands(&h.settings());
     assert!(commands.iter().any(|c| c == MINE), "{commands:?}");
     assert!(!commands
@@ -246,7 +242,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     assert!(!backups.is_empty());
     let zshrc = fs::read_to_string(h.home.join(".zshrc")).unwrap();
     assert!(zshrc.starts_with("export EDITOR=vim\n"), "{zshrc}");
-    assert!(!zshrc.contains("cc.zsh"), "{zshrc}");
+    assert!(!zshrc.contains("playbook shell-init"), "{zshrc}");
     assert_eq!(
         fs::read(h.home.join("notes.md")).unwrap(),
         b"my own notes\n"
@@ -470,7 +466,7 @@ fn the_first_run_step_heals_once_before_any_command_and_keeps_stdout_clean() {
             "{class}: {notice}"
         );
         assert_eq!(
-            notice.contains("need `playbook setup` and `playbook setup --hooks`"),
+            notice.contains("need `playbook setup --hooks`"),
             heals,
             "{class}: {notice}"
         );

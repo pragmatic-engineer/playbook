@@ -75,16 +75,6 @@ pub const PARTS: &[Part] = &[
         undo: "`playbook uninstall --remove-binary` removes the block, which starts with `# playbook binary`.",
     },
     Part {
-        id: "aliases",
-        asked: true,
-        default_on: false,
-        flags: "--aliases, --no-aliases",
-        question: "Add one line to your shell rc file (~/.zshrc or ~/.bashrc) that defines a `playbook` function that follows `playbook cc` and `playbook ccd` into a worktree?",
-        does: "Defines a `playbook` shell function so `playbook cc` and `playbook ccd` can leave you in the worktree they created. The commands work without it.",
-        changes: "~/.zshrc or ~/.bashrc (one eval line)",
-        undo: "`playbook uninstall` removes the line.",
-    },
-    Part {
         id: "system-prompt",
         asked: true,
         default_on: false,
@@ -113,16 +103,6 @@ pub const PARTS: &[Part] = &[
         does: "Installs a per-user service that runs `playbook usage collect --idle-seconds 0` at login and starts it again when it stops. On macOS it is a launchd agent with RunAtLoad and KeepAlive, on Linux a systemd user unit with Restart=always. Other systems get the command to run yourself. Its output goes to collector-service.log next to collector.json. The service file names only the program and the log: the collector reads its token from collector.json, so no secret is written. A no is remembered, so playbook stops reminding you.",
         changes: "~/Library/LaunchAgents/io.github.pragmatic-engineer.playbook.collector.plist (macOS) or ~/.config/systemd/user/playbook-collector.service (Linux), and the log file",
         undo: "`playbook uninstall` stops the service and removes its file.",
-    },
-    Part {
-        id: "claude-override",
-        asked: true,
-        default_on: false,
-        flags: "--claude-override, --no-claude-override",
-        question: "Make a plain `claude` load the playbook system prompt every time (it replaces Claude Code's built-in prompt), and pass calls that use their own flags straight to Claude Code? This sets `launcher.claudeOverride` in ~/.config/playbook. No Claude Code setting or memory is changed.",
-        does: "Turns on `launcher.claudeOverride`, so `playbook shell-init` also defines a `claude` function. A plain interactive `claude` then starts through the launcher, so the playbook system prompt loads every time. Calls that need Claude Code untouched (piped or scripted use, `-p`, subcommands, your own prompt or settings flags, `PLAYBOOK_BYPASS=1`) go straight to the real binary. It takes effect once the launcher line from the aliases part is in your rc file.",
-        changes: "~/.config/playbook (the playbook config store, key `launcher.claudeOverride`)",
-        undo: "Run `playbook config set launcher.claudeOverride false`, or `command claude` to skip it once.",
     },
     Part {
         id: "short-name",
@@ -221,7 +201,6 @@ pub fn plan() -> String {
 /// The part a `StepReport` name stands for.
 fn part_for_step(step: &str) -> &str {
     match step {
-        "shim" => "aliases",
         "memory" => "memory-migration",
         other => other,
     }
@@ -391,13 +370,13 @@ mod tests {
 
     #[test]
     fn the_summary_says_how_to_undo_each_changed_part() {
-        let text = summary(&["hooks", "shim"], &[]);
+        let text = summary(&["hooks", "path"], &[]);
         assert!(
             text.contains("hooks: edited ~/.claude/settings.json"),
             "{text}"
         );
         assert!(
-            text.contains("aliases: edited ~/.zshrc or ~/.bashrc"),
+            text.contains("path: edited your shell startup files"),
             "{text}"
         );
         assert!(text.contains("playbook uninstall"), "{text}");

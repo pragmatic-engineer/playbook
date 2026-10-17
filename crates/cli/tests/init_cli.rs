@@ -3,7 +3,7 @@
 
 //! `playbook setup` as `/playbook:setup` runs it, against a scratch `$HOME`:
 //! the golden settings a fresh and a contested install must produce, what a
-//! plain run leaves alone, and what `--aliases` and `--system-prompt` add.
+//! plain run leaves alone, and what `--system-prompt` adds.
 
 use serde_json::Value;
 use std::fs;
@@ -12,9 +12,6 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-const SHELL_INIT_LINE: &str =
-    "command -v playbook >/dev/null 2>&1 && eval \"$(playbook shell-init)\"";
 
 struct Sandbox {
     home: PathBuf,
@@ -165,30 +162,18 @@ fn a_plain_run_places_settings_and_guards_and_touches_no_rc_or_launcher() {
 }
 
 #[test]
-fn aliases_wire_only_the_rc_file_of_the_current_shell() {
-    for (shell, wired, other) in [
-        ("/bin/bash", ".bashrc", ".zshrc"),
-        ("/bin/zsh", ".zshrc", ".bashrc"),
-    ] {
-        let sb = Sandbox::new("aliases");
-        let out = sb.init(shell, &["--aliases"]);
-        assert!(!text(&out).contains("[skip] shim"), "{}", text(&out));
-        assert!(sb.read(wired).lines().any(|l| l == SHELL_INIT_LINE));
-        assert!(!sb.path(other).exists());
-        assert!(!sb.path(".config/playbook/shell").exists());
+fn the_retired_launcher_flags_are_accepted_and_write_no_rc_file() {
+    for shell in ["/bin/bash", "/bin/zsh"] {
+        let sb = Sandbox::new("retired-aliases");
+        let out = sb.init(
+            shell,
+            &["--aliases", "--claude-override", "--only", "hooks,aliases"],
+        );
+        assert!(out.status.success(), "{}", text(&out));
+        assert!(!sb.path(".bashrc").exists());
+        assert!(!sb.path(".zshrc").exists());
+        assert!(sb.read(".claude/settings.json").contains("playbook hook"));
     }
-}
-
-#[test]
-fn a_second_aliases_run_changes_nothing() {
-    let sb = Sandbox::new("aliases-twice");
-    sb.init("/bin/bash", &["--aliases"]);
-    let rc = sb.read(".bashrc");
-    let settings = sb.read(".claude/settings.json");
-    sb.init("/bin/bash", &["--aliases"]);
-    assert_eq!(sb.read(".bashrc"), rc);
-    assert_eq!(rc.matches("playbook shell-init").count(), 1);
-    assert_eq!(sb.read(".claude/settings.json"), settings);
 }
 
 #[test]
@@ -264,30 +249,6 @@ fn a_plain_run_twice_is_byte_identical_and_makes_no_new_backups() {
 }
 
 #[test]
-fn an_old_launcher_line_is_migrated_and_the_users_lines_and_blanks_survive() {
-    for old in [
-        "source \"$HOME/.claude/shell/cc.zsh\"",
-        "source \"$HOME/.claude/shell/zsh/cc.zsh\"",
-    ] {
-        let sb = Sandbox::new("migrate");
-        sb.write(
-            ".zshrc",
-            &format!("export FOO=1\n\nexport BAR=2\n\n# playbook launchers (cc/ccd)\n{old}\n"),
-        );
-        sb.init("/bin/zsh", &["--aliases"]);
-        let rc = sb.read(".zshrc");
-        assert!(!rc.contains(old), "{rc}");
-        assert_eq!(rc.matches("playbook shell-init").count(), 1, "{rc}");
-        assert_eq!(rc.matches("launchers (ccc/ccd)").count(), 1, "{rc}");
-        assert!(rc.lines().any(|l| l == SHELL_INIT_LINE), "{rc}");
-        assert!(rc.starts_with("export FOO=1\n\nexport BAR=2\n"), "{rc}");
-
-        sb.init("/bin/zsh", &["--aliases"]);
-        assert_eq!(sb.read(".zshrc"), rc);
-    }
-}
-
-#[test]
 fn no_hooks_leaves_every_hook_entry_out_and_says_so() {
     let h = Sandbox::new("no-hooks");
     let out = h.init("/bin/zsh", &["--no-hooks"]);
@@ -334,14 +295,14 @@ fn a_yes_run_without_a_terminal_uses_defaults_and_never_blocks() {
     let out = h.init("/bin/zsh", &[]);
     let t = text(&out);
     assert!(t.contains("hooks"), "{t}");
-    assert!(t.contains("shim"), "{t}");
+    assert!(!t.contains("shim"), "{t}");
 }
 
 #[test]
 fn a_no_flag_overrides_its_yes_twin() {
     let h = Sandbox::new("override");
-    let t = text(&h.init("/bin/zsh", &["--aliases", "--no-aliases"]));
-    assert!(t.contains("not installed"), "{t}");
+    let t = text(&h.init("/bin/zsh", &["--short-name", "--no-short-name"]));
+    assert!(t.contains("you said no"), "{t}");
 }
 
 fn has_security(settings: &Value) -> bool {

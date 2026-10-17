@@ -9,7 +9,6 @@
 use crate::init::catalog::{self, Part};
 use crate::init::choices::Flags;
 use crate::init::run::{StepReport, StepStatus};
-use crate::init::shim::SOURCE_LINE;
 use crate::init::wire::{wired_hooks, Group};
 use crate::ui::render::{self, Choice, Counts, Status};
 use crate::ui::wizard::{Item, MAX_ITEMS};
@@ -51,7 +50,6 @@ fn extra_lines(id: &str) -> Vec<String> {
             "Adds a block that starts with `# playbook binary` and one `export PATH=...` line."
                 .to_string(),
         ],
-        "aliases" => vec![format!("Adds this line to your rc file: {SOURCE_LINE}")],
         "telemetry" => {
             crate::init::telemetry::plan_lines(&crate::common::home_dir().join(".claude"))
         }
@@ -60,12 +58,6 @@ fn extra_lines(id: &str) -> Vec<String> {
             crate::init::collector_service::program().display(),
             crate::usage::service::ARGS.join(" ")
         )],
-        "claude-override" => {
-            vec![
-                "Runs the equivalent of `playbook config set launcher.claudeOverride true`."
-                    .to_string(),
-            ]
-        }
         "short-name" => vec![
             "Adds the same link install.sh makes: pb -> playbook, in the playbook install folder."
                 .to_string(),
@@ -84,11 +76,9 @@ pub fn decline_line(id: &str) -> &'static str {
         "hooks" => "No hooks are added. The safety guards, session helpers and usage warm-up do not run.",
         "statusline" => "Your status line stays as it is.",
         "path" => "Your shell files are not touched. Hooks may not find playbook unless it is already on PATH.",
-        "aliases" => "No line is added to your rc file, so `playbook cc` will not follow you into a new worktree.",
         "system-prompt" => "No file is copied. The launchers start without the playbook prompt.",
         "telemetry" => "No variables are written. `playbook usage` reads transcripts instead.",
         "collector-service" => "No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`.",
-        "claude-override" => "`claude` stays the plain Claude Code command.",
         "short-name" => "No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing.",
         "attribution-off" => "Claude Code keeps adding its attribution. The commit-message-sanitizer hook still strips it from commits and PRs when the hooks are on.",
         _ => "Nothing changes for this part.",
@@ -244,11 +234,9 @@ mod tests {
             hooks: true,
             statusline: true,
             path: true,
-            aliases: true,
             system_prompt: true,
             telemetry: true,
             collector_service: true,
-            claude_override: true,
             short_name: true,
             attribution_off: true,
             ..Flags::default()
@@ -261,24 +249,16 @@ mod tests {
     #[test]
     fn an_off_flag_fixes_the_item_to_no() {
         let flags = Flags {
-            no_aliases: true,
+            no_short_name: true,
             ..Flags::default()
         };
         let list = items(&flags, false);
-        let a = list.iter().find(|i| i.choice.id == "aliases");
+        let a = list.iter().find(|i| i.choice.id == "short-name");
         assert_eq!(a.map(|i| i.fixed), Some(Some(false)));
         assert_eq!(
             a.map(|i| summary_detail(i, false)),
             Some("left as it is (set by a flag)".to_string())
         );
-    }
-
-    #[test]
-    fn the_aliases_screen_shows_the_exact_rc_line() {
-        let list = items(&Flags::default(), false);
-        let a = list.iter().find(|i| i.choice.id == "aliases");
-        let shown = a.map(|i| i.choice.accept.join("\n")).unwrap_or_default();
-        assert!(shown.contains("eval \"$(playbook shell-init)\""), "{shown}");
     }
 
     #[test]
@@ -294,7 +274,7 @@ mod tests {
         let steps = vec![
             StepReport::wired("hooks", "29 entries added"),
             StepReport::already_correct("path", "already set"),
-            StepReport::skipped("aliases", "you chose off"),
+            StepReport::skipped("short-name", "you chose off"),
             StepReport::failed("trust", "cannot write"),
         ];
         let got = progress(
@@ -304,7 +284,7 @@ mod tests {
         );
         assert!(got.contains("[ok] hooks  29 entries added\n"));
         assert!(got.contains("[=] path  already set\n"));
-        assert!(got.contains("[skip] aliases  you chose off\n"));
+        assert!(got.contains("[skip] short-name  you chose off\n"));
         assert!(got.contains("[fail] trust  cannot write\n"));
         assert!(got.contains("1 done, 1 unchanged, 1 skipped, 1 failed"));
         assert!(got.contains("Fix the failed lines"));
@@ -338,7 +318,7 @@ mod tests {
             guided_answer(&guided, q, d)
         });
         assert!(!c.hooks && !c.statusline && !c.path);
-        assert!(c.aliases && c.system_prompt && c.claude_override && c.short_name);
+        assert!(c.system_prompt && c.short_name);
         assert!(
             !c.telemetry && !c.collector_service && !c.attribution_off,
             "telemetry, collector-service and attribution-off are on by default, so a no flips them off"

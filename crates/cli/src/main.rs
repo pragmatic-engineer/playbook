@@ -423,6 +423,11 @@ fn main() {
                     std::process::exit(2);
                 }
             };
+            if std::io::stderr().is_terminal() {
+                for note in init::choices::retired_notes(&flags) {
+                    eprintln!("{note}");
+                }
+            }
             let asking = init::choices::stdio_is_interactive()
                 && !flags.yes
                 && !flags.dry_run
@@ -561,7 +566,7 @@ fn main() {
                     );
                 }
             }
-            let (system_prompt, aliases) = (choices.system_prompt, choices.aliases);
+            let system_prompt = choices.system_prompt;
             let home = common::home_dir();
             let claude_home = home.join(".claude");
             let plugin_root = std::env::var("CLAUDE_PLUGIN_ROOT").ok();
@@ -571,10 +576,6 @@ fn main() {
             } else {
                 init::self_root::resolve_or_embedded(plugin_root.as_deref(), &home)
             };
-            let shell_kind = std::env::var("SHELL")
-                .ok()
-                .and_then(|shell| ShellKind::detect(&shell));
-
             let path_setup = std::env::current_exe()
                 .ok()
                 .filter(|_| choices.path)
@@ -603,9 +604,7 @@ fn main() {
                         path_var: std::env::var_os("PATH").unwrap_or_default(),
                     }),
                 home,
-                shell_kind,
                 system_prompt,
-                aliases,
                 path_setup,
                 hooks: choices.hooks,
                 statusline: choices.statusline,
@@ -622,7 +621,6 @@ fn main() {
                     asking && skip_service_question.is_none(),
                 ),
                 only: only_run,
-                claude_override: choices.claude_override,
                 short_name: init::choices::short_name_choice(
                     &flags,
                     choices.short_name,

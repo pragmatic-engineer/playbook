@@ -86,7 +86,7 @@ fn a_dry_run_changes_nothing_and_exits_zero() {
     let sb = Sandbox::new("dry");
     let before = sb.snapshot();
 
-    let out = sb.run(&["setup", "--dry-run", "--aliases", "--system-prompt"]);
+    let out = sb.run(&["setup", "--dry-run", "--short-name", "--system-prompt"]);
 
     assert!(out.status.success(), "{}", stdout(&out));
     assert_eq!(sb.snapshot(), before, "a dry run wrote a file");
@@ -96,13 +96,7 @@ fn a_dry_run_changes_nothing_and_exits_zero() {
 fn a_dry_run_names_the_files_and_the_changes_for_each_part() {
     let sb = Sandbox::new("dry-text");
 
-    let text = stdout(&sb.run(&[
-        "setup",
-        "--dry-run",
-        "--yes",
-        "--aliases",
-        "--system-prompt",
-    ]));
+    let text = stdout(&sb.run(&["setup", "--dry-run", "--yes", "--system-prompt"]));
 
     let hooks = format!("add {} hook entries", wired_hooks().count());
     for needle in [
@@ -110,7 +104,6 @@ fn a_dry_run_names_the_files_and_the_changes_for_each_part() {
         hooks.as_str(),
         "~/.claude/settings.json: add statusLine",
         "~/.zshenv: add `# playbook binary`",
-        "~/.zshrc: add `command -v playbook",
         "~/.config/playbook/prompts/SYSTEM_PROMPT.md: add the file",
         "security (off)",
     ] {
@@ -130,17 +123,17 @@ fn a_dry_run_reports_a_part_you_turned_off_as_skipped() {
 #[test]
 fn a_dry_run_describes_what_a_real_run_then_does() {
     let sb = Sandbox::new("dry-vs-real");
-    let plan = stdout(&sb.run(&["setup", "--dry-run", "--yes", "--aliases"]));
+    let plan = stdout(&sb.run(&["setup", "--dry-run", "--yes"]));
 
-    let real = sb.run(&["setup", "--yes", "--aliases"]);
+    let real = sb.run(&["setup", "--yes"]);
 
     assert!(real.status.success());
     let settings = fs::read_to_string(sb.home.join(".claude/settings.json")).unwrap();
     assert!(settings.contains("\"statusLine\"") && plan.contains("add statusLine"));
-    assert!(fs::read_to_string(sb.home.join(".zshrc"))
-        .unwrap()
+    assert!(!fs::read_to_string(sb.home.join(".zshrc"))
+        .unwrap_or_default()
         .contains("playbook shell-init"));
-    let again = stdout(&sb.run(&["setup", "--dry-run", "--yes", "--aliases"]));
+    let again = stdout(&sb.run(&["setup", "--dry-run", "--yes"]));
     assert!(!again.contains("add statusLine"), "{again}");
     assert!(
         again.contains("no change") || again.contains("already"),
@@ -176,8 +169,8 @@ fn explain_without_a_part_describes_every_part() {
         "statusline",
         "security",
         "path",
-        "aliases",
         "system-prompt",
+        "short-name",
         "trust",
     ] {
         assert!(
