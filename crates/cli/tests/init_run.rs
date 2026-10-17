@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Integration tests for `playbook::init::run`, the module that composes
-//! `merge`, `wire`, `shim` and `statusline` into `Command::Init`. Coverage
+//! `merge`, `wire` and `statusline` into `Command::Init`. Coverage
 //! map:
 //! - a fresh config gets fully wired: `fresh_config_gets_fully_wired`
 //! - running twice is idempotent, no second-run changes:
@@ -15,8 +15,7 @@
 //!   contract, not `run`'s)
 //! - the reported summary matches what changed on disk: asserted inline in
 //!   every test above via the returned `StepStatus`, plus
-//!   `missing_self_root_skips_template_dependent_steps` and
-//!   `unrecognised_shell_skips_shim_only` for the two ways a step is
+//!   `missing_self_root_skips_template_dependent_steps` for a step that is
 //!   legitimately skipped rather than wired or failed
 //! - regression pin: a full composed `init` on a clean scratch HOME must
 //!   never write a guard command
@@ -43,7 +42,6 @@
 //! write the developer's real `~/.claude`.
 
 use playbook::init::run::{run, InitOutcome, InitPaths, StepReport, StepStatus};
-use playbook::init::shim::ShellKind;
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
@@ -181,20 +179,17 @@ fn find_step<'a>(outcome: &'a InitOutcome, name: &str) -> &'a StepReport {
         })
 }
 
-fn base_paths(home: &Path, shell_kind: Option<ShellKind>) -> InitPaths {
+fn base_paths(home: &Path) -> InitPaths {
     InitPaths {
         plugin_root: None,
         self_root: Some(self_root()),
         claude_home: claude_home_of(home),
         home: home.to_path_buf(),
-        shell_kind,
         system_prompt: false,
-        aliases: true,
         hooks: true,
         statusline: true,
         security: false,
         telemetry: false,
-        claude_override: false,
         telemetry_replace_off: false,
         collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
@@ -211,7 +206,7 @@ fn fresh_config_gets_fully_wired() {
     // Arrange: a machine with no `~/.claude` at all.
     let home = scratch_home("fresh");
     let claude_home = claude_home_of(&home);
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
 
     // Act
     let outcome = run(&paths);
@@ -249,7 +244,6 @@ fn fresh_config_gets_fully_wired() {
             "path",
             "telemetry",
             "collector-service",
-            "claude-override",
             "short-name",
         ]
         .contains(&step.name)
@@ -291,10 +285,11 @@ fn fresh_config_gets_fully_wired() {
         );
     }
 
-    // Assert: the merge baseline, the shim, and the statusline all landed.
+    // Assert: the merge baseline and the statusline landed, and no shell rc
+    // file was written (ADR 0044).
     assert!(claude_home.join(".settings.base.json").is_file());
-    let rc = fs::read_to_string(home.join(".bashrc")).expect(".bashrc should exist");
-    assert!(rc.contains("playbook shell-init"));
+    assert!(!home.join(".bashrc").exists());
+    assert!(!home.join(".zshrc").exists());
     assert_eq!(
         read_json(&settings_path)["statusLine"]["command"],
         "playbook statusline"
@@ -323,7 +318,7 @@ fn init_rewrites_the_old_statusline_command_even_when_base_is_missing() {
     );
 
     // Act
-    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+    let outcome = run(&base_paths(&home));
 
     // Assert
     assert!(outcome.ok());
@@ -345,7 +340,7 @@ fn init_leaves_a_custom_statusline_command_alone() {
     );
 
     // Act
-    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+    let outcome = run(&base_paths(&home));
 
     // Assert
     assert!(outcome.ok());
@@ -360,7 +355,7 @@ fn init_keeps_the_old_command_when_the_user_edited_statusline_sh() {
     // Arrange: an older init recorded the shipped script, then the user edited it.
     let home = scratch_home("sl-edited");
     let claude_home = claude_home_of(&home);
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
     run(&paths);
     let script = home.join(".config/playbook/statusline.sh");
     write_text(&script, "#!/bin/sh\necho shipped\n");
@@ -396,7 +391,7 @@ fn statusline_command_migration_is_idempotent_across_inits() {
         &claude_home.join("settings.json"),
         &json!({"statusLine": {"type": "command", "command": OLD_STATUSLINE}}),
     );
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
 
     // Act
     run(&paths);
@@ -429,7 +424,7 @@ fn zero_hook_commands_point_under_claude_hooks_dir_after_a_full_init() {
     // shape `fresh_config_gets_fully_wired` exercises.
     let home = scratch_home("zero-hooks-dir");
     let claude_home = claude_home_of(&home);
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
 
     // Act
     let outcome = run(&paths);
@@ -468,7 +463,7 @@ fn withheld_customisation_produces_a_skip_report_alongside_the_backup() {
         &claude_home.join("settings.json"),
         &json!({"statusLine": {"type": "command", "command": "my-line"}}),
     );
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
 
     // Act
     let outcome = run(&paths);
@@ -581,7 +576,7 @@ fn stale_backup_and_skip_report_files_beyond_five_are_pruned_after_a_real_merge(
             &claude_home.join("settings.json"),
             &json!({"cleanupPeriodDays": 500}),
         );
-        let paths = base_paths(&home, Some(ShellKind::Bash));
+        let paths = base_paths(&home);
 
         // Act
         let outcome = run(&paths);
@@ -619,7 +614,7 @@ fn idempotent_rerun_creates_no_backup_or_skip_report_and_prunes_nothing() {
     // retain-5 threshold.
     let home = scratch_home("idempotent-skip");
     let claude_home = claude_home_of(&home);
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
     let first = run(&paths);
     assert!(first.ok());
 
@@ -670,7 +665,7 @@ fn fresh_install_placeholder_produces_exactly_one_backup_and_no_skip_report() {
     // Arrange: no prior `~/.claude` at all.
     let home = scratch_home("fresh-placeholder-backup");
     let claude_home = claude_home_of(&home);
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
 
     // Act
     let outcome = run(&paths);
@@ -698,19 +693,17 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     let claude_home = claude_home_of(&home);
     let settings_path = claude_home.join("settings.json");
     let base_path = claude_home.join(".settings.base.json");
-    let rc_path = home.join(".bashrc");
 
     // Act: first run wires everything.
-    let first = run(&base_paths(&home, Some(ShellKind::Bash)));
+    let first = run(&base_paths(&home));
     assert!(first.ok(), "first run should succeed");
     let after_first = (
         fs::read(&settings_path).unwrap(),
         fs::read(&base_path).unwrap(),
-        fs::read(&rc_path).unwrap(),
     );
 
     // Act: second run against the exact same paths.
-    let second = run(&base_paths(&home, Some(ShellKind::Bash)));
+    let second = run(&base_paths(&home));
 
     // Assert: nothing is reported as a change the second time.
     assert!(second.ok());
@@ -724,7 +717,6 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
             "path",
             "telemetry",
             "collector-service",
-            "claude-override",
             "short-name",
         ]
         .contains(&step.name)
@@ -746,7 +738,6 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
     let after_second = (
         fs::read(&settings_path).unwrap(),
         fs::read(&base_path).unwrap(),
-        fs::read(&rc_path).unwrap(),
     );
     assert_eq!(
         after_first, after_second,
@@ -780,7 +771,7 @@ fn hand_added_hook_entry_survives_composed_init() {
     );
 
     // Act
-    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+    let outcome = run(&base_paths(&home));
 
     // Assert
     assert!(
@@ -813,7 +804,7 @@ fn malformed_settings_json_fails_without_panicking_or_writing() {
     fs::write(&settings_path, malformed).unwrap();
 
     // Act
-    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+    let outcome = run(&base_paths(&home));
 
     // Assert: the run reports failure, with a useful message, not a panic
     // (reaching this line at all proves that), and the broken file is left
@@ -841,14 +832,11 @@ fn missing_self_root_skips_template_dependent_steps() {
         self_root: None,
         claude_home: claude_home_of(&home),
         home: home.clone(),
-        shell_kind: Some(ShellKind::Bash),
         system_prompt: false,
-        aliases: true,
         hooks: true,
         statusline: true,
         security: false,
         telemetry: false,
-        claude_override: false,
         telemetry_replace_off: false,
         collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
@@ -866,116 +854,14 @@ fn missing_self_root_skips_template_dependent_steps() {
     // `hooks` still runs since `wire::wire` needs no template at all.
     assert!(outcome.ok());
     assert_eq!(find_step(&outcome, "settings").status, StepStatus::Skipped);
-    // The launcher is `playbook shell-init`, so the rc line needs no plugin files.
-    assert_eq!(find_step(&outcome, "shim").status, StepStatus::Wired);
     assert_eq!(find_step(&outcome, "hooks").status, StepStatus::Wired);
-    assert!(home.join(".bashrc").is_file());
-}
-
-#[test]
-fn unrecognised_shell_skips_shim_only() {
-    // Arrange: `$SHELL` names neither bash nor zsh.
-    let home = scratch_home("weird-shell");
-    let paths = base_paths(&home, None);
-
-    // Act
-    let outcome = run(&paths);
-
-    // Assert
-    assert!(outcome.ok());
-    let shim_step = find_step(&outcome, "shim");
-    assert_eq!(shim_step.status, StepStatus::Skipped);
-    assert!(shim_step.detail.contains("$SHELL"), "{}", shim_step.detail);
-    assert_eq!(find_step(&outcome, "settings").status, StepStatus::Wired);
-    assert_eq!(find_step(&outcome, "hooks").status, StepStatus::Wired);
-    assert!(!home.join(".bashrc").is_file());
-    assert!(!home.join(".zshrc").is_file());
-}
-
-/// `aliases: false` (the default, absent `--aliases`) must skip the `shim`
-/// step entirely, so a caller like `/playbook:setup` can call `playbook setup`
-/// for guards and settings without silently installing a shell launcher the
-/// user did not opt into this run.
-#[test]
-fn aliases_false_skips_shim_entirely() {
-    // Arrange
-    let home = scratch_home("no-aliases");
-    let paths = InitPaths {
-        plugin_root: None,
-        self_root: Some(self_root()),
-        claude_home: claude_home_of(&home),
-        home: home.clone(),
-        shell_kind: Some(ShellKind::Bash),
-        system_prompt: false,
-        aliases: false,
-        hooks: true,
-        statusline: true,
-        security: false,
-        telemetry: false,
-        claude_override: false,
-        telemetry_replace_off: false,
-        collector_service: playbook::init::collector_service::Choice::Skip,
-        only: false,
-        short_name: playbook::init::pb_link::Choice::Skip,
-        pb_target: None,
-        attribution: playbook::init::attribution::Choice::Skip,
-        path_setup: None,
-        repo: None,
-    };
-
-    // Act
-    let outcome = run(&paths);
-
-    // Assert
-    assert!(outcome.ok());
-    let shim_step = find_step(&outcome, "shim");
-    assert_eq!(shim_step.status, StepStatus::Skipped);
-    assert!(
-        shim_step.detail.contains("--aliases"),
-        "{}",
-        shim_step.detail
-    );
-    assert!(!home.join(".bashrc").is_file());
-    assert!(!home.join(".zshrc").is_file());
-    // The other steps still ran; only `shim` is gated by `aliases`.
-    assert_eq!(find_step(&outcome, "settings").status, StepStatus::Wired);
-    assert_eq!(find_step(&outcome, "hooks").status, StepStatus::Wired);
-}
-
-/// A read-only rc file is reported as a skipped step, not a failure, and is
-/// left as it was.
-#[cfg(unix)]
-#[test]
-fn read_only_rc_file_is_reported_as_a_skipped_shim_step() {
-    use std::os::unix::fs::PermissionsExt;
-
-    // Arrange
-    let home = scratch_home("readonly-rc");
-    let rc_file = home.join(".zshrc");
-    let before = "source \"$HOME/.claude/shell/cc.zsh\"\n";
-    write_text(&rc_file, before);
-    fs::set_permissions(&rc_file, fs::Permissions::from_mode(0o444)).unwrap();
-
-    // Act
-    let outcome = run(&base_paths(&home, Some(ShellKind::Zsh)));
-
-    // Assert
-    assert!(outcome.ok(), "a read-only rc is not a failure");
-    let shim_step = find_step(&outcome, "shim");
-    assert_eq!(shim_step.status, StepStatus::Skipped);
-    assert!(
-        shim_step.detail.contains("not writable"),
-        "{}",
-        shim_step.detail
-    );
-    assert_eq!(fs::read_to_string(&rc_file).unwrap(), before);
 }
 
 /// The config hash runs inside the binary now, so init places no shell script.
 #[test]
-fn init_with_aliases_places_no_config_hash_script() {
+fn init_places_no_config_hash_script() {
     let home = scratch_home("config-hash");
-    let outcome = run(&base_paths(&home, Some(ShellKind::Zsh)));
+    let outcome = run(&base_paths(&home));
     assert!(outcome.ok());
     assert!(!home
         .join(".config/playbook/hooks/lib/config-hash.sh")
@@ -1065,7 +951,7 @@ fn binary_clean_init_exits_zero_and_is_idempotent() {
 fn memory_migrate_step_appears_in_reported_steps() {
     // Arrange
     let home = scratch_home("memory-migrate-presence");
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
 
     // Act
     let outcome = run(&paths);
@@ -1088,7 +974,7 @@ fn memory_step_actually_migrates_real_content_to_the_new_root() {
     let mem_dir = claude_home.join("memory");
     std::fs::create_dir_all(&mem_dir).unwrap();
     std::fs::write(mem_dir.join("graph.json"), r#"{"nodes":[]}"#).unwrap();
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
 
     // Act
     let outcome = run(&paths);
@@ -1131,7 +1017,7 @@ fn memory_step_repairs_a_stray_graph_file_at_the_new_root() {
     std::fs::create_dir_all(&new_root).unwrap();
     std::fs::write(new_root.join("graph.json"), r#"{"nodes":[]}"#).unwrap();
     std::fs::write(new_root.join(".migration-complete"), "migrated\n").unwrap();
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
 
     // Act
     let outcome = run(&paths);
@@ -1184,7 +1070,7 @@ fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift(
         &home.join(".bashrc"),
         "export EDITOR=vim\n\n# playbook launchers (cc/ccd)\nsource \"$HOME/.claude/shell/bash/cc.sh\"\n",
     );
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
 
     // Act
     let outcome = run(&paths);
@@ -1200,10 +1086,12 @@ fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift(
             .collect::<Vec<_>>()
     );
 
-    // Doctor Layer 3 shape: the rc file names the new location.
+    // Setup no longer rewrites the old launcher line into a new one (ADR 0044).
     let rc = fs::read_to_string(home.join(".bashrc")).unwrap();
-    assert!(rc.contains("playbook shell-init"));
-    assert!(!rc.contains("$HOME/.claude/shell/bash/cc.sh"));
+    assert_eq!(
+        rc,
+        "export EDITOR=vim\n\n# playbook launchers (cc/ccd)\nsource \"$HOME/.claude/shell/bash/cc.sh\"\n"
+    );
 
     // Doctor Layer 5 shape: the Rust command.
     let settings_path = claude_home.join("settings.json");
@@ -1242,7 +1130,7 @@ fn init_trusts_the_config_dir_and_leaves_siblings_alone() {
     let config_dir = home.join(".config").join("playbook");
 
     // Act
-    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+    let outcome = run(&base_paths(&home));
 
     // Assert
     let step = find_step(&outcome, "trust");
@@ -1261,11 +1149,11 @@ fn a_second_init_changes_nothing_in_claude_json() {
     let home = scratch_home("trust-twice");
     let claude_json = home.join(".claude.json");
     fs::write(&claude_json, "{}").unwrap();
-    run(&base_paths(&home, Some(ShellKind::Bash)));
+    run(&base_paths(&home));
     let first = fs::read(&claude_json).unwrap();
 
     // Act
-    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+    let outcome = run(&base_paths(&home));
 
     // Assert
     assert_eq!(
@@ -1281,7 +1169,7 @@ fn init_never_creates_claude_json() {
     let home = scratch_home("trust-absent");
 
     // Act
-    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+    let outcome = run(&base_paths(&home));
 
     // Assert
     assert_eq!(find_step(&outcome, "trust").status, StepStatus::Skipped);
@@ -1296,7 +1184,7 @@ fn a_malformed_claude_json_warns_and_init_still_succeeds() {
     fs::write(&claude_json, "{ not json").unwrap();
 
     // Act
-    let outcome = run(&base_paths(&home, Some(ShellKind::Bash)));
+    let outcome = run(&base_paths(&home));
 
     // Assert: reported as skipped with the reason, the file untouched.
     let step = find_step(&outcome, "trust");
@@ -1311,7 +1199,7 @@ fn a_malformed_claude_json_warns_and_init_still_succeeds() {
 fn init_warns_when_the_installed_system_prompt_was_edited() {
     // Arrange
     let home = scratch_home("prompt-edited");
-    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    let mut paths = base_paths(&home);
     paths.system_prompt = true;
     let first = run(&paths);
     assert!(first.warnings.is_empty());
@@ -1329,7 +1217,7 @@ fn init_warns_when_the_installed_system_prompt_was_edited() {
 #[test]
 fn the_path_step_puts_the_binary_dir_on_path_and_is_idempotent() {
     let home = scratch_home("path-step");
-    let mut paths = base_paths(&home, Some(ShellKind::Zsh));
+    let mut paths = base_paths(&home);
     paths.path_setup = Some(playbook::init::path::Setup {
         bin_dir: PathBuf::from("/opt/pb/bin"),
         shell: playbook::init::path::PathShell::Zsh,
@@ -1355,7 +1243,7 @@ fn the_path_step_puts_the_binary_dir_on_path_and_is_idempotent() {
 #[test]
 fn without_a_binary_location_the_path_step_is_skipped() {
     let home = scratch_home("path-skip");
-    let outcome = run(&base_paths(&home, Some(ShellKind::Zsh)));
+    let outcome = run(&base_paths(&home));
     assert_eq!(find_step(&outcome, "path").status, StepStatus::Skipped);
     assert!(!home.join(".zshenv").exists());
 }
@@ -1364,7 +1252,7 @@ fn without_a_binary_location_the_path_step_is_skipped() {
 fn a_fresh_init_without_the_statusline_leaves_statusline_out_of_settings() {
     // Arrange: no settings yet, status line answered no.
     let home = scratch_home("no-statusline-fresh");
-    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    let mut paths = base_paths(&home);
     paths.statusline = false;
 
     // Act
@@ -1386,7 +1274,7 @@ fn init_without_the_statusline_keeps_a_custom_command_and_does_not_rewrite_the_o
         &claude_home.join("settings.json"),
         &serde_json::json!({"statusLine": {"type": "command", "command": legacy}}),
     );
-    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    let mut paths = base_paths(&home);
     paths.statusline = false;
 
     // Act: twice, so the three-way merge cannot re-add or change it.
@@ -1406,8 +1294,8 @@ fn init_without_the_statusline_says_an_existing_playbook_status_line_stays() {
     // Arrange: a playbook status line from an earlier init.
     let home = scratch_home("no-statusline-existing");
     let claude_home = claude_home_of(&home);
-    run(&base_paths(&home, Some(ShellKind::Bash)));
-    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    run(&base_paths(&home));
+    let mut paths = base_paths(&home);
     paths.statusline = false;
 
     // Act
@@ -1423,44 +1311,9 @@ fn init_without_the_statusline_says_an_existing_playbook_status_line_stays() {
         .contains("status line not changed"));
 }
 
-#[test]
-fn claude_override_is_written_only_with_consent_and_never_touches_claude_settings() {
-    // Arrange
-    let home = scratch_home("claude-override");
-    let claude_home = claude_home_of(&home);
-    let off = run(&base_paths(&home, Some(ShellKind::Bash)));
-    assert_eq!(
-        find_step(&off, "claude-override").status,
-        StepStatus::Skipped
-    );
-    assert!(!playbook::init::shell_init::claude_override_enabled(&home));
-    let settings_before = std::fs::read_to_string(claude_home.join("settings.json")).ok();
-    let mut paths = base_paths(&home, Some(ShellKind::Bash));
-    paths.claude_override = true;
-
-    // Act
-    let first = run(&paths);
-    let second = run(&paths);
-
-    // Assert
-    assert_eq!(
-        find_step(&first, "claude-override").status,
-        StepStatus::Wired
-    );
-    assert_eq!(
-        find_step(&second, "claude-override").status,
-        StepStatus::AlreadyCorrect
-    );
-    assert!(playbook::init::shell_init::claude_override_enabled(&home));
-    assert_eq!(
-        std::fs::read_to_string(claude_home.join("settings.json")).ok(),
-        settings_before
-    );
-}
-
 #[cfg(unix)]
 #[test]
-fn setup_links_pb_in_the_install_folder_once() {
+fn setup_links_pb_in_the_install_folder_and_writes_no_rc_file() {
     use std::os::unix::fs::PermissionsExt;
     // Arrange: a binary in the install folder and no `pb` anywhere.
     let home = scratch_home("short-name");
@@ -1469,7 +1322,7 @@ fn setup_links_pb_in_the_install_folder_once() {
     let exe = bin.join("playbook");
     write_text(&exe, "#!/bin/sh\n");
     fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
-    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    let mut paths = base_paths(&home);
     paths.short_name = playbook::init::pb_link::Choice::Link;
     paths.pb_target = Some(playbook::init::pb_link::Target {
         exe,
@@ -1491,13 +1344,14 @@ fn setup_links_pb_in_the_install_folder_once() {
         fs::read_link(bin.join("pb")).unwrap(),
         Path::new("playbook")
     );
+    assert!(!home.join(".zshrc").exists() && !home.join(".bashrc").exists());
 }
 
 #[test]
 fn init_records_this_binary_in_the_version_record() {
     // Arrange
     let home = scratch_home("version-record");
-    let paths = base_paths(&home, Some(ShellKind::Bash));
+    let paths = base_paths(&home);
 
     // Act
     let outcome = run(&paths);
@@ -1520,7 +1374,7 @@ fn init_with_the_hooks_left_off_keeps_a_dead_hook_entry() {
         &claude_home.join("settings.json"),
         &json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": dead}]}]}}),
     );
-    let mut paths = base_paths(&home, Some(ShellKind::Bash));
+    let mut paths = base_paths(&home);
     paths.hooks = false;
 
     // Act

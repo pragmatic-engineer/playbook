@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Orchestrates `playbook setup`: composes `merge`, `wire` and `shim`
-//! into one idempotent repair, backing `Command::Init`.
+//! Orchestrates `playbook setup`: composes `merge`, `wire` and the other
+//! parts into one idempotent repair, backing `Command::Init`.
 
 use crate::init::merge;
 use crate::init::migrate;
 use crate::init::path;
-use crate::init::shim::{self, ShellKind};
 use crate::init::system_prompt;
 use crate::init::wire;
 use std::fs;
@@ -16,8 +15,7 @@ use std::path::{Path, PathBuf};
 /// Everything `run` needs to locate and repair a machine's Claude Code
 /// configuration, resolved once by the caller (`main.rs`) so this module
 /// never reads the environment itself and stays trivial to test against a
-/// scratch directory, the same split `init::shim`
-/// already draw between resolving paths and acting on them.
+/// scratch directory.
 pub struct InitPaths {
     /// The installed playbook plugin (`plugin_root::resolve`), whose shipped
     /// skills init records to notice later edits. `None` when not installed.
@@ -28,22 +26,13 @@ pub struct InitPaths {
     pub self_root: Option<PathBuf>,
     /// `$HOME/.claude`, where `settings.json` and the launcher runtime live.
     pub claude_home: PathBuf,
-    /// The user's home directory, for the rc file `shim` wires.
+    /// The user's home directory.
     pub home: PathBuf,
-    /// `None` when `$SHELL` names neither bash nor zsh, in which case the
-    /// shim step is skipped with instructions to source it manually.
-    pub shell_kind: Option<ShellKind>,
     /// Whether the user asked for `prompts/SYSTEM_PROMPT.md` via
     /// `--system-prompt`. False still refreshes an already-installed copy;
     /// see `init::system_prompt` for why installing one unasked would be a
     /// behaviour change rather than a port.
     pub system_prompt: bool,
-    /// Whether the user asked for the shell launcher shim via `--aliases`,
-    /// which `/playbook:setup` forwards. False
-    /// skips the `shim` step entirely: unlike `system_prompt`, there is no
-    /// "refresh an existing copy" case here, since a launcher a user never
-    /// asked for should not be touched at all.
-    pub aliases: bool,
     /// Whether to wire the hook entries into settings.json.
     pub hooks: bool,
     /// Whether init may set or change `statusLine` in settings.json. False
@@ -66,9 +55,6 @@ pub struct InitPaths {
     /// An `--only` run: only the parts that are on run, and the migrations,
     /// the trust entry and the old launcher notes are skipped.
     pub only: bool,
-    /// Whether the user consented to the `claude` shell function: writes
-    /// `launcher.claudeOverride` to playbook's own config, never to Claude Code.
-    pub claude_override: bool,
     /// What the short-name part does: skip, record a no, or link `pb`.
     pub short_name: crate::init::pb_link::Choice,
     /// Where the `pb` link may go. `None` when the binary's location is unknown.
@@ -165,7 +151,7 @@ impl InitOutcome {
 }
 
 /// Run every `init` step against `paths`. Copy steps run first; `settings`
-/// and `shim` only rewrite their file once their copy step is confirmed.
+/// only rewrites its file once its copy step is confirmed.
 pub fn run(paths: &InitPaths) -> InitOutcome {
     let self_root = paths.self_root.as_deref();
     // One stamp for every backup of this run, so a second boundary cannot split them.
@@ -214,10 +200,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let telemetry_step = telemetry_step(paths, epoch);
     // After telemetry, so the service sees the settings that step wrote.
     let service_step = collector_service_step(paths);
-    let override_step = claude_override_step(&paths.home, paths.claude_override);
     let short_name_step = short_name_step(paths);
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
-    let shim_step = rewire_rc_file_step(&paths.home, paths.shell_kind, paths.aliases);
 
     let trust_step = trust_config_dir_step(&paths.home);
 
@@ -228,10 +212,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         telemetry_step,
         service_step,
         attribution_step,
-        override_step,
         short_name_step,
         path_step,
-        shim_step,
     ];
     steps.extend(migrated.steps);
     steps.push(trust_step);
@@ -271,17 +253,11 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     if paths.attribution != crate::init::attribution::Choice::Skip {
         steps.push(attribution_step(paths, epoch));
     }
-    if paths.claude_override {
-        steps.push(claude_override_step(&paths.home, true));
-    }
     if paths.short_name != crate::init::pb_link::Choice::Skip {
         steps.push(short_name_step(paths));
     }
     if paths.path_setup.is_some() {
         steps.push(path_step(&paths.home, paths.path_setup.as_ref()));
-    }
-    if paths.aliases {
-        steps.push(rewire_rc_file_step(&paths.home, paths.shell_kind, true));
     }
     InitOutcome {
         steps,
@@ -351,33 +327,6 @@ pub(crate) fn attribution_step(paths: &InitPaths, epoch: u64) -> StepReport {
         epoch,
         paths.attribution,
     )
-}
-
-/// The claude-override part: records the user's consent in playbook's own
-/// config. Nothing happens unless asked, and nothing in Claude Code changes.
-pub(crate) fn claude_override_step(home: &Path, requested: bool) -> StepReport {
-    if !requested {
-        return StepReport::skipped(
-            "claude-override",
-            "not requested; pass --claude-override to opt in",
-        );
-    }
-    if super::shell_init::claude_override_enabled(home) {
-        return StepReport::already_correct("claude-override", "launcher.claudeOverride is on");
-    }
-    match crate::config::write::set(
-        crate::config::write::Tier::Global,
-        "launcher.claudeOverride",
-        serde_json::Value::Bool(true),
-        home,
-        None,
-    ) {
-        Ok(()) => StepReport::wired(
-            "claude-override",
-            "launcher.claudeOverride set to true; `playbook shell-init` now defines a claude function",
-        ),
-        Err(err) => StepReport::failed("claude-override", format!("could not write config: {err}")),
-    }
 }
 
 /// The short-name part, as `paths.short_name` says.
@@ -910,44 +859,6 @@ pub(crate) fn old_launcher_steps(home: &Path, path: &std::ffi::OsStr) -> Vec<Ste
         .iter()
         .map(|f| StepReport::skipped("old-launcher", crate::doctor::launchers::describe(f)))
         .collect()
-}
-
-/// Patch the rc file. Gated on `aliases`, then `$SHELL`.
-pub(crate) fn rewire_rc_file_step(
-    home: &Path,
-    shell_kind: Option<ShellKind>,
-    aliases: bool,
-) -> StepReport {
-    if !aliases {
-        return StepReport::skipped("shim", "not installed; pass --aliases to opt in");
-    }
-    let Some(shell_kind) = shell_kind else {
-        return StepReport::skipped(
-            "shim",
-            "$SHELL is neither bash nor zsh; add `eval \"$(playbook shell-init)\"` to your rc file by hand",
-        );
-    };
-    match shim::rewire_rc_file(home, shell_kind) {
-        Ok(outcome) if outcome.unwritable => StepReport::skipped(
-            "shim",
-            format!(
-                "{} is not writable; left unchanged, source the launcher there by hand",
-                outcome.rc_file.display()
-            ),
-        ),
-        Ok(outcome) if outcome.appended => StepReport::wired(
-            "shim",
-            format!(
-                "wired `playbook shell-init` in {}",
-                outcome.rc_file.display()
-            ),
-        ),
-        Ok(outcome) => StepReport::already_correct(
-            "shim",
-            format!("{} already loads the launcher", outcome.rc_file.display()),
-        ),
-        Err(err) => StepReport::failed("shim", err.to_string()),
-    }
 }
 
 #[cfg(test)]

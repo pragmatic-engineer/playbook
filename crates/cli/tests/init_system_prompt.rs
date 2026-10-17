@@ -25,7 +25,6 @@
 //! write the developer's real `~/.claude`.
 
 use playbook::init::run::{run, InitOutcome, InitPaths, StepReport, StepStatus};
-use playbook::init::shim::ShellKind;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -67,14 +66,11 @@ fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
         self_root: Some(self_root()),
         claude_home: claude_home_of(home),
         home: home.to_path_buf(),
-        shell_kind: Some(ShellKind::Bash),
         system_prompt,
-        aliases: true,
         hooks: true,
         statusline: true,
         security: false,
         telemetry: false,
-        claude_override: false,
         telemetry_replace_off: false,
         collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,

@@ -1,14 +1,14 @@
 ---
-description: Use on first install or to repair the local setup. Wires safety guards, settings.json, launchers and system prompt.
+description: Use on first install or to repair the local setup. Wires safety guards, settings.json, the pb short name and system prompt.
 allowed-tools: Bash, Read, AskUserQuestion
-argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--aliases|--no-aliases] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--collector-service|--no-collector-service] [--claude-override|--no-claude-override] [--short-name|--no-short-name] [--attribution-off|--no-attribution-off] [--help] [--auto] [--ask]"
+argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--collector-service|--no-collector-service] [--short-name|--no-short-name] [--attribution-off|--no-attribution-off] [--help] [--auto] [--ask]"
 model: haiku
 effort: low
 ---
 
 # Setup
 
-Wire the playbook binary into Claude Code: the safety guards and hooks in settings.json, the status line, PATH, the optional launcher and system prompt, and telemetry for `playbook usage`. Each part is safe to run again and only changes what is missing.
+Wire the playbook binary into Claude Code: the safety guards and hooks in settings.json, the status line, PATH, the system prompt, the `pb` short name, and telemetry for `playbook usage`. Each part is safe to run again and only changes what is missing.
 
 This command is the `playbook setup` binary command in a Claude Code session. It takes the same flags, and its questions match the binary's in text, order and defaults. Only the binary writes files. Never edit `~/.claude/settings.json`, a shell file or the playbook config yourself: every change goes through `playbook setup`, and only after the user said yes to it.
 
@@ -41,7 +41,8 @@ playbook setup --help >/dev/null 2>&1 && echo setup || echo init
 Take `$ARGUMENTS` word by word:
 
 - Drop `--auto` and `--ask`. Step 0 read them, and the binary does not take them.
-- Replace the old names this command used, keeping what they meant: `--install-aliases` becomes `--yes --aliases`, and `--use-system-prompt` becomes `--yes --aliases --system-prompt`. Say so in one line.
+- Replace the old name `--use-system-prompt` with `--yes --system-prompt`. Say so in one line.
+- Drop the retired words `--install-aliases`, `--aliases`, `--no-aliases`, `--claude-override` and `--no-claude-override`, and the names `aliases` and `claude-override` inside an `--only` value. Say in one line that they are retired and that `playbook cc` and `pb cc` need no shell line (ADR 0044). When an `--only` value had only retired names, stop there and run nothing.
 - Every other word must be a flag from the Flags table below, or the value after `--only` or `--explain`. A value is part names from the Questions table or `security`, joined by commas. When a word is neither, stop with one line that names it and points to `/playbook:setup --help`. Ask nothing and run nothing.
 
 The rest of this file calls the kept words the arguments. A part flag is any flag in the Flags table from `--hooks` to `--no-attribution-off`. When you build a command, put each argument in single quotes.
@@ -127,27 +128,23 @@ The same flags as `playbook setup`, with the same text as `playbook setup --help
 | `--no-security` | Do not apply the security defaults, even when `security.defaults` is true |
 | `--path` | Put the playbook binary on PATH for every shell start |
 | `--no-path` | Do not edit shell files for PATH |
-| `--aliases` | Add the `playbook` cd wrapper (follows `playbook cc` into a worktree) to your rc file |
-| `--no-aliases` | Do not install the launcher |
 | `--system-prompt` | Install the playbook system prompt (an existing copy is refreshed either way) |
 | `--no-system-prompt` | Do not install the system prompt |
 | `--telemetry` | Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry` |
 | `--no-telemetry` | Do not write telemetry variables into settings.json |
 | `--collector-service` | Keep the usage collector running in a per-user background service (launchd agent or systemd user unit), when telemetry points at it |
 | `--no-collector-service` | Do not install the background service for the usage collector |
-| `--claude-override` | Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config) |
-| `--no-claude-override` | Do not turn on the `claude` shell function |
 | `--short-name` | Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free |
 | `--no-short-name` | Do not add the `pb` short name |
 | `--attribution-off` | Turn off the commit, PR and session link attribution Claude Code adds (sets `attribution` in settings.json) |
 | `--no-attribution-off` | Do not set or change attribution in settings.json |
-| `--only <PART>...` | Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, collector-service, claude-override, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on |
+| `--only <PART>...` | Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on |
 | `-y`, `--yes`, `--defaults` | Never ask: use the default for every part you did not answer with a flag |
 | `--dry-run` | Print what would change for each part and change nothing |
 | `--explain [<PART>]` | Describe a part, or every part when none is named, and change nothing |
 | `-h`, `--help` | Print help (see a summary with '-h') |
 
-This command also reads `--auto` and `--ask` (the run mode, Step 0), and the old names `--install-aliases` and `--use-system-prompt` (Step 2), which it turns into the flags they stood for. It passes none of these four to the binary.
+This command also reads `--auto` and `--ask` (the run mode, Step 0), the old name `--use-system-prompt`, which it turns into the flags it stood for, and the retired launcher words (Step 2), which it drops. It passes none of these to the binary.
 
 ## Questions
 
@@ -158,12 +155,10 @@ The questions `playbook setup` asks in a terminal, in its order, with its defaul
 | 1 | `hooks` | Hooks | Wire the playbook hooks into ~/.claude/settings.json? (see them with `playbook hooks list`) | Yes | No hooks are added. The safety guards, session helpers and usage warm-up do not run. |
 | 2 | `statusline` | Status line | Set the status line in ~/.claude/settings.json to `playbook statusline`? | Yes | Your status line stays as it is. |
 | 3 | `path` | PATH | Add the playbook binary's directory to PATH in your shell startup files (~/.zshenv for zsh, ~/.bashrc and a login file for bash)? | Yes | Your shell files are not touched. Hooks may not find playbook unless it is already on PATH. |
-| 4 | `aliases` | Launcher | Add one line to your shell rc file (~/.zshrc or ~/.bashrc) that defines a `playbook` function that follows `playbook cc` and `playbook ccd` into a worktree? | No | No line is added to your rc file, so `playbook cc` will not follow you into a new worktree. |
-| 5 | `system-prompt` | Prompt | Copy the playbook system prompt to ~/.config/playbook/prompts/SYSTEM_PROMPT.md? | No | No file is copied. The launchers start without the playbook prompt. |
-| 6 | `telemetry` | Telemetry | Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting that `playbook setup` will not change) | Yes | No variables are written. `playbook usage` reads transcripts instead. |
-| 7 | `collector-service` | Collector | Keep the usage collector (`playbook usage collect`) running in the background, so telemetry has a receiver after every login? This installs a per-user service: a launchd agent in ~/Library/LaunchAgents on macOS, a systemd user unit on Linux. It acts only when telemetry points at the playbook collector. | Yes | No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`. |
-| 8 | `claude-override` | claude | Make a plain `claude` load the playbook system prompt every time (it replaces Claude Code's built-in prompt), and pass calls that use their own flags straight to Claude Code? This sets `launcher.claudeOverride` in ~/.config/playbook. No Claude Code setting or memory is changed. | No | `claude` stays the plain Claude Code command. |
-| 9 | `short-name` | Short name | Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists. | No | No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing. |
-| 10 | `attribution-off` | Attribution | Turn off the attribution Claude Code adds to commits and pull requests (the Co-Authored-By trailer, the generated-by line and the claude.ai session link) by setting `attribution` in ~/.claude/settings.json? | Yes | Claude Code keeps adding its attribution. The commit-message-sanitizer hook still strips it from commits and PRs when the hooks are on. |
+| 4 | `system-prompt` | Prompt | Copy the playbook system prompt to ~/.config/playbook/prompts/SYSTEM_PROMPT.md? | No | No file is copied. The launchers start without the playbook prompt. |
+| 5 | `telemetry` | Telemetry | Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting that `playbook setup` will not change) | Yes | No variables are written. `playbook usage` reads transcripts instead. |
+| 6 | `collector-service` | Collector | Keep the usage collector (`playbook usage collect`) running in the background, so telemetry has a receiver after every login? This installs a per-user service: a launchd agent in ~/Library/LaunchAgents on macOS, a systemd user unit on Linux. It acts only when telemetry points at the playbook collector. | Yes | No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`. |
+| 7 | `short-name` | Short name | Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists. | No | No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing. |
+| 8 | `attribution-off` | Attribution | Turn off the attribution Claude Code adds to commits and pull requests (the Co-Authored-By trailer, the generated-by line and the claude.ai session link) by setting `attribution` in ~/.claude/settings.json? | Yes | Claude Code keeps adding its attribution. The commit-message-sanitizer hook still strips it from commits and PRs when the hooks are on. |
 
 The security part is never asked about, in a terminal or here. It runs only with `--security` or when `security.defaults` is true.

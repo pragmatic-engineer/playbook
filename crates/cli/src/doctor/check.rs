@@ -272,18 +272,10 @@ fn layer3(env: &Env) -> Row {
         return Row::new(
             "3",
             Level::Info,
-            "outdated launcher line (run `playbook setup`)",
+            "old launcher line in the rc file; `playbook cc` no longer needs it (ADR 0044)",
         );
     }
-    if text.contains("playbook shell-init") && on_path(env, "playbook").is_some() {
-        return Row::new("3", Level::Pass, "launcher installed");
-    }
-    Row::new(
-        "3",
-        Level::Info,
-        "launcher not installed (opt-in; run /playbook:setup)",
-    )
-    .hint("run /playbook:setup and choose Yes for the launcher question")
+    Row::new("3", Level::Pass, "no shell line needed for `playbook cc`")
 }
 
 fn layer4(env: &Env) -> Row {

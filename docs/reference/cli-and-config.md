@@ -1331,13 +1331,13 @@ Create the shared settings template from a live settings.json
 
 Install or repair your local Claude Code setup
 
-Safe to run again: it only touches what is missing or out of date. In a terminal it asks about each optional part (hooks, status line, PATH, the `playbook cc` launcher, the system prompt) unless you answer with a flag. Each part has `--x` and `--no-x`. With `--yes`, unanswered parts use their defaults: hooks, the status line and PATH on, the launcher and system prompt off. Telemetry is on by default too: the question defaults to yes and `--yes` is a yes, but `--yes` alone never replaces an off switch you set. Without a terminal and without `--yes`, hooks, the status line and telemetry stay off unless you pass their flag. `--only telemetry` (or a bare `--telemetry`) runs just that part; `--only` takes any parts and leaves everything else alone.
+Safe to run again: it only touches what is missing or out of date. In a terminal it asks about each optional part (hooks, status line, PATH, the system prompt, the `pb` short name) unless you answer with a flag. Each part has `--x` and `--no-x`. With `--yes`, unanswered parts use their defaults: hooks, the status line and PATH on, the system prompt and `pb` off. Telemetry is on by default too: the question defaults to yes and `--yes` is a yes, but `--yes` alone never replaces an off switch you set. Without a terminal and without `--yes`, hooks, the status line and telemetry stay off unless you pass their flag. `--only telemetry` (or a bare `--telemetry`) runs just that part; `--only` takes any parts and leaves everything else alone.
 
 The security defaults (permissions rules) are never asked about and stay off unless you pass `--security` or set `security.defaults` to true. Without them, `setup` leaves any permissions you already have untouched.
 
 Before it asks anything, setup prints a plan of each part and the files it edits. `--dry-run` shows what would change on your machine and changes nothing. `--explain` describes a part, or every part, and changes nothing.
 
-Example: `playbook setup --no-hooks --aliases`
+Example: `playbook setup --no-hooks --system-prompt`
 
 - `--hooks`: Wire every playbook hook into settings.json (guards, session and worktree hooks)
 - `--no-hooks`: Add no playbook hook entries, including the guards in the shared settings
@@ -1347,21 +1347,17 @@ Example: `playbook setup --no-hooks --aliases`
 - `--no-security`: Do not apply the security defaults, even when `security.defaults` is true
 - `--path`: Put the playbook binary on PATH for every shell start
 - `--no-path`: Do not edit shell files for PATH
-- `--aliases`: Add the `playbook` cd wrapper (follows `playbook cc` into a worktree) to your rc file
-- `--no-aliases`: Do not install the launcher
 - `--system-prompt`: Install the playbook system prompt (an existing copy is refreshed either way)
 - `--no-system-prompt`: Do not install the system prompt
 - `--telemetry`: Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
 - `--no-telemetry`: Do not write telemetry variables into settings.json
 - `--collector-service`: Keep the usage collector running in a per-user background service (launchd agent or systemd user unit), when telemetry points at it
 - `--no-collector-service`: Do not install the background service for the usage collector
-- `--claude-override`: Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config)
-- `--no-claude-override`: Do not turn on the `claude` shell function
 - `--short-name`: Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
 - `--no-short-name`: Do not add the `pb` short name
 - `--attribution-off`: Turn off the commit, PR and session link attribution Claude Code adds (sets `attribution` in settings.json)
 - `--no-attribution-off`: Do not set or change attribution in settings.json
-- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, collector-service, claude-override, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
+- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing

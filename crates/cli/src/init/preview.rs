@@ -185,9 +185,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         self_root: paths.self_root.clone(),
         claude_home: sh.join(".claude"),
         home: sh.clone(),
-        shell_kind: paths.shell_kind,
         system_prompt: false,
-        aliases: paths.aliases,
         hooks: paths.hooks,
         statusline: paths.statusline,
         security: paths.security,
@@ -196,7 +194,6 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         // Previewed from the files below, so the dry run installs nothing.
         collector_service: crate::init::collector_service::Choice::Skip,
         only: paths.only,
-        claude_override: paths.claude_override,
         short_name: paths.short_name,
         pb_target: paths.pb_target.clone(),
         // A no is previewed as nothing to do, so the dry run records nothing.
@@ -214,13 +211,10 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
     let (settings_step, hooks_step) = run::settings_and_hooks_steps(&scratch_paths, epoch);
     let telemetry_step = run::telemetry_step(&scratch_paths, epoch);
     let attribution_step = run::attribution_step(&scratch_paths, epoch);
-    let override_step = run::claude_override_step(&sh, scratch_paths.claude_override);
     let short_line =
         crate::init::pb_link::preview(scratch_paths.short_name, scratch_paths.pb_target.as_ref());
     let path_step = run::path_step(&sh, scratch_paths.path_setup.as_ref());
     let after_path = rc_snapshot(&sh);
-    let shim_step = run::rewire_rc_file_step(&sh, scratch_paths.shell_kind, scratch_paths.aliases);
-    let after_shim = rc_snapshot(&sh);
     let before_rc = rc_snapshot(&paths.home);
 
     let settings_rel = ".claude/settings.json";
@@ -241,11 +235,9 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("statusline", choices.statusline),
         ("security", choices.security),
         ("path", choices.path),
-        ("aliases", choices.aliases),
         ("system-prompt", choices.system_prompt),
         ("telemetry", choices.telemetry),
         ("collector-service", choices.collector_service),
-        ("claude-override", choices.claude_override),
         ("short-name", choices.short_name),
         ("attribution-off", choices.attribution_off),
     ];
@@ -294,13 +286,8 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
                     || crate::init::collector_service::telemetry_points_here(&paths.home),
                 &crate::init::collector_service::program(),
             )],
-            "claude-override" => vec![format!(
-                "~/.config/playbook config: {}",
-                override_step.detail
-            )],
             "short-name" => vec![format!("pb: {short_line}")],
             "path" => file_lines(&before_rc, &after_path, &path_step),
-            "aliases" => file_lines(&after_path, &after_shim, &shim_step),
             _ => vec![system_prompt_line(paths)],
         };
         for line in lines {

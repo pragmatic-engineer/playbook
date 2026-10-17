@@ -25,7 +25,7 @@ Which one? Choose skills only if you want to read the skills and nothing else ru
 | Tool | Status | Why |
 |---|---|---|
 | `claude` | only for the skills | The skills are a Claude Code plugin. The binary, hooks, guards and settings do not need it. |
-| `bash` or `zsh` | required | The `playbook` shell wrapper works in both. |
+| `bash` or `zsh` | required | The installer runs in bash, and the `path` part edits a bash or zsh rc file. |
 | `git`, `shasum` | required | Used by hooks and the installer. |
 | `gh` | optional | Status line PR and CI info, and the build attestation check. |
 | `agent-browser` | optional | Browser automation `/playbook:plan` uses for web-only tickets. |
@@ -42,7 +42,7 @@ It installs only the `playbook` binary, into `PLAYBOOK_BIN_DIR` (default `~/.loc
 
 When it replaces an older binary, it prints `playbook updated from A to B.`, then the breaking changes of the new release if there are any, then a link to the full release notes. Before 1.0 a breaking change can ship in any release, so read them.
 
-Then it asks "Run playbook setup now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the launcher and the system prompt (Enter means yes for these two), then runs `playbook setup --yes`, which adds the hook entries, the status line and the telemetry variables (a collector on this machine) to `settings.json`. On no, or with no terminal and no `--yes`, it skips `setup` and prints the command to run later, with any `--aliases` or `--system-prompt` you passed. Open a new terminal afterward.
+Then it asks "Run playbook setup now?". Only a typed `y` or `yes` counts, so a bare Enter is a no. On yes it asks about the system prompt (Enter means yes), then runs `playbook setup --yes`, which adds the hook entries, the status line and the telemetry variables (a collector on this machine) to `settings.json`. On no, or with no terminal and no `--yes`, it skips `setup` and prints the command to run later, with `--system-prompt` if you passed it. Open a new terminal afterward.
 
 Pass `--yes` to say yes to every question, including `playbook setup`. Flags go after `-s --` when piping:
 
@@ -50,12 +50,11 @@ Pass `--yes` to say yes to every question, including `playbook setup`. Flags go 
 |---|---|
 | `--yes`, `-y` | Say yes to every question, including running `playbook setup`. |
 | `--no-init` | Install the binary only. Do not ask about `playbook setup`. |
-| `--aliases` | Add the `playbook` cd wrapper to your rc file without asking. |
-| `--system-prompt` | Install the system prompt without asking (implies `--aliases`). |
-| `--binary-only` | Still offers `playbook setup`, but skips the launcher and system prompt questions. |
+| `--system-prompt` | Install the system prompt without asking. |
+| `--binary-only` | Still offers `playbook setup`, but skips the system prompt question. |
 | `--ref <tag>` | Release tag, same as `PLAYBOOK_REF`. |
 
-`--skip-plugin`, `--no-setup`, `--skip-deps` and `--skip-shell` are accepted and ignored, so older commands keep working. `--skills-only` is gone and exits with the plugin commands. The other `setup` options (`--claude-override`, `--short-name`) belong to `playbook setup`; run it yourself to pass them, and install.sh also links `pb` to `playbook` when the name is free.
+`--skip-plugin`, `--no-setup`, `--skip-deps`, `--skip-shell` and `--aliases` are accepted and ignored, so older commands keep working. `--aliases` prints a warning, because `playbook cc` and `pb cc` need no shell line (ADR 0044). `--skills-only` is gone and exits with the plugin commands. The other `setup` options, such as `--short-name`, belong to `playbook setup`; run it yourself to pass them, and install.sh also links `pb` to `playbook` when the name is free.
 
 Pin a version with `PLAYBOOK_REF`:
 
@@ -200,7 +199,7 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 ## Setup flags
 
-`playbook setup` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--aliases`, `--system-prompt`, `--telemetry`, `--collector-service`, `--claude-override`, `--short-name` and `--attribution-off`, each with a `--no-` form. With `--yes` or in a terminal, hooks, status line, `PATH`, telemetry, the collector service and attribution-off are on by default. Without a terminal and without `--yes`, hooks, the status line, telemetry, the collector service and attribution-off stay off unless their flag is passed. `--only <part>[,<part>]` runs just the named parts, so `playbook setup --only telemetry` turns telemetry on and touches nothing else. A bare `--telemetry` (no `--yes` and no other part flag) means the same. The permissions rules (`--security`), launcher and system prompt are off.
+`playbook setup` has one flag pair per part: `--hooks`, `--statusline`, `--security`, `--path`, `--system-prompt`, `--telemetry`, `--collector-service`, `--short-name` and `--attribution-off`, each with a `--no-` form. `--aliases` and `--claude-override` are retired: setup accepts them, prints a note and does nothing. With `--yes` or in a terminal, hooks, status line, `PATH`, telemetry, the collector service and attribution-off are on by default. Without a terminal and without `--yes`, hooks, the status line, telemetry, the collector service and attribution-off stay off unless their flag is passed. `--only <part>[,<part>]` runs just the named parts, so `playbook setup --only telemetry` turns telemetry on and touches nothing else. A bare `--telemetry` (no `--yes` and no other part flag) means the same. The permissions rules (`--security`), launcher and system prompt are off.
 
 ## Skills without the binary
 

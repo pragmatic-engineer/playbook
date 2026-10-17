@@ -213,7 +213,7 @@ fn recording_stub(work: &Work) -> (PathBuf, PathBuf) {
     shift
     printf '%s\n' "$@" > "{}"
     if [ "${{1:-}}" = "--help" ]; then
-      printf -- '--aliases\n--system-prompt\n'
+      printf -- '--system-prompt\n'
       exit 0
     fi
     home="${{CLAUDE_HOME:-$HOME/.claude}}"
@@ -249,7 +249,7 @@ fn a_binary_with_setup_runs_setup_and_never_init() {
   setup)
     shift
     if [ "${{1:-}}" = "--help" ]; then
-      printf 'Usage: playbook setup [OPTIONS]\n  --aliases\n  --system-prompt\n  --yes\n'
+      printf 'Usage: playbook setup [OPTIONS]\n  --system-prompt\n  --yes\n'
       exit 0
     fi
     printf '%s\n' "$@" > "{argv}"
@@ -265,13 +265,13 @@ exit 0
             init = init_calls.display()
         ),
     );
-    let (rc, home, log) = local_install(&work, &dir, &["--yes", "--aliases"], "setup");
+    let (rc, home, log) = local_install(&work, &dir, &["--yes", "--system-prompt"], "setup");
     assert_eq!(rc, 0, "{log}");
     assert!(log.contains("Running playbook setup"), "{log}");
     assert!(home.join(".claude/settings.json").exists(), "{log}");
     let got = fs::read_to_string(&argv).unwrap_or_default();
     assert!(
-        got.contains("--aliases") && got.contains("--yes"),
+        got.contains("--system-prompt") && got.contains("--yes"),
         "setup received: '{got}'"
     );
     assert!(
@@ -281,22 +281,24 @@ exit 0
 }
 
 #[test]
-fn aliases_and_system_prompt_flags_are_forwarded_to_init() {
+fn the_system_prompt_flag_is_forwarded_and_the_retired_aliases_flag_is_not() {
     let work = Work::new("bp-forward");
     let (stub, argv) = recording_stub(&work);
-    local_install(
+    let (rc, _, log) = local_install(
         &work,
         &stub,
         &["--yes", "--aliases", "--system-prompt"],
         "fwd",
     );
+    assert_eq!(rc, 0, "{log}");
+    assert!(log.contains("--aliases is retired"), "{log}");
     let got = fs::read_to_string(&argv).unwrap_or_default();
-    assert!(got.contains("--aliases"), "init received: '{got}'");
+    assert!(!got.contains("--aliases"), "init received: '{got}'");
     assert!(got.contains("--system-prompt"), "init received: '{got}'");
 }
 
 #[test]
-fn binary_only_does_not_opt_in_to_the_launcher_or_system_prompt() {
+fn binary_only_does_not_opt_in_to_the_system_prompt() {
     let work = Work::new("bp-binonly");
     let (stub, argv) = recording_stub(&work);
     let (rc, _, log) = local_install(&work, &stub, &["--yes", "--binary-only"], "bo");
@@ -382,7 +384,7 @@ fn with_no_yes_and_no_terminal_init_is_not_run_and_its_command_is_printed() {
 }
 
 #[test]
-fn requested_wrapper_flags_are_kept_in_the_printed_init_command() {
+fn a_requested_system_prompt_is_kept_in_the_printed_init_command() {
     let work = Work::new("bp-noconsent-flags");
     let (stub, argv) = recording_stub(&work);
 
@@ -393,7 +395,7 @@ fn requested_wrapper_flags_are_kept_in_the_printed_init_command() {
     assert!(out.status.success(), "{text}");
     assert!(!argv.exists(), "init ran without a yes: {text}");
     assert!(
-        text.contains("Run: playbook init --aliases --system-prompt"),
+        text.contains("Run: playbook init --system-prompt "),
         "{text}"
     );
 }

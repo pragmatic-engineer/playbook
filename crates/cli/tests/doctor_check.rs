@@ -293,14 +293,14 @@ fn l2_the_backstop_is_checked_on_posttooluse() {
 fn l3_and_l4_are_opt_in_and_never_fail() {
     let b = Box::new("l34");
     let rows = b.run(&[], "/bin/zsh", None);
-    assert_eq!(layer(&rows, "3")[0]["level"], "INFO");
+    assert_eq!(layer(&rows, "3")[0]["level"], "PASS");
     assert_eq!(layer(&rows, "4")[0]["level"], "INFO");
     let rows = b.run(&[], "/usr/bin/fish", None);
     assert!(text(&layer(&rows, "3")).contains("shell not detected"));
 }
 
 #[test]
-fn l3_passes_with_the_shell_init_line_and_a_binary_on_path() {
+fn l3_passes_with_an_old_shell_init_line() {
     let b = Box::new("l3p");
     fs::write(b.home().join(".zshrc"), "eval \"$(playbook shell-init)\"\n").unwrap();
     let bin = b.stub("bin1", "0.19.0", true);
@@ -309,7 +309,7 @@ fn l3_passes_with_the_shell_init_line_and_a_binary_on_path() {
 }
 
 #[test]
-fn l3_an_old_source_line_reads_as_outdated() {
+fn l3_an_old_source_line_is_reported_as_not_needed() {
     let b = Box::new("l3o");
     fs::write(
         b.home().join(".zshrc"),
@@ -317,7 +317,8 @@ fn l3_an_old_source_line_reads_as_outdated() {
     )
     .unwrap();
     let t = text(&layer(&b.run(&[], "/bin/zsh", None), "3"));
-    assert!(t.contains("outdated launcher line"), "{t}");
+    assert!(t.contains("old launcher line"), "{t}");
+    assert!(!t.contains("playbook setup"), "{t}");
 }
 
 #[test]

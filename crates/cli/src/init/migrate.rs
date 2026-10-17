@@ -478,18 +478,10 @@ fn remove_config_hash_script(ctx: &Ctx) -> Outcome {
     ))
 }
 
-fn shell_init_rc_line(ctx: &Ctx) -> Outcome {
-    match crate::init::shim::upgrade_legacy_rc_files(&ctx.home) {
-        Ok(files) if files.is_empty() => Outcome::Quiet,
-        Ok(files) => Outcome::Repeat(StepReport::wired(
-            "shell-init",
-            format!(
-                "{} now loads the launcher with `playbook shell-init`",
-                join_paths(&files)
-            ),
-        )),
-        Err(err) => Outcome::Failed(StepReport::failed("shell-init", err.to_string())),
-    }
+/// Retired by ADR 0044: setup no longer writes a shell line, so the legacy
+/// `source` lines are no longer rewritten to one. Migration 0018 removes them.
+fn shell_init_rc_line(_: &Ctx) -> Outcome {
+    Outcome::Quiet
 }
 
 fn statusline_rust_command_pending(ctx: &Ctx) -> Option<String> {
@@ -503,14 +495,9 @@ fn statusline_rust_command_pending(ctx: &Ctx) -> Option<String> {
     .then(|| "statusLine.command in settings.json still runs the old script".to_string())
 }
 
-fn shell_init_rc_line_pending(ctx: &Ctx) -> Option<String> {
-    let files = crate::init::shim::legacy_rc_files(&ctx.home);
-    (!files.is_empty()).then(|| {
-        format!(
-            "{} still loads the launcher the old way",
-            join_paths(&files)
-        )
-    })
+/// Retired with `shell_init_rc_line`: nothing to report.
+fn shell_init_rc_line_pending(_: &Ctx) -> Option<String> {
+    None
 }
 
 fn join_paths(files: &[PathBuf]) -> String {
@@ -1554,7 +1541,11 @@ mod tests {
             command("0006-statusline-rust-command"),
             Some("playbook setup --statusline")
         );
-        assert_eq!(command("0007-shell-init-rc-line"), Some("playbook setup"));
+        assert_eq!(
+            command("0007-shell-init-rc-line"),
+            None,
+            "retired by ADR 0044"
+        );
         assert_eq!(
             command(DEAD_HOOKS_MIGRATION),
             Some("playbook setup --hooks")

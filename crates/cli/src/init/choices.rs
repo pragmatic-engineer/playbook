@@ -35,11 +35,11 @@ pub struct Flags {
     /// Do not edit shell files for PATH
     #[arg(long, overrides_with = "path")]
     pub no_path: bool,
-    /// Add the `playbook` cd wrapper (follows `playbook cc` into a worktree) to your rc file
-    #[arg(long, overrides_with = "no_aliases")]
+    /// Retired: setup no longer writes a shell rc line (ADR 0044). Accepted and ignored until 1.0
+    #[arg(long, hide = true, overrides_with = "no_aliases")]
     pub aliases: bool,
-    /// Do not install the launcher
-    #[arg(long, overrides_with = "aliases")]
+    /// Retired with `--aliases`
+    #[arg(long, hide = true, overrides_with = "aliases")]
     pub no_aliases: bool,
     /// Install the playbook system prompt (an existing copy is refreshed either way)
     #[arg(long, overrides_with = "no_system_prompt")]
@@ -59,11 +59,11 @@ pub struct Flags {
     /// Do not install the background service for the usage collector
     #[arg(long, overrides_with = "collector_service")]
     pub no_collector_service: bool,
-    /// Define a `claude` shell function that loads the playbook system prompt for a plain session (sets `launcher.claudeOverride` in playbook's config)
-    #[arg(long, overrides_with = "no_claude_override")]
+    /// Retired: setup no longer defines a `claude` shell function (ADR 0044). Accepted and ignored until 1.0
+    #[arg(long, hide = true, overrides_with = "no_claude_override")]
     pub claude_override: bool,
-    /// Do not turn on the `claude` shell function
-    #[arg(long, overrides_with = "claude_override")]
+    /// Retired with `--claude-override`
+    #[arg(long, hide = true, overrides_with = "claude_override")]
     pub no_claude_override: bool,
     /// Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
     #[arg(long, overrides_with = "no_short_name")]
@@ -77,7 +77,7 @@ pub struct Flags {
     /// Do not set or change attribution in settings.json
     #[arg(long, overrides_with = "attribution_off")]
     pub no_attribution_off: bool,
-    /// Run only these parts (comma separated: hooks, statusline, security, path, aliases, system-prompt, telemetry, collector-service, claude-override, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
+    /// Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
     #[arg(long, value_name = "PART", value_delimiter = ',', num_args = 1..)]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
@@ -98,11 +98,9 @@ pub struct Choices {
     pub statusline: bool,
     pub security: bool,
     pub path: bool,
-    pub aliases: bool,
     pub system_prompt: bool,
     pub telemetry: bool,
     pub collector_service: bool,
-    pub claude_override: bool,
     pub short_name: bool,
     pub attribution_off: bool,
 }
@@ -123,15 +121,43 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
         "statusline" => (flags.statusline, flags.no_statusline),
         "security" => (flags.security, flags.no_security),
         "path" => (flags.path, flags.no_path),
-        "aliases" => (flags.aliases, flags.no_aliases),
         "system-prompt" => (flags.system_prompt, flags.no_system_prompt),
         "telemetry" => (flags.telemetry, flags.no_telemetry),
         "collector-service" => (flags.collector_service, flags.no_collector_service),
-        "claude-override" => (flags.claude_override, flags.no_claude_override),
         "short-name" => (flags.short_name, flags.no_short_name),
         "attribution-off" => (flags.attribution_off, flags.no_attribution_off),
         _ => return None,
     })
+}
+
+/// The part names setup took before ADR 0044 and now ignores.
+pub const RETIRED_PARTS: [&str; 2] = ["aliases", "claude-override"];
+
+/// One stderr line per retired flag or `--only` name in use, for a terminal.
+pub fn retired_notes(flags: &Flags) -> Vec<String> {
+    let set_by_flag = [
+        flags.aliases || flags.no_aliases,
+        flags.claude_override || flags.no_claude_override,
+    ];
+    RETIRED_PARTS
+        .iter()
+        .zip(set_by_flag)
+        .filter(|(id, flag)| *flag || flags.only.iter().any(|n| n == *id))
+        .map(|(id, _)| {
+            format!(
+                "playbook setup: `{id}` is retired and does nothing; `playbook cc` and `pb cc` need no shell line (ADR 0044)"
+            )
+        })
+        .collect()
+}
+
+/// Whether `--only` names only retired parts, so setup has nothing to run.
+pub fn only_retired(flags: &Flags) -> bool {
+    !flags.only.is_empty()
+        && flags
+            .only
+            .iter()
+            .all(|n| RETIRED_PARTS.contains(&n.as_str()))
 }
 
 /// The parts `--only` selects. A bare `--telemetry` (no other part flag and
@@ -152,8 +178,11 @@ pub fn only_parts(flags: &Flags) -> Vec<String> {
 /// The choices for an `--only` run: the named parts on, every other part off.
 /// `Ok(None)` when `--only` is not in play.
 pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
-    let named = only_parts(flags);
-    if named.is_empty() {
+    let named: Vec<String> = only_parts(flags)
+        .into_iter()
+        .filter(|n| !RETIRED_PARTS.contains(&n.as_str()))
+        .collect();
+    if named.is_empty() && flags.only.is_empty() {
         return Ok(None);
     }
     let valid: Vec<&'static str> = catalog::ids()
@@ -175,7 +204,7 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         if !chosen && on && !flags.only.is_empty() {
             return Err(format!(
                 "--{id} is not in --only {}; add it to --only or drop the flag",
-                named.join(",")
+                flags.only.join(",")
             ));
         }
     }
@@ -185,11 +214,9 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         statusline: has("statusline"),
         security: has("security"),
         path: has("path"),
-        aliases: has("aliases"),
         system_prompt: has("system-prompt"),
         telemetry: has("telemetry"),
         collector_service: has("collector-service"),
-        claude_override: has("claude-override"),
         short_name: has("short-name"),
         attribution_off: has("attribution-off"),
     }))
@@ -301,12 +328,6 @@ pub fn resolve_with(
         ),
         security: pick(flags.security, flags.no_security).unwrap_or(security_config),
         path: decide(flags.path, flags.no_path, catalog::question("path"), true),
-        aliases: decide(
-            flags.aliases,
-            flags.no_aliases,
-            catalog::question("aliases"),
-            false,
-        ),
         system_prompt: decide(
             flags.system_prompt,
             flags.no_system_prompt,
@@ -324,12 +345,6 @@ pub fn resolve_with(
             flags.no_collector_service,
             catalog::question("collector-service"),
             settings_default,
-        ),
-        claude_override: decide(
-            flags.claude_override,
-            flags.no_claude_override,
-            catalog::question("claude-override"),
-            false,
         ),
         short_name: decide(
             flags.short_name,
@@ -359,7 +374,6 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
         (flags.hooks, flags.no_hooks),
         (flags.statusline, flags.no_statusline),
         (flags.path, flags.no_path),
-        (flags.aliases, flags.no_aliases),
         (flags.system_prompt, flags.no_system_prompt),
         (flags.telemetry, flags.no_telemetry),
         (flags.collector_service, flags.no_collector_service),
@@ -392,7 +406,6 @@ mod tests {
             hooks: true,
             no_statusline: true,
             path: true,
-            no_aliases: true,
             system_prompt: true,
             no_telemetry: true,
             no_collector_service: true,
@@ -443,11 +456,9 @@ mod tests {
                 statusline: false,
                 security: false,
                 path: true,
-                aliases: false,
                 system_prompt: false,
                 telemetry: false,
                 collector_service: false,
-                claude_override: false,
                 short_name: false,
                 attribution_off: false
             }
@@ -458,7 +469,7 @@ mod tests {
     fn a_flag_wins_and_is_never_asked() {
         let flags = Flags {
             no_hooks: true,
-            aliases: true,
+            path: true,
             yes: false,
             ..Flags::default()
         };
@@ -468,11 +479,11 @@ mod tests {
             d
         });
         assert!(!c.hooks);
-        assert!(c.aliases);
-        assert_eq!(asked.len(), 8, "{asked:?}");
+        assert!(c.path);
+        assert_eq!(asked.len(), 6, "{asked:?}");
         assert!(asked
             .iter()
-            .all(|q| !q.contains("hooks") && !q.contains("cd wrapper")));
+            .all(|q| !q.contains("hooks") && q != catalog::question("path")));
     }
 
     #[test]
@@ -551,7 +562,7 @@ mod tests {
             q.contains("hooks")
         });
         assert!(c.hooks);
-        assert!(!c.statusline && !c.path && !c.aliases && !c.system_prompt);
+        assert!(!c.statusline && !c.path && !c.system_prompt);
     }
 
     #[test]
@@ -561,7 +572,7 @@ mod tests {
             ..Flags::default()
         };
         let c = resolve(&flags, true, false, &mut never);
-        assert!(c.hooks && c.statusline && c.path && !c.aliases && !c.system_prompt);
+        assert!(c.hooks && c.statusline && c.path && !c.system_prompt);
     }
 
     #[test]
@@ -649,15 +660,55 @@ mod tests {
                 statusline: false,
                 security: false,
                 path: false,
-                aliases: false,
                 system_prompt: false,
                 telemetry: true,
                 collector_service: false,
-                claude_override: false,
                 short_name: false,
                 attribution_off: false
             }
         );
+    }
+
+    #[test]
+    fn the_retired_parts_are_accepted_ignored_and_noted() {
+        let flags = Flags {
+            only: vec!["aliases".into()],
+            claude_override: true,
+            ..Flags::default()
+        };
+
+        let c = only_choices(&flags).unwrap().unwrap();
+        let notes = retired_notes(&flags);
+
+        assert!(!c.hooks && !c.path && !c.system_prompt && !c.short_name);
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(notes[0].contains("`aliases` is retired") && notes[0].contains("ADR 0044"));
+        assert!(notes[1].contains("`claude-override` is retired"));
+        assert!(retired_notes(&Flags::default()).is_empty());
+        let no_flag = Flags {
+            no_aliases: true,
+            ..Flags::default()
+        };
+        assert_eq!(retired_notes(&no_flag).len(), 1);
+        assert!(resolve(&no_flag, false, false, &mut never).path);
+        assert!(only_retired(&flags));
+        assert!(!only_retired(&Flags {
+            only: vec!["aliases".into(), "hooks".into()],
+            ..Flags::default()
+        }));
+    }
+
+    #[test]
+    fn a_part_flag_outside_a_retired_only_names_what_was_typed() {
+        let flags = Flags {
+            only: vec!["aliases".into()],
+            hooks: true,
+            ..Flags::default()
+        };
+
+        let err = only_choices(&flags).unwrap_err();
+
+        assert!(err.contains("--hooks is not in --only aliases;"), "{err}");
     }
 
     #[test]
