@@ -1,8 +1,8 @@
 # ADR 0007: Move the hooks and the launcher into a single Rust binary
 
-- **Status:** Accepted
+- **Status:** Accepted. The shell function per shell family is dropped by [ADR 0044](0044-drop-the-shell-launcher.md): `playbook cc` runs with no shell line, and `shell-init` prints nothing that runs.
 - **Date created:** 2026-08-13
-- **Date modified:** 2026-08-15
+- **Date modified:** 2026-10-18
 - **Amends:** ADR 0005 (migrate the hooks and the config scripts from shell to Python), ADR 0001 (package the toolkit as a plugin), ADR 0002 (plugin based install with always-on safety hooks)
 
 ## Context
