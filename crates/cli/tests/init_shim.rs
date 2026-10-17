@@ -201,6 +201,25 @@ fn a_non_utf8_rc_file_keeps_its_other_bytes() {
     assert_eq!(fs::read(&rc_file).unwrap(), b"# configura\xe7\xe3o\n");
 }
 
+#[test]
+fn a_failed_backup_reports_the_error_and_leaves_the_rc_file() {
+    // Arrange
+    let home = temp_home("bak-fails");
+    let rc_file = home.join(".zshrc");
+    let before = format!("{SOURCE_LINE}\n");
+    write_file(&rc_file, &before);
+    fs::create_dir_all(home.join(".zshrc.bak-7")).unwrap();
+
+    // Act
+    let changed = strip_retired_rc_lines(&home, 7);
+
+    // Assert
+    assert_eq!(changed.len(), 1);
+    assert!(changed[0].error.is_some());
+    assert_eq!(changed[0].backup, None);
+    assert_eq!(fs::read_to_string(&rc_file).unwrap(), before);
+}
+
 #[cfg(unix)]
 #[test]
 fn a_read_only_rc_is_not_reported_or_touched() {

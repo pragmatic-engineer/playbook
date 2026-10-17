@@ -256,35 +256,49 @@ fn layer2(env: &Env) -> Row {
 }
 
 fn layer3(env: &Env) -> Row {
-    let files = crate::init::shim::rc_files_with_retired_lines(&env.home);
-    if let Some(stuck) = files
-        .iter()
-        .find(|f| !crate::init::shim::owner_can_write(f))
-    {
-        return Row::new(
-            "3",
-            Level::Warn,
-            format!("retired launcher line in {}", stuck.display()),
-        )
-        .hint("the file is read-only; delete the playbook launcher lines by hand");
-    }
-    if !files.is_empty() {
-        let names: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
-        return Row::new(
-            "3",
-            Level::Warn,
-            format!("retired launcher line in {}", names.join(", ")),
-        )
-        .hint("run `playbook setup` to remove it after a backup");
-    }
-    let row = Row::new("3", Level::Pass, "no shell line needed for `playbook cc`");
+    let (writable, stuck): (Vec<_>, Vec<_>) = crate::init::shim::retired_rc_entries(&env.home)
+        .into_iter()
+        .partition(|r| r.writable);
+    let names = |list: &[crate::init::shim::RetiredRc]| {
+        list.iter()
+            .map(|r| r.rc_file.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let hint = match (writable.is_empty(), stuck.is_empty()) {
+        (true, true) => {
+            let row = Row::new("3", Level::Pass, "no shell line needed for `playbook cc`");
+            return if pb_runs_this_binary(env) {
+                row
+            } else {
+                row.hint("no `pb` on PATH runs playbook; run: playbook setup --only short-name")
+            };
+        }
+        (false, true) => "run `playbook setup` to remove it after a backup".to_string(),
+        (true, false) => {
+            "the file is read-only; delete the playbook launcher lines by hand".to_string()
+        }
+        (false, false) => format!(
+            "run `playbook setup` for {}; delete the lines by hand in {}, which is read-only",
+            names(&writable),
+            names(&stuck)
+        ),
+    };
+    let all: Vec<_> = writable.into_iter().chain(stuck).collect();
+    Row::new(
+        "3",
+        Level::Warn,
+        format!("retired launcher line in {}", names(&all)),
+    )
+    .hint(hint)
+}
+
+/// Whether a `pb` on PATH resolves to the running binary, as the short-name
+/// part checks it.
+fn pb_runs_this_binary(env: &Env) -> bool {
     let same = |p: PathBuf| fs::canonicalize(p).ok();
     let pb = on_path(env, "pb").and_then(same);
-    if pb.is_some() && pb == on_path(env, "playbook").and_then(same) {
-        row
-    } else {
-        row.hint("no `pb` on PATH runs playbook; run: playbook setup --only short-name")
-    }
+    pb.is_some() && pb == std::env::current_exe().ok().and_then(same)
 }
 
 fn layer4(env: &Env) -> Row {

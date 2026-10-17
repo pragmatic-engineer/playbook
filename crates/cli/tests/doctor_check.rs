@@ -308,7 +308,7 @@ fn l3_passes_with_a_bare_shell_init_line_and_notes_a_missing_pb() {
     assert_eq!(layer(&rows, "3")[0]["level"], "PASS");
     let hint = |rows: &[Value]| layer(rows, "3")[0]["hint"].as_str().map(str::to_string);
     assert!(hint(&rows).is_some_and(|h| h.contains("--only short-name")));
-    std::os::unix::fs::symlink("playbook", bin.join("pb")).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_playbook"), bin.join("pb")).unwrap();
     let rows = b.run(&[&bin], "/bin/zsh", None);
     assert_eq!(hint(&rows), None);
 }
@@ -330,6 +330,27 @@ fn l3_warns_on_a_retired_line_and_names_setup() {
     );
     assert!(
         row["hint"].as_str().unwrap().contains("playbook setup"),
+        "{row}"
+    );
+}
+
+#[test]
+fn l3_names_both_files_when_one_is_read_only_and_one_is_not() {
+    let b = Box::new("l3m");
+    let zsh = b.home().join(".zshrc");
+    fs::write(&zsh, "# playbook launchers (ccc/ccd)\n").unwrap();
+    fs::set_permissions(&zsh, fs::Permissions::from_mode(0o444)).unwrap();
+    fs::write(b.home().join(".bashrc"), "# playbook launchers (ccc/ccd)\n").unwrap();
+    let rows = b.run(&[], "/bin/zsh", None);
+    let row = layer(&rows, "3")[0];
+    let message = row["message"].as_str().unwrap();
+    let hint = row["hint"].as_str().unwrap();
+    assert!(
+        message.contains(".zshrc") && message.contains(".bashrc"),
+        "{row}"
+    );
+    assert!(
+        hint.contains("playbook setup") && hint.contains("read-only"),
         "{row}"
     );
 }

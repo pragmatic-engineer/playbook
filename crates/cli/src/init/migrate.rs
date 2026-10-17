@@ -266,27 +266,31 @@ fn retired_rc_line_pending(ctx: &Ctx) -> Option<String> {
 /// Removes the retired launcher lines after a backup (ADR 0044 decision 6).
 fn retired_rc_line(ctx: &Ctx) -> Outcome {
     let changed = crate::init::shim::strip_retired_rc_lines(&ctx.home, ctx.epoch);
-    if let Some(failed) = changed.iter().find(|c| c.error.is_some()) {
-        return Outcome::Failed(StepReport::failed(
-            "rc-line",
-            format!(
-                "could not remove the retired launcher line from {}: {}",
-                failed.rc_file.display(),
-                failed.error.as_deref().unwrap_or_default()
-            ),
-        ));
-    }
-    let backups: Vec<PathBuf> = changed.into_iter().filter_map(|c| c.backup).collect();
-    if backups.is_empty() {
-        return Outcome::Quiet;
-    }
-    Outcome::Repeat(StepReport::wired(
-        "rc-line",
+    let backups: Vec<PathBuf> = changed.iter().filter_map(|c| c.backup.clone()).collect();
+    let failed: Vec<String> = changed
+        .iter()
+        .filter_map(|c| Some(format!("{}: {}", c.rc_file.display(), c.error.as_deref()?)))
+        .collect();
+    let done = (!backups.is_empty()).then(|| {
         format!(
             "removed the retired launcher line, backup at {}",
             join_paths(&backups)
-        ),
-    ))
+        )
+    });
+    if !failed.is_empty() {
+        let mut detail = format!(
+            "could not remove the retired launcher line from {}",
+            failed.join("; ")
+        );
+        if let Some(done) = done {
+            detail.push_str(&format!("; {done}"));
+        }
+        return Outcome::Failed(StepReport::failed("rc-line", detail));
+    }
+    match done {
+        Some(done) => Outcome::Repeat(StepReport::wired("rc-line", done)),
+        None => Outcome::Quiet,
+    }
 }
 
 /// Telemetry points at the collector and no service keeps it running (ADR

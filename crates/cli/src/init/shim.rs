@@ -27,7 +27,7 @@ impl ShellKind {
     }
 
     /// The rc file this shell reads on startup, relative to `$HOME`.
-    pub fn rc_file_name(self) -> &'static str {
+    fn rc_file_name(self) -> &'static str {
         match self {
             ShellKind::Bash => ".bashrc",
             ShellKind::Zsh => ".zshrc",
@@ -70,11 +70,29 @@ const BLOCK_COMMENTS: [&str; 2] = [
 /// The `eval` line without the guard, as a user may write it by hand.
 const BARE_EVAL: &str = "eval \"$(playbook shell-init)\"";
 
-/// One rc file `strip_rc_files` changed, or would change on a dry run.
+/// What a strip does with a hand-written `BARE_EVAL` line.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BareEval {
+    /// Uninstall removes everything playbook-related.
+    Remove,
+    /// Migration 0018 keeps a line the user wrote, since it is a harmless no-op.
+    Keep,
+}
+
+/// An rc file that holds a retired launcher line, and whether setup can
+/// rewrite it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetiredRc {
+    pub rc_file: PathBuf,
+    pub writable: bool,
+}
+
+/// One file a strip changed, or would change on a dry run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RcStrip {
     pub rc_file: PathBuf,
-    /// The copy taken before the write; `None` on a dry run or when unwritable.
+    /// The copy taken before the write; `None` on a dry run, when unwritable
+    /// or on an error.
     pub backup: Option<PathBuf>,
     /// The file needs a change but lacks the owner write bit, so it was left alone.
     pub unwritable: bool,
@@ -87,17 +105,26 @@ pub struct RcStrip {
 /// installer appends. Anything else in the file is kept byte for byte. A
 /// changed file is first copied to `<rc>.bak-<stamp>`.
 pub fn strip_rc_files(home: &Path, stamp: u64, binary_path: bool, dry_run: bool) -> Vec<RcStrip> {
-    ShellKind::ALL
+    rc_rewrites(home, |existing, kind| {
+        let content = strip_launcher(existing, kind, BareEval::Remove);
+        if !binary_path {
+            return content;
+        }
+        strip_binary_path(content.as_deref().unwrap_or(existing)).or(content)
+    })
+    .into_iter()
+    .map(|(rc_file, content)| apply(rc_file, &content, stamp, dry_run))
+    .collect()
+}
+
+/// Each rc file under `home` that holds a line migration 0018 removes, and
+/// whether setup can rewrite it. Reads only.
+pub fn retired_rc_entries(home: &Path) -> Vec<RetiredRc> {
+    retired_rewrites(home)
         .into_iter()
-        .filter_map(|kind| {
-            let rc_file = home.join(kind.rc_file_name());
-            let existing = fs::read(&rc_file).ok()?;
-            let mut content = strip_launcher(&existing, kind, true);
-            if binary_path {
-                let base = content.as_deref().unwrap_or(&existing);
-                content = strip_binary_path(base).or(content);
-            }
-            Some(apply(rc_file, &content?, stamp, dry_run))
+        .map(|(rc_file, _)| RetiredRc {
+            writable: can_rewrite(&rc_file),
+            rc_file,
         })
         .collect()
 }
@@ -105,37 +132,41 @@ pub fn strip_rc_files(home: &Path, stamp: u64, binary_path: bool, dry_run: bool)
 /// The writable rc files under `home` that hold a line migration 0018
 /// removes. Reads only.
 pub fn retired_rc_files(home: &Path) -> Vec<PathBuf> {
-    retired_rewrites(home)
+    retired_rc_entries(home)
         .into_iter()
-        .filter(|(rc_file, _)| owner_can_write(rc_file))
-        .map(|(rc_file, _)| rc_file)
+        .filter(|r| r.writable)
+        .map(|r| r.rc_file)
         .collect()
-}
-
-/// Each rc file under `home`, writable or not, that holds a retired launcher
-/// line, for doctor.
-pub fn rc_files_with_retired_lines(home: &Path) -> Vec<PathBuf> {
-    retired_rewrites(home).into_iter().map(|(f, _)| f).collect()
 }
 
 /// Remove the retired launcher lines from each writable rc file under
 /// `home`, after a copy to `<rc>.bak-<stamp>`. A bare hand-written `eval`
-/// stays. Files without the write bit are skipped.
+/// stays. Files setup cannot rewrite are left out.
 pub fn strip_retired_rc_lines(home: &Path, stamp: u64) -> Vec<RcStrip> {
     retired_rewrites(home)
         .into_iter()
-        .filter(|(rc_file, _)| owner_can_write(rc_file))
         .map(|(rc_file, content)| apply(rc_file, &content, stamp, false))
+        .filter(|entry| !entry.unwritable)
         .collect()
 }
 
 fn retired_rewrites(home: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    rc_rewrites(home, |existing, kind| {
+        strip_launcher(existing, kind, BareEval::Keep)
+    })
+}
+
+/// Each shell's rc file under `home` that `rewrite` changes, with its new content.
+fn rc_rewrites(
+    home: &Path,
+    rewrite: impl Fn(&[u8], ShellKind) -> Option<Vec<u8>>,
+) -> Vec<(PathBuf, Vec<u8>)> {
     ShellKind::ALL
         .into_iter()
         .filter_map(|kind| {
             let rc_file = home.join(kind.rc_file_name());
             let existing = fs::read(&rc_file).ok()?;
-            Some((rc_file, strip_launcher(&existing, kind, false)?))
+            Some((rc_file, rewrite(&existing, kind)?))
         })
         .collect()
 }
@@ -162,7 +193,7 @@ fn apply(rc_file: PathBuf, content: &[u8], stamp: u64, dry_run: bool) -> RcStrip
         unwritable: false,
         error: None,
     };
-    if !owner_can_write(&entry.rc_file) {
+    if !can_rewrite(&entry.rc_file) {
         entry.unwritable = true;
     } else if !dry_run {
         let rc_file = &entry.rc_file;
@@ -176,25 +207,27 @@ fn apply(rc_file: PathBuf, content: &[u8], stamp: u64, dry_run: bool) -> RcStrip
     entry
 }
 
-/// `content` without the launcher lines, a lone marker comment, and the
-/// comment right above a removed line. With `bare_eval` the unguarded `eval`
-/// goes too. `None` when there was nothing to remove.
-fn strip_launcher(content: &[u8], shell_kind: ShellKind, bare_eval: bool) -> Option<Vec<u8>> {
+/// `content` without the launcher lines, a lone marker comment, and a
+/// launchers marker comment right above a removed line. `None` when there
+/// was nothing to remove.
+fn strip_launcher(content: &[u8], shell_kind: ShellKind, bare_eval: BareEval) -> Option<Vec<u8>> {
     strip_lines(
         content,
         |lines, i| {
             let line = lines[i];
             let trimmed = line.trim_ascii();
             let ours = trimmed == SOURCE_LINE.as_bytes()
-                || (bare_eval && trimmed == BARE_EVAL.as_bytes())
+                || (bare_eval == BareEval::Remove && trimmed == BARE_EVAL.as_bytes())
                 || is_block_comment(line);
             usize::from(ours || is_legacy_source_line(line, shell_kind))
         },
         |prev| {
             let prev = prev.trim_ascii();
             prev.starts_with(b"#")
-                && (prev.windows(18).any(|w| w == b"launchers (cc/ccd)")
-                    || prev.windows(19).any(|w| w == b"launchers (ccc/ccd)"))
+                && BLOCK_COMMENTS.iter().any(|c| {
+                    let tail = c.trim_start_matches("# playbook ").as_bytes();
+                    prev.windows(tail.len()).any(|w| w == tail)
+                })
         },
     )
 }
@@ -302,6 +335,27 @@ fn names_path(args: &[u8], path: &[u8]) -> bool {
             (before.is_ascii_whitespace() || before == b'"' || before == b'\'')
                 && after.is_none_or(|b| b.is_ascii_whitespace() || b == b'"' || b == b'\'')
         })
+}
+
+/// Whether this process can replace `path`: write the file, and create the
+/// temp file and rename in the directory of its real target.
+#[cfg(unix)]
+pub(crate) fn can_rewrite(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let writable = |p: &Path| {
+        std::ffi::CString::new(p.as_os_str().as_bytes())
+            // SAFETY: access(2) only reads the NUL-terminated path.
+            .is_ok_and(|c| unsafe { libc::access(c.as_ptr(), libc::W_OK) } == 0)
+    };
+    let Ok(target) = fs::canonicalize(path) else {
+        return false;
+    };
+    owner_can_write(&target) && writable(&target) && target.parent().is_some_and(writable)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn can_rewrite(path: &Path) -> bool {
+    owner_can_write(path)
 }
 
 #[cfg(unix)]

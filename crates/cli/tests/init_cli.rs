@@ -195,11 +195,26 @@ fn migrate_lists_the_old_rc_block_and_setup_removes_it_after_a_backup() {
     sb.init("/bin/zsh", &[]);
 
     // Assert
-    assert!(listed.contains(".zshrc still loads the retired"), "{listed}");
+    assert!(
+        listed.contains(".zshrc still loads the retired"),
+        "{listed}"
+    );
     assert!(listed.contains("(run `playbook setup`)"), "{listed}");
     assert_eq!(untouched, before);
     assert_eq!(sb.read(".zshrc"), "export EDITOR=vim\n");
     assert_eq!(sb.count("", ".zshrc.bak-"), 1);
+}
+
+#[test]
+fn an_only_run_leaves_the_old_rc_block_alone() {
+    let sb = Sandbox::new("rc-block-only");
+    let before = "# playbook launchers (ccc/ccd)\ncommand -v playbook >/dev/null 2>&1 && eval \"$(playbook shell-init)\"\n";
+    sb.write(".zshrc", before);
+
+    sb.init("/bin/zsh", &["--only", "hooks"]);
+
+    assert_eq!(sb.read(".zshrc"), before);
+    assert_eq!(sb.count("", ".zshrc.bak-"), 0);
 }
 
 #[test]
