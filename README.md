@@ -86,7 +86,7 @@ For a small bug, `/playbook:fix` goes from a failing test to one pull request. F
 
 ## The launcher
 
-`playbook cc` starts Claude Code with the playbook system prompt (it replaces Claude Code's built-in prompt and never appends to it), the right model chain and your effort ceiling. `playbook ccd` is the same with permission prompts skipped. `pb` is a short alias for `playbook` (`pb cc`, `pb ccd`), linked next to the binary by install.sh and Homebrew when the name is free. The old `ccc` and `ccd` shell functions are gone; `playbook doctor` finds leftovers and names the replacement. Add the cd wrapper, which lets `playbook cc launch worktree` leave you in the new worktree, with `playbook setup --aliases`.
+`playbook cc` starts Claude Code with the playbook system prompt (it replaces Claude Code's built-in prompt and never appends to it), the right model chain and your effort ceiling. `playbook ccd` is the same with permission prompts skipped. `pb` is a short alias for `playbook` (`pb cc`, `pb ccd`), linked next to the binary by install.sh, Homebrew and `playbook setup` when the name is free and the binary sits in the install folder. No shell line is needed. Turn the prompt off with `playbook setup --no-system-prompt`, and `pb cc` then starts with Claude Code's own prompt. A plain `claude` never loads the playbook prompt. The old `ccc` and `ccd` shell functions are gone; `playbook doctor` finds leftovers and names the replacement.
 
 ```bash
 playbook cc                     # resume this directory's last session, or start fresh
@@ -98,7 +98,7 @@ playbook cc raw [id]            # resume verbatim, no fork or cleanup
 playbook cc prune               # prune old transcripts now
 ```
 
-The work happens in the binary, so bash and zsh behave the same. `playbook shell-init` prints one small `playbook` shell function that only adds the `cd` into a worktree after a session. Worktrees land in `<repo-parent>/.worktrees/<repo>/<folder>`. See [worktrees](docs/internals/03-worktree.md) and [the launcher](docs/internals/01-launcher-and-hooks.md).
+The work happens in the binary, so bash and zsh behave the same. A program cannot change its parent shell's directory, so after a session in a new worktree `playbook cc` prints the `cd` command to run. Worktrees land in `<repo-parent>/.worktrees/<repo>/<folder>`. See [worktrees](docs/internals/03-worktree.md) and [the launcher](docs/internals/01-launcher-and-hooks.md).
 
 ## Commands
 

@@ -4,29 +4,25 @@
 
 ## The `playbook cc` and `playbook ccd` launcher
 
-The rc file holds one line: `command -v playbook >/dev/null 2>&1 && eval "$(playbook shell-init)"`. `playbook shell-init` prints one `playbook` function that adds the `cd` into a worktree after `playbook cc` and `playbook ccd`. Both run `playbook cc launch` (`crates/cli/src/cc/launch.rs`), and the binary works without the function. The same text works in bash and zsh. `playbook ccd` is `playbook cc` with `--dangerously-skip-permissions` added. Nothing else differs.
+`playbook cc` and `playbook ccd` run `playbook cc launch` (`crates/cli/src/cc/launch.rs`) straight from the binary, and so do `pb cc` and `pb ccd`. No shell line is needed ([ADR 0044](../adr/0044-drop-the-shell-launcher.md)). `playbook ccd` is `playbook cc` with `--dangerously-skip-permissions` added. Nothing else differs.
 
-A child process cannot change its parent's directory, so the functions create a temp file and pass its path in `PLAYBOOK_CC_CD_FILE`. When the launcher enters a worktree it writes the path there, and the function `cd`s to it after the session ends.
+A child process cannot change its parent's directory. After a session in a worktree that `playbook cc launch worktree <branch>` created or entered, the launcher prints the `cd` command to run, quoted when the path needs it. `playbook shell-init` is retired and prints one comment line, so an old rc line still loads. Migration 0018 removes the lines older setups wrote, after a backup, when you run `playbook setup`.
 
 On every launch the launcher:
 
 - Trusts `$PWD` (the equivalent of `playbook trust`), so Claude Code's trust dialog never blocks. Best effort.
-- Passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` when it is installed.
+- Passes `--system-prompt-file ~/.config/playbook/prompts/SYSTEM_PROMPT.md` when it is installed and `systemPrompt.enabled` is true, the default. With the key false it adds no prompt flag and passes your own prompt flags through, append flags included.
 - Passes the model fallback chain with `--fallback-model`, and exports `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for any `models.*` override. See [Model tiers](02-model-routing-and-memory.md#model-tiers-and-the-55-rule).
 - Passes no `--settings`. Your effort ceiling lowers the default `--effort` the launcher adds and the agent variants it renders. It moves `CLAUDE_CODE_EFFORT_LEVEL` to `--effort` so the variable cannot raise a playbook skill, command or agent above its own effort. See [Effort policy](02-model-routing-and-memory.md#effort-policy).
 - Renders the agent effort variants into a throwaway session plugin and passes it with `--plugin-dir`. Nothing is committed. `agents.variants` (`auto`, `all`, `off`) picks which, and `playbook agents variants` shows them. `crates/cli/src/cc/agent_variants.rs`.
 - Sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for that session when `memory.source` is `playbook`. It never edits Claude Code's settings or memory.
 - After `claude` exits, prunes to the newest `CCD_KEEP` transcripts per project (default 5, floor 2), with their sidecars and runtime state.
 
-A session started without the launcher gets none of this except the hooks.
-
-### The `claude` function
-
-`playbook setup --claude-override` (or `playbook config set launcher.claudeOverride true`) makes `playbook shell-init` also define a `claude` function. A plain interactive `claude` then goes through the launcher, so the playbook system prompt loads every time. Calls that use their own flags, subcommands, `-p`, piped or scripted use, and `PLAYBOOK_BYPASS=1` run the real binary untouched, and an existing `claude` alias or function is never replaced. Setup writes only this playbook key, with your consent. It never changes Claude Code settings or memory and never passes `--settings`.
+A session started without the launcher, such as a plain `claude`, gets none of this except the hooks and the status line: no playbook prompt, no effort default, no agent variants, no model overrides and no memory switch. The `claude` function that `launcher.claudeOverride` turned on is gone with the shell line.
 
 ### The `pb` short name
 
-`pb` is a symlink to the `playbook` binary. `install.sh` links `$PLAYBOOK_BIN_DIR/pb`, and the Homebrew formula installs one with `bin.install_symlink`. `playbook setup --short-name` makes the same relative link in the install folder for other installs, only when no other `pb` is on your PATH, and stores the answer as `launcher.shortName`. With that key on, `playbook shell-init` still defines a `pb` function for an rc file that loads it, until ADR 0044 retires the shell line.
+`pb` is a symlink to the `playbook` binary. `install.sh` links `$PLAYBOOK_BIN_DIR/pb`, and the Homebrew formula installs one with `bin.install_symlink`. `playbook setup --short-name` makes the same relative link in the install folder for other installs, only when no other `pb` is on your PATH, and stores the answer as `launcher.shortName`. `setup --yes` makes the link too, unless a no is stored.
 
 ### Subcommands
 
