@@ -49,7 +49,8 @@ mod settings_writes;
 
 use crate::common::payload::Payload;
 use crate::common::shell::{
-    program_index, program_name, runner_value_options, shell_script_at, simple_commands, SHELLS,
+    program_index, program_name, runner_value_options, shell_script_at, simple_commands,
+    skip_options, SHELLS,
 };
 use crate::common::{emit_pre_context, emit_pre_deny};
 use std::path::{Component, Path, PathBuf};
@@ -240,14 +241,10 @@ fn changes_rm_guard_config_at(
                 }
             }
         }
-        if runner_value_options(&program).is_some() {
-            return rest
-                .iter()
-                .position(|w| matches!(program_name(w).as_str(), "playbook" | "pb"))
-                .is_some_and(|i| {
-                    let inner = &rest[i..];
-                    changes_rm_guard_config_at(inner, 0, home, depth + 1)
-                });
+        if let Some(takes_value) = runner_value_options(&program) {
+            let inner = &rest[skip_options(rest, 0, takes_value)..];
+            return program_index(inner)
+                .is_some_and(|i| changes_rm_guard_config_at(inner, i, home, depth + 1));
         }
     }
     let mut args = rest;
@@ -386,12 +383,13 @@ fn wrapped_commands(words: &[String], program_at: usize) -> Vec<Vec<String>> {
         let script = shell_script_at(rest).and_then(|at| rest.get(at));
         return script.map(|s| simple_commands(s)).unwrap_or_default();
     }
-    if runner_value_options(&program).is_some() {
-        return rest
-            .iter()
-            .position(|w| matches!(program_name(w).as_str(), "playbook" | "pb"))
-            .map(|at| vec![rest[at..].to_vec()])
-            .unwrap_or_default();
+    if let Some(takes_value) = runner_value_options(&program) {
+        let inner = &rest[skip_options(rest, 0, takes_value)..];
+        return if inner.is_empty() {
+            Vec::new()
+        } else {
+            vec![inner.to_vec()]
+        };
     }
     Vec::new()
 }
@@ -693,6 +691,9 @@ mod tests {
             "playbook config edit",
             "cargo run -q -- config set hooks.rmGuard.allowedRoots /a/b",
             "cd x && playbook config set hooks.rmGuard.allowedRoots /a/b",
+            "ksh -c 'playbook config set hooks.rmGuard.allowedRoots /a/b'",
+            "doas -u root playbook config set hooks.rmGuard.allowedRoots /a/b",
+            "doas sh -c 'playbook config set hooks.rmGuard.allowedRoots /a/b'",
             "env playbook config set hooks.rmGuard.allowedRoots /a/b",
             "sqlite3 ~/.config/playbook/playbook.db 'update x'",
             "WORKTREE_BASE_DIR=/tmp/x rm -rf /tmp/x/y",
@@ -867,6 +868,7 @@ mod tests {
             "/usr/local/bin/playbook uninstall --yes",
             "pb uninstall --yes",
             "nohup pb uninstall --yes",
+            "doas playbook uninstall --yes",
         ] {
             assert_eq!(deny(command), Some(HOOK_ENTRIES_REASON), "{command}");
         }

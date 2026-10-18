@@ -22,29 +22,41 @@ const WRAPPERS: [&str; 7] = ["env", "command", "exec", "time", "nice", "timeout"
 /// Shells that run the script after `-c`, or read one from standard input.
 pub const SHELLS: [&str; 5] = ["sh", "bash", "zsh", "dash", "ksh"];
 
-/// Programs that run another command given as their remaining words, each
-/// with the options that take the next word as their value.
-pub const RUNNERS: [(&str, &[&str]); 12] = [
-    ("nohup", &[]),
-    ("xargs", &["-I", "-L", "-n", "-P", "-d", "-E", "-s", "-a"]),
-    ("setsid", &[]),
-    ("stdbuf", &["-i", "-o", "-e"]),
-    ("watch", &["-n", "-d"]),
-    ("parallel", &["-j", "-S"]),
-    ("ionice", &["-c", "-n", "-p", "-P", "-u"]),
-    ("caffeinate", &["-t", "-w"]),
-    ("unbuffer", &[]),
-    ("doas", &["-u", "-C"]),
-    ("chronic", &[]),
-    ("busybox", &[]),
+/// A program that runs another command given as its remaining words.
+pub struct Runner {
+    pub name: &'static str,
+    /// The options that take the next word as their value.
+    pub value_options: &'static [&'static str],
+}
+
+const fn runner(name: &'static str, value_options: &'static [&'static str]) -> Runner {
+    Runner {
+        name,
+        value_options,
+    }
+}
+
+pub const RUNNERS: &[Runner] = &[
+    runner("nohup", &[]),
+    runner("xargs", &["-I", "-L", "-n", "-P", "-d", "-E", "-s", "-a"]),
+    runner("setsid", &[]),
+    runner("stdbuf", &["-i", "-o", "-e"]),
+    runner("watch", &["-n", "-d"]),
+    runner("parallel", &["-j", "-S"]),
+    runner("ionice", &["-c", "-n", "-p", "-P", "-u"]),
+    runner("caffeinate", &["-t", "-w"]),
+    runner("unbuffer", &[]),
+    runner("doas", &["-u", "-C"]),
+    runner("chronic", &[]),
+    runner("busybox", &[]),
 ];
 
 /// The options `program` takes a value for, when it is a runner.
 pub fn runner_value_options(program: &str) -> Option<&'static [&'static str]> {
     RUNNERS
         .iter()
-        .find(|(name, _)| *name == program)
-        .map(|(_, takes_value)| *takes_value)
+        .find(|r| r.name == program)
+        .map(|r| r.value_options)
 }
 
 /// The index of the first word from `from` that is not an option, skipping
@@ -244,7 +256,8 @@ pub fn substitutions(text: &str, quotes: bool) -> Vec<String> {
             '"' if quotes => in_double = !in_double,
             '\'' if quotes && !in_double => while lexer.take().is_some_and(|c| c != '\'') {},
             '$' if lexer.looking_at("((") => {
-                lexer.substitution();
+                let arithmetic = lexer.substitution();
+                found.extend(substitutions(&arithmetic, quotes));
             }
             '$' if lexer.looking_at("(") => {
                 let group = lexer.substitution();
@@ -253,11 +266,15 @@ pub fn substitutions(text: &str, quotes: bool) -> Vec<String> {
             }
             '`' => {
                 let mut inner = String::new();
+                // Inside backticks a backslash only escapes `$`, a backtick
+                // or another backslash; before anything else it stays.
                 while let Some(c) = lexer.take().filter(|&c| c != '`') {
-                    if c == '\\' {
-                        inner.extend(lexer.take());
-                    } else {
-                        inner.push(c);
+                    match (c, lexer.peek()) {
+                        ('\\', Some(next @ ('$' | '`' | '\\'))) => {
+                            lexer.take();
+                            inner.push(next);
+                        }
+                        _ => inner.push(c),
                     }
                 }
                 found.push(inner);
@@ -497,9 +514,10 @@ impl Lexer {
                     self.joined_next = false;
                 }
                 '`' | ';' | '&' | '(' | ')' => {
-                    // A word that runs into an opening backtick takes the
-                    // substitution's output; a closing one only ends it.
-                    if c == '`' && self.word.is_some() && !self.in_backtick {
+                    // A word that runs into a backtick stays dynamic either way:
+                    // the commit message sanitizer must not rewrite text that
+                    // sits inside a substitution.
+                    if c == '`' && self.word.is_some() {
                         self.word_dynamic = true;
                     }
                     let opens = match c {
@@ -1106,7 +1124,13 @@ mod tests {
 
     #[test]
     fn substitutions_are_read_with_their_quotes_and_heredocs() {
-        let table: [(&str, bool, Vec<&str>); 7] = [
+        let table: [(&str, bool, Vec<&str>); 9] = [
+            (
+                r#"`echo "\"" ; x a\ b`"#,
+                true,
+                vec![r#"echo "\"" ; x a\ b"#],
+            ),
+            ("$(( $(x) + 1 ))", true, vec!["x"]),
             ("a $(b (c)) d", true, vec!["b (c)"]),
             ("x `y` z", true, vec!["y"]),
             ("\"$(printf ')'; rm /a)\"", true, vec!["printf ')'; rm /a"]),
@@ -1131,6 +1155,11 @@ mod tests {
         assert_eq!(skip_options(&words, 0, &["-c"]), 3);
         assert_eq!(skip_options(&words, 0, &[]), 1);
         assert_eq!(
+            skip_options(&["--".to_string(), "-x".to_string()], 0, &[]),
+            1
+        );
+        assert_eq!(skip_options(&["-n".to_string()], 0, &["-n"]), 1);
+        assert_eq!(
             shell_script_at(&["-lc".to_string(), "x".to_string()]),
             Some(1)
         );
@@ -1141,11 +1170,11 @@ mod tests {
     }
 
     #[test]
-    fn a_word_before_a_closing_backtick_is_not_dynamic() {
+    fn a_word_before_a_closing_backtick_stays_dynamic() {
         let got = commands("echo `ls /a`");
 
         assert_eq!(got[1].words, ["ls", "/a"]);
-        assert!(!got[1].spans[1].dynamic);
+        assert!(got[1].spans[1].dynamic);
     }
 
     #[test]

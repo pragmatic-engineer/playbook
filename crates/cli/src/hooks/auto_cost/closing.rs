@@ -538,6 +538,8 @@ mod tests {
         ];
         let new_work = [
             "playbook deliver --ready --auto-merge",
+            "echo `git push origin feat/x`",
+            "git add -A `git push origin feat/x`",
             "playbook deliver --wait",
             "playbook deliver --ready",
             "cargo build",
