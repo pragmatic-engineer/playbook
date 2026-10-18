@@ -21,11 +21,11 @@ pub fn has_seed_files(root: &Path) -> bool {
 }
 
 /// Where a checkout keeps the seed files.
-pub const CHECKOUT_SEED_DIR: &str = "seed";
+pub(crate) const CHECKOUT_SEED_DIR: &str = "seed";
 
 /// The seed folder inside the checkout at `root`: `seed/` when it holds the
 /// seed files, else `root` itself.
-pub fn seed_in_checkout(root: &Path) -> PathBuf {
+pub(crate) fn seed_in_checkout(root: &Path) -> PathBuf {
     let nested = root.join(CHECKOUT_SEED_DIR);
     if has_seed_files(&nested) {
         nested
@@ -205,5 +205,34 @@ mod tests {
 
         // Act and assert
         assert_eq!(seed_root(root.to_str()), None);
+    }
+
+    #[test]
+    fn the_retired_hooks_plugin_with_a_seed_folder_is_never_a_seed_source() {
+        // Arrange: the manifest at the root names another plugin.
+        let home = scratch("hooks-plugin-seed-dir");
+        let root = home.join("playbook-hooks");
+        seeded(&root.join(CHECKOUT_SEED_DIR));
+        fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+        fs::write(
+            root.join(".claude-plugin/plugin.json"),
+            r#"{"name":"playbook-hooks","version":"0.25.0"}"#,
+        )
+        .unwrap();
+
+        // Act and assert
+        assert_eq!(seed_root(root.to_str()), None);
+    }
+
+    #[test]
+    fn a_seed_folder_with_the_files_wins_over_the_root() {
+        // Arrange: a checkout partway through the move holds both copies.
+        let home = scratch("both-seeded");
+        let root = home.join("checkout");
+        seeded(&root);
+        seeded(&root.join(CHECKOUT_SEED_DIR));
+
+        // Act and assert
+        assert_eq!(seed_root(root.to_str()), Some(root.join(CHECKOUT_SEED_DIR)));
     }
 }
