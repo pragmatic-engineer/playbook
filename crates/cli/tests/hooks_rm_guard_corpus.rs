@@ -13,7 +13,7 @@
 //!
 //! Paths in the corpus are written under `/Users/<user>`, which the test maps
 //! to a fake home in Cargo's scratch folder, where it also builds the repos and
-//! worktrees the cases name. Set `RM_GUARD_CORPUS_PRINT=1` to print the
+//! worktrees the cases name. A case with an `os` runs on that OS only. Set `RM_GUARD_CORPUS_PRINT=1` to print the
 //! verdict of every case.
 
 use serde_json::Value;
@@ -22,6 +22,7 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+const USER: &str = "<user>";
 const USER_HOME: &str = "/Users/<user>";
 
 struct Case {
@@ -31,6 +32,9 @@ struct Case {
     want: String,
     expect: String,
     class: String,
+    /// The one OS the case applies to, as `std::env::consts::OS` names it,
+    /// or empty for every OS.
+    os: String,
 }
 
 fn corpus() -> Vec<Case> {
@@ -47,6 +51,7 @@ fn corpus() -> Vec<Case> {
             want: field(c, "want"),
             expect: field(c, "expect"),
             class: field(c, "class"),
+            os: field(c, "os"),
         })
         .collect()
 }
@@ -101,7 +106,7 @@ impl Tree {
         fs::create_dir_all(&base).expect("base");
         let base = fs::canonicalize(base).expect("canonical base");
         let home = base.join("home");
-        let w = home.join("Workspace");
+        let w = home.join("code");
         let pb = w.join("pragmatic-engineer/playbook");
         let wt = w.join("pragmatic-engineer/.worktrees");
         let coda = w.join("acme/coda");
@@ -205,11 +210,12 @@ fn the_corpus_is_well_formed() {
             case.id
         );
         assert!(!case.class.is_empty(), "{}: class", case.id);
-        assert!(
-            !case.command.contains("/Users/isantos") && !case.cwd.contains("/Users/isantos"),
-            "{}: anonymized",
-            case.id
-        );
+        for text in [&case.command, &case.cwd] {
+            let named = text.match_indices("/Users/").all(|(at, _)| {
+                text[at + 7..].starts_with(USER) || text[at + 7..].starts_with("Shared")
+            });
+            assert!(named, "{}: anonymized", case.id);
+        }
     }
 }
 
@@ -217,7 +223,10 @@ fn the_corpus_is_well_formed() {
 fn every_corpus_case_gets_its_recorded_verdict() {
     let tree = Tree::new();
     let print = std::env::var_os("RM_GUARD_CORPUS_PRINT").is_some();
-    let cases = corpus();
+    let cases: Vec<Case> = corpus()
+        .into_iter()
+        .filter(|c| c.os.is_empty() || c.os == std::env::consts::OS)
+        .collect();
     // Each case spawns the binary, so they run eight at a time.
     let verdicts: Vec<String> = std::thread::scope(|scope| {
         let tree = &tree;
