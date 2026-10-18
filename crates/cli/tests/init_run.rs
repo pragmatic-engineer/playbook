@@ -1383,8 +1383,5 @@ fn init_with_the_hooks_left_off_keeps_a_dead_hook_entry() {
     assert!(all_hook_commands(&settings).contains(&dead.to_string()));
     let root = playbook::common::paths::playbook_root_from(&home);
     let record = playbook::heal::Record::read(&root).unwrap();
-    assert!(record
-        .pending
-        .iter()
-        .any(|id| id == "0011-dead-hook-scripts"));
+    assert!(record.pending.iter().any(|id| id == "dead-hook-scripts"));
 }

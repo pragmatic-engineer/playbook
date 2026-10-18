@@ -210,7 +210,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     for line in [
         "claude plugin uninstall playbook-hooks@pragmatic-engineer",
         "claude plugin update playbook@pragmatic-engineer",
-        "0014-orphaned-plugin-caches: 1 old plugin folder(s)",
+        "orphaned-plugin-caches: 1 old plugin folder(s)",
         "(run `playbook setup --hooks`)",
         "(run `playbook setup --only attribution-off`)",
     ] {
@@ -307,7 +307,7 @@ fn migrate_on_a_v025_home_previews_runs_once_and_leaves_user_files_alone() {
     assert!(status.contains("recorded: nothing yet"), "{status}");
     let dead = status
         .lines()
-        .find(|l| l.starts_with("0.34.0  0011-dead-hook-scripts "))
+        .find(|l| l.starts_with("0.34.0  dead-hook-scripts "))
         .unwrap_or_default();
     assert!(
         dead.contains("consent") && dead.contains("needs you"),
@@ -317,7 +317,7 @@ fn migrate_on_a_v025_home_previews_runs_once_and_leaves_user_files_alone() {
     assert!(dry.starts_with("would run: "), "{dry}");
     for line in [
         "(run `playbook setup --hooks`)",
-        "note: 0014-orphaned-plugin-caches: 1 old plugin folder(s)",
+        "note: orphaned-plugin-caches: 1 old plugin folder(s)",
         "claude plugin uninstall playbook-hooks@pragmatic-engineer",
     ] {
         assert!(dry.contains(line), "{dry}");
@@ -351,7 +351,7 @@ fn migrate_on_a_v025_home_previews_runs_once_and_leaves_user_files_alone() {
         .iter()
         .any(|i| i["command"] == "playbook setup --hooks"));
     assert!(
-        stdout(&after).starts_with("would run: 0001-memory-store-move"),
+        stdout(&after).starts_with("would run: memory-store-move"),
         "{}",
         stdout(&after)
     );
@@ -371,7 +371,7 @@ fn migrate_previews_write_nothing_in_a_half_set_up_home_and_fail_on_a_bad_store(
     drop(playbook::config::store::open(&root).unwrap());
     write(
         &root.join("migrations.state"),
-        "applied 0001-memory-store-move\n",
+        "applied memory-store-move\n",
     );
     let before = tree(&h.home);
 

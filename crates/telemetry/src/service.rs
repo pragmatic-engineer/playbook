@@ -27,8 +27,9 @@ macro_rules! collector_label {
 
 /// The launchd label, also the file name of the agent.
 pub const LABEL: &str = collector_label!();
-/// The launchd label that 0.37.0 shipped. Migration 0020 moves an agent
-/// installed under it to [`LABEL`], and `playbook uninstall` removes it.
+/// The launchd label that 0.37.0 shipped. The `collector-service-label`
+/// migration moves an agent installed under it to [`LABEL`], and `playbook
+/// uninstall` removes it.
 pub const OLD_LABEL: &str = "io.github.pragmatic-engineer.playbook.collector";
 /// The comment every service file playbook writes carries.
 const MARKER: &str = "The playbook usage collector. `playbook uninstall` removes this file.";
