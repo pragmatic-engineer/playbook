@@ -174,7 +174,7 @@
     "id": "var-literal",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "S=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad; rm -rf $S/homebrew-tap",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "variable assigned a literal path"
@@ -183,7 +183,7 @@
     "id": "var-literal-quoted",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "S=\"/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad/chunks\" ; rm -rf \"$S\" && mkdir -p \"$S\"",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "quoted variable"
@@ -192,7 +192,7 @@
     "id": "var-braced",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "SP=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad; rm -rf \"${SP}/m4b-full\"",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "braced variable"
@@ -201,7 +201,7 @@
     "id": "var-export",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "export OUT=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad/out; rm -f $OUT/report.txt",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "exported variable"
@@ -210,7 +210,7 @@
     "id": "var-chain",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "S=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad; N=$S/negtest; rm -rf $N",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "a variable built from another"
@@ -219,7 +219,7 @@
     "id": "var-for-literal",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "d=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad/fx; for f in a.json b.json; do rm -f \"$d/$f\"; done",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "for loop over literal words"
@@ -291,7 +291,7 @@
     "id": "var-pid",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "for t in shell/*.test.sh; do bash \"$t\" >/tmp/st.$$ 2>&1; done; rm -f /tmp/st.$$",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "$$ is digits only"
@@ -300,7 +300,7 @@
     "id": "var-tmpdir",
     "cwd": "/Users/<user>/code/acme/coda",
     "command": "git checkout crates/coda-store/src/lib.rs && rm $TMPDIR/lib.rs.bak",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "$TMPDIR"
@@ -309,7 +309,7 @@
     "id": "var-tmpdir-default",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "rm -f \"${TMPDIR:-/tmp}/pm.$$.json\"",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "${TMPDIR:-/tmp}"
@@ -318,7 +318,7 @@
     "id": "var-pwd",
     "cwd": "/Users/<user>/code/acme/coda",
     "command": "B=$PWD/.mut.bak; cp src/lib.rs $B; rm -f $B",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "$PWD"
@@ -327,7 +327,7 @@
     "id": "var-pwd-sub",
     "cwd": "/Users/<user>/code/acme/coda",
     "command": "rm -rf \"$(pwd)/target/tmp\"",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "$(pwd)"
@@ -336,7 +336,7 @@
     "id": "var-oldpwd",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "cd /Users/<user>/code/acme/coda && cd /tmp && rm -rf \"$OLDPWD/target/x\"",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "$OLDPWD after two cds"
@@ -345,7 +345,7 @@
     "id": "mktemp-d",
     "cwd": "/Users/<user>/code/acme/coda",
     "command": "d=$(mktemp -d); printf 'x' > $d/a.sh; rm -r $d",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "mktemp -d made by the same command"
@@ -354,7 +354,7 @@
     "id": "mktemp-d-sub",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "cd /tmp; d=$(mktemp -d); echo x>$d/f; rm $d/f; rm -rf $d",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "mktemp -d and a file in it"
@@ -363,7 +363,7 @@
     "id": "mktemp-file",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "MSG_FILE=$(mktemp)\ncat > \"$MSG_FILE\" <<'EOF'\nfix: x\nEOF\ngit commit -F \"$MSG_FILE\"; rm -f \"$MSG_FILE\"",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "safe form that cannot be resolved",
     "note": "mktemp file made by the same command"
