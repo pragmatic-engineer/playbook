@@ -9,30 +9,52 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::time::SystemTime;
 
 /// Bytes allocated under `path`, the path itself included. Symlinks are not
 /// followed, and a file with several hard links counts once, as cargo links
 /// the same build output into more than one folder. An unreadable entry
 /// counts as 0.
 pub fn allocated(path: &Path) -> u64 {
+    scan(path).bytes
+}
+
+/// What one walk of a tree finds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Scan {
+    /// Bytes allocated, as [`allocated`] counts them.
+    pub bytes: u64,
+    /// The latest change time of any entry, the path itself included.
+    /// `UNIX_EPOCH` when nothing could be read.
+    pub newest: SystemTime,
+}
+
+/// Walks `path` once for its size and its most recent change.
+pub fn scan(path: &Path) -> Scan {
     let mut seen: HashSet<(u64, u64)> = HashSet::new();
-    let mut total = 0u64;
+    let mut found = Scan {
+        bytes: 0,
+        newest: SystemTime::UNIX_EPOCH,
+    };
     let mut stack = vec![path.to_path_buf()];
     while let Some(at) = stack.pop() {
         let Ok(meta) = std::fs::symlink_metadata(&at) else {
             continue;
         };
+        if let Ok(modified) = meta.modified() {
+            found.newest = found.newest.max(modified);
+        }
         if !first_link(&meta, &mut seen) {
             continue;
         }
-        total = total.saturating_add(on_disk(&meta));
+        found.bytes = found.bytes.saturating_add(on_disk(&meta));
         if meta.is_dir() {
             if let Ok(entries) = std::fs::read_dir(&at) {
                 stack.extend(entries.filter_map(Result::ok).map(|e| e.path()));
             }
         }
     }
-    total
+    found
 }
 
 #[cfg(unix)]
@@ -81,6 +103,21 @@ mod tests {
         assert!(
             linked - one < 64 * 1024,
             "hard link or symlink counted twice: {one} then {linked}"
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn scan_reports_the_newest_change_inside() {
+        let dir = std::env::temp_dir().join(format!("pb-disk-newest-{}", crate::testing::run_id()));
+        fs::create_dir_all(dir.join("deep/er")).unwrap();
+        let before = SystemTime::now() - std::time::Duration::from_secs(2);
+        fs::write(dir.join("deep/er/new"), b"x").unwrap();
+        let found = scan(&dir);
+        assert!(found.newest >= before, "{:?}", found.newest);
+        assert_eq!(
+            scan(Path::new("/pb-disk-scan-missing")).newest,
+            SystemTime::UNIX_EPOCH
         );
         fs::remove_dir_all(&dir).unwrap();
     }

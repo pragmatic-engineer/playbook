@@ -478,7 +478,16 @@ Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb`, and the folde
 
 Example: `playbook disk status`
 
-Subcommands: `status`
+Subcommands: `clean`, `status`
+
+### `playbook disk clean`
+
+Remove what playbook can prove is disposable and print what it freed: idle cargo target folders no build holds, old `/tmp/pb-*` scratch and cache entries, orphaned plugin caches and landed worktrees
+
+Example: `playbook disk clean --dry-run`
+
+- `--dry-run`: Show what would be removed without removing anything
+- `--auto`: Run only when `disk.autoCleanup` is on and free space is below `disk.warnFreeGb`, as the disk guard hooks do
 
 ### `playbook disk status`
 
