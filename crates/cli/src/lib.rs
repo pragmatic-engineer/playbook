@@ -681,7 +681,7 @@ pub enum Command {
     /// Check free disk space and keep builds from filling the disk
     ///
     /// Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb`, and
-    /// holds a ballast file that gives space back when the disk is full.
+    /// the folders that use the most of it.
     ///
     /// Example: `playbook disk status`
     Disk {
@@ -2006,13 +2006,6 @@ pub enum DiskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Write a 1 GB ballast file under ~/.cache/playbook/ballast, kept out of
-    /// backups, that `disk release` deletes to give space back on a full disk.
-    /// Refuses, with exit code 1, when less than `disk.warnFreeGb` would stay
-    /// free
-    Reserve,
-    /// Delete the ballast file and print the space it gave back
-    Release,
 }
 
 /// `playbook worktree` subcommands.

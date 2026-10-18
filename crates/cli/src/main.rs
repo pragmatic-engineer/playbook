@@ -2724,25 +2724,5 @@ fn run_disk(sub: DiskCommand) {
                 print!("{}", disk::status::render(&report));
             }
         }
-        DiskCommand::Reserve => {
-            match disk::ballast::reserve_for(&home, &disk::policy::load(&home)) {
-                Ok(line) => println!("{line}"),
-                Err(err) => {
-                    eprintln!("{err}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        DiskCommand::Release => match disk::ballast::release(&home) {
-            Ok(Some(bytes)) => println!(
-                "disk release: deleted the ballast, {} given back. Run `playbook disk reserve` after a cleanup to put it back",
-                disk::size::gb(bytes)
-            ),
-            Ok(None) => println!("disk release: there is no ballast to delete"),
-            Err(err) => {
-                eprintln!("disk release: {err}");
-                std::process::exit(1);
-            }
-        },
     }
 }
