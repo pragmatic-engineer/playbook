@@ -51,7 +51,7 @@ Two hooks watch every session whose resolved mode is `auto`.
 - The caps are per session, so `/clear` or a resume starts a new count: `session-init` clears the spend state, the notes and the park notes on every start except a compaction.
 - While the main session is parked, the memory capture Stop hook stands down, since it could not write the memory store anyway.
 - Change them with `playbook config set auto.budgetUsd <usd>`, `auto.agentBudgetUsd` and `auto.sessionCeilingUsd`.
-- Before the defaults were raised, both budgets were 5. Migration `0017-auto-budget-defaults` moves a stored budget of exactly 5 to the new default at the next session start or the first run of most playbook commands after the upgrade, or with `playbook migrate`. When you set `auto.sessionCeilingUsd` below the new default, the budget moves up to the ceiling instead. Any other stored value stays as you set it.
+- Before the defaults were raised, both budgets were 5. The `auto-budget-defaults` migration moves a stored budget of exactly 5 to the new default at the next session start or the first run of most playbook commands after the upgrade, or with `playbook migrate`. When you set `auto.sessionCeilingUsd` below the new default, the budget moves up to the ceiling instead. Any other stored value stays as you set it.
 
 While auto is on, the model cannot switch the mode, change the `mode`, `auto.*` or `fix.*` settings, or edit the config files. This covers `auto.agentBudgetUsd` and `auto.sessionCeilingUsd`. Only you can, by typing the command yourself. At a cap it also cannot raise the cap. The one exception is an unreadable cost: then it may run `playbook mode ask` to leave auto.
 
