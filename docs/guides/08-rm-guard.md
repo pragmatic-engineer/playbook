@@ -1,6 +1,6 @@
 # The rm guard
 
-The `rm-workspace-guard` hook stops an `rm` that would delete something outside the folders playbook treats as safe. It is a guard against accidents. It does not try to be a security boundary. [ADR 0045](../adr/0045-rm-guard-roots-and-parser.md) records the design.
+The `rm-workspace-guard` hook stops a command that would delete something outside the folders playbook treats as safe. It is a guard against accidents. It does not try to be a security boundary. [ADR 0045](../adr/0045-rm-guard-roots-and-parser.md) records the design.
 
 ## What counts as a deletion
 
@@ -23,7 +23,7 @@ Variables are followed when the command itself sets them to something the guard 
 
 Text that is only data is left alone: a quoted grep pattern, a commit message, an `echo`, a file path, and a heredoc read by `cat`, `git commit` or any program other than a shell. A redirect such as `2>/dev/null` is never a target.
 
-Claude Code starts the hook only for a command that holds an `rm` word (`if: Bash(rm:*)`). A command with no `rm` word anywhere, such as a lone `find -delete`, `git clean -fd` or `> file`, never reaches it.
+Claude Code runs the hook for every Bash command, so a `find -delete`, `git clean -fd` or `> file` with no `rm` word reaches it too. A command that deletes nothing returns at once, before any git or config read. Setup before this change wired the hook with `if: Bash(rm:*)`; run `playbook setup --only hooks` to drop that filter.
 
 ## What is allowed with no config
 
