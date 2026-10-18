@@ -161,7 +161,9 @@ fn worktree_and_clone_leftovers_are_allowed_but_never_the_root_or_parents() {
     let cases: Vec<(String, bool)> = vec![
         (format!("{d} -rf {w}/cargo-rm-guard"), false),
         (format!("{d} -rf {w}/new-repos/some-name"), false),
-        (format!("{d} -rf {w}/repo/wt1"), false),
+        // A linked worktree root goes with `git worktree remove`.
+        (format!("{d} -rf {w}/repo/wt1"), true),
+        (format!("{d} -rf {w}/repo/wt1/target"), false),
         (format!("{d} -rf {w}/repo/never-existed/deep"), false),
         (format!("{d} -rf {w}/cargo-rm-guard/"), false),
         (format!("{d} -rf {w}/cargo-*"), false),
@@ -282,6 +284,31 @@ fn os_temp_directories_are_allowed_but_never_the_root_or_a_bare_glob() {
     assert!(!fx.denied(&format!("{d} -rf $TMPDIR/x"), &fx.repo, &env));
     assert!(fx.denied(&format!("{d} -rf $TMPDIR"), &fx.repo, &[("TMPDIR", "/tmp")]));
     assert!(fx.denied(&format!("{d} -rf $TMPDIR/x"), &fx.repo, &[("TMPDIR", "/")]));
+}
+
+#[test]
+fn a_scratch_clone_in_a_temp_folder_may_go_whole_but_a_repo_root_elsewhere_may_not() {
+    let fx = Fx::new();
+    let d = rm();
+    let clone = fx.tmp.join("clone");
+    fs::create_dir_all(clone.join(".git")).expect("clone .git");
+    let (c, r) = (s(&clone), s(&fx.repo));
+    let cases: Vec<(String, bool)> = vec![
+        (format!("{d} -rf {c}"), false),
+        (format!("{d} -rf {c}/.git"), false),
+        (format!("{d} -rf {r}"), true),
+        (format!("{d} -rf {r}/.git"), true),
+        (format!("{d} -f {r}/.git/index.lock"), true),
+        (format!("{d} -rf {r}/*"), true),
+        (format!("{d} -rf {r}/.[a-z]*"), true),
+        (format!("{d} -rf {r}/*.log"), false),
+        (format!("{d} -rf {r}/{{a,b}}"), false),
+        (format!("{d} -rf {r}/{{a,.git}}"), true),
+        (format!("{d} -rf {r}/*/target"), false),
+        (format!("find {r} -name '*.orig' -delete"), false),
+        (format!("find {r} -delete"), true),
+    ];
+    check(&fx, &fx.repo, &cases);
 }
 
 #[test]
@@ -527,7 +554,7 @@ fn a_worktree_base_dir_from_the_environment_is_allowed_contents_only() {
 fn the_denial_message_names_the_scratch_roots_and_the_config_key() {
     let fx = Fx::new();
     let payload =
-        serde_json::json!({ "tool_input": { "command": format!("{} -rf /etc/x", rm()) } })
+        serde_json::json!({ "tool_input": { "command": format!("{} -rf /srv/pb-x", rm()) } })
             .to_string();
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["hook", "rm-workspace-guard"])
