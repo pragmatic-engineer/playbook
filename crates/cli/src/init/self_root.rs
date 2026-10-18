@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Resolves `InitPaths::self_root`, the files `init` seeds from:
-//! `CLAUDE_PLUGIN_ROOT` when it holds them (a dev checkout), else the copies
-//! compiled into this binary. A plugin cache directory is never a source,
+//! `CLAUDE_PLUGIN_ROOT` when it holds them, or its `seed/` folder when it is
+//! a dev checkout (ADR 0048), else the copies compiled into this binary. A plugin cache directory is never a source,
 //! because an old plugin there ships an old settings template (ADR 0034).
 //! The plugin's skills, commands and agents are found by `crate::plugin_root`.
 
@@ -20,13 +20,30 @@ pub fn has_seed_files(root: &Path) -> bool {
     root.join("settings.shared.json").is_file() && root.join("prompts/SYSTEM_PROMPT.md").is_file()
 }
 
-/// The env root when it holds the seed files and is not another plugin, such
-/// as the retired `playbook-hooks`, else `None`. Writes nothing, for a dry run.
+/// Where a checkout keeps the seed files.
+pub(crate) const CHECKOUT_SEED_DIR: &str = "seed";
+
+/// The seed folder inside the checkout at `root`: `seed/` when it holds the
+/// seed files, else `root` itself.
+pub(crate) fn seed_in_checkout(root: &Path) -> PathBuf {
+    let nested = root.join(CHECKOUT_SEED_DIR);
+    if has_seed_files(&nested) {
+        nested
+    } else {
+        root.to_path_buf()
+    }
+}
+
+/// The env root, or its `seed/` folder, when it holds the seed files and is
+/// not another plugin, such as the retired `playbook-hooks`, else `None`.
+/// Writes nothing, for a dry run.
 pub fn seed_root(claude_plugin_root_env: Option<&str>) -> Option<PathBuf> {
     claude_plugin_root_env
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
-        .filter(|root| has_seed_files(root) && crate::plugin_root::is_ours(root))
+        .filter(|root| crate::plugin_root::is_ours(root))
+        .map(|root| seed_in_checkout(&root))
+        .filter(|root| has_seed_files(root))
 }
 
 /// `seed_root`, then the copies of the settings template and system prompt
@@ -109,6 +126,36 @@ mod tests {
     }
 
     #[test]
+    fn a_checkout_root_resolves_to_its_seed_folder() {
+        // Arrange: a checkout keeps the seed files under seed/.
+        let home = scratch("checkout-seed");
+        let root = home.join("checkout");
+        seeded(&root.join(CHECKOUT_SEED_DIR));
+
+        // Act
+        let got = resolve_or_embedded(root.to_str(), &home);
+
+        // Assert
+        assert_eq!(got, Some(root.join(CHECKOUT_SEED_DIR)));
+        assert!(!home.join(".config/playbook/embedded").exists());
+    }
+
+    #[test]
+    fn an_empty_seed_folder_leaves_the_root_as_the_seed() {
+        // Arrange
+        let home = scratch("root-and-seed");
+        let root = home.join("checkout");
+        seeded(&root);
+        fs::create_dir_all(root.join(CHECKOUT_SEED_DIR)).expect("empty seed dir");
+
+        // Act
+        let got = seed_root(root.to_str());
+
+        // Assert
+        assert_eq!(got, Some(root));
+    }
+
+    #[test]
     fn an_env_root_without_the_seed_files_falls_back_to_the_embedded_files() {
         // Arrange: the plugin ships neither file.
         let home = scratch("skills-only-root");
@@ -158,5 +205,34 @@ mod tests {
 
         // Act and assert
         assert_eq!(seed_root(root.to_str()), None);
+    }
+
+    #[test]
+    fn the_retired_hooks_plugin_with_a_seed_folder_is_never_a_seed_source() {
+        // Arrange: the manifest at the root names another plugin.
+        let home = scratch("hooks-plugin-seed-dir");
+        let root = home.join("playbook-hooks");
+        seeded(&root.join(CHECKOUT_SEED_DIR));
+        fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+        fs::write(
+            root.join(".claude-plugin/plugin.json"),
+            r#"{"name":"playbook-hooks","version":"0.25.0"}"#,
+        )
+        .unwrap();
+
+        // Act and assert
+        assert_eq!(seed_root(root.to_str()), None);
+    }
+
+    #[test]
+    fn a_seed_folder_with_the_files_wins_over_the_root() {
+        // Arrange: a checkout partway through the move holds both copies.
+        let home = scratch("both-seeded");
+        let root = home.join("checkout");
+        seeded(&root);
+        seeded(&root.join(CHECKOUT_SEED_DIR));
+
+        // Act and assert
+        assert_eq!(seed_root(root.to_str()), Some(root.join(CHECKOUT_SEED_DIR)));
     }
 }

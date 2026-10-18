@@ -143,7 +143,7 @@ pub fn run_in(root: &Path) -> Report {
         result("agents", Status::Skip, "no agents directory")
     });
 
-    let template = root.join("settings.shared.json");
+    let template = crate::init::self_root::seed_in_checkout(root).join("settings.shared.json");
     report.checks.push(if template.is_file() {
         from_check("settings", crate::settings::check::check(&template, root))
     } else {
