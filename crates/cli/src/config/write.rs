@@ -346,6 +346,7 @@ mod root_list_tests {
             json!(["~/a/b/"]),
             json!(["/opt/data"]),
             json!(["/private/tmp"]),
+            json!(["/a/b/*", "/a/b/**", "~/w/.worktrees/**"]),
         ] {
             assert!(validate_root_list("k", &good).is_ok(), "{good}");
         }
@@ -360,7 +361,10 @@ mod root_list_tests {
             json!(["~//etc"]),
             json!(["rel/dir"]),
             json!(["/a/b/../c"]),
-            json!(["/a/b/*"]),
+            json!(["/tmp/**"]),
+            json!(["~/**"]),
+            json!(["/a/*/b"]),
+            json!(["/a/b/***"]),
             json!(["/a/it's"]),
             json!(["/a/b\\c"]),
             json!(["/a/$X"]),

@@ -56,6 +56,8 @@
 //! parses the JSON either way.
 
 mod parse;
+/// Built-in roots. Public until the guard reads them in the next change.
+pub mod roots;
 
 use crate::common::emit_pre_deny;
 use crate::common::payload::Payload;
