@@ -11,6 +11,8 @@ The guard reads the command the way the shell does, with the shared shell lexer,
 - `xargs rm` fed by a `find` in the same pipeline, judged by that `find`. Other `xargs` input cannot be known, so it is blocked.
 - A script given to `sh -c`, `bash -c`, `eval`, a here-string, or a heredoc that a shell reads.
 
+The guard follows the folder the shell is in. A relative target is judged against the `cwd` Claude Code sends with the command, and after `cd`, `pushd` or `popd` against the folder the shell changed into. A `cd` inside `( ... )` or `$( ... )` ends with the group. When a `cd` could fail and the next command still runs (after `;`, `||` or a line break rather than `&&`), the target is judged in both the new and the old folder. A folder the guard cannot name, such as `cd "$X"`, `popd` with nothing pushed, or `cd name` while `CDPATH` is set, makes a relative target unresolvable.
+
 Text that is only data is left alone: a quoted grep pattern, a commit message, an `echo`, a file path, and a heredoc read by `cat`, `git commit` or any program other than a shell. A redirect such as `2>/dev/null` is never a target.
 
 Claude Code starts the hook only for a command that holds an `rm` word (`if: Bash(rm:*)`). A `find -delete` with no `rm` anywhere in the command never reaches it.
@@ -21,7 +23,7 @@ Paths are judged after `~`, `$HOME`, `..`, trailing slashes and every symlink ar
 
 | Allowed | How |
 | :- | :- |
-| The repo (or `PLAYBOOK_SAFE_ROOTS`) and `~/.claude` | Anything inside, and the folder itself. |
+| The repo (or `PLAYBOOK_SAFE_ROOTS`) and `~/.claude` | Anything inside, and the folder itself. The repo is the one the command starts in, plus the repo of each folder it changes into with `cd`. A repo that is your home or holds it never counts, and a start folder outside any repo counts only when it is not home or above it. |
 | The `.worktrees` folder next to the main checkout, and `WORKTREE_BASE_DIR` | Contents only. `.worktrees/cargo-*` build folders are covered. |
 | Temp and cache folders for your OS (table below) | Contents only. |
 | Playbook's scratch folders: `~/.config/playbook/tmp`, `staging`, `embedded`, `cc-state`, and any `tmp` folder deeper under `~/.config/playbook` | Contents only. |
@@ -69,7 +71,7 @@ Each denied target is listed with the rule that matched:
 | bare glob | A glob the guard cannot judge, such as `/tmp/*`. |
 | protected playbook data | One of the paths in the list above. |
 | playbook lock folder | A `.lock` folder that clears itself. |
-| unresolvable target | A command substitution, `<xargs input>`, a variable other than `$HOME`, or a relative path after `cd`. Run the `rm` as its own call with a literal absolute path. |
+| unresolvable target | A command substitution, `<xargs input>`, a variable other than `$HOME`, or a relative path in a folder the guard cannot name. Run the `rm` as its own call with a literal absolute path. |
 | stray quote or shell character | A quote, backslash or shell syntax left inside the path. |
 | another user's home or a quoted ~ | `~user`, or a `~` inside quotes, which the shell does not expand. |
 | path that cannot be resolved | A link chain too deep to follow, a link that cannot be read, or a working folder that is gone. |

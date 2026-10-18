@@ -194,7 +194,10 @@ fn relative_paths_resolve_from_the_working_directory() {
         (format!("{d} -rf ../.."), true),
         (format!("{d} -rf ../../.."), true),
         (format!("{d} -rf ../../../../home/.ssh"), true),
-        (format!("cd {} && {d} -rf build", s(&fx.wt1)), true),
+        // After a cd the target is judged where it lands.
+        (format!("cd {} && {d} -rf build", s(&fx.wt1)), false),
+        (format!("cd {} && {d} -rf ../..", s(&fx.wt1)), true),
+        (format!("cd \"$X\" && {d} -rf build"), true),
     ];
     check(&fx, &fx.wt1, &cases);
 }
@@ -599,7 +602,8 @@ fn quoting_braces_and_shell_syntax_cannot_smuggle_a_path_out() {
         (format!("{d} -rf {t}/sub(:h)"), true),
         (format!("{d} -rf {t}/sub<x"), true),
         (format!("cd {t} && {d} -rf \"{t}/sub\""), false),
-        (format!("cd {t} && {d} -rf sub"), true),
+        (format!("cd {t} && {d} -rf sub"), false),
+        (format!("cd /tmp && {d} -rf ."), true),
     ];
     check(&fx, &fx.repo, &cases);
 }
