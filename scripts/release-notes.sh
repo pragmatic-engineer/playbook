@@ -135,6 +135,19 @@ json() {
       --arg prefix "$prefix" \
       --arg date "$date" '
       def clean: gsub("[[:cntrl:]]"; "") | gsub("^\\s+|\\s+$"; "");
+      # The text of the first BREAKING CHANGE footer that has some, or null.
+      # A footer runs on over the lines below it, joined with single spaces,
+      # up to a blank line or the next trailer ("Token: " or "Token #").
+      def footer:
+        (split("\n")[1:] | map(clean)) as $l
+        | [range(0; $l | length) | select($l[.] | test("^BREAKING[ -]CHANGE: "))
+           | . as $s
+           | ([range($s + 1; $l | length)
+               | select($l[.] == "" or ($l[.] | test("^(BREAKING[ -]CHANGE|[A-Za-z0-9-]+)(: | #)")))]
+              | first // ($l | length)) as $e
+           | $l[$s:$e] | .[0] |= sub("^BREAKING[ -]CHANGE: "; "") | join(" ") | clean
+           | select(length > 0)]
+        | first;
       def item:
         . as $body
         | (split("\n")[0] | clean) as $subject
@@ -142,8 +155,7 @@ json() {
            | capture("^(?<type>[a-z]+)(\\((?<scope>[^)]*)\\))?(?<bang>!)?: (?<text>.+)$")
           ) // {type: "other", scope: null, bang: null, text: $subject}
         | . as $c
-        | ([$body | split("\n")[1:][] | capture("^BREAKING[ -]CHANGE: (?<t>.+)$") | .t | clean]
-           | map(select(length > 0)) | first) as $footer
+        | ($body | footer) as $footer
         | ($c.text | capture("^(?<t>.*?) *\\(#(?<pr>[0-9]+)\\)$") // {t: $c.text, pr: null}) as $p
         | ($footer != null or $c.bang == "!") as $breaking
         | {
@@ -190,8 +202,17 @@ markdown() {
   jq -r --arg repo "$REPO" '
     # Markup characters show as they are, so a subject cannot add link or
     # image markup, HTML, emphasis or a mention to the release page. GitHub
-    # still links a bare URL.
-    def esc: gsub("(?<c>[\\\\`*_\\[\\]<>|~&#@])"; "\\\(.c)");
+    # still links a bare URL. Paired backticks stay as code spans, which
+    # show their text as it is, so only the text outside them is escaped.
+    # An odd backtick is escaped like the rest.
+    def esc_all: gsub("(?<c>[\\\\`*_\\[\\]<>|~&#@])"; "\\\(.c)");
+    def esc:
+      split("`") as $parts
+      | if ($parts | length) % 2 == 1 then
+          [range(0; $parts | length) as $i
+           | if $i % 2 == 0 then $parts[$i] | esc_all else $parts[$i] end]
+          | join("`")
+        else esc_all end;
     def link: if .pr == null then "" else " ([#\(.pr)](https://github.com/\($repo)/pull/\(.pr)))" end;
     def line($name):
       if $name == "other" then
