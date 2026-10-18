@@ -486,7 +486,7 @@ Delete the ballast file and print the space it gave back
 
 ### `playbook disk reserve`
 
-Write a 1 GB ballast file under ~/.cache/playbook/ballast, kept out of backups, that `disk release` or the disk guard deletes to give space back on a full disk
+Write a 1 GB ballast file under ~/.cache/playbook/ballast, kept out of backups, that `disk release` deletes to give space back on a full disk. Refuses, with exit code 1, when less than `disk.warnFreeGb` would stay free
 
 ### `playbook disk status`
 

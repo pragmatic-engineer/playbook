@@ -11,18 +11,23 @@ use std::path::{Path, PathBuf};
 pub const TARGET_PREFIX: &str = "cargo-";
 
 /// The folder that holds this repo's worktree folder and the `cargo-*`
-/// target folders: `<repo parent>/.worktrees`, or `WORKTREE_BASE_DIR` as
-/// the worktree hook reads it. `repo_root` may be any worktree of the repo.
+/// target folders: `<main worktree parent>/.worktrees`, or
+/// `WORKTREE_BASE_DIR` as the worktree hook reads it. `repo_root` may be any
+/// worktree of the repo. The main worktree is the first entry of `git
+/// worktree list`, which also holds with a separate git folder.
 pub fn worktrees_root(repo_root: &Path) -> Option<PathBuf> {
-    let common = playbook_common::git::output(
-        repo_root,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    )?;
-    let main_root = Path::new(common.trim()).parent()?.to_path_buf();
-    let parent = main_root.parent()?;
-    let configured = std::env::var("WORKTREE_BASE_DIR").ok();
-    let base = crate::cc::worktree::resolve_base(&main_root, parent, configured.as_deref());
-    base.parent().map(Path::to_path_buf)
+    let main = crate::worktree::list_worktrees(repo_root)
+        .ok()?
+        .into_iter()
+        .next()?;
+    root_for_main(&main.path)
+}
+
+/// [`worktrees_root`] for a known main worktree.
+pub fn root_for_main(main_root: &Path) -> Option<PathBuf> {
+    crate::worktree::launcher_base(main_root)?
+        .parent()
+        .map(Path::to_path_buf)
 }
 
 /// The `cargo-*` folders directly under `root`, sorted. Symlinks are left
@@ -78,11 +83,56 @@ mod tests {
     }
 
     #[test]
-    fn the_root_sits_next_to_the_repo() {
-        let here = std::env::current_dir().unwrap();
-        let Some(root) = worktrees_root(&here) else {
+    fn the_root_sits_next_to_the_main_worktree() {
+        if std::env::var_os("WORKTREE_BASE_DIR").is_some() {
             return;
+        }
+        assert_eq!(
+            root_for_main(Path::new("/code/acme/widgets")),
+            Some(PathBuf::from("/code/acme/.worktrees"))
+        );
+    }
+
+    #[test]
+    fn a_linked_worktree_finds_the_same_root() {
+        if std::env::var_os("WORKTREE_BASE_DIR").is_some() {
+            return;
+        }
+        let base = fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("pb-disk-root-{}", crate::testing::run_id()));
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        let git = |dir: &Path, args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
         };
-        assert!(root.ends_with(".worktrees") || std::env::var_os("WORKTREE_BASE_DIR").is_some());
+        git(&repo, &["init", "-q"]);
+        git(
+            &repo,
+            &[
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+        );
+        let linked = base.join(".worktrees/repo/feature");
+        git(&repo, &["worktree", "add", "-q", linked.to_str().unwrap()]);
+        assert_eq!(worktrees_root(&linked), Some(base.join(".worktrees")));
+        assert_eq!(worktrees_root(&repo), Some(base.join(".worktrees")));
+        fs::remove_dir_all(&base).unwrap();
     }
 }

@@ -101,7 +101,7 @@ fn cache_dirs(home: &Path, claude_home: &Path) -> Vec<PathBuf> {
         );
     }
     dirs.push(crate::common::paths::playbook_root_from(home).join("tmp"));
-    dirs.push(claude_home.join("plugins/cache/pragmatic-engineer/playbook"));
+    dirs.push(crate::plugin_root::cache_dir(claude_home));
     dirs.retain(|p| p.exists());
     dirs
 }
@@ -120,6 +120,14 @@ pub fn measure(candidates: Vec<(Kind, PathBuf)>) -> Vec<Consumer> {
     );
     consumers.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
     consumers
+}
+
+/// Claude Code's config folder: `CLAUDE_CONFIG_DIR` when set, else
+/// `~/.claude`.
+pub fn claude_home(home: &Path) -> PathBuf {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|v| !v.is_empty())
+        .map_or_else(|| home.join(".claude"), PathBuf::from)
 }
 
 /// Builds the full report.
@@ -183,7 +191,7 @@ pub fn render(report: &Report) -> String {
     }
     if report.target_count as u64 > p.max_target_dirs {
         out.push_str(&format!(
-            "\n{} cargo target folders exist, more than disk.maxTargetDirs ({}). Remove the ones no agent uses with `cargo clean` or `playbook disk clean`.\n",
+            "\n{} cargo target folders exist, more than disk.maxTargetDirs ({}). Run `cargo clean` in the ones no agent uses.\n",
             report.target_count, p.max_target_dirs
         ));
     }
@@ -202,14 +210,14 @@ pub fn to_json(report: &Report) -> Value {
             "maxTargetDirs": p.max_target_dirs,
         },
         "volumes": report.volumes.iter().map(|v| json!({
-            "path": v.path,
+            "path": v.path.to_string_lossy(),
             "freeBytes": v.space.free,
             "totalBytes": v.space.total,
             "level": p.level(v.space.free).label(),
         })).collect::<Vec<_>>(),
         "consumers": report.consumers.iter().map(|c| json!({
             "kind": c.kind.label(),
-            "path": c.path,
+            "path": c.path.to_string_lossy(),
             "bytes": c.bytes,
         })).collect::<Vec<_>>(),
         "targetDirs": report.target_count,
@@ -310,5 +318,63 @@ mod tests {
         let dirs = cache_dirs(&home, &home.join(".claude"));
         assert_eq!(dirs, vec![home.join(".cache/playbook/other")]);
         std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn candidates_list_targets_linked_worktrees_caches_and_the_ballast() {
+        if std::env::var_os("WORKTREE_BASE_DIR").is_some() {
+            return;
+        }
+        let base = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("pb-disk-candidates-{}", crate::testing::run_id()));
+        let repo = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        git(&[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "x",
+        ]);
+        let linked = base.join(".worktrees/repo/feature");
+        git(&["worktree", "add", "-q", linked.to_str().unwrap()]);
+        std::fs::create_dir_all(base.join(".worktrees/cargo-feature")).unwrap();
+        std::fs::create_dir_all(home.join(".cache/playbook/old")).unwrap();
+        std::fs::create_dir_all(ballast::dir(&home)).unwrap();
+        std::fs::write(ballast::file(&home), b"x").unwrap();
+
+        let found = candidates(&home, &home.join(".claude"), Some(&repo));
+
+        assert_eq!(
+            found,
+            vec![
+                (Kind::Target, base.join(".worktrees/cargo-feature")),
+                (Kind::Worktree, linked),
+                (Kind::Cache, home.join(".cache/playbook/old")),
+                (Kind::Ballast, ballast::file(&home)),
+            ]
+        );
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

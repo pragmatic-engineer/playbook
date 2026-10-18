@@ -2713,7 +2713,7 @@ fn run_disk(sub: DiskCommand) {
     match sub {
         DiskCommand::Status { json } => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
-            let report = disk::status::report(&home, &home.join(".claude"), &cwd);
+            let report = disk::status::report(&home, &disk::status::claude_home(&home), &cwd);
             if json {
                 println!(
                     "{}",
@@ -2725,9 +2725,7 @@ fn run_disk(sub: DiskCommand) {
             }
         }
         DiskCommand::Reserve => {
-            let policy = disk::policy::load(&home);
-            let keep = policy.warn_free_gb.saturating_mul(disk::probe::GIB);
-            match disk::ballast::reserve(&home, disk::ballast::BALLAST_BYTES, keep) {
+            match disk::ballast::reserve_for(&home, &disk::policy::load(&home)) {
                 Ok(line) => println!("{line}"),
                 Err(err) => {
                     eprintln!("{err}");
