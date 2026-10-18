@@ -85,9 +85,73 @@ pub fn run(payload: &Payload) {
     if cmd.is_empty() {
         return;
     }
-
-    let home = std::env::var("HOME").unwrap_or_default();
     let cwd = start_dir(&payload.field(".cwd"));
+    let Some((judged, roots)) = judge_command(&cmd, &cwd) else {
+        return;
+    };
+    let denied: Vec<(String, Rule)> = judged
+        .into_iter()
+        .filter_map(|j| j.rule.map(|rule| (j.target, rule)))
+        .collect();
+    if denied.is_empty() {
+        return;
+    }
+    emit_pre_deny(&message::denial(&denied, &roots));
+}
+
+/// What the guard does with one path a command names.
+pub struct Explained {
+    /// The path as written, or the label of what cannot be resolved.
+    pub target: String,
+    /// `delete`, `below` (a deletion that stays under the path), `overwrite`,
+    /// `unresolvable` or `option`.
+    pub kind: &'static str,
+    /// The rule that denies it, or `None` when it is allowed.
+    pub rule: Option<&'static str>,
+    /// Where it resolved to, when that is outside every root.
+    pub resolved: Option<PathBuf>,
+}
+
+/// The guard's verdict on `command` run in `cwd`, for `playbook hooks
+/// explain-rm`: every path it names, and the denial text Claude would see.
+pub fn explain(command: &str, cwd: &Path) -> (Vec<Explained>, Option<String>) {
+    let Some((judged, roots)) = judge_command(command, cwd) else {
+        return (Vec::new(), None);
+    };
+    let denied: Vec<(String, Rule)> = judged
+        .iter()
+        .filter_map(|j| j.rule.clone().map(|rule| (j.target.clone(), rule)))
+        .collect();
+    let text = (!denied.is_empty()).then(|| message::denial(&denied, &roots));
+    let explained = judged
+        .into_iter()
+        .map(|j| Explained {
+            // As in the denial: only when it differs from the path as written.
+            resolved: match &j.rule {
+                Some(Rule::Outside(dir)) if dir.as_os_str() != j.target.as_str() => {
+                    Some(dir.clone())
+                }
+                _ => None,
+            },
+            rule: j.rule.as_ref().map(Rule::name),
+            target: j.target,
+            kind: j.kind,
+        })
+        .collect();
+    (explained, text)
+}
+
+/// One judged target.
+struct Judged {
+    target: String,
+    kind: &'static str,
+    rule: Option<Rule>,
+}
+
+/// Every target `command` names, judged, with the roots used, or `None`
+/// when it deletes and overwrites nothing.
+fn judge_command(cmd: &str, cwd: &Path) -> Option<(Vec<Judged>, Roots)> {
+    let home = std::env::var("HOME").unwrap_or_default();
     let absolute = |name: &str| {
         std::env::var_os(name)
             .map(PathBuf::from)
@@ -98,17 +162,17 @@ pub fn run(payload: &Payload) {
     // Most commands that reach the hook delete nothing, so the roots, which
     // cost git and config reads, are only worked out when something does.
     let found = parse::scan(
-        &cmd,
+        cmd,
         &parse::Env {
             home: &home,
-            cwd: &cwd,
+            cwd,
             cdpath: std::env::var_os("CDPATH").is_some_and(|v| !v.is_empty()),
             tmpdir: tmpdir.as_deref(),
             cargo_target_dir: cargo_target_dir.as_deref(),
         },
     );
     if found.targets.is_empty() {
-        return;
+        return None;
     }
     let env = RootEnv::from_process(&home);
     // An overwrite is judged by the deny set and playbook's data alone, so a
@@ -118,15 +182,12 @@ pub fn run(payload: &Payload) {
         .iter()
         .all(|t| matches!(t, Target::Overwrite { .. }));
     let roots = if overwrites_only {
-        Roots::for_overwrites(&home, &cwd, &env)
+        Roots::for_overwrites(&home, cwd, &env)
     } else {
-        Roots::new(&home, &cwd, &found.dirs, &env)
+        Roots::new(&home, cwd, &found.dirs, &env)
     };
-    let denied = denied_targets(found.targets, &roots);
-    if denied.is_empty() {
-        return;
-    }
-    emit_pre_deny(&message::denial(&denied, &roots));
+    let judged = judge_targets(found.targets, &roots);
+    Some((judged, roots))
 }
 
 /// The folder the command runs in: the `cwd` Claude Code sends, which is
@@ -855,26 +916,33 @@ fn repo_data(
     }
 }
 
-/// The deletion targets that are denied, each as written, or as its label
-/// when it cannot be resolved, with the rule that denies it.
-fn denied_targets(targets: Vec<Target>, roots: &Roots) -> Vec<(String, Rule)> {
+/// Every deletion and overwrite target, each as written, or as its label
+/// when it cannot be resolved, with the rule that denies it, if any.
+fn judge_targets(targets: Vec<Target>, roots: &Roots) -> Vec<Judged> {
     targets
         .into_iter()
-        .filter_map(|target| match target {
-            Target::Unresolvable(label) => Some((label, Rule::Unresolvable)),
-            Target::Forbidden(label) => Some((label, Rule::Forbidden)),
-            Target::Path { text, tilde } => {
-                judge(&text, tilde, false, roots).err().map(|r| (text, r))
-            }
-            Target::Below { text, tilde } => {
-                judge(&text, tilde, true, roots).err().map(|r| (text, r))
-            }
-            // An overwrite keeps the file, so only the deny set and playbook's
-            // data block it.
-            Target::Overwrite { text, tilde } => judge(&text, tilde, false, roots)
-                .err()
-                .filter(|r| matches!(r, Rule::Denied(_) | Rule::Protected(_)))
-                .map(|r| (text, r)),
+        .map(|target| {
+            let (target, kind, rule) = match target {
+                Target::Unresolvable(label) => (label, "unresolvable", Some(Rule::Unresolvable)),
+                Target::Forbidden(label) => (label, "option", Some(Rule::Forbidden)),
+                Target::Path { text, tilde } => {
+                    let rule = judge(&text, tilde, false, roots).err();
+                    (text, "delete", rule)
+                }
+                Target::Below { text, tilde } => {
+                    let rule = judge(&text, tilde, true, roots).err();
+                    (text, "below", rule)
+                }
+                // An overwrite keeps the file, so only the deny set and
+                // playbook's data block it.
+                Target::Overwrite { text, tilde } => {
+                    let rule = judge(&text, tilde, false, roots)
+                        .err()
+                        .filter(|r| matches!(r, Rule::Denied(_) | Rule::Protected(_)));
+                    (text, "overwrite", rule)
+                }
+            };
+            Judged { target, kind, rule }
         })
         .collect()
 }

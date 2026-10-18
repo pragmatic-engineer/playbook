@@ -861,9 +861,19 @@ Print the rules and template for writing a handoff
 
 ### `playbook hooks`
 
-List the hooks that `playbook setup` wires into Claude Code
+List the hooks that `playbook setup` wires into Claude Code, or explain a guard verdict
 
-Subcommands: `list`
+Subcommands: `explain-rm`, `list`
+
+### `playbook hooks explain-rm`
+
+Show what the rm guard does with a Bash command
+
+Reads the command the way the guard does and prints each path it deletes or overwrites, with the verdict and the rule that matched, then the denial text Claude would see. Runs nothing and changes nothing.
+
+- `<COMMAND>`: The Bash command, quoted as one argument
+- `--cwd <CWD>`: The folder the command runs in (default: the current folder)
+- `--json`: Print JSON instead of text
 
 ### `playbook hooks list`
 

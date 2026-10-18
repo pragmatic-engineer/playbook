@@ -315,6 +315,119 @@ fn a_scratch_clone_in_a_temp_folder_may_go_whole_but_a_repo_root_elsewhere_may_n
 }
 
 #[test]
+fn explain_rm_shows_each_target_with_its_verdict_and_the_denial() {
+    let fx = Fx::new();
+    let (d, t) = (rm(), s(&fx.tmp));
+    let explain = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["hooks", "explain-rm"])
+            .args(args)
+            .env("HOME", &fx.home)
+            .env_remove("PLAYBOOK_SAFE_ROOTS")
+            .env_remove("CDPATH")
+            .current_dir(&fx.repo)
+            .output()
+            .expect("spawn");
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+
+    let text = explain(&[&format!("{d} -rf {t}/sub /etc/x")]);
+    let json: serde_json::Value =
+        serde_json::from_str(&explain(&["--json", "--cwd", &t, &format!("{d} -rf sub")]))
+            .expect("json");
+    let nothing = explain(&["ls -la"]);
+
+    assert!(
+        text.contains(&format!("allow  delete       {t}/sub")),
+        "{text}"
+    );
+    assert!(
+        text.contains("deny   delete       /etc/x  (rule: built-in deny list)"),
+        "{text}"
+    );
+    assert!(text.contains("verdict: deny"), "{text}");
+    assert!(text.contains("rm blocked:"), "{text}");
+    assert_eq!(json["verdict"], "allow", "{json}");
+    assert_eq!(json["targets"][0]["target"], "sub", "{json}");
+    assert_eq!(json["targets"][0]["kind"], "delete", "{json}");
+    assert!(nothing.starts_with("allow:"), "{nothing}");
+}
+
+/// Explain gives the hook's verdict and denial text for the same command and
+/// folder, a folder reached through a link included.
+#[test]
+fn explain_rm_matches_the_hook() {
+    let fx = Fx::new();
+    let d = rm();
+    let link = fx.tmp.join("to-repo");
+    symlink(&fx.repo, &link).expect("link");
+    let cases: Vec<(PathBuf, String)> = vec![
+        (fx.repo.clone(), format!("{d} -rf target")),
+        (
+            fx.repo.clone(),
+            format!("{d} -rf /etc/x {}/sub", s(&fx.tmp)),
+        ),
+        (fx.repo.clone(), format!("{d} -rf {}", s(&fx.repo))),
+        (link.clone(), format!("cd .. && {d} -rf stale")),
+        (link, format!("{d} -rf ../../x")),
+    ];
+    for (cwd, command) in cases {
+        let payload =
+            serde_json::json!({ "tool_input": { "command": command }, "cwd": cwd }).to_string();
+        let hook = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["hook", "rm-workspace-guard"])
+            .env("HOOK_INPUT", payload)
+            .env("HOME", &fx.home)
+            .env_remove("PLAYBOOK_SAFE_ROOTS")
+            .env_remove("CDPATH")
+            .current_dir(&fx.repo)
+            .output()
+            .expect("hook");
+        let hook_out: Option<serde_json::Value> = serde_json::from_slice(&hook.stdout).ok();
+        let explained = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .args(["hooks", "explain-rm", "--json", "--cwd"])
+            .arg(&cwd)
+            .arg(&command)
+            .env("HOME", &fx.home)
+            .env_remove("PLAYBOOK_SAFE_ROOTS")
+            .env_remove("CDPATH")
+            .current_dir(&fx.repo)
+            .output()
+            .expect("explain");
+        let json: serde_json::Value = serde_json::from_slice(&explained.stdout).expect("json");
+
+        let hook_reason = hook_out
+            .as_ref()
+            .map(|o| o["hookSpecificOutput"]["permissionDecisionReason"].clone())
+            .unwrap_or(serde_json::Value::Null);
+        assert_eq!(
+            json["message"],
+            hook_reason,
+            "{command} in {}",
+            cwd.display()
+        );
+    }
+}
+
+#[test]
+fn explain_rm_refuses_a_folder_that_is_not_there() {
+    let fx = Fx::new();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["hooks", "explain-rm", "--cwd", "/no/such/folder", "ls"])
+        .env("HOME", &fx.home)
+        .output()
+        .expect("spawn");
+
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("not a folder"),
+        "{out:?}"
+    );
+}
+
+#[test]
 fn symlinks_and_dot_dot_are_judged_where_they_really_point() {
     let fx = Fx::new();
     let d = rm();
