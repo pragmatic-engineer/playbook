@@ -311,11 +311,11 @@ mod tests {
         // Assert
         assert!(text.contains("recorded: nothing yet"), "{text}");
         assert!(
-            text.contains("0.36.0  move-a  idempotent  owned    runs on every run"),
+            text.contains("0.36.0  move-a     idempotent  owned    runs on every run"),
             "{text}"
         );
         assert!(
-            text.contains("0.36.0  budget-b  idempotent  owned    applied"),
+            text.contains("0.36.0  budget-b   idempotent  owned    applied"),
             "{text}"
         );
         assert!(text.starts_with(&format!(

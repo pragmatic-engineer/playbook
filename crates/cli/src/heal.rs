@@ -44,6 +44,9 @@ pub struct Record {
     pub plugin: Option<String>,
     pub pending: Vec<String>,
     pub failed_at: Option<u64>,
+    /// Whether `versions/pending` holds an old numbered id, which the next
+    /// write stores as its slug (ADR 0046).
+    pub pending_numbered: bool,
 }
 
 impl Record {
@@ -79,6 +82,8 @@ impl Record {
                 })
                 .unwrap_or_default(),
             failed_at: get(FAILED_AT_KEY).and_then(|v| v.parse().ok()),
+            pending_numbered: get(PENDING_KEY)
+                .is_some_and(|v| v.split(',').any(|id| migrate::slug_of(id) != id)),
         }
     }
 
@@ -382,7 +387,7 @@ fn recheck_pending(ctx: &Ctx, root: &Path, record: &Record) -> Outcome {
     }
     let open = migrate::open_items(ctx, Some(&record.pending));
     let pending = ids(&open);
-    if pending != record.pending {
+    if pending != record.pending || record.pending_numbered {
         let _ = set_key(root, PENDING_KEY, &pending.join(","));
     }
     Outcome {
@@ -443,6 +448,7 @@ fn record_clean(ctx: &Ctx, root: &Path, mut out: Outcome) -> Outcome {
         plugin,
         pending: ids(&out.open),
         failed_at: None,
+        pending_numbered: false,
     }
     .write(root)
     .is_ok();
@@ -855,8 +861,9 @@ mod tests {
     fn old_compare(record: &Record, binary: &str, schema: u32) -> Ordering {
         match &record.binary {
             None => Ordering::Less,
-            Some(recorded) => crate::update::resolve::compare(recorded, binary)
-                .then(record.schema.cmp(&schema)),
+            Some(recorded) => {
+                crate::update::resolve::compare(recorded, binary).then(record.schema.cmp(&schema))
+            }
         }
     }
 
