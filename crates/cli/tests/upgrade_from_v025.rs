@@ -307,7 +307,7 @@ fn migrate_on_a_v025_home_previews_runs_once_and_leaves_user_files_alone() {
     assert!(status.contains("recorded: nothing yet"), "{status}");
     let dead = status
         .lines()
-        .find(|l| l.starts_with("0011-dead-hook-scripts "))
+        .find(|l| l.starts_with("0.34.0  0011-dead-hook-scripts "))
         .unwrap_or_default();
     assert!(
         dead.contains("consent") && dead.contains("needs you"),
@@ -355,7 +355,7 @@ fn migrate_on_a_v025_home_previews_runs_once_and_leaves_user_files_alone() {
         "{}",
         stdout(&after)
     );
-    let recorded = format!("recorded: playbook {},", env!("CARGO_PKG_VERSION"));
+    let recorded = format!("recorded: playbook {}\n", env!("CARGO_PKG_VERSION"));
     assert!(status_after.contains(&recorded), "{status_after}");
     assert!(!status_after.contains("not checked"), "{status_after}");
     assert_eq!(tree(&h.home), healed);

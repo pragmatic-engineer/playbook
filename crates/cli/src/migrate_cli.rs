@@ -55,12 +55,12 @@ pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
 
 /// Whether a newer playbook wrote the record, so a run would do nothing.
 fn downgraded(record: &Record) -> bool {
-    record.compare_with(env!("CARGO_PKG_VERSION"), migrate::schema()) == Ordering::Greater
+    record.compare_with(env!("CARGO_PKG_VERSION")) == Ordering::Greater
 }
 
 fn recorded_line(record: &Record) -> String {
     match &record.binary {
-        Some(b) => format!("recorded: playbook {b}, migrations up to {}", record.schema),
+        Some(b) => format!("recorded: playbook {b}"),
         None => "recorded: nothing yet".to_string(),
     }
 }
@@ -73,20 +73,26 @@ fn state_text(state: &State) -> String {
         State::Clear => "nothing to do".into(),
         State::Open { message, command } => heal::needs_you(message, *command).trim_end().into(),
         State::Unknown => "not checked: old state files are not imported yet".into(),
+        State::Unreleased => "waits for the next release".into(),
     }
 }
 
 fn render_status(record: &Record, plan: &[Planned]) -> String {
     let mut text = format!(
-        "running: playbook {}, migrations up to {}\n{}\n",
+        "running: playbook {}\n{}\n",
         env!("CARGO_PKG_VERSION"),
-        migrate::schema(),
         recorded_line(record)
     );
     let width = plan.iter().map(|p| p.id.len()).max().unwrap_or(0);
+    let since = plan
+        .iter()
+        .map(|p| p.since.as_str().len())
+        .max()
+        .unwrap_or(0);
     for p in plan {
         text.push_str(&format!(
-            "{:<width$}  {:<10}  {:<7}  {}\n",
+            "{:<since$}  {:<width$}  {:<10}  {:<7}  {}\n",
+            p.since.as_str(),
             p.id,
             p.kind,
             p.scope,
@@ -152,6 +158,7 @@ fn status_json(record: &Record, plan: &[Planned]) -> Value {
             };
             json!({
                 "id": p.id,
+                "since": p.since.as_str(),
                 "kind": p.kind,
                 "scope": p.scope,
                 "state": p.state.code(),
@@ -162,7 +169,7 @@ fn status_json(record: &Record, plan: &[Planned]) -> Value {
         })
         .collect();
     json!({
-        "running": {"binary": env!("CARGO_PKG_VERSION"), "schema": migrate::schema()},
+        "running": {"binary": env!("CARGO_PKG_VERSION"), "schema": heal::LEGACY_SCHEMA},
         "recorded": record_json(record),
         "migrations": migrations,
     })
@@ -222,10 +229,18 @@ mod tests {
     fn planned(id: &'static str, scope: &'static str, state: State, runs: bool) -> Planned {
         Planned {
             id,
+            since: migrate::Since::At("0.36.0"),
             kind: "idempotent",
             scope,
             state,
             runs,
+        }
+    }
+
+    fn planned_next() -> Planned {
+        Planned {
+            since: migrate::Since::Next,
+            ..planned("0021-e", "owned", State::Unreleased, false)
         }
     }
 
@@ -262,7 +277,7 @@ mod tests {
         // Act
         let old = render_dry_run(&record(Some("0.25.0"), 1), &plan);
         let same = render_dry_run(
-            &record(Some(env!("CARGO_PKG_VERSION")), migrate::schema()),
+            &record(Some(env!("CARGO_PKG_VERSION")), heal::LEGACY_SCHEMA),
             &plan,
         );
         let newer = render_dry_run(&record(Some("999.0.0"), 999), &plan);
@@ -296,14 +311,30 @@ mod tests {
         // Assert
         assert!(text.contains("recorded: nothing yet"), "{text}");
         assert!(
-            text.contains("0001-a  idempotent  owned    runs on every run"),
+            text.contains("0.36.0  0001-a  idempotent  owned    runs on every run"),
             "{text}"
         );
         assert!(
-            text.contains("0002-b  idempotent  owned    applied"),
+            text.contains("0.36.0  0002-b  idempotent  owned    applied"),
             "{text}"
         );
+        assert!(text.starts_with(&format!(
+            "running: playbook {}\nrecorded: nothing yet\n",
+            env!("CARGO_PKG_VERSION")
+        )));
+        assert!(!text.contains("migrations up to"), "{text}");
         assert_eq!(value["migrations"][0]["state"], "every_run");
+        assert_eq!(value["migrations"][0]["since"], "0.36.0");
+        assert_eq!(value["migrations"][0]["id"], "0001-a");
+        let next_text = render_status(&record(None, 0), &[planned_next()]);
+        let next_value = status_json(&record(None, 0), &[planned_next()]);
+        assert!(
+            next_text.contains("next  0021-e  idempotent  owned    waits for the next release"),
+            "{next_text}"
+        );
+        assert_eq!(next_value["migrations"][0]["since"], "next");
+        assert_eq!(next_value["migrations"][0]["state"], "unreleased");
+        assert_eq!(next_value["migrations"][0]["runs"], false);
         assert_eq!(value["migrations"][2]["state"], "open");
         assert_eq!(value["running"]["binary"], env!("CARGO_PKG_VERSION"));
     }
