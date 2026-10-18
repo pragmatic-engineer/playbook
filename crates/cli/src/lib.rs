@@ -18,6 +18,7 @@ pub mod common;
 pub mod config;
 pub mod deliver;
 pub mod deps;
+pub mod disk;
 #[cfg(unix)]
 pub mod doc;
 /// Document conversion needs process groups and signals, so on other
