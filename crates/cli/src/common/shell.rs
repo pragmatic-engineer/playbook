@@ -19,6 +19,74 @@ const SHELL_KEYWORDS: [&str; 10] = [
 ];
 const WRAPPERS: [&str; 7] = ["env", "command", "exec", "time", "nice", "timeout", "sudo"];
 
+/// Shells that run the script after `-c`, or read one from standard input.
+pub const SHELLS: [&str; 5] = ["sh", "bash", "zsh", "dash", "ksh"];
+
+/// A program that runs another command given as its remaining words.
+pub struct Runner {
+    pub name: &'static str,
+    /// The options that take the next word as their value.
+    pub value_options: &'static [&'static str],
+}
+
+const fn runner(name: &'static str, value_options: &'static [&'static str]) -> Runner {
+    Runner {
+        name,
+        value_options,
+    }
+}
+
+pub const RUNNERS: &[Runner] = &[
+    runner("nohup", &[]),
+    runner("xargs", &["-I", "-L", "-n", "-P", "-d", "-E", "-s", "-a"]),
+    runner("setsid", &[]),
+    runner("stdbuf", &["-i", "-o", "-e"]),
+    runner("watch", &["-n", "-d"]),
+    runner("parallel", &["-j", "-S"]),
+    runner("ionice", &["-c", "-n", "-p", "-P", "-u"]),
+    runner("caffeinate", &["-t", "-w"]),
+    runner("unbuffer", &[]),
+    runner("doas", &["-u", "-C"]),
+    runner("chronic", &[]),
+    runner("busybox", &[]),
+];
+
+/// The options `program` takes a value for, when it is a runner.
+pub fn runner_value_options(program: &str) -> Option<&'static [&'static str]> {
+    RUNNERS
+        .iter()
+        .find(|r| r.name == program)
+        .map(|r| r.value_options)
+}
+
+/// The index of the first word from `from` that is not an option, skipping
+/// the value of each option in `takes_value` and stopping after `--`.
+pub fn skip_options(words: &[String], from: usize, takes_value: &[&str]) -> usize {
+    let mut next = from;
+    while let Some(word) = words.get(next) {
+        if takes_value.contains(&word.as_str()) {
+            next += 2;
+        } else if word == "--" {
+            next += 1;
+            break;
+        } else if word.len() > 1 && word.starts_with('-') {
+            next += 1;
+        } else {
+            break;
+        }
+    }
+    next.min(words.len())
+}
+
+/// The index in `args` of the script after a shell's `-c`, which may sit in
+/// a cluster such as `-lc`.
+pub fn shell_script_at(args: &[String]) -> Option<usize> {
+    let at = args
+        .iter()
+        .position(|w| w.starts_with('-') && !w.starts_with("--") && w.contains('c'))?;
+    (at + 1 < args.len()).then_some(at + 1)
+}
+
 /// The index of the word that names the program: past leading assignments,
 /// redirections, shell keywords and wrappers such as `env` or `sudo`.
 pub fn program_index(words: &[String]) -> Option<usize> {
@@ -75,7 +143,7 @@ fn after_wrapper(words: &[String], at: usize) -> usize {
 
 /// The words a redirection takes: the operator word, plus its target when
 /// the operator stands alone.
-fn redirect_len(word: &str) -> usize {
+pub fn redirect_len(word: &str) -> usize {
     let operator = word.trim_start_matches(|c: char| c.is_ascii_digit());
     if !operator.starts_with(['<', '>']) {
         0
@@ -144,6 +212,15 @@ pub struct Command {
     /// continuations after it. A heredoc the command opens has its body right
     /// after it. `None` when the script ends first.
     pub line_end: Option<usize>,
+    /// The command runs inside a command substitution, `$( ... )` or a
+    /// backtick pair, so its output becomes words of another command.
+    pub substitution: bool,
+    /// The command carries on a command that a substitution split, as the
+    /// `rm` in `X=$(pwd) rm a`: no separator stands between them.
+    pub joined: bool,
+    /// The command ends where a substitution opens, so the substitution's
+    /// output becomes more of its words, as in `rm `cat list``.
+    pub opens_substitution: bool,
 }
 
 /// The words of each simple command in `command`. Heredoc bodies and comments
@@ -160,24 +237,78 @@ pub fn simple_commands(command: &str) -> Vec<Vec<String>> {
 /// `cat <<EOF | git commit -F -` is `cat`, not `git`. A heredoc opened on a
 /// line with no command words belongs to no command.
 pub fn commands(command: &str) -> Vec<Command> {
-    Lexer {
-        chars: command.chars().collect(),
-        at: 0,
-        commands: Vec::new(),
-        words: Vec::new(),
-        spans: Vec::new(),
-        word: None,
-        word_start: 0,
-        word_end: 0,
-        word_dynamic: false,
-        opened: Vec::new(),
-        opened_here: Vec::new(),
-        piped_next: false,
-        groups: Vec::new(),
-        groups_opened: 0,
-        line_first: 0,
+    Lexer::new(command).run()
+}
+
+/// The command texts of the `$( ... )` groups and backtick pairs in `text`,
+/// read the way the shell reads them: quotes, comments and heredoc bodies
+/// inside a group do not end it. With `quotes`, single-quoted text is skipped,
+/// as in a word. Without, quotes are literal, as in an unquoted heredoc body.
+pub fn substitutions(text: &str, quotes: bool) -> Vec<String> {
+    let mut lexer = Lexer::new(text);
+    let mut found = Vec::new();
+    let mut in_double = false;
+    while let Some(c) = lexer.take() {
+        match c {
+            '\\' => {
+                lexer.take();
+            }
+            '"' if quotes => in_double = !in_double,
+            '\'' if quotes && !in_double => while lexer.take().is_some_and(|c| c != '\'') {},
+            '$' if lexer.looking_at("((") => {
+                let arithmetic = lexer.substitution();
+                found.extend(substitutions(&arithmetic, quotes));
+            }
+            '$' if lexer.looking_at("(") => {
+                let group = lexer.substitution();
+                let inner = group.strip_prefix('(').unwrap_or(&group);
+                found.push(inner.strip_suffix(')').unwrap_or(inner).to_string());
+            }
+            '`' => {
+                let mut inner = String::new();
+                // Inside backticks a backslash only escapes `$`, a backtick
+                // or another backslash; before anything else it stays.
+                while let Some(c) = lexer.take().filter(|&c| c != '`') {
+                    match (c, lexer.peek()) {
+                        ('\\', Some(next @ ('$' | '`' | '\\'))) => {
+                            lexer.take();
+                            inner.push(next);
+                        }
+                        _ => inner.push(c),
+                    }
+                }
+                found.push(inner);
+            }
+            _ => {}
+        }
     }
-    .run()
+    found
+}
+
+impl Lexer {
+    fn new(command: &str) -> Lexer {
+        Lexer {
+            chars: command.chars().collect(),
+            at: 0,
+            commands: Vec::new(),
+            words: Vec::new(),
+            spans: Vec::new(),
+            word: None,
+            word_start: 0,
+            word_end: 0,
+            word_dynamic: false,
+            opened: Vec::new(),
+            opened_here: Vec::new(),
+            piped_next: false,
+            groups: Vec::new(),
+            groups_opened: 0,
+            substitution_groups: Vec::new(),
+            in_backtick: false,
+            joined_next: false,
+            opens_next: false,
+            line_first: 0,
+        }
+    }
 }
 
 /// Replaces the character ranges of `text` named by `edits`. A range that
@@ -311,6 +442,14 @@ struct Lexer {
     /// The ids of the parentheses open around the position being read.
     groups: Vec<usize>,
     groups_opened: usize,
+    /// One entry per open parenthesis: whether it opened a `$( ... )`.
+    substitution_groups: Vec<bool>,
+    /// Inside an unquoted backtick pair.
+    in_backtick: bool,
+    /// The next command carries on one a substitution split.
+    joined_next: bool,
+    /// The command being ended stops where a substitution opens.
+    opens_next: bool,
     /// Index in `commands` of the first command on the current line.
     line_first: usize,
 }
@@ -372,26 +511,44 @@ impl Lexer {
                     }
                     self.end_command();
                     self.piped_next = !or_list;
+                    self.joined_next = false;
                 }
                 '`' | ';' | '&' | '(' | ')' => {
+                    // A word that runs into a backtick stays dynamic either way:
+                    // the commit message sanitizer must not rewrite text that
+                    // sits inside a substitution.
                     if c == '`' && self.word.is_some() {
                         self.word_dynamic = true;
                     }
+                    let opens = match c {
+                        '(' => start > 0 && self.chars[start - 1] == '$',
+                        '`' => !self.in_backtick,
+                        _ => false,
+                    };
+                    self.opens_next = opens;
                     self.end_command();
                     self.piped_next = false;
+                    self.joined_next = false;
                     match c {
                         '(' => {
                             self.groups_opened += 1;
                             self.groups.push(self.groups_opened);
+                            self.substitution_groups.push(opens);
                         }
                         ')' => {
                             self.groups.pop();
+                            self.joined_next = self.substitution_groups.pop().unwrap_or(false);
+                        }
+                        '`' => {
+                            self.in_backtick = !self.in_backtick;
+                            self.joined_next = !self.in_backtick;
                         }
                         _ => {}
                     }
                 }
                 '\n' | '\r' => {
                     self.end_command();
+                    self.joined_next = false;
                     if c == '\n' {
                         for command in &mut self.commands[self.line_first..] {
                             command.line_end = Some(start);
@@ -459,6 +616,7 @@ impl Lexer {
     fn end_command(&mut self) {
         self.end_word();
         let here = std::mem::take(&mut self.opened_here);
+        let opens_substitution = std::mem::take(&mut self.opens_next);
         if self.words.is_empty() {
             return;
         }
@@ -474,6 +632,9 @@ impl Lexer {
             depth: self.groups.len(),
             group: self.groups.last().copied().unwrap_or(0),
             line_end: None,
+            substitution: self.in_backtick || self.substitution_groups.contains(&true),
+            joined: std::mem::take(&mut self.joined_next),
+            opens_substitution,
         });
     }
 
@@ -928,6 +1089,92 @@ mod tests {
             depth,
             [("a", 0), ("b", 1), ("c", 2), ("d", 0), ("e", 1), ("f", 0)]
         );
+    }
+
+    /// One code per command: `s` inside a substitution, `j` joined to one,
+    /// `o` opens one, `-` for a flag that is off.
+    #[test]
+    fn each_command_knows_how_it_meets_a_command_substitution() {
+        let table = [
+            ("a $(b) c; d", "--o s-- -j- ---"),
+            ("a `b` c", "--o s-- -j-"),
+            ("(a) && b", "--- ---"),
+            ("x=$(a) b", "--o s-- -j-"),
+            ("a $(b) | c", "--o s-- ---"),
+            ("$(a; (b); c)", "--o s-- s-- s--"),
+        ];
+        for (script, expected) in table {
+            let flag = |on: bool, code: char| if on { code } else { '-' };
+            let got: Vec<String> = commands(script)
+                .iter()
+                .map(|c| {
+                    [
+                        flag(c.substitution, 's'),
+                        flag(c.joined, 'j'),
+                        flag(c.opens_substitution, 'o'),
+                    ]
+                    .iter()
+                    .collect()
+                })
+                .collect();
+
+            assert_eq!(got.join(" "), expected, "{script:?}");
+        }
+    }
+
+    #[test]
+    fn substitutions_are_read_with_their_quotes_and_heredocs() {
+        let table: [(&str, bool, Vec<&str>); 9] = [
+            (
+                r#"`echo "\"" ; x a\ b`"#,
+                true,
+                vec![r#"echo "\"" ; x a\ b"#],
+            ),
+            ("$(( $(x) + 1 ))", true, vec!["x"]),
+            ("a $(b (c)) d", true, vec!["b (c)"]),
+            ("x `y` z", true, vec!["y"]),
+            ("\"$(printf ')'; rm /a)\"", true, vec!["printf ')'; rm /a"]),
+            ("'$(no)' \"it's $(yes)\"", true, vec!["yes"]),
+            (
+                "$(cat <<'E'\n1) `q`\nE\n)",
+                true,
+                vec!["cat <<'E'\n1) `q`\nE\n"],
+            ),
+            ("it's $(yes) $((1+2))", false, vec!["yes"]),
+            ("$(open", true, vec!["open"]),
+        ];
+        for (text, quotes, expected) in table {
+            assert_eq!(substitutions(text, quotes), expected, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn options_and_the_shell_script_are_found_past_values_and_clusters() {
+        let words: Vec<String> = ["-c", "3", "-x", "rm", "a"].map(String::from).to_vec();
+
+        assert_eq!(skip_options(&words, 0, &["-c"]), 3);
+        assert_eq!(skip_options(&words, 0, &[]), 1);
+        assert_eq!(
+            skip_options(&["--".to_string(), "-x".to_string()], 0, &[]),
+            1
+        );
+        assert_eq!(skip_options(&["-n".to_string()], 0, &["-n"]), 1);
+        assert_eq!(
+            shell_script_at(&["-lc".to_string(), "x".to_string()]),
+            Some(1)
+        );
+        assert_eq!(
+            shell_script_at(&["--norc".to_string(), "-c".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn a_word_before_a_closing_backtick_stays_dynamic() {
+        let got = commands("echo `ls /a`");
+
+        assert_eq!(got[1].words, ["ls", "/a"]);
+        assert!(got[1].spans[1].dynamic);
     }
 
     #[test]
