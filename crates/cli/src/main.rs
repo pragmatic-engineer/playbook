@@ -1403,8 +1403,9 @@ fn main() {
                             std::process::exit(1);
                         }
                     };
+                    let shown = value_json.to_string();
                     match config::write::set(tier, &key, value_json, &home, repo_slug) {
-                        Ok(()) => println!("config set: {key} updated"),
+                        Ok(()) => println!("config set: {key} updated to {shown}"),
                         Err(err) => {
                             eprintln!("config set: {err}");
                             std::process::exit(1);

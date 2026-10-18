@@ -220,6 +220,7 @@ fn configured_roots(home: &str) -> Vec<PathBuf> {
         .into_iter()
         .flatten()
         .filter_map(serde_json::Value::as_str)
+        .map(crate::config::write::strip_root_glob)
         .filter(|t| !t.contains(['*', '?', '[', '{', '$', '`']))
         .filter_map(|t| match t.strip_prefix("~/") {
             // `join` of an absolute remainder replaces home, so `~//etc` would

@@ -133,10 +133,11 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
 /// `hooks.rmGuard.allowedRoots` takes strings that are an absolute path or a
 /// `~/` path, with no `..` segment and no glob or quote characters, naming a
 /// directory at least two levels deep. A root such as `/`, `~` or `/Users` would
-/// hand the guard's allowance to far more than a scratch tree.
+/// hand the guard's allowance to far more than a scratch tree. A trailing `/**`
+/// or `/*` is accepted and means the same as the plain path, since a root
+/// always covers everything under it.
 fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
-    const CONSTRAINT: &str =
-        "absolute or ~/ paths, at least two levels deep, with no .., glob or quote characters";
+    const CONSTRAINT: &str = "directories given as absolute or ~/ paths, at least two levels deep (one under ~/), with no .., quote or glob characters. A root covers everything under it, so a trailing /** is optional. Example: playbook config set --global hooks.rmGuard.allowedRoots '[\"~/Workspace/acme/.worktrees\",\"/opt/scratch\"]'";
     let bad = || ConfigError::OutOfRange {
         key: key.to_string(),
         value: value.to_string(),
@@ -146,7 +147,7 @@ fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
         return Err(bad());
     };
     for item in items {
-        let text = item.as_str().ok_or_else(bad)?;
+        let text = strip_root_glob(item.as_str().ok_or_else(bad)?);
         let rest = match text.strip_prefix("~/") {
             Some(rest) if rest.starts_with('/') => return Err(bad()),
             Some(rest) => rest,
@@ -169,6 +170,13 @@ fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
         }
     }
     Ok(())
+}
+
+/// `root` without a trailing `/**` or `/*`, which a root implies anyway.
+pub(crate) fn strip_root_glob(root: &str) -> &str {
+    root.strip_suffix("/**")
+        .or_else(|| root.strip_suffix("/*"))
+        .unwrap_or(root)
 }
 
 const CEILING_KEY: &str = "auto.sessionCeilingUsd";
