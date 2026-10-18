@@ -18,12 +18,10 @@ use std::time::{Duration, SystemTime};
 pub const TARGET_IDLE: Duration = Duration::from_secs(30 * 60);
 /// A scratch entry touched more recently than this may be in use.
 pub const SCRATCH_IDLE: Duration = Duration::from_secs(60 * 60);
-/// A plugin cache marked orphaned more recently than this may still serve a
-/// running session.
+/// A plugin cache orphaned more recently may still serve a running session.
 pub const ORPHAN_IDLE: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// Debug builds read the scratch folders to scan from this variable, so a
-/// test can run a real cleanup without touching the machine's `/tmp`.
+/// Debug builds scan this folder in place of `/tmp`, for tests.
 pub const TEST_TMP_VAR: &str = "PLAYBOOK_TEST_DISK_TMP";
 
 /// Why a folder is a candidate.
@@ -350,8 +348,7 @@ fn named_by_a_process(path: &Path, process_args: &str) -> Option<String> {
         .then(|| "in use by a running process".to_string())
 }
 
-/// The `.cargo-lock` files of a target folder: one per profile, and one per
-/// profile under each target triple folder.
+/// The `.cargo-lock` files of a target folder, per profile and per triple.
 fn cargo_locks(target: &Path) -> Vec<PathBuf> {
     let mut locks = Vec::new();
     for profile in children(target) {
@@ -373,7 +370,6 @@ fn build_lock_held(target: &Path) -> Option<String> {
 }
 
 /// Takes every build lock of `target`, or `None` when a build holds one.
-/// The locks are released when the files are dropped.
 fn take_locks(target: &Path) -> Option<Vec<std::fs::File>> {
     let mut held = Vec::new();
     for lock in cargo_locks(target) {

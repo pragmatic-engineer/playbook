@@ -27,29 +27,17 @@ pub struct Scan {
     /// The latest change time of any entry, the path itself included.
     /// `UNIX_EPOCH` when nothing could be read.
     pub newest: SystemTime,
-    /// False when the walk stopped at its deadline, so `bytes` is a floor.
-    pub complete: bool,
 }
 
 /// Walks `path` once for its size and its most recent change.
 pub fn scan(path: &Path) -> Scan {
-    scan_until(path, None)
-}
-
-/// [`scan`] that stops at `deadline`, for reports that must stay fast.
-pub fn scan_until(path: &Path, deadline: Option<std::time::Instant>) -> Scan {
     let mut seen: HashSet<(u64, u64)> = HashSet::new();
     let mut found = Scan {
         bytes: 0,
         newest: SystemTime::UNIX_EPOCH,
-        complete: true,
     };
     let mut stack = vec![path.to_path_buf()];
     while let Some(at) = stack.pop() {
-        if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-            found.complete = false;
-            break;
-        }
         let Ok(meta) = std::fs::symlink_metadata(&at) else {
             continue;
         };
@@ -131,19 +119,6 @@ mod tests {
             scan(Path::new("/pb-disk-scan-missing")).newest,
             SystemTime::UNIX_EPOCH
         );
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn a_past_deadline_stops_the_walk() {
-        let dir =
-            std::env::temp_dir().join(format!("pb-disk-deadline-{}", crate::testing::run_id()));
-        fs::create_dir_all(dir.join("x")).unwrap();
-        let past = std::time::Instant::now();
-        let found = scan_until(&dir, Some(past));
-        assert!(!found.complete);
-        assert_eq!(found.bytes, 0);
-        assert!(scan_until(&dir, None).complete);
         fs::remove_dir_all(&dir).unwrap();
     }
 
