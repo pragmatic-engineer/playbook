@@ -100,5 +100,5 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0041](adr/0041-retire-playbook-telemetry.md) | Retire the `playbook-telemetry` binary and formula, and keep `pbtop` | Accepted, amended by 0043 | 2026-10-16 |
 | [0042](adr/0042-attribution-off-in-setup.md) | Turn off Claude Code attribution in setup | Accepted, amended by 0044 | 2026-10-17 |
 | [0043](adr/0043-collector-service-in-setup.md) | Keep the usage collector running with a per-user service | Accepted, amended by 0044 and on 2026-10-18 (launchd label) | 2026-10-17 |
-| [0044](adr/0044-drop-the-shell-launcher.md) | Drop the shell launcher and turn every setup part on with `--yes` | Accepted | 2026-10-18 |
+| [0044](adr/0044-drop-the-shell-launcher.md) | Drop the shell launcher and turn every setup part on with `--yes` | Accepted, amended on 2026-10-19 | 2026-10-18 |
 | [0046](adr/0046-migrations-by-release-version.md) | Attach each migration to the release that introduced it | Accepted | 2026-10-18 |

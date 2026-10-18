@@ -56,8 +56,6 @@ fn defines(line: &str, name: &str) -> bool {
 }
 
 /// The aliases and functions in `text` that define an old launcher name.
-/// Lines the playbook-managed `shell-init` block owns are not matched,
-/// because that block no longer defines them.
 pub fn scan_text(file: &str, text: &str) -> Vec<Finding> {
     let mut out = Vec::new();
     for (i, line) in text.lines().enumerate() {

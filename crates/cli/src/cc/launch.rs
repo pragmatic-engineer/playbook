@@ -522,7 +522,7 @@ fn spawn(cwd: &Path, args: &[String], stderr: Option<Stdio>) -> i32 {
     cmd.args(args)
         .current_dir(cwd)
         .env("PWD", cwd)
-        // A shell that loaded the old `shell-init` function may still set it.
+        // A shell that loaded the retired launcher function may still set it.
         .env_remove("PLAYBOOK_CC_CD_FILE");
     // Hooks inherit this PATH and read no rc file, so the session must be
     // able to find the binary that launched it even when the shell's PATH
