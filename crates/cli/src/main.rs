@@ -2760,7 +2760,7 @@ fn run_disk(sub: DiskCommand) {
                 return;
             }
             let repo_root = playbook_common::gitfacts::toplevel(&cwd);
-            for line in disk::clean::run(&home, repo_root.as_deref(), dry_run) {
+            for line in disk::clean::run(&home, repo_root.as_deref(), dry_run, auto) {
                 println!("{line}");
             }
         }

@@ -149,6 +149,35 @@ fn read(_path: &Path) -> io::Result<Space> {
     ))
 }
 
+/// Whether `path` sits on a file system kept in memory, such as a tmpfs
+/// `/tmp` on Linux. Its free space is bounded by RAM and says nothing about
+/// the disk, so the guard leaves it out.
+#[cfg(target_os = "linux")]
+pub fn ram_backed(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    const TMPFS_MAGIC: i64 = 0x0102_1994;
+    const RAMFS_MAGIC: i64 = 0x8584_58f6;
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut out = std::mem::MaybeUninit::<libc::statfs>::zeroed();
+    // SAFETY: `c_path` is a valid NUL-terminated string that outlives the
+    // call, and `out` points to writable memory the size of one `statfs`.
+    if unsafe { libc::statfs(c_path.as_ptr(), out.as_mut_ptr()) } != 0 {
+        return false;
+    }
+    // SAFETY: `statfs` returned 0, so it filled `out`.
+    #[allow(clippy::unnecessary_cast)]
+    let kind = unsafe { out.assume_init() }.f_type as i64;
+    kind == TMPFS_MAGIC || kind == RAMFS_MAGIC
+}
+
+/// No in-memory temp folder to skip outside Linux.
+#[cfg(not(target_os = "linux"))]
+pub fn ram_backed(_path: &Path) -> bool {
+    false
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
