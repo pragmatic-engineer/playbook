@@ -1914,6 +1914,9 @@ fn read_only_mode_and_config_commands_and_near_misses_are_not_denied() {
         "playbookx mode ask",
         "echo playbook mode ask",
         "git commit -m 'document playbook mode ask'",
+        "sqlite3 ~/.config/playbook/data/config.db 'select * from config'",
+        "sqlite3 ~/.config/playbook/data/memory.db .tables 2>/dev/null",
+        "ls ~/.config/playbook/data 2>/dev/null",
     ];
     for (from, source) in both_sources() {
         let session = Session::under_budget(&format!("near-miss-{source}"), from);

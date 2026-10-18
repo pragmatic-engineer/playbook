@@ -116,9 +116,10 @@ fn script_names_settings(word: &str) -> bool {
 }
 
 /// The target of each redirect that writes, in the words of one command. A
-/// redirect can be a word of its own (`>`), start a word (`>file`, `2>file`),
-/// or sit inside one (`{}>file`). `>&2` and `2>&1` write to a descriptor.
-fn redirect_targets(words: &[String]) -> Vec<&str> {
+/// redirect can be a word of its own (`>`, `<>`), start a word (`>file`,
+/// `2>file`, `1<>file`), or sit inside one (`{}>file`). `>&2` and `2>&1`
+/// write to a descriptor.
+pub(super) fn redirect_targets(words: &[String]) -> Vec<&str> {
     let mut targets = Vec::new();
     for (i, word) in words.iter().enumerate() {
         let Some(at) = word.rfind('>') else { continue };

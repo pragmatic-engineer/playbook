@@ -554,11 +554,10 @@ fn is_guarded_command(command: &str) -> bool {
 }
 
 fn is_guarded_invocation(words: &[String]) -> bool {
-    // Any program pointed at the config database can change guarded settings.
-    if words
-        .iter()
-        .any(|word| super::policy_guard::names_database(&word.to_lowercase()))
-    {
+    // A write to the config store can change guarded settings. Reading it is
+    // fine, the same rule the policy guard applies.
+    let home = std::env::var("HOME").unwrap_or_default();
+    if super::policy_guard::writes_config_store(words, &home) {
         return true;
     }
     let Some(start) = program_index(words) else {

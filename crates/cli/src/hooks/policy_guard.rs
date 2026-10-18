@@ -14,8 +14,11 @@
 //! - changing the `rm` guard's own allowance: `playbook config set` on a
 //!   `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars` or
 //!   `pr.ticketPatterns` key, `config import`, `config unset` or `config edit`,
-//!   anything naming the config database, a write to a config file, or an
-//!   inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=` assignment. A model
+//!   a write to the config database or a config file (a redirect into it, a
+//!   writer program, an interpreter, `sed -i`, or `sqlite3` with anything but
+//!   a read), or an inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`
+//!   assignment. Reading the store is allowed, and each denial names the
+//!   rule that matched. A model
 //!   that could widen the roots could delete anything it likes, so this holds
 //!   in `ask` mode too, unlike the `auto_cost` guard, which covers `mode`,
 //!   `auto.*` and `fix.*` in `auto` mode only. The inline assignments cannot
@@ -46,6 +49,9 @@
 //! expand variables, aliases or scripts, so an obfuscated spelling passes.
 
 mod settings_writes;
+mod store_writes;
+
+pub(crate) use store_writes::writes_config_store;
 
 use crate::common::payload::Payload;
 use crate::common::shell::{
@@ -118,7 +124,25 @@ describes: a directory (`src/auth/`), a file (`src/auth/login.py`) or a symbol \
 `<owner>/` for one owner's repos, the root for everything. Inside a scoped folder do not repeat the \
 owner or repo in the text.";
 
-const RM_GUARD_CONFIG_REASON: &str = "The rm guard's allowed roots, the prose lint mode and the pull request rules are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Until then, work within the current setting and say so.";
+/// The shared tail of the reasons for a protected setting.
+macro_rules! protected_reason {
+    ($rule:literal) => {
+        concat!(
+            "Matched rule: ",
+            $rule,
+            ". The rm guard's allowed roots, the prose lint mode and the pull request rules are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Reading the config store is fine. Until then, work within the current setting and say so."
+        )
+    };
+}
+
+const CONFIG_SET_REASON: &str =
+    protected_reason!("`playbook config set`, `unset`, `import` or `edit` of a protected key");
+
+const CONFIG_STORE_REASON: &str =
+    protected_reason!("a write to playbook's config database or a config file");
+
+const SAFE_ROOTS_ENV_REASON: &str =
+    protected_reason!("an inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=` assignment");
 
 /// The part both settings reasons share: what to ask the user and what the
 /// model may run itself.
@@ -179,12 +203,6 @@ fn is_fact_file(path: &str, memory_dir: &Path) -> bool {
         && !path.components().any(|c| c == Component::ParentDir)
 }
 
-/// Programs that can write a file or database they are handed, on top of
-/// `WRITER_PROGRAMS`.
-const DB_WRITER_PROGRAMS: [&str; 8] = [
-    "sqlite3", "python", "python3", "node", "ruby", "perl", "sed", "jq",
-];
-
 /// The config keys the model may not change: the `rm` guard's roots, the
 /// prose lint mode and the pull request rules. Matched on lowercase prefixes.
 const PROTECTED_KEY_PREFIXES: [&str; 5] = [
@@ -200,8 +218,13 @@ fn is_protected_config_key(word: &str) -> bool {
     PROTECTED_KEY_PREFIXES.iter().any(|p| key.starts_with(p))
 }
 
-/// Whether this simple command can widen the `rm` guard's allowance.
-fn changes_rm_guard_config(words: &[String], program_at: usize, home: &str) -> bool {
+/// The reason to deny this simple command because it can widen the `rm`
+/// guard's allowance, or `None`.
+fn changes_rm_guard_config(
+    words: &[String],
+    program_at: usize,
+    home: &str,
+) -> Option<&'static str> {
     changes_rm_guard_config_at(words, program_at, home, 0)
 }
 
@@ -210,33 +233,28 @@ fn changes_rm_guard_config_at(
     program_at: usize,
     home: &str,
     depth: usize,
-) -> bool {
+) -> Option<&'static str> {
     let assigns = words[..program_at].iter().any(|w| {
         w.split_once('=')
             .is_some_and(|(name, _)| matches!(name, "WORKTREE_BASE_DIR" | "PLAYBOOK_SAFE_ROOTS"))
     });
     if assigns {
-        return true;
+        return Some(SAFE_ROOTS_ENV_REASON);
     }
     let program = program_name(&words[program_at]);
     let rest = &words[program_at + 1..];
-    // A config file or the database named as the target of something that can
-    // write. Read-only programs, `git commit -m "mention playbook.db"` and
-    // searches are left alone.
-    let writes = WRITER_PROGRAMS.contains(&program.as_str())
-        || DB_WRITER_PROGRAMS.contains(&program.as_str())
-        || SHELLS.contains(&program.as_str())
-        || words.iter().any(|w| redirects(w));
-    if writes && words.iter().any(|w| names_config_store(w, home)) {
-        return true;
+    // Reading the store (`cat`, `ls`, `jq`, `sqlite3` with a SELECT, a
+    // `2>/dev/null`) and mentions in a message or a search are left alone.
+    if store_writes::writes_config_store(words, home) {
+        return Some(CONFIG_STORE_REASON);
     }
     if depth < 3 {
         if SHELLS.contains(&program.as_str()) {
             if let Some(at) = shell_script_at(rest) {
                 if let Some(script) = rest.get(at) {
-                    return simple_commands(script).iter().any(|inner| {
+                    return simple_commands(script).iter().find_map(|inner| {
                         program_index(inner)
-                            .is_some_and(|i| changes_rm_guard_config_at(inner, i, home, depth + 1))
+                            .and_then(|i| changes_rm_guard_config_at(inner, i, home, depth + 1))
                     });
                 }
             }
@@ -244,17 +262,14 @@ fn changes_rm_guard_config_at(
         if let Some(takes_value) = runner_value_options(&program) {
             let inner = &rest[skip_options(rest, 0, takes_value)..];
             return program_index(inner)
-                .is_some_and(|i| changes_rm_guard_config_at(inner, i, home, depth + 1));
+                .and_then(|i| changes_rm_guard_config_at(inner, i, home, depth + 1));
         }
     }
     let mut args = rest;
     match program.as_str() {
         "playbook" | "pb" => {}
-        "cargo" => match super::auto_cost::cargo_run_args(args) {
-            Some(after) => args = after,
-            None => return false,
-        },
-        _ => return false,
+        "cargo" => args = super::auto_cost::cargo_run_args(args)?,
+        _ => return None,
     }
     if args
         .iter()
@@ -262,10 +277,10 @@ fn changes_rm_guard_config_at(
         .map(String::as_str)
         != Some("config")
     {
-        return false;
+        return None;
     }
     let at = args.iter().position(|w| w == "config").unwrap_or(0);
-    match args[at + 1..].first().map(String::as_str) {
+    let changes = match args[at + 1..].first().map(String::as_str) {
         // `unset` and `edit` do not exist yet. They are denied ahead of time so
         // adding them later cannot open a gap.
         Some("import" | "unset" | "edit") => true,
@@ -276,7 +291,8 @@ fn changes_rm_guard_config_at(
             .filter(|w| !w.starts_with('-'))
             .any(|w| is_protected_config_key(w)),
         _ => false,
-    }
+    };
+    changes.then_some(CONFIG_SET_REASON)
 }
 
 /// Whether `word` names one of playbook's databases: the settings store (now
@@ -447,16 +463,22 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
         ) {
             return Some(SETTINGS_WRITE_REASON);
         }
+        if store_writes::is_open_redirect_into_store(previous.as_deref(), &words, home) {
+            return Some(CONFIG_STORE_REASON);
+        }
         previous = Some(words.clone());
         let Some(at) = program_index(&words) else {
             if settings_writes::redirects_to_settings(&words, home, in_claude_dir) {
                 return Some(SETTINGS_WRITE_REASON);
             }
+            if store_writes::writes_config_store(&words, home) {
+                return Some(CONFIG_STORE_REASON);
+            }
             continue;
         };
         let args = &words[at + 1..];
-        if changes_rm_guard_config(&words, at, home) {
-            return Some(RM_GUARD_CONFIG_REASON);
+        if let Some(reason) = changes_rm_guard_config(&words, at, home) {
+            return Some(reason);
         }
         if uninstalls_playbook(&words, at, 0) {
             return Some(HOOK_ENTRIES_REASON);
@@ -619,7 +641,7 @@ fn check_path(path: &str, home: &str) -> Option<&'static str> {
             &crate::common::paths::playbook_root_from(Path::new(home)),
         )
     {
-        return Some(RM_GUARD_CONFIG_REASON);
+        return Some(CONFIG_STORE_REASON);
     }
     is_claude_memory_path(path, home).then_some(MEMORY_REASON)
 }
@@ -714,7 +736,16 @@ mod tests {
             "cd ~/.config/playbook/data && sqlite3 config.db 'update x'",
             "sed -i s/a/b/ ~/.config/playbook/d*/c*.db",
         ] {
-            assert_eq!(deny(command), Some(RM_GUARD_CONFIG_REASON), "{command}");
+            let expected = if command.contains("WORKTREE_BASE_DIR=")
+                || command.contains("PLAYBOOK_SAFE_ROOTS=")
+            {
+                SAFE_ROOTS_ENV_REASON
+            } else if command.contains(" config ") {
+                CONFIG_SET_REASON
+            } else {
+                CONFIG_STORE_REASON
+            };
+            assert_eq!(deny(command), Some(expected), "{command}");
         }
     }
 
@@ -745,6 +776,88 @@ mod tests {
             "cp a /work/.worktrees/playbook/data-config/b",
         ] {
             assert_eq!(deny(command), None, "{command}");
+        }
+    }
+
+    /// Reading the config store, the memory store or a settings file is never
+    /// a write, however the command is spelled.
+    #[test]
+    fn reads_of_the_config_store_are_left_alone() {
+        for command in [
+            "sqlite3 ~/.config/playbook/data/config.db \"select * from settings\"",
+            "sqlite3 ~/.config/playbook/data/config.db .tables 2>/dev/null",
+            "sqlite3 -readonly ~/.config/playbook/data/config.db 'select 1' 2>&1 | head",
+            "sqlite3 ~/.config/playbook/data/memory.db \"select count(*) from facts\"",
+            "sqlite3 -header ~/.config/playbook/data/config.db 'pragma table_info(settings)'",
+            "cd ~/.config/playbook/data && sqlite3 config.db .tables",
+            "cat ~/.config/playbook/config.json 2>/dev/null",
+            "jq . ~/.config/playbook/config.json",
+            "jq . ~/.config/playbook/config.json > /tmp/pb-config.json",
+            "ls -la ~/.config/playbook/data > /private/tmp/out",
+            "ls ~/.config/playbook/data/ 2>/dev/null | head",
+            "grep x ~/.config/playbook/*/config.db 2>/dev/null",
+            "sed -n 1,5p ~/.config/playbook/config.json",
+            "grep -n rmGuard ~/.claude/settings.json",
+            "playbook migrate --status 2>/dev/null",
+            "rg \"playbook config set hooks.rmGuard\" docs/",
+        ] {
+            assert_eq!(deny(command), None, "{command}");
+        }
+    }
+
+    #[test]
+    fn a_write_to_the_config_store_names_its_rule() {
+        for (command, reason) in [
+            (
+                "sqlite3 ~/.config/playbook/data/config.db \"update settings set v=1\"",
+                CONFIG_STORE_REASON,
+            ),
+            (
+                "sqlite3 ~/.config/playbook/data/config.db 'select 1; delete from settings'",
+                CONFIG_STORE_REASON,
+            ),
+            (
+                "sqlite3 ~/.config/playbook/data/config.db \"select writefile('x', 1)\"",
+                CONFIG_STORE_REASON,
+            ),
+            (
+                "sqlite3 ~/.config/playbook/data/config.db < x.sql",
+                CONFIG_STORE_REASON,
+            ),
+            (
+                "sqlite3 ~/.config/playbook/data/config.db .read x.sql",
+                CONFIG_STORE_REASON,
+            ),
+            (
+                "jq . a.json > ~/.config/playbook/config.json",
+                CONFIG_STORE_REASON,
+            ),
+            (
+                "echo x 2>~/.config/playbook/config.json",
+                CONFIG_STORE_REASON,
+            ),
+            (
+                "playbook config set hooks.rmGuard.allowedRoots /a/b",
+                CONFIG_SET_REASON,
+            ),
+            ("PLAYBOOK_SAFE_ROOTS=/ ls", SAFE_ROOTS_ENV_REASON),
+        ] {
+            assert_eq!(deny(command), Some(reason), "{command}");
+        }
+        assert!(CONFIG_STORE_REASON.starts_with("Matched rule: a write"));
+        for command in [
+            "sqlite3 -cmd \"delete from settings\" ~/.config/playbook/data/config.db \"select 1\"",
+            "sqlite3 --init x.sql ~/.config/playbook/data/config.db \"select 1\"",
+            "sqlite3 ~/.config/playbook/data/config.db 'pragma writable_schema=1'",
+            "Q='1; delete from settings'; sqlite3 ~/.config/playbook/data/config.db \"select $Q\"",
+            "sed --in-place s/a/b/ ~/.config/playbook/config.json",
+            "sed -Ei s/a/b/ ~/.config/playbook/config.json",
+            "sed -n 'w /Users/me/.config/playbook/data/config.db' /tmp/evil.db",
+            "echo x >| ~/.config/playbook/config.json",
+            "echo x &> ~/.config/playbook/config.json",
+            "echo x 1<> ~/.config/playbook/config.json",
+        ] {
+            assert_eq!(deny(command), Some(CONFIG_STORE_REASON), "{command}");
         }
     }
 
@@ -797,11 +910,7 @@ mod tests {
             format!("{root}/orgs/acme/config.json"),
             format!("{root}/x/../playbook.db"),
         ] {
-            assert_eq!(
-                check_path(&path, HOME),
-                Some(RM_GUARD_CONFIG_REASON),
-                "{path}"
-            );
+            assert_eq!(check_path(&path, HOME), Some(CONFIG_STORE_REASON), "{path}");
         }
         assert_eq!(check_path(&format!("{root}/memory/a.md"), HOME), None);
     }

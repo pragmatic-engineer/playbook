@@ -253,6 +253,28 @@ fn the_rm_guard_allowance_cannot_be_changed_by_the_model() {
     assert!(reason_of(bash("git commit -m 'mention playbook.db'")).is_none());
 }
 
+/// Reads of playbook's state that blocked real sessions, sent through the
+/// hook entry as JSON payloads.
+#[test]
+fn reading_playbook_state_is_never_denied() {
+    let reason_of = |command: &str| denial(&run(&bash(command), &[]).0);
+    for command in [
+        "sqlite3 ~/.config/playbook/data/config.db \"select * from settings\"",
+        "sqlite3 ~/.config/playbook/data/config.db .tables 2>/dev/null",
+        "cd ~/.config/playbook/data && sqlite3 config.db .schema",
+        "cat ~/.config/playbook/config.json 2>/dev/null",
+        "jq . ~/.config/playbook/config.json",
+        "ls -la ~/.config/playbook/memory ~/.config/playbook/data > /private/tmp/pb-ls",
+        "grep -n rmGuard ~/.claude/settings.json 2>/dev/null",
+        "playbook migrate --status 2>/dev/null",
+    ] {
+        assert_eq!(reason_of(command), None, "{command}");
+    }
+    let write = reason_of("sqlite3 ~/.config/playbook/data/config.db \"update settings set v=1\"")
+        .unwrap_or_default();
+    assert!(write.starts_with("Matched rule: a write"), "{write}");
+}
+
 #[test]
 fn a_claude_settings_file_cannot_be_written_by_the_model() {
     let dir =
