@@ -369,8 +369,9 @@ fn multiple_targets_and_chained_commands_are_all_judged() {
         ),
         (format!("echo hi ; {d} -rf {t}/sub ; ls {h}"), false),
         (format!("{d} -rf {t}/sub /etc/x"), true),
-        // Only `rm` is inspected: pinned so it is not re-reported later.
-        (format!("rmdir {h}/.ssh"), false),
+        // `rmdir` and `unlink` are judged like `rm`.
+        (format!("rmdir {h}/.ssh"), true),
+        (format!("unlink {t}/sub/x"), false),
     ];
     check(&fx, &fx.repo, &cases);
 }

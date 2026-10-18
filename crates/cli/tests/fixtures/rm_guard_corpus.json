@@ -751,7 +751,7 @@
     "id": "xargs-literal",
     "cwd": "/Users/<user>/code/acme/coda",
     "command": "printf '%s\\n' a.tmp b.tmp | xargs rm -f",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "bypass, now classified",
     "note": "xargs fed a literal list"
@@ -778,7 +778,7 @@
     "id": "git-clean-home",
     "cwd": "/Users/<user>",
     "command": "git clean -fdx",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "git clean in the home folder"
@@ -796,7 +796,7 @@
     "id": "git-worktree-remove-home",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "git worktree remove --force ~/Documents/wt",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "a worktree in a denied folder"
@@ -823,7 +823,7 @@
     "id": "unlink-ssh",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "unlink ~/.ssh/id_ed25519",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "unlink of a credential file"
@@ -841,7 +841,7 @@
     "id": "rmdir-etc",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "rmdir /etc/x",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "rmdir in /etc"
@@ -850,7 +850,7 @@
     "id": "shred",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "shred -u ~/.aws/credentials",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "shred of a credential file"
@@ -877,7 +877,7 @@
     "id": "py-rmtree-home",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "python3 -c 'import shutil,os; shutil.rmtree(os.path.expanduser(\"~\"))'",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "python rmtree of a computed path"
@@ -886,7 +886,7 @@
     "id": "py-remove-memory",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "python3 -c \"import os; os.remove('/Users/<user>/.config/playbook/data/config.db')\"",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "python os.remove of protected data"
@@ -913,7 +913,7 @@
     "id": "node-rmsync",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "node -e \"require('fs').rmSync('/etc/x', {recursive: true})\"",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "node rmSync in /etc"
@@ -931,7 +931,7 @@
     "id": "truncate-memory",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "truncate -s 0 ~/.config/playbook/data/memory.db",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "truncate of protected data"
@@ -940,7 +940,7 @@
     "id": "redirect-config",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "echo '{}' > ~/.config/playbook/config.json",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "redirect over protected data"
@@ -949,7 +949,7 @@
     "id": "redirect-zshrc",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "echo 'x' > ~/.zshrc",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "redirect over a shell rc file"
@@ -976,7 +976,7 @@
     "id": "dd-of",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "dd if=/dev/zero of=/Users/<user>/.config/playbook/data/usage.db bs=1 count=1",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "dd over protected data"
@@ -985,7 +985,7 @@
     "id": "chmod-ssh",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "chmod -R 777 ~/.ssh",
-    "expect": "allow",
+    "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
     "note": "recursive chmod of a credential folder"

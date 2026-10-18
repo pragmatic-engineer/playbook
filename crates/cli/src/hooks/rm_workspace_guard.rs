@@ -26,7 +26,8 @@
 //! ACCEPTED RISKS, pinned here: a check-then-use race (a link created between
 //! the guard and the `rm`) cannot be closed by a pre-execution hook; the
 //! `.worktrees` allowance covers every repo's folder there, not only this
-//! repo's; `rmdir`, `unlink`, `shred` and `>` truncation are not seen.
+//! repo's; a script file run by an interpreter, and a `>|` redirect, are not
+//! read.
 //!
 //! Best-effort protection against an accidental `rm`, NOT a security boundary.
 //! Anything it cannot resolve is blocked rather than evaluated.
@@ -66,6 +67,7 @@
 //! parses the JSON either way.
 
 mod expand;
+mod interp;
 mod message;
 mod parse;
 mod roots;
@@ -84,9 +86,13 @@ pub fn run(payload: &Payload) {
 
     let home = std::env::var("HOME").unwrap_or_default();
     let cwd = start_dir(&payload.field(".cwd"));
-    let tmpdir = std::env::var_os("TMPDIR")
-        .map(PathBuf::from)
-        .filter(|t| t.is_absolute());
+    let absolute = |name: &str| {
+        std::env::var_os(name)
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+    };
+    let tmpdir = absolute("TMPDIR");
+    let cargo_target_dir = absolute("CARGO_TARGET_DIR");
     // Most commands that reach the hook delete nothing, so the roots, which
     // cost git and config reads, are only worked out when something does.
     let found = parse::scan(
@@ -96,6 +102,7 @@ pub fn run(payload: &Payload) {
             cwd: &cwd,
             cdpath: std::env::var_os("CDPATH").is_some_and(|v| !v.is_empty()),
             tmpdir: tmpdir.as_deref(),
+            cargo_target_dir: cargo_target_dir.as_deref(),
         },
     );
     if found.targets.is_empty() {
@@ -770,6 +777,12 @@ fn denied_targets(targets: Vec<Target>, roots: &Roots) -> Vec<(String, Rule)> {
             Target::Below { text, tilde } => {
                 judge(&text, tilde, true, roots).err().map(|r| (text, r))
             }
+            // An overwrite keeps the file, so only the deny set and playbook's
+            // data block it.
+            Target::Overwrite { text, tilde } => judge(&text, tilde, false, roots)
+                .err()
+                .filter(|r| matches!(r, Rule::Denied(_) | Rule::Protected | Rule::Lock))
+                .map(|r| (text, r)),
         })
         .collect()
 }
