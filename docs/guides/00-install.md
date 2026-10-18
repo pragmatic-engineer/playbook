@@ -179,7 +179,7 @@ playbook setup --yes
 
 ### Coming from the shell launcher
 
-Older setups added a line to `~/.zshrc` or `~/.bashrc` that runs `eval "$(playbook shell-init)"`, and some users wrote it by hand. The `shell-init` command is removed. Start sessions with `pb cc` or `pb ccd`, or `playbook cc` and `playbook ccd`. Delete the line from your rc file, or run `playbook setup`, which removes it after a backup (migration 0018). `playbook doctor` warns while the line is there. Until 1.0, an rc file that still runs the line prints one line on stderr when a shell starts and nothing else, so the shell still starts.
+Older setups added a line to `~/.zshrc` or `~/.bashrc` that runs `eval "$(playbook shell-init)"`, and some users wrote it by hand. The `shell-init` command is removed. Start sessions with `pb cc` or `pb ccd`, or `playbook cc` and `playbook ccd`. Delete the line from your rc file, or run `playbook setup`, which removes it after a backup (the `retired-launcher-rc-line` migration). `playbook doctor` warns while the line is there. Until 1.0, an rc file that still runs the line prints one line on stderr when a shell starts and nothing else, so the shell still starts.
 
 See [release channels](../internals/06-release-channels.md) for how a release reaches each channel.
 

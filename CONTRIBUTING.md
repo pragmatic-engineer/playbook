@@ -65,6 +65,15 @@ Playbook is before 1.0, so a breaking change can ship in any release. A change i
 - Until 0.36.0, a breaking change to playbook also gets an entry in `breaking-changes.json`. A 0.34 binary that updates itself to 0.35.0 reads that file and asks the new binary for `playbook breaking`, so the 0.35 line keeps both, and 0.36.0 removes them.
 - A change to playbook's own config, its data files, the entries it writes into Claude Code settings, or the contract between the binary and the plugin keeps working after an upgrade or ships a migration that runs on first use ([ADR-0034](docs/adr/0034-self-healing-upgrades.md)).
 
+### Adding a migration
+
+A migration is named by a slug and the release that ships it ([ADR-0046](docs/adr/0046-migrations-by-release-version.md)).
+
+- Append the entry to `registry()` in `crates/cli/src/init/migrate.rs` with a new slug, such as `move-old-cache`, and `since: "next",` on its own line in exactly that form. The release pull request writes the version in its place.
+- Never rename or move an entry. The record and the doctor name it by its slug.
+- A build skips a `next` migration, so it never runs from a dev build of `main`. Test it with the unit tests next to it in that file, or build from a scratch checkout after `scripts/release-prepare.sh <next version>`.
+- [Internals: Migrations](docs/internals/07-migrations.md) explains the kinds and the scopes.
+
 Renaming a command is a deprecation. Keep the old name as a hidden alias that runs the same code, prints one line on stderr in a terminal that names the new command, and keeps its exit codes. Since the old name keeps working, the commit is not marked breaking. Remove the alias no earlier than the next major release, and mark that removal as breaking. The rename to `playbook setup` is the example ([ADR-0040](docs/adr/0040-rename-init-to-setup.md)).
 
 ## Changing the plugin

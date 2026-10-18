@@ -105,7 +105,8 @@ These never fail the check and carry no fix hint:
   `.worktrees/<repo>/` is the session launcher's worktree, `review-worktrees/` is
   the PR review, `repos/<owner>/<repo>/worktrees/<plan-slug>/<wu-id>` is a `/playbook:implement`
   Work Unit), or "no stale worktrees found".
-- Files you edited after playbook placed them, as `migration <id>: <message>`.
+- Files you edited after playbook placed them, as `migration <id>: <message>`,
+  where `<id>` is a slug such as `system-prompt-edited`.
 
 ## Output format
 

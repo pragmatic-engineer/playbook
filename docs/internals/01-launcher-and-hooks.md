@@ -6,7 +6,7 @@
 
 `playbook cc` and `playbook ccd` run `playbook cc launch` (`crates/cli/src/cc/launch.rs`) straight from the binary, and so do `pb cc` and `pb ccd`. No shell line is needed ([ADR 0044](../adr/0044-drop-the-shell-launcher.md)). `playbook ccd` is `playbook cc` with `--dangerously-skip-permissions` added. Nothing else differs.
 
-A child process cannot change its parent's directory. After a session in a worktree that `playbook cc launch worktree <branch>` created or entered, the launcher prints the `cd` command to run, quoted when the path needs it. The `playbook shell-init` command is removed. Until 1.0, a run of it prints one line on stderr that says to delete the rc line, prints nothing on stdout and exits 0, so an old rc line does not break shell startup. Migration 0018 removes the lines older setups wrote, after a backup, when you run `playbook setup`.
+A child process cannot change its parent's directory. After a session in a worktree that `playbook cc launch worktree <branch>` created or entered, the launcher prints the `cd` command to run, quoted when the path needs it. The `playbook shell-init` command is removed. Until 1.0, a run of it prints one line on stderr that says to delete the rc line, prints nothing on stdout and exits 0, so an old rc line does not break shell startup. The `retired-launcher-rc-line` migration removes the lines older setups wrote, after a backup, when you run `playbook setup`.
 
 On every launch the launcher:
 
