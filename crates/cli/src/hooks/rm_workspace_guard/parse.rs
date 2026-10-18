@@ -13,7 +13,7 @@
 //! `echo` or a heredoc read by another program is never a command.
 //!
 //! What it cannot resolve it reports as unresolvable, so the guard blocks it:
-//! a target holding a variable other than `$HOME` or `$TMPDIR`, a relative
+//! a target holding a variable other than `$HOME`, a relative
 //! target after a change of directory, a deletion inside or next to a command
 //! substitution, a shell reading a pipe, and `xargs` deleting what anything
 //! other than a plain `find` prints.
@@ -51,10 +51,13 @@ pub enum Target {
     Unresolvable(String),
 }
 
-/// The values the guard may expand itself.
+/// The values the guard may expand itself. `$TMPDIR` is left out on purpose:
+/// the shell that runs the command can have a different value than this hook
+/// (a shell profile may export one), so judging it here could allow a
+/// deletion outside the roots. `$HOME` is set at login and is the same for
+/// both.
 pub struct Env<'a> {
     pub home: &'a str,
-    pub tmpdir: Option<&'a str>,
 }
 
 /// Everything `command` deletes, in order.
@@ -111,7 +114,7 @@ struct Scan<'a> {
     /// The directory changed earlier, so a relative path no longer means the
     /// cwd.
     saw_cd: bool,
-    /// The command sets or unsets `HOME` or `TMPDIR`, so neither is expanded.
+    /// The command sets or unsets `HOME`, so it is not expanded.
     tainted: bool,
 }
 
@@ -296,7 +299,9 @@ impl Scan<'_> {
         if word.contains('$') {
             return Target::Unresolvable(raw);
         }
-        let tilde = raw.starts_with('~');
+        // `~` expands only when nothing up to the first `/` is quoted.
+        let prefix = raw.split('/').next().unwrap_or_default();
+        let tilde = raw.starts_with('~') && !prefix.contains(['"', '\'', '\\']);
         if self.saw_cd && !word.starts_with('/') && !tilde {
             return Target::Unresolvable(word.to_string());
         }
@@ -306,31 +311,25 @@ impl Scan<'_> {
         }
     }
 
-    /// `$HOME`, `${HOME}`, `$TMPDIR` or `${TMPDIR}` at the start of `word`,
-    /// expanded with the values this hook sees, when nothing else in the word
-    /// expands and the command never redefines them.
+    /// `$HOME` or `${HOME}` at the start of `word`, expanded with the value
+    /// this hook sees, when nothing else in the word expands and the command
+    /// never redefines it.
     fn expand(&self, word: &str, raw: &str) -> Option<String> {
-        if self.tainted || raw.starts_with('\'') {
+        if self.tainted || raw.starts_with('\'') || !self.env.home.starts_with('/') {
             return None;
         }
-        for (name, value) in [("HOME", Some(self.env.home)), ("TMPDIR", self.env.tmpdir)] {
-            for prefix in [format!("${name}"), format!("${{{name}}}")] {
-                let Some(rest) = word.strip_prefix(&prefix) else {
-                    continue;
-                };
-                if !(rest.is_empty() || rest.starts_with('/')) || rest.contains(['$', '`']) {
-                    return None;
-                }
-                let value = value.filter(|v| v.starts_with('/'))?;
-                let joined = format!("{}{rest}", value.trim_end_matches('/'));
-                return Some(if joined.is_empty() {
-                    "/".to_string()
-                } else {
-                    joined
-                });
-            }
+        let rest = word
+            .strip_prefix("${HOME}")
+            .or_else(|| word.strip_prefix("$HOME"))?;
+        if !(rest.is_empty() || rest.starts_with('/')) || rest.contains(['$', '`']) {
+            return None;
         }
-        None
+        let joined = format!("{}{rest}", self.env.home.trim_end_matches('/'));
+        Some(if joined.is_empty() {
+            "/".to_string()
+        } else {
+            joined
+        })
     }
 
     fn find(&mut self, args: Words, ctx: &Ctx) {
@@ -507,13 +506,14 @@ fn changes_directory(wrappers: &[String]) -> bool {
             .any(|w| matches!(w.as_str(), "-C" | "-D" | "--chdir") || w.starts_with("--chdir="))
 }
 
-/// Whether `word`, with its quotes removed, names `HOME` or `TMPDIR` other
-/// than to read it, as in `HOME=/`, `export TMPDIR=x` or `unset HOME`.
+/// Whether `word`, with its quotes removed, names `HOME` other than to read
+/// it, as in `HOME=/`, `export HOME`, `unset HOME` or `${HOME:=x}`.
 fn names_expanded(word: &str) -> bool {
-    ["HOME", "TMPDIR"].iter().any(|name| {
-        word.strip_prefix(name)
+    word.contains("{HOME:=")
+        || word.contains("{HOME=")
+        || word
+            .strip_prefix("HOME")
             .is_some_and(|rest| rest.is_empty() || rest.starts_with('=') || rest.starts_with("+="))
-    })
 }
 
 /// The source text of one word, quotes included.
@@ -581,11 +581,7 @@ mod tests {
     /// literal deletion that the live guard would judge.
     fn scan(case: &str) -> (String, Vec<Target>) {
         let command = case.replace("RM", &("r".to_string() + "m"));
-        let env = Env {
-            home: "/Users/me",
-            tmpdir: Some("/var/folders/ab/xyz/T/"),
-        };
-        let got = targets(&command, &env);
+        let got = targets(&command, &Env { home: "/Users/me" });
         (command, got)
     }
 
@@ -666,14 +662,15 @@ mod tests {
         // Variables, zsh qualifiers and cd.
         ("RM -rf $HOME/x", "p:/Users/me/x"),
         ("RM -rf \"${HOME}/x\"", "p:/Users/me/x"),
-        ("RM -rf $TMPDIR/x", "p:/var/folders/ab/xyz/T/x"),
-        ("RM -rf \"$TMPDIR\"", "p:/var/folders/ab/xyz/T"),
+        ("RM -rf $TMPDIR/x", "u:$TMPDIR/x"),
+        ("RM -rf ~\"/x\"", "p:~/x"),
+        (": ${HOME:=/}; RM -rf $HOME/x", "u:$HOME/x"),
         ("RM -rf '$HOME/x'", "u:'$HOME/x'"),
         ("RM -rf $REPO/x", "u:$REPO/x"),
         ("RM -rf $HOME$X", "u:$HOME$X"),
         ("RM -rf /a/x(:h)", "u:/a/x("),
         ("HOME=/ RM -rf $HOME/x", "u:$HOME/x"),
-        ("export TMPDIR=/; RM -rf $TMPDIR/x", "u:$TMPDIR/x"),
+        ("export HOME=/; RM -rf $HOME/x", "u:$HOME/x"),
         ("cd /x && RM -rf build", "u:build"),
         ("cd /x && RM -rf /x/build ~/y", "p:/x/build,t:~/y"),
         ("builtin cd /x && RM b", "u:b"),
@@ -762,22 +759,13 @@ mod tests {
     }
 
     #[test]
-    fn only_a_write_or_unset_of_home_or_tmpdir_stops_expansion() {
+    fn only_a_write_or_unset_of_home_stops_expansion() {
         assert!(names_expanded("HOME=/"));
-        assert!(names_expanded("TMPDIR"));
+        assert!(names_expanded("HOME"));
         assert!(names_expanded("HOME+=x"));
+        assert!(names_expanded("${HOME:=/}"));
         assert!(!names_expanded("$HOME"));
+        assert!(!names_expanded("${HOME:-/x}"));
         assert!(!names_expanded("HOMEBREW_PREFIX=x"));
-    }
-
-    #[test]
-    fn an_unset_tmpdir_is_not_expanded() {
-        let command = format!("{} -rf $TMPDIR/x", "r".to_string() + "m");
-        let env = Env {
-            home: "/Users/me",
-            tmpdir: None,
-        };
-
-        assert_eq!(targets(&command, &env), spec("u:$TMPDIR/x"));
     }
 }
