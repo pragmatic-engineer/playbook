@@ -5,15 +5,15 @@ use clap::{CommandFactory, Parser};
 use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::{
-    adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor,
-    effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
+    adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, disk, doc,
+    doctor, effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
     plan_cleanup, planning, pr, prose, review, sanitize, settings, statusline, storage, tools_map,
     trust, update, usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli,
-    Command, CommitCommand, ConfigCommand, DepsCommand, DocCommand, DoctorCommand, EvalCommand,
-    GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand,
-    MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ProseCommand, ReviewCommand,
-    ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand,
-    SettingsCommand, ToolsCommand, WorktreeCommand,
+    Command, CommitCommand, ConfigCommand, DepsCommand, DiskCommand, DocCommand, DoctorCommand,
+    EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand,
+    ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ProseCommand,
+    ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology,
+    SessionsCommand, SettingsCommand, ToolsCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -2045,6 +2045,7 @@ fn main() {
             }
             ReviewWorktreeCommand::Teardown { path } => worktree::review::teardown(&path),
         },
+        Command::Disk { sub } => run_disk(sub),
         Command::Worktree { sub } => {
             let home = common::home_dir();
             let slug = common::repo_slug();
@@ -2705,4 +2706,45 @@ fn effort_diff_shape(base: &str) -> Result<effort::auto::Shape, String> {
     }
     let text = String::from_utf8_lossy(&out.stdout);
     effort::auto::Shape::from_numstat(&text)
+}
+
+fn run_disk(sub: DiskCommand) {
+    let home = common::home_dir();
+    match sub {
+        DiskCommand::Status { json } => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
+            let report = disk::status::report(&home, &home.join(".claude"), &cwd);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&disk::status::to_json(&report))
+                        .unwrap_or_default()
+                );
+            } else {
+                print!("{}", disk::status::render(&report));
+            }
+        }
+        DiskCommand::Reserve => {
+            let policy = disk::policy::load(&home);
+            let keep = policy.warn_free_gb.saturating_mul(disk::probe::GIB);
+            match disk::ballast::reserve(&home, disk::ballast::BALLAST_BYTES, keep) {
+                Ok(line) => println!("{line}"),
+                Err(err) => {
+                    eprintln!("{err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        DiskCommand::Release => match disk::ballast::release(&home) {
+            Ok(Some(bytes)) => println!(
+                "disk release: deleted the ballast, {} given back. Run `playbook disk reserve` after a cleanup to put it back",
+                disk::size::gb(bytes)
+            ),
+            Ok(None) => println!("disk release: there is no ballast to delete"),
+            Err(err) => {
+                eprintln!("disk release: {err}");
+                std::process::exit(1);
+            }
+        },
+    }
 }

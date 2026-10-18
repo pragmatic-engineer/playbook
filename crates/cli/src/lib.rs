@@ -678,6 +678,16 @@ pub enum Command {
         #[command(subcommand)]
         sub: WorktreeCommand,
     },
+    /// Check free disk space and keep builds from filling the disk
+    ///
+    /// Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb`, and
+    /// holds a ballast file that gives space back when the disk is full.
+    ///
+    /// Example: `playbook disk status`
+    Disk {
+        #[command(subcommand)]
+        sub: DiskCommand,
+    },
     /// Manage the memory graph that sessions read from
     Memory {
         #[command(subcommand)]
@@ -1983,6 +1993,25 @@ pub enum SessionsCommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+/// `playbook disk` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum DiskCommand {
+    /// Show free space per volume, the thresholds, and the biggest folders
+    /// playbook and its agents made: cargo target folders, worktrees, caches
+    /// and the ballast
+    Status {
+        /// Print JSON for tools
+        #[arg(long)]
+        json: bool,
+    },
+    /// Write a 1 GB ballast file under ~/.cache/playbook/ballast, kept out of
+    /// backups, that `disk release` or the disk guard deletes to give space
+    /// back on a full disk
+    Reserve,
+    /// Delete the ballast file and print the space it gave back
+    Release,
 }
 
 /// `playbook worktree` subcommands.

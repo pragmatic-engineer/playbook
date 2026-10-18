@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 18] = [
+const PROBES: [Probe; 19] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -119,6 +119,7 @@ const PROBES: [Probe; 18] = [
     },
     |env| vec![attribution_row(env)],
     update_rows,
+    |env| vec![disk_row(env)],
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -701,6 +702,48 @@ fn config_rows(env: &Env) -> Vec<Row> {
         Err(err) => Row::new("-", Level::Info, format!("{key}: could not check: {err}")),
     })
     .collect()
+}
+
+/// Free disk space against `disk.warnFreeGb` and `disk.blockFreeGb`, on
+/// the volume with the least room.
+fn disk_row(env: &Env) -> Row {
+    use crate::disk::{ballast, policy};
+    let policy = policy::load(&env.home);
+    let paths = policy::measured_paths(&policy, &env.home, env.repo_root.as_deref());
+    let volumes = policy::volumes(&paths);
+    let Some(tight) = policy::tightest(&volumes) else {
+        return Row::new("-", Level::Info, "disk: could not read free space");
+    };
+    disk_row_for(&policy, tight, ballast::size(&env.home))
+}
+
+fn disk_row_for(
+    policy: &crate::disk::Policy,
+    tight: &crate::disk::policy::Volume,
+    ballast: Option<u64>,
+) -> Row {
+    use crate::disk::{size::gb, Level as Disk};
+    let level = match policy.level(tight.space.free) {
+        Disk::Ok => Level::Pass,
+        Disk::Low => Level::Warn,
+        Disk::Critical => Level::Fail,
+    };
+    let mut message = format!(
+        "disk: {} free on {} (warn below {} GB, block builds below {} GB)",
+        gb(tight.space.free),
+        tight.path.display(),
+        policy.warn_free_gb,
+        policy.block_free_gb
+    );
+    if let Some(bytes) = ballast {
+        message.push_str(&format!(", ballast {} reserved", gb(bytes)));
+    }
+    let row = Row::new("-", level, message);
+    if level == Level::Pass {
+        row
+    } else {
+        row.hint("run: playbook disk status to see what uses the space")
+    }
 }
 
 fn worktree_rows(env: &Env) -> Vec<Row> {
@@ -1382,5 +1425,44 @@ mod tests {
         assert_eq!(without[1].level, Level::Fail);
         assert_eq!(failing.len(), 1);
         assert_eq!(failing[0].level, Level::Fail);
+    }
+
+    #[test]
+    fn the_disk_row_follows_the_thresholds() {
+        use crate::disk::policy::Volume;
+        use crate::disk::probe::{Space, GIB};
+        let volume = |gb: f64| Volume {
+            path: PathBuf::from("/Users/me"),
+            space: Space {
+                free: (gb * GIB as f64) as u64,
+                total: 460 * GIB,
+                device: 1,
+            },
+        };
+        let policy = crate::disk::Policy::default();
+        let cases = [
+            (0.0, Level::Fail),
+            (5.9, Level::Fail),
+            (6.0, Level::Warn),
+            (14.9, Level::Warn),
+            (15.0, Level::Pass),
+        ];
+        for (gb, want) in cases {
+            let row = disk_row_for(&policy, &volume(gb), None);
+            assert_eq!(row.level, want, "{gb} GB");
+            assert_eq!(row.hint.is_some(), want != Level::Pass, "{gb} GB");
+            assert!(
+                row.message
+                    .contains("warn below 15 GB, block builds below 6 GB"),
+                "{}",
+                row.message
+            );
+        }
+        let row = disk_row_for(&policy, &volume(20.0), Some(GIB));
+        assert!(
+            row.message.ends_with("ballast 1.0 GB reserved"),
+            "{}",
+            row.message
+        );
     }
 }
