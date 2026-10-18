@@ -351,7 +351,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Bash"),
         name: "rm-workspace-guard",
         group: Group::Safety,
-        purpose: "Stops an `rm` whose target is outside your safe roots, `~/.claude`, and the scratch roots (contents only): `/tmp`, the system temp folders, `~/.cache`, the `.worktrees` folder next to the repo and `hooks.rmGuard.allowedRoots`. `~/.cache` is intentional: it is regenerable by definition, and cargo registry and build caches live there, so cleanup is routine and the cache root itself stays protected. Symlinks and `..` are resolved first, and a bare glob such as `/tmp/*` is denied while `/tmp/pb-*` is allowed. Runs only for `rm` commands.",
+        purpose: "Stops an `rm` whose target is outside your safe roots, `~/.claude`, playbook's own install files, and the scratch roots (contents only): the temp and cache folders for your OS, playbook's scratch folders, the `.worktrees` folder next to the repo and `hooks.rmGuard.allowedRoots`. Playbook's data, such as the memory store and `config.db`, stays blocked. Only real command words count, so quoted text and heredocs read by other programs are data. Symlinks and `..` are resolved first, and a bare glob such as `/tmp/*` is denied while `/tmp/pb-*` is allowed. A denial names the rule that matched. Runs only for `rm` commands.",
         if_cond: Some("Bash(rm:*)"),
         timeout: Some(10),
         also_replaces: None,
