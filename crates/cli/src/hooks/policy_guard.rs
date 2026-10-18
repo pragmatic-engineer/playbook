@@ -49,11 +49,14 @@
 //! expand variables, aliases or scripts, so an obfuscated spelling passes.
 
 mod settings_writes;
+mod store_writes;
+
+pub(crate) use store_writes::writes_config_store;
 
 use crate::common::payload::Payload;
 use crate::common::shell::{
-    program_index, program_name, redirect_len, runner_value_options, shell_script_at,
-    simple_commands, skip_options, SHELLS,
+    program_index, program_name, runner_value_options, shell_script_at, simple_commands,
+    skip_options, SHELLS,
 };
 use crate::common::{emit_pre_context, emit_pre_deny};
 use std::path::{Component, Path, PathBuf};
@@ -141,9 +144,6 @@ const CONFIG_STORE_REASON: &str =
 const SAFE_ROOTS_ENV_REASON: &str =
     protected_reason!("an inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=` assignment");
 
-#[cfg(test)]
-const PROTECTED_PREFIX: &str = "Matched rule: ";
-
 /// The part both settings reasons share: what to ask the user and what the
 /// model may run itself.
 macro_rules! settings_reason_tail {
@@ -203,49 +203,6 @@ fn is_fact_file(path: &str, memory_dir: &Path) -> bool {
         && !path.components().any(|c| c == Component::ParentDir)
 }
 
-/// Interpreters, which can write any file they are handed.
-const INTERPRETERS: [&str; 5] = ["python", "python3", "node", "ruby", "perl"];
-
-/// The `sqlite3` dot commands that only read.
-const SQLITE_READ_COMMANDS: [&str; 16] = [
-    ".tables",
-    ".table",
-    ".schema",
-    ".fullschema",
-    ".indexes",
-    ".indices",
-    ".dump",
-    ".headers",
-    ".header",
-    ".mode",
-    ".width",
-    ".databases",
-    ".help",
-    ".show",
-    ".timer",
-    ".stats",
-];
-
-/// SQL words that change a database, or reach outside it.
-const SQL_WRITE_WORDS: [&str; 16] = [
-    "insert",
-    "update",
-    "delete",
-    "replace",
-    "drop",
-    "create",
-    "alter",
-    "vacuum",
-    "reindex",
-    "attach",
-    "detach",
-    "upsert",
-    "writefile",
-    "edit",
-    "load_extension",
-    "fts5vocab",
-];
-
 /// The config keys the model may not change: the `rm` guard's roots, the
 /// prose lint mode and the pull request rules. Matched on lowercase prefixes.
 const PROTECTED_KEY_PREFIXES: [&str; 5] = [
@@ -286,12 +243,9 @@ fn changes_rm_guard_config_at(
     }
     let program = program_name(&words[program_at]);
     let rest = &words[program_at + 1..];
-    // A redirect writes only its own target, and a program writes only when it
-    // can. Reading the store (`cat`, `ls`, `jq`, `sqlite3` with a SELECT, a
+    // Reading the store (`cat`, `ls`, `jq`, `sqlite3` with a SELECT, a
     // `2>/dev/null`) and mentions in a message or a search are left alone.
-    if redirect_targets(words).any(|t| names_config_store(t, home))
-        || (program_writes(&program, rest) && rest.iter().any(|w| names_config_store(w, home)))
-    {
+    if store_writes::writes_config_store(words, home) {
         return Some(CONFIG_STORE_REASON);
     }
     if depth < 3 {
@@ -339,92 +293,6 @@ fn changes_rm_guard_config_at(
         _ => false,
     };
     changes.then_some(CONFIG_SET_REASON)
-}
-
-/// The files the redirections of a simple command write: `> f`, `>> f`,
-/// `2>f`, `>|f`. `>&2` and input redirections write nothing.
-fn redirect_targets(words: &[String]) -> impl Iterator<Item = &str> {
-    words.iter().enumerate().filter_map(|(i, word)| {
-        let operator = word.trim_start_matches(|c: char| c.is_ascii_digit());
-        if !operator.starts_with('>') || operator.starts_with(">&") {
-            return None;
-        }
-        let target = operator.trim_start_matches(['>', '|']);
-        if target.is_empty() {
-            words.get(i + 1).map(String::as_str)
-        } else {
-            Some(target)
-        }
-    })
-}
-
-/// Whether `program` with `args` can write a file it is handed.
-fn program_writes(program: &str, args: &[String]) -> bool {
-    match program {
-        "sqlite3" => !sqlite_only_reads(args),
-        "sed" => args
-            .iter()
-            .any(|w| is_short_cluster_with(w, 'i') || w.starts_with("--in-place")),
-        _ => {
-            WRITER_PROGRAMS.contains(&program)
-                || INTERPRETERS.contains(&program)
-                || SHELLS.contains(&program)
-        }
-    }
-}
-
-/// Whether a `sqlite3` call only reads: `-readonly`, or every statement on the
-/// command line is a SELECT, a WITH that only reads, an EXPLAIN, a PRAGMA that
-/// sets nothing, or a dot command that only reads. SQL fed on standard input
-/// is not seen, so it counts as a write.
-fn sqlite_only_reads(args: &[String]) -> bool {
-    if args.iter().any(|w| w == "-readonly") {
-        return true;
-    }
-    if args.iter().any(|w| matches!(w.as_str(), "-cmd" | "-init")) {
-        return false;
-    }
-    let mut operands = Vec::new();
-    let mut i = 0;
-    while let Some(word) = args.get(i) {
-        let redirect = redirect_len(word);
-        if redirect > 0 {
-            i += redirect;
-            continue;
-        }
-        if !word.starts_with('-') {
-            operands.push(word);
-        }
-        i += 1;
-    }
-    let Some((_, statements)) = operands.split_first() else {
-        return false;
-    };
-    !statements.is_empty() && statements.iter().all(|sql| sql_only_reads(sql))
-}
-
-fn sql_only_reads(sql: &str) -> bool {
-    let lower = sql.to_lowercase();
-    if lower.trim_start().starts_with('.') {
-        return lower
-            .split_whitespace()
-            .next()
-            .is_some_and(|c| SQLITE_READ_COMMANDS.contains(&c));
-    }
-    let writes = lower
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .any(|w| SQL_WRITE_WORDS.contains(&w));
-    let reads = lower
-        .split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .all(|s| {
-            ["select", "with", "explain", "values"]
-                .iter()
-                .any(|k| s.starts_with(k))
-                || (s.starts_with("pragma") && !s.contains('='))
-        });
-    reads && !writes
 }
 
 /// Whether `word` names one of playbook's databases: the settings store (now
@@ -595,10 +463,16 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
         ) {
             return Some(SETTINGS_WRITE_REASON);
         }
+        if store_writes::is_open_redirect_into_store(previous.as_deref(), &words, home) {
+            return Some(CONFIG_STORE_REASON);
+        }
         previous = Some(words.clone());
         let Some(at) = program_index(&words) else {
             if settings_writes::redirects_to_settings(&words, home, in_claude_dir) {
                 return Some(SETTINGS_WRITE_REASON);
+            }
+            if store_writes::writes_config_store(&words, home) {
+                return Some(CONFIG_STORE_REASON);
             }
             continue;
         };
@@ -862,10 +736,16 @@ mod tests {
             "cd ~/.config/playbook/data && sqlite3 config.db 'update x'",
             "sed -i s/a/b/ ~/.config/playbook/d*/c*.db",
         ] {
-            assert!(
-                deny(command).is_some_and(|r| r.starts_with(PROTECTED_PREFIX)),
-                "{command}"
-            );
+            let expected = if command.contains("WORKTREE_BASE_DIR=")
+                || command.contains("PLAYBOOK_SAFE_ROOTS=")
+            {
+                SAFE_ROOTS_ENV_REASON
+            } else if command.contains(" config ") {
+                CONFIG_SET_REASON
+            } else {
+                CONFIG_STORE_REASON
+            };
+            assert_eq!(deny(command), Some(expected), "{command}");
         }
     }
 
@@ -965,6 +845,20 @@ mod tests {
             assert_eq!(deny(command), Some(reason), "{command}");
         }
         assert!(CONFIG_STORE_REASON.starts_with("Matched rule: a write"));
+        for command in [
+            "sqlite3 -cmd \"delete from settings\" ~/.config/playbook/data/config.db \"select 1\"",
+            "sqlite3 --init x.sql ~/.config/playbook/data/config.db \"select 1\"",
+            "sqlite3 ~/.config/playbook/data/config.db 'pragma writable_schema=1'",
+            "Q='1; delete from settings'; sqlite3 ~/.config/playbook/data/config.db \"select $Q\"",
+            "sed --in-place s/a/b/ ~/.config/playbook/config.json",
+            "sed -Ei s/a/b/ ~/.config/playbook/config.json",
+            "sed -n 'w /Users/me/.config/playbook/data/config.db' /tmp/evil.db",
+            "echo x >| ~/.config/playbook/config.json",
+            "echo x &> ~/.config/playbook/config.json",
+            "echo x 1<> ~/.config/playbook/config.json",
+        ] {
+            assert_eq!(deny(command), Some(CONFIG_STORE_REASON), "{command}");
+        }
     }
 
     #[test]
