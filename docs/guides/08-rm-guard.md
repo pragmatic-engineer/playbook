@@ -68,7 +68,7 @@ Each denied target is listed with the rule that matched:
 | unresolvable target | A command substitution, `<xargs input>`, a variable other than `$HOME`, or a relative path after `cd`. Run the `rm` as its own call with a literal absolute path. |
 | stray quote or shell character | A quote, backslash or shell syntax left inside the path. |
 | another user's home or a quoted ~ | `~user`, or a `~` inside quotes, which the shell does not expand. |
-| symlink loop | A link chain too deep to follow. |
+| path that cannot be resolved | A link chain too deep to follow, a link that cannot be read, or a working folder that is gone. |
 
 For a path outside the roots, the message gives the exact command that keeps your current roots and adds the folder that holds the target. It offers this only for a folder inside your home that is not under a dot folder, so it never suggests `/etc` or `~/.ssh`. The model cannot change the key, so it asks you to run the command yourself.
 
@@ -87,7 +87,7 @@ A root covers everything under it, so `~/scratch/**` and `~/scratch` mean the sa
 Run it in the Claude Code prompt with `!`, or in a terminal:
 
 ```bash
-! playbook config set --global hooks.rmGuard.allowedRoots '["~/Workspace/acme/scratch","/opt/scratch"]'
+! playbook config set --global hooks.rmGuard.allowedRoots '["~/code/acme/scratch","/opt/scratch"]'
 ```
 
 On success it prints the stored list. A colon-separated value such as `~/a/b:/opt/scratch` works too, and an empty value clears the list.

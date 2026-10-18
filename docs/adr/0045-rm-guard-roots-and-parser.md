@@ -77,7 +77,7 @@ Each was added only where deleting is safe:
 
 ### Protected paths
 
-Blocked whatever root covers them: `~/.config/playbook/memory`, `data` (`config.db`, `memory.db`, the usage database), `repos` (plans, handoffs, per-repo config, live worktrees), `orgs` (legacy org config), `runtime/handoff`, `runtime/to-learn` (the auto-learn queue), `effort`, `prompts`, `playbook.db` with its `-wal` and `-shm` files, `config.json`, any folder that holds one of them (such as `~/.config/playbook` itself), and any `.lock` folder under `~/.config/playbook`.
+Blocked whatever root covers them: `~/.config/playbook/memory`, `data` (`config.db`, `memory.db`, the usage database), `repos` (plans, handoffs, per-repo config, live worktrees), `orgs` (legacy org config), `runtime/handoff`, `runtime/to-learn` (the auto-learn queue), `effort`, `prompts`, `playbook.db` with its `-wal` and `-shm` files, `config.json`, any folder that holds one of them (such as `~/.config/playbook` itself), and any `.lock` folder under `~/.config/playbook`. The check compares the path as the disk stores it, so a different letter case on a case-insensitive disk (`MEMORY`, `runtime/HANDOFF`) is caught.
 
 ## Consequences
 
