@@ -1,8 +1,8 @@
 # ADR-0039: A Release Workflow That Runs Every Step
 
-- **Status:** Accepted, amended by [ADR 0041](0041-retire-playbook-telemetry.md). Amended 2026-10-17: decision 5 adds the macOS release gate, and pull requests test Linux only.
+- **Status:** Accepted, amended by [ADR 0041](0041-retire-playbook-telemetry.md). Amended 2026-10-17: decision 5 adds the macOS release gate, and pull requests test Linux only. Decision 3 is amended by [ADR 0046](0046-migrations-by-release-version.md): `release-prepare.sh` also fills in the release version of each `next` migration.
 - **Date created:** 2026-10-16
-- **Date modified:** 2026-10-17
+- **Date modified:** 2026-10-18
 - **Amends:** [ADR 0029](0029-cargo-workspace-monorepo.md) decision 6, which leaves the tap to poll for releases, [ADR 0037](0037-release-notes-from-conventional-commits.md) decision 2, which starts a release from a pushed tag.
 
 ## Context
