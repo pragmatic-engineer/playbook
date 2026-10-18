@@ -18,7 +18,8 @@ pub const INSTALL_HINT: &str = "claude plugin install playbook@pragmatic-enginee
 pub const OVERRIDE_ENV: &str = "PLAYBOOK_PLUGIN_DIR";
 
 const CACHE_DIR: &str = "plugins/cache/pragmatic-engineer/playbook";
-const ORPHAN_MARKER: &str = ".orphaned_at";
+/// The file Claude Code writes into a plugin cache version it no longer uses.
+pub const ORPHAN_MARKER: &str = ".orphaned_at";
 const PLUGIN_NAME: &str = "playbook";
 
 /// Where the plugin files sit inside the playbook source checkout.
@@ -292,6 +293,11 @@ pub fn plugin_out_of_range(version: &str, binary: &str, homebrew: bool) -> Optio
             ))
         }
     }
+}
+
+/// The folder that holds one subfolder per cached plugin version.
+pub fn cache_dir(claude_home: &Path) -> PathBuf {
+    claude_home.join(CACHE_DIR)
 }
 
 /// Version folders in the plugin cache that Claude Code marked orphaned. The

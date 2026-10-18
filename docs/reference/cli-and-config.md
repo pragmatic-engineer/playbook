@@ -96,7 +96,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `breaking`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `breaking`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `disk`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -469,6 +469,22 @@ Keep each tool on PATH and install only the missing ones with Homebrew, from the
 
 - `<BREWFILE>`: Brewfile to read; defaults to `Brewfile` in the current directory
 - `--builtin`: Read the Brewfile built into this binary instead of a file
+
+### `playbook disk`
+
+Check free disk space and keep builds from filling the disk
+
+Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb`, and the folders that use the most of it.
+
+Example: `playbook disk status`
+
+Subcommands: `status`
+
+### `playbook disk status`
+
+Show free space per volume, the thresholds, and the biggest folders playbook and its agents made: cargo target folders, worktrees, caches and the ballast
+
+- `--json`: Print JSON for tools
 
 ### `playbook doc`
 

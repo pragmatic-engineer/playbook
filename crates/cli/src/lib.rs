@@ -678,6 +678,16 @@ pub enum Command {
         #[command(subcommand)]
         sub: WorktreeCommand,
     },
+    /// Check free disk space and keep builds from filling the disk
+    ///
+    /// Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb`, and
+    /// the folders that use the most of it.
+    ///
+    /// Example: `playbook disk status`
+    Disk {
+        #[command(subcommand)]
+        sub: DiskCommand,
+    },
     /// Manage the memory graph that sessions read from
     Memory {
         #[command(subcommand)]
@@ -1980,6 +1990,19 @@ pub enum SessionsCommand {
     /// List recent sessions (the default)
     List {
         /// Print the sessions as JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `playbook disk` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum DiskCommand {
+    /// Show free space per volume, the thresholds, and the biggest folders
+    /// playbook and its agents made: cargo target folders, worktrees, caches
+    /// and the ballast
+    Status {
+        /// Print JSON for tools
         #[arg(long)]
         json: bool,
     },

@@ -91,13 +91,19 @@ fn is_cc_launcher_convention(path: &Path) -> bool {
     let Some(main) = crate::cc::worktree::main_worktree(&porcelain) else {
         return false;
     };
-    let main_root = PathBuf::from(main);
-    let Some(parent) = main_root.parent() else {
-        return false;
-    };
+    launcher_base(Path::new(&main)).is_some_and(|base| is_direct_child(path, &base))
+}
+
+/// The folder the worktree hook puts this repo's worktrees in,
+/// `<main-worktree-parent>/.worktrees/<repo>` or under `WORKTREE_BASE_DIR`.
+pub(crate) fn launcher_base(main_root: &Path) -> Option<PathBuf> {
+    let parent = main_root.parent()?;
     let configured = std::env::var("WORKTREE_BASE_DIR").ok();
-    let base = crate::cc::worktree::resolve_base(&main_root, parent, configured.as_deref());
-    is_direct_child(path, &base)
+    Some(crate::cc::worktree::resolve_base(
+        main_root,
+        parent,
+        configured.as_deref(),
+    ))
 }
 
 /// `review-worktrees/<pr>-<sha>` under the git common dir, per
@@ -304,7 +310,7 @@ pub fn live_worktree_ids(repo_root: &Path) -> Option<Vec<String>> {
 /// Lists every worktree registered against `repo_root`. Aborts rather than
 /// treating a failed or unparseable command as "nothing to sweep": a broken
 /// `.git` state must stop the sweep, not proceed as if no worktrees existed.
-fn list_worktrees(repo_root: &Path) -> Result<Vec<WorktreeEntry>, String> {
+pub(crate) fn list_worktrees(repo_root: &Path) -> Result<Vec<WorktreeEntry>, String> {
     let out = git::run(
         Some(repo_root),
         &["worktree", "list", "--porcelain"],

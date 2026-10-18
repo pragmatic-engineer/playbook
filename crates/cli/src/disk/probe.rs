@@ -37,13 +37,6 @@ pub struct Space {
     pub device: u64,
 }
 
-impl Space {
-    /// Free space in GB, for messages.
-    pub fn free_gb(&self) -> f64 {
-        self.free as f64 / GIB as f64
-    }
-}
-
 /// Free space on the volume that holds `path`. A path that does not exist
 /// is measured at its nearest existing parent folder.
 pub fn space(path: &Path) -> io::Result<Space> {
@@ -217,15 +210,5 @@ mod tests {
         for (text, want) in cases {
             assert_eq!(parse_free_gb(text), want, "{text:?}");
         }
-    }
-
-    #[test]
-    fn gb_counts_like_df() {
-        let space = Space {
-            free: 6 * GIB,
-            total: 10 * GIB,
-            device: 0,
-        };
-        assert!((space.free_gb() - 6.0).abs() < f64::EPSILON);
     }
 }
