@@ -83,7 +83,7 @@ fn an_edited_prompt_is_left_in_place_and_an_unedited_one_still_updates() {
     assert!(outcome
         .warnings
         .iter()
-        .any(|w| w.contains("0003-system-prompt-edited") && w.contains("delete it")));
+        .any(|w| w.contains("system-prompt-edited") && w.contains("delete it")));
 
     fs::remove_file(prompt_dest(&home)).unwrap();
     run(&paths(&home, &root, None));
@@ -197,7 +197,7 @@ fn doctor_prints_pending_items_only_when_something_is_pending() {
 
     fs::write(root.join("skills/demo/SKILL.md"), "edited").unwrap();
     let out = pending(&home, &root);
-    assert!(out.contains("0004-skills-edited") && out.contains("demo"));
+    assert!(out.contains("skills-edited") && out.contains("demo"));
 }
 
 #[test]

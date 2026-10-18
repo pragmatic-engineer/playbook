@@ -1086,7 +1086,7 @@ fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift(
             .collect::<Vec<_>>()
     );
 
-    // Migration 0018 removes the old launcher block after a backup (ADR 0044).
+    // The `retired-launcher-rc-line` migration removes the old launcher block after a backup (ADR 0044).
     let rc = fs::read_to_string(home.join(".bashrc")).unwrap();
     assert_eq!(rc, "export EDITOR=vim\n");
 
@@ -1383,8 +1383,5 @@ fn init_with_the_hooks_left_off_keeps_a_dead_hook_entry() {
     assert!(all_hook_commands(&settings).contains(&dead.to_string()));
     let root = playbook::common::paths::playbook_root_from(&home);
     let record = playbook::heal::Record::read(&root).unwrap();
-    assert!(record
-        .pending
-        .iter()
-        .any(|id| id == "0011-dead-hook-scripts"));
+    assert!(record.pending.iter().any(|id| id == "dead-hook-scripts"));
 }

@@ -495,11 +495,11 @@ mod tests {
             .contains("needs a migration"));
         assert!(parse(&auto(
             "None, migrated automatically.",
-            "\"0001-memory-store-move\""
+            "\"memory-store-move\""
         ))
         .unwrap_err()
         .contains("exactly"));
-        assert!(parse(&auto(AUTO_ACTION, "\"0001-memory-store-move\"")).is_ok());
+        assert!(parse(&auto(AUTO_ACTION, "\"memory-store-move\"")).is_ok());
     }
 
     #[test]
@@ -529,7 +529,7 @@ mod tests {
     fn to_json_round_trips_through_lenient() {
         let mut migrated = entry("0.27.0", Component::Plugin);
         migrated.action = AUTO_ACTION.into();
-        migrated.migration = Some("0001-memory-store-move".into());
+        migrated.migration = Some("memory-store-move".into());
         let entries = vec![entry("0.26.0", Component::Playbook), migrated];
 
         let values: Vec<serde_json::Value> = serde_json::from_str(&to_json(&entries)).unwrap();

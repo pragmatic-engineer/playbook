@@ -59,8 +59,8 @@ const BLOCK_COMMENTS: [&str; 2] = [
 
 /// The `eval` line without the guard, as a user may write it by hand, with
 /// and without the old `--shell` flag. The `shell-init` command is gone, so
-/// this line now prints a notice on every shell start, and migration 0018
-/// removes it too. Only a line that starts at column 0 matches: an indented
+/// this line now prints a notice on every shell start, and the
+/// `retired-launcher-rc-line` migration removes it too. Only a line that starts at column 0 matches: an indented
 /// one may be the only command of the user's own `if` block, and bash
 /// rejects an empty `then` body.
 const BARE_EVALS: [&str; 3] = [
@@ -107,8 +107,8 @@ pub fn strip_rc_files(home: &Path, stamp: u64, binary_path: bool, dry_run: bool)
     .collect()
 }
 
-/// Each rc file under `home` that holds a line migration 0018 removes, and
-/// whether setup can rewrite it. Reads only.
+/// Each rc file under `home` that holds a line the `retired-launcher-rc-line`
+/// migration removes, and whether setup can rewrite it. Reads only.
 pub fn retired_rc_entries(home: &Path) -> Vec<RetiredRc> {
     retired_rewrites(home)
         .into_iter()
@@ -119,8 +119,8 @@ pub fn retired_rc_entries(home: &Path) -> Vec<RetiredRc> {
         .collect()
 }
 
-/// The writable rc files under `home` that hold a line migration 0018
-/// removes. Reads only.
+/// The writable rc files under `home` that hold a line the
+/// `retired-launcher-rc-line` migration removes. Reads only.
 pub fn retired_rc_files(home: &Path) -> Vec<PathBuf> {
     retired_rc_entries(home)
         .into_iter()

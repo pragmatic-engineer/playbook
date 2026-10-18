@@ -23,7 +23,7 @@ pub const COMMAND: &str = "playbook setup --only attribution-off";
 /// The command that also replaces the user's own values.
 pub const REPLACE_COMMAND: &str = "playbook setup --only attribution-off --attribution-off";
 
-/// The state key that records a no, so the reminder of migration 0015 stops.
+/// The state key that records a no, so the reminder of the `attribution-off` migration stops.
 const DECLINED_KEY: &str = "attribution/declined";
 
 /// What setup does with the part, decided from the flags and the answer.
@@ -131,7 +131,7 @@ fn names(keys: &[&str]) -> String {
         .join(", ")
 }
 
-/// The `Consent` check of migration 0015: a line when a key is missing, else
+/// The `Consent` check of the `attribution-off` migration: a line when a key is missing, else
 /// `None`. A key with the user's own value is not reported, and nothing is
 /// after the user said no.
 pub fn pending(home: &Path, settings_path: &Path) -> Option<String> {

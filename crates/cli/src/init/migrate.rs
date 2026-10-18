@@ -18,23 +18,23 @@ const SYSTEM_PROMPT_KEY: &str = "system-prompt";
 const STATUSLINE_KEY: &str = "statusline";
 const SKILL_KEY_PREFIX: &str = "skill:";
 /// The `Consent` migration `init` skips when the user declines the status line.
-pub const STATUSLINE_MIGRATION: &str = "0006-statusline-rust-command";
+pub const STATUSLINE_MIGRATION: &str = "statusline-rust-command";
 /// The `Consent` migration `init` skips when the user declines the hooks.
-pub const DEAD_HOOKS_MIGRATION: &str = "0011-dead-hook-scripts";
+pub const DEAD_HOOKS_MIGRATION: &str = "dead-hook-scripts";
 /// The `Consent` item for the attribution-off part (ADR 0042).
-pub const ATTRIBUTION_MIGRATION: &str = "0015-attribution-off";
+pub const ATTRIBUTION_MIGRATION: &str = "attribution-off";
 /// The `Consent` item for the collector-service part (ADR 0043).
-pub const COLLECTOR_SERVICE_MIGRATION: &str = "0016-collector-service";
+pub const COLLECTOR_SERVICE_MIGRATION: &str = "collector-service";
 /// The `Owned` move of stored auto budgets off the old $5 default (ADR 0028).
-pub const AUTO_BUDGET_MIGRATION: &str = "0017-auto-budget-defaults";
+pub const AUTO_BUDGET_MIGRATION: &str = "auto-budget-defaults";
 /// The `Consent` removal of the retired launcher rc lines (ADR 0044).
-pub const RC_LINE_MIGRATION: &str = "0018-retired-launcher-rc-line";
+pub const RC_LINE_MIGRATION: &str = "retired-launcher-rc-line";
 /// The `Consent` question about the system prompt now on by default (ADR 0044).
-pub const PROMPT_DEFAULT_MIGRATION: &str = "0019-system-prompt-default-on";
+pub const PROMPT_DEFAULT_MIGRATION: &str = "system-prompt-default-on";
 /// The `Owned` move of the collector agent to its new launchd label (ADR
 /// 0043, 2026-10-18 amendment).
-pub const COLLECTOR_LABEL_MIGRATION: &str = "0020-collector-service-label";
-/// How long migration 0020 waits for the moved collector to run.
+pub const COLLECTOR_LABEL_MIGRATION: &str = "collector-service-label";
+/// How long `collector-service-label` waits for the moved collector to run.
 const COLLECTOR_LABEL_WAIT: Duration = Duration::from_secs(3);
 
 /// What a migration needs to find the state it moves.
@@ -103,7 +103,7 @@ pub enum Scope {
     },
     /// Reports on files Claude Code owns and writes nothing. A `Manual`
     /// migration whose warning the session hook repeats until it clears. A
-    /// note that should not repeat each session stays `Owned`, as 0014 does.
+    /// note that should not repeat each session stays `Owned`, as `orphaned-plugin-caches` does.
     Report,
 }
 
@@ -208,35 +208,35 @@ pub fn shipped(migrations: Vec<Migration>, running: &str) -> Vec<Migration> {
 pub fn registry() -> Vec<Migration> {
     vec![
         Migration {
-            id: "0001-memory-store-move",
+            id: "memory-store-move",
             since: "0.18.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: memory_store_move,
         },
         Migration {
-            id: "0002-gate-repo-local-move",
+            id: "gate-repo-local-move",
             since: "0.18.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: gate_repo_local_move,
         },
         Migration {
-            id: "0003-system-prompt-edited",
+            id: "system-prompt-edited",
             since: "0.18.0",
             kind: Kind::Manual,
             scope: Scope::Owned,
             run: system_prompt_edited,
         },
         Migration {
-            id: "0004-skills-edited",
+            id: "skills-edited",
             since: "0.18.0",
             kind: Kind::Manual,
             scope: Scope::Owned,
             run: skills_edited,
         },
         Migration {
-            id: "0005-statusline-edited",
+            id: "statusline-edited",
             since: "0.18.0",
             kind: Kind::Manual,
             scope: Scope::Owned,
@@ -253,7 +253,7 @@ pub fn registry() -> Vec<Migration> {
             run: statusline_rust_command,
         },
         Migration {
-            id: "0007-shell-init-rc-line",
+            id: "shell-init-rc-line",
             since: "0.18.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
@@ -263,21 +263,21 @@ pub fn registry() -> Vec<Migration> {
             run: shell_init_rc_line,
         },
         Migration {
-            id: "0008-remove-config-hash-script",
+            id: "remove-config-hash-script",
             since: "0.20.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: remove_config_hash_script,
         },
         Migration {
-            id: "0009-adopt-late-config-json",
+            id: "adopt-late-config-json",
             since: "0.20.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: adopt_late_config_json,
         },
         Migration {
-            id: "0010-state-files-to-sqlite",
+            id: "state-files-to-sqlite",
             since: "0.20.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
@@ -294,21 +294,21 @@ pub fn registry() -> Vec<Migration> {
             run: dead_hook_scripts,
         },
         Migration {
-            id: "0012-other-playbook-plugins",
+            id: "other-playbook-plugins",
             since: "0.34.0",
             kind: Kind::Manual,
             scope: Scope::Report,
             run: other_playbook_plugins,
         },
         Migration {
-            id: "0013-plugin-version-range",
+            id: "plugin-version-range",
             since: "0.34.0",
             kind: Kind::Manual,
             scope: Scope::Report,
             run: plugin_version_range,
         },
         Migration {
-            id: "0014-orphaned-plugin-caches",
+            id: "orphaned-plugin-caches",
             since: "0.34.0",
             kind: Kind::Manual,
             scope: Scope::Owned,
@@ -426,6 +426,82 @@ fn move_collector_label(ctx: &Ctx, manager: &dyn crate::service_manager::Manager
             STEP,
             format!("{why}; to try again, run: playbook migrate"),
         )),
+    }
+}
+
+/// The numbered ids the releases up to 0.37.0 shipped (ADR 0046). The slug
+/// is the id without its `NNNN-` prefix. Fixed: never add to it. A record row or a pending id under an
+/// old id reads as its slug, and applying one of these writes both rows, so
+/// an older binary still finds its own id.
+const LEGACY_IDS: [&str; 19] = [
+    "0001-memory-store-move",
+    "0002-gate-repo-local-move",
+    "0003-system-prompt-edited",
+    "0004-skills-edited",
+    "0005-statusline-edited",
+    "0006-statusline-rust-command",
+    "0007-shell-init-rc-line",
+    "0008-remove-config-hash-script",
+    "0009-adopt-late-config-json",
+    "0010-state-files-to-sqlite",
+    "0011-dead-hook-scripts",
+    "0012-other-playbook-plugins",
+    "0013-plugin-version-range",
+    "0014-orphaned-plugin-caches",
+    "0015-attribution-off",
+    "0016-collector-service",
+    "0017-auto-budget-defaults",
+    "0018-retired-launcher-rc-line",
+    "0019-system-prompt-default-on",
+];
+
+/// The slug for `id`: itself, or the slug of an old numbered id. A numbered
+/// id outside [`LEGACY_IDS`], such as one a dev build wrote, stays as it is.
+pub fn slug_of(id: &str) -> &str {
+    LEGACY_IDS
+        .iter()
+        .find(|old| **old == id)
+        .map_or(id, |old| &old[LEGACY_PREFIX..])
+}
+
+/// The length of the `NNNN-` prefix of an old id.
+const LEGACY_PREFIX: usize = 5;
+
+/// The old numbered id of `slug`, when a release before ADR 0046 shipped it.
+fn legacy_id(slug: &str) -> Option<&'static str> {
+    LEGACY_IDS
+        .iter()
+        .find(|old| &old[LEGACY_PREFIX..] == slug)
+        .copied()
+}
+
+/// The record `lines` with a slug row added next to each numbered applied
+/// row that lacks one, or `None` when nothing is missing. The numbered rows
+/// stay, so an older binary's `setup` still skips what ran.
+fn converted(lines: &[String]) -> Option<Vec<String>> {
+    let mut out = lines.to_vec();
+    for line in lines {
+        let Some(id) = line.strip_prefix("applied ") else {
+            continue;
+        };
+        let slug = slug_of(id);
+        let row = format!("applied {slug}");
+        if slug != id && !out.contains(&row) {
+            out.push(row);
+        }
+    }
+    (out.len() != lines.len()).then_some(out)
+}
+
+/// Writes the slug rows [`converted`] adds. The caller holds the migration
+/// lock. Running it again changes nothing.
+fn convert_record(home: &Path) -> std::io::Result<()> {
+    let Some(lines) = load_state(home) else {
+        return Err(std::io::Error::other("could not read the migration record"));
+    };
+    match converted(&lines) {
+        Some(lines) => write_state(home, &lines),
+        None => Ok(()),
     }
 }
 
@@ -721,7 +797,7 @@ fn remove_config_hash_script(ctx: &Ctx) -> Outcome {
 }
 
 /// Retired by ADR 0044: setup no longer writes a shell line, so the legacy
-/// `source` lines are no longer rewritten to one. Migration 0018 removes them.
+/// `source` lines are no longer rewritten to one. `retired-launcher-rc-line` removes them.
 fn shell_init_rc_line(_: &Ctx) -> Outcome {
     Outcome::Quiet
 }
@@ -1060,11 +1136,29 @@ pub fn run_owned(ctx: &Ctx, retries: u32, deadline: Option<Instant>) -> Report {
         return refused;
     }
     let locked = with_lock_retry(&ctx.home, retries, || {
-        run_idempotent(&owned, ctx, &mut report, deadline);
-        run_auto(&owned, ctx, &mut report, deadline);
+        if convert_into(&ctx.home, &mut report) {
+            run_idempotent(&owned, ctx, &mut report, deadline);
+            run_auto(&owned, ctx, &mut report, deadline);
+        }
     });
     report.lock_busy = !locked;
     report
+}
+
+/// Runs [`convert_record`] under a lock the caller holds, and notes a
+/// failure in `report`. False when the record could not be converted, so
+/// nothing else runs.
+fn convert_into(home: &Path, report: &mut Report) -> bool {
+    match convert_record(home) {
+        Ok(()) => true,
+        Err(err) => {
+            report.failed = true;
+            report.warnings.push(format!(
+                "migrations skipped: could not convert the record: {err}"
+            ));
+            false
+        }
+    }
 }
 
 /// Whether a heal runs `m`: an `Owned` migration that writes.
@@ -1140,9 +1234,9 @@ pub struct Planned {
 /// Checks that read the record, which `plan` skips while old state files
 /// wait to be imported, because the record is not complete yet.
 const READS_STATE: [&str; 4] = [
-    "0003-system-prompt-edited",
-    "0004-skills-edited",
-    "0005-statusline-edited",
+    "system-prompt-edited",
+    "skills-edited",
+    "statusline-edited",
     STATUSLINE_MIGRATION,
 ];
 
@@ -1304,13 +1398,16 @@ fn run_with_retries(migrations: &[Migration], ctx: &Ctx, retries: u32) -> Report
         }
     }
     run_idempotent(migrations, ctx, &mut report, None);
-    let done = applied(&read_state(&ctx.home));
+    let lines = read_state(&ctx.home);
+    let done = applied(&lines);
     let pending = |m: &&Migration| matches!(m.kind, Kind::Auto) && !done.iter().any(|d| d == m.id);
-    if !migrations.iter().any(|m| pending(&m)) {
+    if converted(&lines).is_none() && !migrations.iter().any(|m| pending(&m)) {
         return report;
     }
     let locked = with_lock_retry(&ctx.home, retries, || {
-        run_auto(migrations, ctx, &mut report, None)
+        if convert_into(&ctx.home, &mut report) {
+            run_auto(migrations, ctx, &mut report, None);
+        }
     });
     if !locked {
         report.lock_busy = true;
@@ -1322,10 +1419,11 @@ fn run_with_retries(migrations: &[Migration], ctx: &Ctx, retries: u32) -> Report
     report
 }
 
+/// The slugs of the applied rows, an old numbered row read as its slug.
 fn applied(lines: &[String]) -> Vec<String> {
     lines
         .iter()
-        .filter_map(|l| l.strip_prefix("applied ").map(str::to_string))
+        .filter_map(|l| l.strip_prefix("applied ").map(|id| slug_of(id).to_string()))
         .collect()
 }
 
@@ -1382,6 +1480,9 @@ fn run_auto(migrations: &[Migration], ctx: &Ctx, report: &mut Report, deadline: 
         match (m.run)(ctx) {
             Outcome::Done(step) => {
                 lines.push(format!("applied {}", m.id));
+                if let Some(old) = legacy_id(m.id) {
+                    lines.push(format!("applied {old}"));
+                }
                 if let Err(err) = write_state(&ctx.home, &lines) {
                     report.failed = true;
                     report
@@ -1457,6 +1558,221 @@ mod tests {
         assert_eq!(*CALLS.lock().unwrap(), vec!["a", "b"]);
         assert_eq!(first.steps.len(), 2);
         assert!(second.steps.is_empty());
+    }
+
+    fn rows(home: &Path) -> Vec<String> {
+        let root = playbook_root_from(home);
+        let mut rows: Vec<String> = crate::state::list(&root, "migrations/")
+            .unwrap()
+            .into_iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        rows.sort();
+        rows
+    }
+
+    fn set_budget(home: &Path, usd: f64) {
+        crate::config::write::set(
+            crate::config::write::Tier::Global,
+            "auto.budgetUsd",
+            serde_json::Value::from(usd),
+            home,
+            None,
+        )
+        .unwrap();
+    }
+
+    fn budget(home: &Path) -> String {
+        crate::config::resolve("auto.budgetUsd", home, None)
+            .unwrap()
+            .0
+            .to_string()
+    }
+
+    #[test]
+    fn a_record_from_0_37_converts_to_slugs_and_keeps_its_numbered_rows() {
+        // Arrange: the rows a 0.37.0 heal leaves, with the budget migration
+        // applied and a $5 budget the user set again on purpose afterwards.
+        let h = home("convert");
+        write_state(
+            &h,
+            &[
+                "applied 0017-auto-budget-defaults".to_string(),
+                "applied 0020-collector-service-label".to_string(),
+                "shipped system-prompt abc".to_string(),
+            ],
+        )
+        .unwrap();
+        set_budget(&h, 5.0);
+
+        // Act
+        let first = run_owned(&ctx(&h), 0, None);
+        let after_first = rows(&h);
+        let second = run_owned(&ctx(&h), 0, None);
+
+        // Assert
+        assert!(!first.failed && !second.failed, "{:?}", first.warnings);
+        assert_eq!(
+            after_first,
+            [
+                "migrations/applied/0017-auto-budget-defaults=1",
+                "migrations/applied/0020-collector-service-label=1",
+                "migrations/applied/auto-budget-defaults=1",
+                "migrations/shipped/system-prompt=abc",
+            ]
+        );
+        assert_eq!(rows(&h), after_first, "the conversion runs once");
+        assert_eq!(budget(&h), "5.0", "an applied migration does not run again");
+        assert!(!applied(&read_state(&h)).contains(&COLLECTOR_LABEL_MIGRATION.to_string()));
+    }
+
+    #[test]
+    fn applying_a_migration_with_an_old_number_writes_both_rows() {
+        // Arrange: a home from 0.35 that never ran the budget migration.
+        let h = home("both-rows");
+        set_budget(&h, 5.0);
+
+        // Act
+        let report = run_owned(&ctx(&h), 0, None);
+
+        // Assert
+        assert!(!report.failed, "{:?}", report.warnings);
+        assert_ne!(budget(&h), "5.0");
+        let rows = rows(&h);
+        assert!(rows.contains(&"migrations/applied/auto-budget-defaults=1".to_string()));
+        assert!(
+            rows.contains(&"migrations/applied/0017-auto-budget-defaults=1".to_string()),
+            "an older binary looks for its own id: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn setup_converts_the_record_too() {
+        // Arrange: only a numbered row, so no Auto migration is pending.
+        let h = home("convert-setup");
+        write_state(&h, &["applied 0017-auto-budget-defaults".to_string()]).unwrap();
+
+        // Act
+        let report = run_pending(&ctx(&h));
+
+        // Assert
+        assert!(!report.failed && !report.lock_busy, "{:?}", report.warnings);
+        let rows = rows(&h);
+        assert!(rows.contains(&"migrations/applied/auto-budget-defaults=1".to_string()));
+        assert!(rows.contains(&"migrations/applied/0017-auto-budget-defaults=1".to_string()));
+    }
+
+    #[test]
+    fn setup_says_so_when_the_lock_stops_the_conversion() {
+        // Arrange: a numbered row to convert and a held lock.
+        let h = home("convert-busy");
+        write_state(&h, &["applied 0017-auto-budget-defaults".to_string()]).unwrap();
+        fs::create_dir_all(playbook_root_from(&h).join(LOCK_DIR)).unwrap();
+
+        // Act
+        let report = run_with_retries(&[], &ctx(&h), 0);
+
+        // Assert
+        assert!(report.lock_busy);
+        assert!(report
+            .steps
+            .iter()
+            .any(|s| s.detail.contains("migration lock")));
+        assert_eq!(rows(&h), ["migrations/applied/0017-auto-budget-defaults=1"]);
+    }
+
+    #[test]
+    fn an_unreadable_record_stops_the_heal_before_anything_runs() {
+        // Arrange: a store that is not a database.
+        let h = home("convert-unreadable");
+        let data = playbook_root_from(&h).join("data");
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("config.db"), "not a database").unwrap();
+
+        // Act
+        let report = run_owned(&ctx(&h), 0, None);
+
+        // Assert
+        assert!(report.failed);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("could not convert the record")),
+            "{:?}",
+            report.warnings
+        );
+        assert!(
+            report.steps.is_empty(),
+            "nothing ran: {}",
+            report.steps.len()
+        );
+    }
+
+    #[test]
+    fn an_old_state_file_is_imported_then_converted() {
+        // Arrange: a 0.18 home that still has migrations.state.
+        let h = home("convert-legacy");
+        let root = playbook_root_from(&h);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("migrations.state"),
+            "applied 0001-memory-store-move\napplied 0017-auto-budget-defaults\n",
+        )
+        .unwrap();
+
+        // Act
+        let report = run_owned(&ctx(&h), 0, None);
+
+        // Assert
+        assert!(!report.failed, "{:?}", report.warnings);
+        let rows = rows(&h);
+        for row in [
+            "migrations/applied/0001-memory-store-move=1",
+            "migrations/applied/memory-store-move=1",
+            "migrations/applied/0017-auto-budget-defaults=1",
+            "migrations/applied/auto-budget-defaults=1",
+        ] {
+            assert!(rows.contains(&row.to_string()), "{row}: {rows:?}");
+        }
+    }
+
+    #[test]
+    fn only_the_released_numbers_map_to_slugs() {
+        // Arrange: (stored id, slug it reads as)
+        let cases = [
+            ("0015-attribution-off", "attribution-off"),
+            ("0019-system-prompt-default-on", "system-prompt-default-on"),
+            ("attribution-off", "attribution-off"),
+            // Never released with a number, so a dev build's row stays as is.
+            (
+                "0020-collector-service-label",
+                "0020-collector-service-label",
+            ),
+            ("0099-unknown", "0099-unknown"),
+        ];
+
+        for (stored, want) in cases {
+            // Act
+            let got = slug_of(stored);
+
+            // Assert
+            assert_eq!(got, want, "{stored}");
+        }
+        let slugs: Vec<&str> = registry().iter().map(|m| m.id).collect();
+        for (i, old) in LEGACY_IDS.iter().enumerate() {
+            let slug = slug_of(old);
+            assert_eq!(
+                *old,
+                format!("{:04}-{slug}", i + 1),
+                "the table keeps release order"
+            );
+            assert!(slugs.contains(&slug), "{old} names no migration");
+            assert_eq!(legacy_id(slug), Some(*old));
+        }
+        assert!(slugs
+            .iter()
+            .all(|id| !id.starts_with(|c: char| c.is_ascii_digit())));
     }
 
     #[test]
@@ -1727,7 +2043,7 @@ mod tests {
         assert!(dirty.warnings[0].contains("edited"));
         let notes = owned_notes(&ctx(&h));
         assert_eq!(notes.len(), 1);
-        assert!(notes[0].starts_with("0003-system-prompt-edited: "));
+        assert!(notes[0].starts_with("system-prompt-edited: "));
     }
 
     #[test]
@@ -1834,18 +2150,14 @@ mod tests {
         // Assert
         assert!(!run.lock_busy && !run.failed);
         assert_eq!(notes.len(), 1, "{notes:?}");
-        assert!(notes[0].starts_with("0014-orphaned-plugin-caches: "));
+        assert!(notes[0].starts_with("orphaned-plugin-caches: "));
         assert_eq!(outside(&h), before);
         let command = |id: &str| open.iter().find(|i| i.id == id).and_then(|i| i.command);
         assert_eq!(
-            command("0006-statusline-rust-command"),
+            command("statusline-rust-command"),
             Some("playbook setup --statusline")
         );
-        assert_eq!(
-            command("0007-shell-init-rc-line"),
-            None,
-            "retired by ADR 0044"
-        );
+        assert_eq!(command("shell-init-rc-line"), None, "retired by ADR 0044");
         assert_eq!(command(RC_LINE_MIGRATION), Some("playbook setup"));
         assert_eq!(
             command(DEAD_HOOKS_MIGRATION),
@@ -1853,7 +2165,7 @@ mod tests {
         );
         assert!(open
             .iter()
-            .any(|i| i.id == "0012-other-playbook-plugins" && i.command.is_none()));
+            .any(|i| i.id == "other-playbook-plugins" && i.command.is_none()));
     }
 
     #[test]

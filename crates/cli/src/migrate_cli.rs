@@ -240,16 +240,16 @@ mod tests {
     fn planned_next() -> Planned {
         Planned {
             since: migrate::Since::Next,
-            ..planned("0021-e", "owned", State::Unreleased, false)
+            ..planned("label-e", "owned", State::Unreleased, false)
         }
     }
 
     fn sample() -> Vec<Planned> {
         vec![
-            planned("0001-a", "owned", State::EveryRun, true),
-            planned("0002-b", "owned", State::Applied, false),
+            planned("move-a", "owned", State::EveryRun, true),
+            planned("budget-b", "owned", State::Applied, false),
             planned(
-                "0006-c",
+                "command-c",
                 "consent",
                 State::Open {
                     message: "old command".into(),
@@ -258,7 +258,7 @@ mod tests {
                 false,
             ),
             planned(
-                "0014-d",
+                "caches-d",
                 "owned",
                 State::Open {
                     message: "old folders".into(),
@@ -283,11 +283,11 @@ mod tests {
         let newer = render_dry_run(&record(Some("999.0.0"), 999), &plan);
 
         // Assert
-        assert!(old.starts_with("would run: 0001-a\n"), "{old}");
+        assert!(old.starts_with("would run: move-a\n"), "{old}");
         assert!(old.contains("needs you: old command (run `playbook setup --statusline`)"));
-        assert!(old.contains("note: 0014-d: old folders\n"), "{old}");
+        assert!(old.contains("note: caches-d: old folders\n"), "{old}");
         assert!(old.ends_with("dry run: nothing was written\n"));
-        assert!(same.starts_with("would run: 0001-a\n"), "{same}");
+        assert!(same.starts_with("would run: move-a\n"), "{same}");
         assert!(
             newer.starts_with("nothing would run: a newer playbook"),
             "{newer}"
@@ -295,7 +295,7 @@ mod tests {
         let value = dry_run_json(&record(Some("999.0.0"), 999), &plan);
         assert_eq!(value["would_run"], json!([]));
         assert_eq!(value["skipped"], "downgrade");
-        assert_eq!(value["notes"], json!(["0014-d: old folders"]));
+        assert_eq!(value["notes"], json!(["caches-d: old folders"]));
         assert_eq!(value["open"][0]["command"], "playbook setup --statusline");
     }
 
@@ -311,11 +311,11 @@ mod tests {
         // Assert
         assert!(text.contains("recorded: nothing yet"), "{text}");
         assert!(
-            text.contains("0.36.0  0001-a  idempotent  owned    runs on every run"),
+            text.contains("0.36.0  move-a     idempotent  owned    runs on every run"),
             "{text}"
         );
         assert!(
-            text.contains("0.36.0  0002-b  idempotent  owned    applied"),
+            text.contains("0.36.0  budget-b   idempotent  owned    applied"),
             "{text}"
         );
         assert!(text.starts_with(&format!(
@@ -325,11 +325,11 @@ mod tests {
         assert!(!text.contains("migrations up to"), "{text}");
         assert_eq!(value["migrations"][0]["state"], "every_run");
         assert_eq!(value["migrations"][0]["since"], "0.36.0");
-        assert_eq!(value["migrations"][0]["id"], "0001-a");
+        assert_eq!(value["migrations"][0]["id"], "move-a");
         let next_text = render_status(&record(None, 0), &[planned_next()]);
         let next_value = status_json(&record(None, 0), &[planned_next()]);
         assert!(
-            next_text.contains("next  0021-e  idempotent  owned    waits for the next release"),
+            next_text.contains("next  label-e  idempotent  owned    waits for the next release"),
             "{next_text}"
         );
         assert_eq!(next_value["migrations"][0]["since"], "next");

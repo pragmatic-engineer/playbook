@@ -685,10 +685,10 @@ fn l6_the_upgrade_record_row_follows_the_record_of_the_binary_on_path() {
         t.starts_with("INFO") && t.contains("nothing runs after a downgrade"),
         "{t}"
     );
-    set(&[("versions/pending", "0011-dead-hook-scripts")]);
+    set(&[("versions/pending", "dead-hook-scripts")]);
     let t = row();
     assert!(
-        t.starts_with("WARN") && t.contains("1 upgrade item(s) need you: 0011-dead-hook-scripts"),
+        t.starts_with("WARN") && t.contains("1 upgrade item(s) need you: dead-hook-scripts"),
         "{t}"
     );
     set(&[("versions/failed-at", "1000")]);

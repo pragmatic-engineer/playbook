@@ -72,7 +72,11 @@ impl Record {
             schema: get(SCHEMA_KEY).and_then(|v| v.parse().ok()).unwrap_or(0),
             plugin: get(PLUGIN_KEY),
             pending: get(PENDING_KEY)
-                .map(|v| v.split(',').map(str::to_string).collect())
+                .map(|v| {
+                    v.split(',')
+                        .map(|id| migrate::slug_of(id).to_string())
+                        .collect()
+                })
                 .unwrap_or_default(),
             failed_at: get(FAILED_AT_KEY).and_then(|v| v.parse().ok()),
         }
@@ -308,7 +312,7 @@ fn run_shown(ctx: &Ctx, trigger: Trigger, now: u64, shown: bool) -> Outcome {
     let pending = crate::notices::prepare(&root, record.binary.as_deref(), older);
     let out = heal_for(ctx, trigger, now, &root, &record, order);
     // Every trigger but setup prints the open items, so the one reminder of
-    // migration 0017 counts as shown here. Setup asks the question itself.
+    // the `collector-service` migration counts as shown here. Setup asks the question itself.
     let reminded = out
         .open
         .iter()
@@ -377,9 +381,16 @@ fn recheck_pending(ctx: &Ctx, root: &Path, record: &Record) -> Outcome {
         return Outcome::default();
     }
     let open = migrate::open_items(ctx, Some(&record.pending));
-    let pending = ids(&open);
-    if pending != record.pending {
-        let _ = set_key(root, PENDING_KEY, &pending.join(","));
+    let pending = ids(&open).join(",");
+    let stored = crate::state::get(root, PENDING_KEY).ok().flatten();
+    if stored.as_deref() != Some(pending.as_str()) {
+        // Slugs go with the fixed schema, so an older binary of the same
+        // version reads the record as newer and does not drop the ids it
+        // cannot match (ADR 0046).
+        let _ = crate::state::transaction(root, |tx| {
+            tx.set(PENDING_KEY, &pending)?;
+            tx.set(SCHEMA_KEY, &LEGACY_SCHEMA.to_string())
+        });
     }
     Outcome {
         open,
@@ -794,6 +805,107 @@ mod tests {
         assert_eq!(Record::read(&root(&home)).unwrap(), before);
     }
 
+    /// Settings with no `attribution` keys, so the attribution item is open
+    /// unless the user said no.
+    fn settings_without_attribution(home: &Path) {
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        fs::write(home.join(".claude/settings.json"), r#"{"model":"x"}"#).unwrap();
+    }
+
+    fn seed_pending(home: &Path, pending: &str) {
+        crate::state::transaction(&root(home), |tx| {
+            tx.set("versions/binary", env!("CARGO_PKG_VERSION"))?;
+            tx.set("versions/schema", "19")?;
+            tx.set("versions/pending", pending)
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_stored_no_still_closes_an_item_the_record_names_by_its_old_number() {
+        // Arrange: a 0.37.0 record whose pending list holds the old id, and a
+        // user who said no to the attribution part.
+        let home = scratch_dir("heal-no-by-slug");
+        settings_without_attribution(&home);
+        seed_pending(&home, "0015-attribution-off");
+        crate::state::set(&root(&home), "attribution/declined", "1").unwrap();
+
+        // Act
+        let read = Record::read(&root(&home)).unwrap();
+        let out = run(&ctx(&home), Trigger::Hook, 1000);
+
+        // Assert
+        assert_eq!(read.pending, ["attribution-off"]);
+        assert!(out.open.is_empty(), "{:?}", out.open);
+        assert!(Record::read(&root(&home)).unwrap().pending.is_empty());
+    }
+
+    #[test]
+    fn an_open_item_under_its_old_number_stays_open_and_is_stored_as_a_slug() {
+        // Arrange: the same record, with no answer stored.
+        let home = scratch_dir("heal-open-by-slug");
+        settings_without_attribution(&home);
+        seed_pending(&home, "0015-attribution-off");
+
+        // Act
+        let out = run(&ctx(&home), Trigger::Hook, 1000);
+
+        // Assert
+        let ids: Vec<&str> = out.open.iter().map(|i| i.id).collect();
+        assert_eq!(ids, [migrate::ATTRIBUTION_MIGRATION]);
+        let stored = crate::state::get(&root(&home), "versions/pending").unwrap();
+        assert_eq!(stored.as_deref(), Some("attribution-off"));
+        let schema = crate::state::get(&root(&home), "versions/schema").unwrap();
+        assert_eq!(
+            schema,
+            Some(LEGACY_SCHEMA.to_string()),
+            "slugs go with schema 20"
+        );
+    }
+
+    #[test]
+    fn a_pending_list_with_an_old_and_a_new_id_for_one_item_is_stored_once() {
+        // Arrange
+        let home = scratch_dir("heal-mixed-pending");
+        settings_without_attribution(&home);
+        seed_pending(&home, "0015-attribution-off,attribution-off");
+
+        // Act
+        let out = run(&ctx(&home), Trigger::Hook, 1000);
+
+        // Assert
+        assert_eq!(out.open.len(), 1, "{:?}", out.open);
+        let stored = crate::state::get(&root(&home), "versions/pending").unwrap();
+        assert_eq!(stored.as_deref(), Some("attribution-off"));
+    }
+
+    /// The record check of playbook 0.34.0 to 0.37.0: the version first,
+    /// then the schema.
+    fn old_compare(record: &Record, binary: &str, schema: u32) -> Ordering {
+        match &record.binary {
+            None => Ordering::Less,
+            Some(recorded) => {
+                crate::update::resolve::compare(recorded, binary).then(record.schema.cmp(&schema))
+            }
+        }
+    }
+
+    #[test]
+    fn an_older_binary_reads_what_this_one_writes_as_newer() {
+        // Arrange: the record a clean heal of this build writes.
+        let home = scratch_dir("heal-old-reader");
+        let out = run(&ctx(&home), Trigger::Fix, 1000);
+        let written = Record::read(&root(&home)).unwrap();
+
+        // Act: older binaries, each with its own highest number.
+        let same_version = old_compare(&written, env!("CARGO_PKG_VERSION"), 19);
+
+        // Assert
+        assert!(out.recorded);
+        assert_eq!(written.schema, LEGACY_SCHEMA);
+        assert_eq!(same_version, Ordering::Greater);
+    }
+
     #[test]
     fn a_downgrade_runs_nothing_and_keeps_the_newer_record() {
         // Arrange
@@ -834,7 +946,7 @@ mod tests {
         }
         assert_eq!(
             Record::read(&root(&home)).unwrap().pending,
-            vec!["0006-statusline-rust-command".to_string()]
+            vec!["statusline-rust-command".to_string()]
         );
         assert_eq!(
             fs::read(home.join(".claude/settings.json")).unwrap(),
@@ -1026,13 +1138,13 @@ mod tests {
     fn the_fix_report_has_one_line_per_change_and_note() {
         let out = Outcome {
             changed: vec![StepReport::wired("config-hash", "removed")],
-            warnings: vec!["0003-system-prompt-edited: edited".into()],
+            warnings: vec!["system-prompt-edited: edited".into()],
             recorded: true,
             ..Outcome::default()
         };
         assert_eq!(
             render_fix(&out),
-            "fixed: config-hash: removed\nnote: 0003-system-prompt-edited: edited\n"
+            "fixed: config-hash: removed\nnote: system-prompt-edited: edited\n"
         );
         assert_eq!(out.exit_code(), 0);
     }

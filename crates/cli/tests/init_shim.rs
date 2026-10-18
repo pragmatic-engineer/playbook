@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The rc-file matcher behind migration 0018 (ADR 0044): which lines the
-//! retired launcher wrote, and how they are removed, in a scratch `$HOME`.
+//! The rc-file matcher behind the `retired-launcher-rc-line` migration (ADR
+//! 0044): which lines the retired launcher wrote, and how they are removed,
+//! in a scratch `$HOME`.
 
 use playbook::init::shim::{retired_rc_files, strip_retired_rc_lines, SOURCE_LINE};
 use std::env;
