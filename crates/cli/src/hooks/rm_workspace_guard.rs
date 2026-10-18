@@ -9,7 +9,10 @@
 //! main checkout when run inside a linked worktree), `WORKTREE_BASE_DIR` when
 //! set, and the `hooks.rmGuard.allowedRoots` config list. Playbook's data (the
 //! memory store, the databases, plans and handoffs) and its lock folders stay
-//! blocked whatever root covers them. A denial names the rule that matched
+//! blocked whatever root covers them, and so do the built-in deny set in
+//! `roots::DENY` (system folders, credentials, personal folders, shell
+//! config, Claude Code's settings and transcripts) and, outside the OS temp
+//! folders, a repo or worktree root and its `.git`. A denial names the rule that matched
 //! and, for a plain folder in home, the exact config command that allows it.
 //!
 //! Targets are judged after resolving symlinks and `..` against the real
@@ -70,7 +73,7 @@ mod roots;
 use crate::common::emit_pre_deny;
 use crate::common::payload::Payload;
 use parse::Target;
-use roots::{InstallFile, RootEnv};
+use roots::{InstallFile, RootEnv, Scope};
 use std::path::{Path, PathBuf};
 
 pub fn run(payload: &Payload) {
@@ -140,6 +143,13 @@ enum Rule {
     Glob,
     /// Outside every allowed root. Holds the resolved path.
     Outside(PathBuf),
+    /// In the built-in deny set. Holds the row's group.
+    Denied(&'static str),
+    /// A repo or worktree root, `.git`, or a glob at a root that takes
+    /// either, outside the temp folders.
+    RepoRoot,
+    /// An option that is always blocked, such as `--no-preserve-root`.
+    Forbidden,
 }
 
 impl Rule {
@@ -154,6 +164,9 @@ impl Rule {
             Rule::RootItself => "scratch root itself (contents only)",
             Rule::Glob => "bare glob",
             Rule::Outside(_) => "outside the allowed roots",
+            Rule::Denied(_) => "built-in deny list",
+            Rule::RepoRoot => "repo root or .git",
+            Rule::Forbidden => "option that is always blocked",
         }
     }
 }
@@ -170,6 +183,11 @@ struct Roots {
     scratch: Vec<PathBuf>,
     playbook_root: PathBuf,
     protected: Vec<PathBuf>,
+    /// The built-in deny set, resolved, with each row's scope and group.
+    deny: Vec<(PathBuf, Scope, &'static str)>,
+    /// The OS temp and cache folders, where a scratch clone's root and
+    /// `.git` may go.
+    temp: Vec<PathBuf>,
     install: Vec<InstallFile>,
     /// `hooks.rmGuard.allowedRoots` as stored, for the fix command.
     configured: Vec<String>,
@@ -203,6 +221,14 @@ impl Roots {
                 home,
             ))),
             protected: roots::protected(env)
+                .iter()
+                .map(|p| resolve_existing(p))
+                .collect(),
+            deny: roots::deny_set(env)
+                .into_iter()
+                .map(|(path, scope, group)| (resolve_existing(&path), scope, group))
+                .collect(),
+            temp: roots::temp_roots(env)
                 .iter()
                 .map(|p| resolve_existing(p))
                 .collect(),
@@ -475,7 +501,7 @@ fn join_parts(parts: &[&str], absolute: bool) -> String {
 /// Whether deleting `target`, a word as the shell passes it, is allowed, and
 /// the rule that denies it when it is not. `tilde` says a leading `~` was
 /// unquoted, so the shell expands it.
-fn judge(target: &str, tilde: bool, roots: &Roots) -> Result<(), Rule> {
+fn judge(target: &str, tilde: bool, below: bool, roots: &Roots) -> Result<(), Rule> {
     // A quote or backslash left in the word is part of the file name, which is
     // more likely a mistake than a real file. The rest are shell syntax (zsh
     // glob qualifiers, redirects) that this guard does not model.
@@ -522,11 +548,15 @@ fn judge(target: &str, tilde: bool, roots: &Roots) -> Result<(), Rule> {
     let last_glob = glob_at
         .filter(|g| *g == parts.len() - 1 && !trailing_slash)
         .map(|g| parts[g]);
+    let first_glob = glob_at.map(|g| parts[g]);
 
     let verdict = |dir: &Path| -> Result<(), Rule> {
         // The deny rules compare the path as the disk stores it, so a
         // different letter case on a case-insensitive disk cannot slip past.
         let stored = stored_case(dir);
+        if let Some(group) = denied_by(&stored, glob_at.is_some(), last_glob, roots) {
+            return Err(Rule::Denied(group));
+        }
         let holds_protected = |p: &PathBuf| {
             if stored.starts_with(p) {
                 return true;
@@ -556,6 +586,9 @@ fn judge(target: &str, tilde: bool, roots: &Roots) -> Result<(), Rule> {
         });
         if is_lock {
             return Err(Rule::Lock);
+        }
+        if repo_data(&stored, first_glob, last_glob, below, roots) {
+            return Err(Rule::RepoRoot);
         }
         if dir.starts_with(&roots.claude_dir) || roots.safe.iter().any(|r| dir.starts_with(r)) {
             return Ok(());
@@ -599,6 +632,130 @@ fn judge(target: &str, tilde: bool, roots: &Roots) -> Result<(), Rule> {
     Ok(())
 }
 
+/// The deny-set group that blocks deleting `stored`, the target as the disk
+/// stores it, or a folder that holds a deny-set path. With a glob, `stored`
+/// is the folder the glob reads, so a row that blocks the folder itself
+/// only is matched by what the glob can take.
+fn denied_by(
+    stored: &Path,
+    glob: bool,
+    last_glob: Option<&str>,
+    roots: &Roots,
+) -> Option<&'static str> {
+    roots.deny.iter().find_map(|(path, scope, group)| {
+        let direct = match scope {
+            Scope::Subtree => stored.starts_with(path),
+            Scope::Itself => !glob && stored == path,
+            Scope::Children => stored == path || stored.parent() == Some(path.as_path()),
+        };
+        (direct || holds(stored, path, last_glob)).then_some(*group)
+    })
+}
+
+/// Whether deleting `stored`, or what `last_glob` matches in it, takes
+/// `inner` with it.
+fn holds(stored: &Path, inner: &Path, last_glob: Option<&str>) -> bool {
+    if inner == stored || !inner.starts_with(stored) {
+        return false;
+    }
+    match last_glob {
+        Some(glob) if inner.parent() == Some(stored) => inner
+            .file_name()
+            .is_some_and(|n| glob_matches(glob, &n.to_string_lossy())),
+        _ => true,
+    }
+}
+
+/// Whether the shell glob `pattern` (`*`, `?`, `[...]`, `{a,b}`) matches
+/// `name`. A leading dot is matched only by a leading dot, as the shell does.
+/// A brace group the guard cannot split is taken to match everything.
+fn glob_matches(pattern: &str, name: &str) -> bool {
+    if let Some(open) = pattern.find('{') {
+        let Some(close) = pattern[open..].find('}').map(|c| open + c) else {
+            return true;
+        };
+        let inner = &pattern[open + 1..close];
+        if inner.contains('{') {
+            return true;
+        }
+        return inner.split(',').any(|alt| {
+            let expanded = format!("{}{alt}{}", &pattern[..open], &pattern[close + 1..]);
+            glob_matches(&expanded, name)
+        });
+    }
+    if name.starts_with('.') && !pattern.starts_with('.') {
+        return false;
+    }
+    let p: Vec<char> = pattern.chars().collect();
+    let n: Vec<char> = name.chars().collect();
+    fn walk(p: &[char], n: &[char]) -> bool {
+        match p.first() {
+            None => n.is_empty(),
+            Some('*') => (0..=n.len()).any(|k| walk(&p[1..], &n[k..])),
+            Some('?') => !n.is_empty() && walk(&p[1..], &n[1..]),
+            Some('[') => {
+                let Some(close) = p.iter().skip(1).position(|c| *c == ']').map(|i| i + 1) else {
+                    return n.first() == Some(&'[') && walk(&p[1..], &n[1..]);
+                };
+                let Some(c) = n.first() else {
+                    return false;
+                };
+                let set = &p[1..close];
+                let (negate, set) = match set.first() {
+                    Some('!' | '^') => (true, &set[1..]),
+                    _ => (false, set),
+                };
+                let mut hit = false;
+                let mut i = 0;
+                while i < set.len() {
+                    if i + 2 < set.len() && set[i + 1] == '-' {
+                        hit |= set[i] <= *c && *c <= set[i + 2];
+                        i += 3;
+                    } else {
+                        hit |= set[i] == *c;
+                        i += 1;
+                    }
+                }
+                hit != negate && walk(&p[close + 1..], &n[1..])
+            }
+            Some(c) => n.first() == Some(c) && walk(&p[1..], &n[1..]),
+        }
+    }
+    walk(&p, &n)
+}
+
+/// Whether deleting `stored` would take a repo or worktree root or a `.git`
+/// with it, outside the OS temp folders, where a scratch clone may go whole.
+/// A glob at a root counts when it is bare (`*`, `.*`) or can match `.git`.
+/// `below` says the deletion stays under `stored`, as a `find` with a name
+/// test does, so a root itself is not taken.
+fn repo_data(
+    stored: &Path,
+    first_glob: Option<&str>,
+    last_glob: Option<&str>,
+    below: bool,
+    roots: &Roots,
+) -> bool {
+    let in_temp = roots.temp.iter().any(|t| stored.starts_with(t))
+        || roots::macos_temp_base(stored).is_some();
+    if in_temp {
+        return false;
+    }
+    if stored.components().any(|c| c.as_os_str() == ".git") {
+        return true;
+    }
+    if std::fs::symlink_metadata(stored.join(".git")).is_err() {
+        return false;
+    }
+    match first_glob {
+        None => !below,
+        Some(glob) => {
+            let bare = glob.chars().all(|c| matches!(c, '*' | '?' | '.'));
+            (bare && last_glob.is_some()) || glob_matches(glob, ".git")
+        }
+    }
+}
+
 /// The deletion targets that are denied, each as written, or as its label
 /// when it cannot be resolved, with the rule that denies it.
 fn denied_targets(targets: Vec<Target>, roots: &Roots) -> Vec<(String, Rule)> {
@@ -606,7 +763,39 @@ fn denied_targets(targets: Vec<Target>, roots: &Roots) -> Vec<(String, Rule)> {
         .into_iter()
         .filter_map(|target| match target {
             Target::Unresolvable(label) => Some((label, Rule::Unresolvable)),
-            Target::Path { text, tilde } => judge(&text, tilde, roots).err().map(|r| (text, r)),
+            Target::Forbidden(label) => Some((label, Rule::Forbidden)),
+            Target::Path { text, tilde } => {
+                judge(&text, tilde, false, roots).err().map(|r| (text, r))
+            }
+            Target::Below { text, tilde } => {
+                judge(&text, tilde, true, roots).err().map(|r| (text, r))
+            }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glob_matches;
+
+    #[test]
+    fn globs_match_the_way_the_shell_matches_names() {
+        let cases = [
+            ("*", "src", true),
+            ("*", ".git", false),
+            (".*", ".git", true),
+            (".g*", ".git", true),
+            ("?git", ".git", false),
+            (".[a-z]*", ".git", true),
+            (".[!g]*", ".git", false),
+            ("*.log", "a.log", true),
+            ("*.log", "a.txt", false),
+            ("{a,.git}", ".git", true),
+            ("{a,b}", ".git", false),
+            ("x{a", ".git", true),
+        ];
+        for (pattern, name, want) in cases {
+            assert_eq!(glob_matches(pattern, name), want, "{pattern} vs {name}");
+        }
+    }
 }

@@ -133,16 +133,30 @@ pub(super) fn identifier_len(text: &str) -> usize {
     len
 }
 
-/// Where `mktemp` with these arguments makes its file or folder, under
-/// `temp`: only the plain forms, with `-d`, `-q`, `-u` or `-t` and no
-/// template, are known.
+/// Where `mktemp` with these arguments makes its file or folder: under
+/// `temp` for the plain forms, with `-d`, `-q`, `-u` or `-t` and no
+/// template, or where a template with three or more trailing `X`s and no
+/// `-t` says, relative to the current folder when it has no leading `/`.
+/// Any other option, such as `-p`, is unknown.
 pub(super) fn mktemp_path(args: &[String], temp: &str) -> Option<String> {
-    let plain = args.iter().all(|a| {
-        a.len() > 1
-            && a.starts_with('-')
-            && a[1..].chars().all(|c| matches!(c, 'd' | 'q' | 'u' | 't'))
-    });
-    plain.then(|| format!("{}/tmp.mktemp", temp.trim_end_matches('/')))
+    let (flags, operands): (Vec<&String>, Vec<&String>) =
+        args.iter().partition(|a| a.len() > 1 && a.starts_with('-'));
+    let plain = flags
+        .iter()
+        .all(|a| a[1..].chars().all(|c| matches!(c, 'd' | 'q' | 'u' | 't')));
+    if !plain {
+        return None;
+    }
+    match operands.as_slice() {
+        [] => Some(format!("{}/tmp.mktemp", temp.trim_end_matches('/'))),
+        [template] if !flags.iter().any(|f| f.contains('t')) => {
+            let stem = template.trim_end_matches('X');
+            let random = template.len() - stem.len();
+            let literal = !stem.contains(['$', '`', '*', '?', '[']);
+            (random >= 3 && literal).then(|| format!("{stem}mktemp"))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -220,7 +234,16 @@ mod tests {
             Some("/t/tmp.mktemp".to_string())
         );
         assert!(mktemp_path(&args(&["-dq"]), "/t").is_some());
-        assert_eq!(mktemp_path(&args(&["-d", "./x.XXXX"]), "/t"), None);
+        assert_eq!(
+            mktemp_path(&args(&["-d", "./.tmp-XXXX"]), "/t"),
+            Some("./.tmp-mktemp".to_string())
+        );
+        assert_eq!(
+            mktemp_path(&args(&["/x/y.XXXXXX"]), "/t"),
+            Some("/x/y.mktemp".to_string())
+        );
+        assert_eq!(mktemp_path(&args(&["-d", "./x.XX"]), "/t"), None);
+        assert_eq!(mktemp_path(&args(&["-t", "x.XXXX"]), "/t"), None);
         assert_eq!(mktemp_path(&args(&["--tmpdir=/x"]), "/t"), None);
         assert_eq!(mktemp_path(&args(&["-p", "/x"]), "/t"), None);
     }

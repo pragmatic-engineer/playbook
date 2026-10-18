@@ -45,6 +45,25 @@ pub(super) fn denial(denied: &[(String, Rule)], roots: &Roots) -> String {
     if has(|r| *r == Rule::Protected) {
         text.push_str(" Protected playbook data (the memory store, the databases and the other user data under ~/.config/playbook, or a folder that holds it) stays blocked whatever the roots say. Ask the user if it really has to go.");
     }
+    if has(|r| matches!(r, Rule::Denied(_))) {
+        let groups: Vec<&str> = denied
+            .iter()
+            .filter_map(|(_, r)| match r {
+                Rule::Denied(group) => Some(*group),
+                _ => None,
+            })
+            .collect();
+        text.push_str(&format!(
+            " The built-in deny list ({}) stays blocked whatever the roots say, and so does a folder that holds an entry. Ask the user to delete it if it really has to go.",
+            groups.join(", ")
+        ));
+    }
+    if has(|r| *r == Rule::RepoRoot) {
+        text.push_str(" A repo or worktree root and its .git stay blocked outside the temp folders: name the paths inside the repo, and remove a linked worktree with `git worktree remove`.");
+    }
+    if has(|r| *r == Rule::Forbidden) {
+        text.push_str(" `--no-preserve-root` is always blocked.");
+    }
     if has(|r| matches!(r, Rule::RootItself | Rule::Glob)) {
         text.push_str(" Name the paths inside the root instead.");
     }
