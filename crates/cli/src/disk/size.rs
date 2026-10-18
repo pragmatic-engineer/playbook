@@ -9,30 +9,64 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::time::SystemTime;
 
 /// Bytes allocated under `path`, the path itself included. Symlinks are not
 /// followed, and a file with several hard links counts once, as cargo links
 /// the same build output into more than one folder. An unreadable entry
 /// counts as 0.
 pub fn allocated(path: &Path) -> u64 {
+    scan(path).bytes
+}
+
+/// What one walk of a tree finds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Scan {
+    /// Bytes allocated, as [`allocated`] counts them.
+    pub bytes: u64,
+    /// The latest change time of any entry, the path itself included.
+    /// `UNIX_EPOCH` when nothing could be read.
+    pub newest: SystemTime,
+    /// False when the walk stopped at its deadline, so `bytes` is a floor.
+    pub complete: bool,
+}
+
+/// Walks `path` once for its size and its most recent change.
+pub fn scan(path: &Path) -> Scan {
+    scan_until(path, None)
+}
+
+/// [`scan`] that stops at `deadline`, for reports that must stay fast.
+pub fn scan_until(path: &Path, deadline: Option<std::time::Instant>) -> Scan {
     let mut seen: HashSet<(u64, u64)> = HashSet::new();
-    let mut total = 0u64;
+    let mut found = Scan {
+        bytes: 0,
+        newest: SystemTime::UNIX_EPOCH,
+        complete: true,
+    };
     let mut stack = vec![path.to_path_buf()];
     while let Some(at) = stack.pop() {
+        if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+            found.complete = false;
+            break;
+        }
         let Ok(meta) = std::fs::symlink_metadata(&at) else {
             continue;
         };
+        if let Ok(modified) = meta.modified() {
+            found.newest = found.newest.max(modified);
+        }
         if !first_link(&meta, &mut seen) {
             continue;
         }
-        total = total.saturating_add(on_disk(&meta));
+        found.bytes = found.bytes.saturating_add(on_disk(&meta));
         if meta.is_dir() {
             if let Ok(entries) = std::fs::read_dir(&at) {
                 stack.extend(entries.filter_map(Result::ok).map(|e| e.path()));
             }
         }
     }
-    total
+    found
 }
 
 #[cfg(unix)]
@@ -82,6 +116,34 @@ mod tests {
             linked - one < 64 * 1024,
             "hard link or symlink counted twice: {one} then {linked}"
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn scan_reports_the_newest_change_inside() {
+        let dir = std::env::temp_dir().join(format!("pb-disk-scan-{}", crate::testing::run_id()));
+        fs::create_dir_all(dir.join("deep/er")).unwrap();
+        let before = SystemTime::now() - std::time::Duration::from_secs(2);
+        fs::write(dir.join("deep/er/new"), b"x").unwrap();
+        let found = scan(&dir);
+        assert!(found.newest >= before, "{:?}", found.newest);
+        assert_eq!(
+            scan(Path::new("/pb-disk-scan-missing")).newest,
+            SystemTime::UNIX_EPOCH
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_past_deadline_stops_the_walk() {
+        let dir =
+            std::env::temp_dir().join(format!("pb-disk-deadline-{}", crate::testing::run_id()));
+        fs::create_dir_all(dir.join("x")).unwrap();
+        let past = std::time::Instant::now();
+        let found = scan_until(&dir, Some(past));
+        assert!(!found.complete);
+        assert_eq!(found.bytes, 0);
+        assert!(scan_until(&dir, None).complete);
         fs::remove_dir_all(&dir).unwrap();
     }
 

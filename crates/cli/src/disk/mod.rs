@@ -5,6 +5,7 @@
 //! `disk.*` thresholds, and keeps the disk from filling while agents build.
 
 pub mod ballast;
+pub mod clean;
 pub mod policy;
 pub mod probe;
 pub mod size;

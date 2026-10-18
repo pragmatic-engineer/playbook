@@ -2724,5 +2724,16 @@ fn run_disk(sub: DiskCommand) {
                 print!("{}", disk::status::render(&report));
             }
         }
+        DiskCommand::Clean { dry_run, auto } => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
+            if auto && !disk::clean::auto_due(&home, &cwd) {
+                println!("disk clean: nothing to do, space is fine or disk.autoCleanup is off");
+                return;
+            }
+            let repo_root = playbook_common::gitfacts::toplevel(&cwd);
+            for line in disk::clean::run(&home, repo_root.as_deref(), dry_run) {
+                println!("{line}");
+            }
+        }
     }
 }

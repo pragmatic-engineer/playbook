@@ -2006,6 +2006,25 @@ pub enum DiskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Remove what playbook can prove is disposable and print what it freed
+    ///
+    /// Removes idle `cargo-*` target folders under this repo's worktrees
+    /// root that no build holds, `/tmp/pb-*` scratch older than an hour,
+    /// playbook's own cache and tmp entries, plugin cache versions Claude
+    /// Code marked orphaned a day ago or more, and landed worktrees through
+    /// `playbook worktree sweep`. Never removes uncommitted work, a branch,
+    /// the memory store or the config database.
+    ///
+    /// Example: `playbook disk clean --dry-run`
+    Clean {
+        /// Show what would be removed without removing anything
+        #[arg(long)]
+        dry_run: bool,
+        /// Run only when `disk.autoCleanup` is on and free space is below
+        /// `disk.warnFreeGb`, as the disk guard hooks do
+        #[arg(long)]
+        auto: bool,
+    },
 }
 
 /// `playbook worktree` subcommands.
