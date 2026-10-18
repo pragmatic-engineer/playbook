@@ -378,7 +378,8 @@ pub fn import(root: &Path, doc: &Value) -> Result<usize, ConfigError> {
         for (key, value) in obj {
             super::write::validate_key_and_value(key, value)?;
             super::write::require_global_for_user_key(key, tier == "global")?;
-            rows.push((tier, scope.to_string(), key.clone(), value.clone()));
+            let value = super::write::normalize(key, value.clone());
+            rows.push((tier, scope.to_string(), key.clone(), value));
         }
         Ok(())
     };

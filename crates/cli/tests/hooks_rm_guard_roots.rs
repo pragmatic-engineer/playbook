@@ -413,7 +413,9 @@ fn the_config_key_rejects_dangerous_or_malformed_values() {
         r#"["relative/dir"]"#,
         r#"["/a/b/../c"]"#,
         r#"["~/a/../.."]"#,
-        r#"["/a/b/*"]"#,
+        r#"["/a/*/b"]"#,
+        r#"["/a/b**"]"#,
+        r#"["/a/b/*.log"]"#,
         r#"["~//etc"]"#,
         r#"["$HOME/x"]"#,
         r#"["/opt/$USER/x"]"#,
@@ -430,11 +432,50 @@ fn the_config_key_rejects_dangerous_or_malformed_values() {
     for good in [
         r#"["~/a", "/opt/data/scratch"]"#,
         "~/a:/opt/data/scratch",
+        r#"["/a/b/*"]"#,
         "",
     ] {
         let out = fx.config_set(good);
         assert!(out.status.success(), "should accept {good:?}: {out:?}");
     }
+    let out = fx.config_set("/opt/$USER/x");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("covers everything under it"), "{err}");
+    assert!(err.contains("playbook config set --global"), "{err}");
+}
+
+/// The exact form the user typed, with a trailing `/**` on each root, is
+/// accepted, stored as plain paths and honoured by the guard.
+#[test]
+fn a_root_with_a_trailing_double_star_is_accepted_and_honoured() {
+    let fx = Fx::new();
+    let d = rm();
+    let w = s(&fx.base.join("data/scratch"));
+    let value = format!(r#"["~/code/acme/.worktrees/**","{w}/**"]"#);
+
+    let out = fx.config_set(&value);
+
+    assert!(out.status.success(), "{out:?}");
+    let plain = format!(r#"["~/code/acme/.worktrees","{w}"]"#);
+    let printed = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        printed.contains(&plain),
+        "success prints the list: {printed}"
+    );
+    let stored = std::process::Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["config", "get", "hooks.rmGuard.allowedRoots"])
+        .env("HOME", &fx.home)
+        .output()
+        .expect("config get");
+    let stored = String::from_utf8_lossy(&stored.stdout);
+    assert!(stored.contains("~/code/acme/.worktrees"), "{stored}");
+    assert!(!stored.contains('*'), "stored without the glob: {stored}");
+    assert!(!fx.denied(&format!("{d} -rf {w}/x"), &fx.repo, &[]));
+    assert!(fx.denied(&format!("{d} -rf {w}"), &fx.repo, &[]));
+    // A single `/*` means the same.
+    assert!(fx.config_set(&format!(r#"["{w}/*"]"#)).status.success());
+    assert!(!fx.denied(&format!("{d} -rf {w}/x"), &fx.repo, &[]));
+    assert!(fx.denied(&format!("{d} -rf {w}"), &fx.repo, &[]));
 }
 
 #[test]

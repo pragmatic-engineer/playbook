@@ -33,7 +33,27 @@ pub fn set(
     require_global_for_user_key(key, tier == Tier::Global)?;
     check_cap_order(tier, key, &value, home, repo_slug)?;
     let root = crate::common::paths::playbook_root_from(home);
-    super::store::put(&root, tier, repo_slug, key, &value)
+    super::store::put(&root, tier, repo_slug, key, &normalize(key, value))
+}
+
+/// `value` in the form it is stored: a root list loses each trailing `/**`
+/// or `/*`, so an older binary that refuses globs still reads it.
+pub fn normalize(key: &str, value: Value) -> Value {
+    if key != "hooks.rmGuard.allowedRoots" {
+        return value;
+    }
+    match value {
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| match item {
+                    Value::String(text) => Value::String(strip_root_glob(&text).to_string()),
+                    other => other,
+                })
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 /// Reject a per-user key bound for the org or repo tier.
@@ -133,10 +153,11 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
 /// `hooks.rmGuard.allowedRoots` takes strings that are an absolute path or a
 /// `~/` path, with no `..` segment and no glob or quote characters, naming a
 /// directory at least two levels deep. A root such as `/`, `~` or `/Users` would
-/// hand the guard's allowance to far more than a scratch tree.
+/// hand the guard's allowance to far more than a scratch tree. A trailing `/**`
+/// or `/*` is accepted and means the same as the plain path, since a root
+/// always covers everything under it.
 fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
-    const CONSTRAINT: &str =
-        "absolute or ~/ paths, at least two levels deep, with no .., glob or quote characters";
+    const CONSTRAINT: &str = "directories given as absolute or ~/ paths, at least two levels deep (one under ~/), with no .., quote or glob characters. A root covers everything under it, so a trailing /** is optional. Example: playbook config set --global hooks.rmGuard.allowedRoots '[\"~/code/acme/.worktrees\",\"/opt/scratch\"]'";
     let bad = || ConfigError::OutOfRange {
         key: key.to_string(),
         value: value.to_string(),
@@ -146,7 +167,7 @@ fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
         return Err(bad());
     };
     for item in items {
-        let text = item.as_str().ok_or_else(bad)?;
+        let text = strip_root_glob(item.as_str().ok_or_else(bad)?);
         let rest = match text.strip_prefix("~/") {
             Some(rest) if rest.starts_with('/') => return Err(bad()),
             Some(rest) => rest,
@@ -169,6 +190,13 @@ fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
         }
     }
     Ok(())
+}
+
+/// `root` without a trailing `/**` or `/*`, which a root implies anyway.
+pub(crate) fn strip_root_glob(root: &str) -> &str {
+    root.strip_suffix("/**")
+        .or_else(|| root.strip_suffix("/*"))
+        .unwrap_or(root)
 }
 
 const CEILING_KEY: &str = "auto.sessionCeilingUsd";
@@ -338,6 +366,7 @@ mod root_list_tests {
             json!(["~/a/b/"]),
             json!(["/opt/data"]),
             json!(["/private/tmp"]),
+            json!(["/a/b/*", "/a/b/**", "~/w/.worktrees/**"]),
         ] {
             assert!(validate_root_list("k", &good).is_ok(), "{good}");
         }
@@ -352,7 +381,10 @@ mod root_list_tests {
             json!(["~//etc"]),
             json!(["rel/dir"]),
             json!(["/a/b/../c"]),
-            json!(["/a/b/*"]),
+            json!(["/tmp/**"]),
+            json!(["~/**"]),
+            json!(["/a/*/b"]),
+            json!(["/a/b/***"]),
             json!(["/a/it's"]),
             json!(["/a/b\\c"]),
             json!(["/a/$X"]),
