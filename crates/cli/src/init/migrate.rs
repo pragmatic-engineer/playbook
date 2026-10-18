@@ -109,6 +109,10 @@ pub enum Scope {
 
 pub struct Migration {
     pub id: &'static str,
+    /// The release that ships it, as `X.Y.Z`, or `next` until the release
+    /// pull request writes the version in (ADR 0046). Write `next` only as
+    /// the one line form `scripts/release-prepare.sh` replaces.
+    pub since: &'static str,
     pub kind: Kind,
     pub scope: Scope,
     pub run: fn(&Ctx) -> Outcome,
@@ -127,41 +131,95 @@ pub struct Report {
     pub timed_out: bool,
 }
 
-/// Shipped migrations in apply order. Append only; never reorder or reuse an id.
+/// The release a migration ships in (ADR 0046).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Since {
+    /// Not released yet: no build runs, checks or lists it as open.
+    Next,
+    /// The `X.Y.Z` release that first runs it.
+    At(&'static str),
+}
+
+/// The `since` of a migration that waits for the next release.
+pub const NEXT: &str = "next";
+
+impl Migration {
+    pub fn since(&self) -> Since {
+        if self.since == NEXT {
+            Since::Next
+        } else {
+            Since::At(self.since)
+        }
+    }
+
+    /// Whether a binary at `running` ships this migration: its `since` is a
+    /// version no higher than `running`. `next` is matched first, because
+    /// `update::resolve::compare` would read the word as 0.
+    pub fn released_in(&self, running: &str) -> bool {
+        match self.since() {
+            Since::Next => false,
+            Since::At(v) => {
+                crate::update::resolve::compare(v, running) != std::cmp::Ordering::Greater
+            }
+        }
+    }
+}
+
+/// The registry entries this binary ships, in apply order (ADR 0046).
+pub fn active() -> Vec<Migration> {
+    active_for(env!("CARGO_PKG_VERSION"))
+}
+
+/// The registry entries a binary at `running` ships, in apply order.
+pub fn active_for(running: &str) -> Vec<Migration> {
+    registry()
+        .into_iter()
+        .filter(|m| m.released_in(running))
+        .collect()
+}
+
+/// Every migration in apply order, the unreleased ones last. Append only;
+/// never reorder or rename an id, and give a new one the `since` of `NEXT`.
 pub fn registry() -> Vec<Migration> {
     vec![
         Migration {
             id: "0001-memory-store-move",
+            since: "0.18.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: memory_store_move,
         },
         Migration {
             id: "0002-gate-repo-local-move",
+            since: "0.18.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: gate_repo_local_move,
         },
         Migration {
             id: "0003-system-prompt-edited",
+            since: "0.18.0",
             kind: Kind::Manual,
             scope: Scope::Owned,
             run: system_prompt_edited,
         },
         Migration {
             id: "0004-skills-edited",
+            since: "0.18.0",
             kind: Kind::Manual,
             scope: Scope::Owned,
             run: skills_edited,
         },
         Migration {
             id: "0005-statusline-edited",
+            since: "0.18.0",
             kind: Kind::Manual,
             scope: Scope::Owned,
             run: statusline_edited,
         },
         Migration {
             id: STATUSLINE_MIGRATION,
+            since: "0.18.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: statusline_rust_command_pending,
@@ -171,6 +229,7 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: "0007-shell-init-rc-line",
+            since: "0.18.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: shell_init_rc_line_pending,
@@ -180,24 +239,28 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: "0008-remove-config-hash-script",
+            since: "0.20.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: remove_config_hash_script,
         },
         Migration {
             id: "0009-adopt-late-config-json",
+            since: "0.20.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: adopt_late_config_json,
         },
         Migration {
             id: "0010-state-files-to-sqlite",
+            since: "0.20.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: state_files_to_sqlite,
         },
         Migration {
             id: DEAD_HOOKS_MIGRATION,
+            since: "0.34.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: dead_hook_scripts_pending,
@@ -207,24 +270,28 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: "0012-other-playbook-plugins",
+            since: "0.34.0",
             kind: Kind::Manual,
             scope: Scope::Report,
             run: other_playbook_plugins,
         },
         Migration {
             id: "0013-plugin-version-range",
+            since: "0.34.0",
             kind: Kind::Manual,
             scope: Scope::Report,
             run: plugin_version_range,
         },
         Migration {
             id: "0014-orphaned-plugin-caches",
+            since: "0.34.0",
             kind: Kind::Manual,
             scope: Scope::Owned,
             run: orphaned_plugin_caches,
         },
         Migration {
             id: ATTRIBUTION_MIGRATION,
+            since: "0.36.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: attribution_pending,
@@ -234,6 +301,7 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: COLLECTOR_SERVICE_MIGRATION,
+            since: "0.36.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: collector_service_pending,
@@ -243,12 +311,14 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: AUTO_BUDGET_MIGRATION,
+            since: "0.36.0",
             kind: Kind::Auto,
             scope: Scope::Owned,
             run: auto_budget_defaults,
         },
         Migration {
             id: RC_LINE_MIGRATION,
+            since: "0.37.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: retired_rc_line_pending,
@@ -258,6 +328,7 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: PROMPT_DEFAULT_MIGRATION,
+            since: "0.37.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: system_prompt_default_pending,
@@ -267,6 +338,7 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: COLLECTOR_LABEL_MIGRATION,
+            since: "next",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: collector_service_label,
@@ -914,7 +986,7 @@ pub struct OpenItem {
 /// The open `Consent` and `Report` items, writing nothing. `only` limits the
 /// checks to those ids.
 pub fn open_items(ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
-    registry()
+    active()
         .iter()
         .filter(|m| only.is_none_or(|ids| ids.iter().any(|id| id == m.id)))
         .filter_map(|m| match m.scope {
@@ -952,7 +1024,7 @@ fn refused_report(ctx: &Ctx) -> Option<Report> {
 /// with `retries` tries 100 ms apart. A `Consent` migration never runs here.
 /// No migration starts after `deadline`; the report then says it timed out.
 pub fn run_owned(ctx: &Ctx, retries: u32, deadline: Option<Instant>) -> Report {
-    let owned: Vec<Migration> = registry().into_iter().filter(heal_runs).collect();
+    let owned: Vec<Migration> = active().into_iter().filter(heal_runs).collect();
     let mut report = Report::default();
     if let Some(refused) = refused_report(ctx) {
         return refused;
@@ -974,7 +1046,7 @@ fn heal_runs(m: &Migration) -> bool {
 /// and the user may have edited, and orphaned plugin folders. `init` and
 /// `doctor --fix` show them; the session hook does not repeat them.
 pub fn owned_notes(ctx: &Ctx) -> Vec<String> {
-    registry()
+    active()
         .iter()
         .filter(|m| matches!(m.kind, Kind::Manual) && matches!(m.scope, Scope::Owned))
         .filter_map(|m| match (m.run)(ctx) {
@@ -1004,6 +1076,8 @@ pub enum State {
     /// Not checked, because the check reads the record and old state files
     /// are still waiting to be imported into it.
     Unknown,
+    /// Waits for the next release, so this build neither runs nor checks it.
+    Unreleased,
 }
 
 impl State {
@@ -1016,6 +1090,7 @@ impl State {
             State::Clear => "clear",
             State::Open { .. } => "open",
             State::Unknown => "unknown",
+            State::Unreleased => "unreleased",
         }
     }
 }
@@ -1023,6 +1098,8 @@ impl State {
 /// One registry entry and where it stands.
 pub struct Planned {
     pub id: &'static str,
+    /// The release that ships it, or `next`.
+    pub since: &'static str,
     pub kind: &'static str,
     pub scope: &'static str,
     pub state: State,
@@ -1059,7 +1136,9 @@ fn planned(ctx: &Ctx, state_ready: bool, applied_ids: &[String]) -> Vec<Planned>
         .iter()
         .map(|m| {
             let needs_state = matches!(m.kind, Kind::Auto) || READS_STATE.contains(&m.id);
-            let state = if needs_state && !state_ready {
+            let state = if !m.released_in(env!("CARGO_PKG_VERSION")) {
+                State::Unreleased
+            } else if needs_state && !state_ready {
                 State::Unknown
             } else {
                 match (&m.kind, m.scope) {
@@ -1082,8 +1161,9 @@ fn planned(ctx: &Ctx, state_ready: bool, applied_ids: &[String]) -> Vec<Planned>
                 }
             };
             Planned {
-                runs: heal_runs(m) && state != State::Applied,
+                runs: heal_runs(m) && !matches!(state, State::Applied | State::Unreleased),
                 id: m.id,
+                since: m.since,
                 kind: match m.kind {
                     Kind::Auto => "auto",
                     Kind::Idempotent => "idempotent",
@@ -1100,19 +1180,10 @@ fn planned(ctx: &Ctx, state_ready: bool, applied_ids: &[String]) -> Vec<Planned>
         .collect()
 }
 
-/// The highest migration number in the registry, from the id prefix.
-pub fn schema() -> u32 {
-    registry()
-        .iter()
-        .filter_map(|m| m.id.split('-').next()?.parse::<u32>().ok())
-        .max()
-        .unwrap_or(0)
-}
-
 /// Manual findings only, for `playbook doctor`; runs nothing else. `Report`
 /// items are left out, because the doctor has its own rows for them.
 pub fn pending_manual(ctx: &Ctx) -> Vec<String> {
-    registry()
+    active()
         .iter()
         .filter(|m| matches!(m.kind, Kind::Manual) && !matches!(m.scope, Scope::Report))
         .filter_map(|m| match (m.run)(ctx) {
@@ -1168,7 +1239,7 @@ pub fn run_pending(ctx: &Ctx) -> Report {
 pub fn run_pending_for(ctx: &Ctx, statusline: bool, hooks: bool) -> Report {
     let root = playbook_root_from(&ctx.home);
     let pending = crate::state::pending_legacy(&root);
-    let mut migrations = registry();
+    let mut migrations = active();
     migrations.retain(|m| {
         (statusline || m.id != STATUSLINE_MIGRATION) && (hooks || m.id != DEAD_HOOKS_MIGRATION)
     });
@@ -1330,6 +1401,7 @@ mod tests {
     fn auto(id: &'static str, run: fn(&Ctx) -> Outcome) -> Migration {
         Migration {
             id,
+            since: "0.1.0",
             kind: Kind::Auto,
             scope: Scope::Owned,
             run,
@@ -1661,6 +1733,7 @@ mod tests {
         let h = home("repeat");
         let ms = [Migration {
             id: "r",
+            since: "0.1.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: repeats,
@@ -1787,9 +1860,155 @@ mod tests {
         assert!(open_items(&ctx(&h), None).is_empty());
     }
 
+    fn with_since(id: &'static str, since: &'static str) -> Migration {
+        Migration {
+            since,
+            ..auto(id, never)
+        }
+    }
+
     #[test]
-    fn the_schema_is_the_highest_registry_number() {
-        assert_eq!(schema(), 20);
+    fn a_migration_is_released_only_in_builds_at_or_above_its_since() {
+        // Arrange: (since, running build, released)
+        let cases = [
+            ("0.36.0", "0.36.0", true),
+            ("0.36.0", "0.37.0", true),
+            ("0.36.0", "1.0.0", true),
+            ("0.37.0", "0.36.0", false),
+            ("0.37.0", "0.37.1", true),
+            ("0.37.1", "0.37.0", false),
+            ("0.10.0", "0.9.0", false),
+            ("0.9.0", "0.10.0", true),
+            // A dev build reports the last release, so `next` waits.
+            (NEXT, "0.37.0", false),
+            (NEXT, "999.0.0", false),
+            (NEXT, "0.0.0", false),
+        ];
+
+        for (since, running, want) in cases {
+            // Act
+            let got = with_since("m", since).released_in(running);
+
+            // Assert
+            assert_eq!(got, want, "since {since} in {running}");
+        }
+    }
+
+    #[test]
+    fn a_build_runs_and_lists_only_the_migrations_it_ships() {
+        // Arrange
+        let ids = |running: &str| -> Vec<&'static str> {
+            active_for(running).iter().map(|m| m.id).collect()
+        };
+
+        // Act
+        let at_034 = ids("0.34.0");
+        let at_037 = ids("0.37.0");
+        let now = ids(env!("CARGO_PKG_VERSION"));
+
+        // Assert
+        assert_eq!(at_034.len(), 14, "{at_034:?}");
+        assert!(!at_034.contains(&ATTRIBUTION_MIGRATION));
+        assert!(at_037.contains(&PROMPT_DEFAULT_MIGRATION));
+        let unreleased: Vec<&str> = registry()
+            .iter()
+            .filter(|m| m.since() == Since::Next)
+            .map(|m| m.id)
+            .collect();
+        assert!(unreleased.iter().all(|id| !now.contains(id)));
+        assert_eq!(now.len() + unreleased.len(), registry().len());
+    }
+
+    #[test]
+    fn an_unreleased_migration_neither_runs_nor_shows_as_open() {
+        // Arrange: a home where the collector label migration would act if it ran.
+        let h = home("unreleased");
+        let unreleased: Vec<&str> = registry()
+            .iter()
+            .filter(|m| m.since() == Since::Next)
+            .map(|m| m.id)
+            .collect();
+
+        // Act
+        let open = open_items(&ctx(&h), None);
+        let plan = plan(&ctx(&h)).expect("a plan");
+
+        // Assert
+        assert!(open.iter().all(|i| !unreleased.contains(&i.id)));
+        for p in plan.iter().filter(|p| unreleased.contains(&p.id)) {
+            assert_eq!(p.state, State::Unreleased, "{}", p.id);
+            assert!(!p.runs, "{}", p.id);
+        }
+    }
+
+    /// Whether `v` is a plain `MAJOR.MINOR.PATCH`.
+    fn plain_version(v: &str) -> bool {
+        let parts: Vec<&str> = v.split('.').collect();
+        parts.len() == 3
+            && parts.iter().all(|p| {
+                !p.is_empty()
+                    && p.bytes().all(|b| b.is_ascii_digit())
+                    && (p.len() == 1 || !p.starts_with('0'))
+            })
+    }
+
+    #[test]
+    fn every_migration_names_a_release_in_order_and_a_unique_id() {
+        // Arrange
+        let all = registry();
+        let running = env!("CARGO_PKG_VERSION");
+
+        // Act
+        let mut ids: Vec<&str> = all.iter().map(|m| m.id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+
+        // Assert
+        assert_eq!(ids.len(), all.len(), "an id is used twice");
+        let mut last: Option<Since> = None;
+        for m in &all {
+            let since = m.since();
+            if let Since::At(v) = since {
+                assert!(plain_version(v), "{}: since {v} is not X.Y.Z", m.id);
+                assert!(
+                    crate::update::resolve::compare(v, running) != std::cmp::Ordering::Greater,
+                    "{}: since {v} is above this build {running}; use next",
+                    m.id
+                );
+            }
+            match (last, since) {
+                (Some(Since::Next), Since::At(_)) => {
+                    panic!("{}: a released migration after a next one", m.id)
+                }
+                (Some(Since::At(a)), Since::At(b)) => assert!(
+                    crate::update::resolve::compare(a, b) != std::cmp::Ordering::Greater,
+                    "{}: since {b} is below the one before it, {a}",
+                    m.id
+                ),
+                _ => {}
+            }
+            last = Some(since);
+        }
+    }
+
+    #[test]
+    fn each_next_is_written_in_the_form_the_release_fills_in() {
+        // Arrange: scripts/release-prepare.sh replaces exactly this line.
+        let source = include_str!("migrate.rs");
+        let form = format!("            since: \"{NEXT}\",");
+        let loose = format!("since: \"{NEXT}\"");
+
+        // Act
+        let written = source.lines().filter(|l| l.contains(&loose)).count();
+        let exact = source.lines().filter(|l| *l == form).count();
+        let entries = registry()
+            .iter()
+            .filter(|m| m.since() == Since::Next)
+            .count();
+
+        // Assert
+        assert_eq!(written, exact, "a next in another form stops the release");
+        assert_eq!(exact, entries);
     }
 
     /// A scratch home with the agent playbook 0.37.0 wrote.
@@ -1895,8 +2114,14 @@ mod tests {
             return;
         }
         let h = old_agent_home("label-scratch");
+        // Until its release fills in `since`, the heal skips this entry, so
+        // run it on its own the way a heal would.
+        let entry: Vec<Migration> = registry()
+            .into_iter()
+            .filter(|m| m.id == COLLECTOR_LABEL_MIGRATION)
+            .collect();
 
-        let report = run_owned(&ctx(&h), 0, None);
+        let report = run_with(&entry, &ctx(&h));
 
         assert!(
             !report.failed,

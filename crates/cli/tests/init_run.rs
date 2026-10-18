@@ -1358,7 +1358,7 @@ fn init_records_this_binary_in_the_version_record() {
     let root = playbook::common::paths::playbook_root_from(&home);
     let record = playbook::heal::Record::read(&root).unwrap();
     assert_eq!(record.binary.as_deref(), Some(env!("CARGO_PKG_VERSION")));
-    assert_eq!(record.schema, playbook::init::migrate::schema());
+    assert_eq!(record.schema, playbook::heal::LEGACY_SCHEMA);
 }
 
 #[test]

@@ -300,3 +300,87 @@ fn prepare_after_a_bump_that_stopped_only_adds_the_changelog_section() {
     assert!(r.read("CHANGELOG.md").contains("\n## playbook 1.1.0\n"));
     assert!(r.read("Cargo.toml").contains("version = \"1.1.0\""));
 }
+
+const MIGRATIONS: &str = "crates/cli/src/init/migrate.rs";
+
+fn registry_with(sinces: &[&str]) -> String {
+    sinces
+        .iter()
+        .map(|s| format!("        Migration {{\n            since: {s},\n        }},\n"))
+        .collect()
+}
+
+#[test]
+fn prepare_writes_the_release_version_in_place_of_next() {
+    // Arrange
+    let r = Repo::new("1.0.0", &["v1.0.0"]);
+    r.write(
+        MIGRATIONS,
+        &registry_with(&[r#""0.9.0""#, r#""next""#, r#""next""#]),
+    );
+    r.commit("feat(migrate): add a migration (#6)");
+
+    // Act
+    let out = r.script("release-prepare.sh", &["1.1.0"]);
+
+    // Assert
+    assert!(out.status.success(), "{}", text_of(&out));
+    assert_eq!(
+        r.read(MIGRATIONS),
+        registry_with(&[r#""0.9.0""#, r#""1.1.0""#, r#""1.1.0""#])
+    );
+}
+
+#[test]
+fn a_resumed_prepare_still_fills_in_next() {
+    // Arrange: the bump and the changelog section are in place, and a
+    // migration still says next.
+    let r = Repo::new("1.0.0", &["v1.0.0"]);
+    r.set_version("1.1.0");
+    r.write(
+        "CHANGELOG.md",
+        "# Changelog\n\n## playbook 1.1.0\n\n- New.\n",
+    );
+    r.write(MIGRATIONS, &registry_with(&[r#""next""#]));
+
+    // Act
+    let out = r.script("release-prepare.sh", &["1.1.0"]);
+
+    // Assert
+    assert!(out.status.success(), "{}", text_of(&out));
+    assert!(text_of(&out).contains("already carries 1.1.0"));
+    assert_eq!(r.read(MIGRATIONS), registry_with(&[r#""1.1.0""#]));
+}
+
+#[test]
+fn prepare_fails_when_a_next_is_left() {
+    // Arrange: a `next` in a form the fill-in does not match.
+    let r = Repo::new("1.0.0", &["v1.0.0"]);
+    r.write(MIGRATIONS, "            since:  \"next\",\n");
+
+    // Act
+    let out = r.script("release-prepare.sh", &["1.1.0"]);
+
+    // Assert
+    assert!(!out.status.success());
+    assert!(
+        text_of(&out).contains("could not fill in"),
+        "{}",
+        text_of(&out)
+    );
+    assert!(r.read("Cargo.toml").contains("version = \"1.0.0\""));
+}
+
+#[test]
+fn prepare_refuses_a_version_that_is_not_plain() {
+    // Arrange
+    let r = Repo::new("1.0.0", &["v1.0.0"]);
+    r.write(MIGRATIONS, &registry_with(&[r#""next""#]));
+
+    // Act
+    let out = r.script("release-prepare.sh", &["1.1.0/x"]);
+
+    // Assert
+    assert!(!out.status.success());
+    assert_eq!(r.read(MIGRATIONS), registry_with(&[r#""next""#]));
+}

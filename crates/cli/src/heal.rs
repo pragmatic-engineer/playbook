@@ -19,6 +19,12 @@ const PLUGIN_KEY: &str = "versions/plugin";
 const PENDING_KEY: &str = "versions/pending";
 const FAILED_AT_KEY: &str = "versions/failed-at";
 
+/// What every clean heal writes to `versions/schema` (ADR 0046). It was the
+/// highest migration number, and 20 is the last number ever used. Older
+/// binaries still parse it, and one with the same version reads a record that
+/// holds it as newer, so it stops at its downgrade guard.
+pub const LEGACY_SCHEMA: u32 = 20;
+
 /// How long the hook waits before it retries after a failed run.
 const RETRY_AFTER_SECS: u64 = 24 * 60 * 60;
 
@@ -88,15 +94,14 @@ impl Record {
         })
     }
 
-    /// How the record compares with this binary: `Less` when this binary is
-    /// newer (or nothing ran yet), `Greater` after a downgrade.
-    /// How the record compares with `binary` at `schema`: `Less` when a heal
-    /// is due, `Greater` after a downgrade.
-    pub fn compare_with(&self, binary: &str, schema: u32) -> Ordering {
+    /// How the record compares with `binary`, by version alone (ADR 0046):
+    /// `Less` when a heal is due or nothing ran yet, `Greater` after a
+    /// downgrade. The stored schema no longer breaks a tie.
+    pub fn compare_with(&self, binary: &str) -> Ordering {
         let Some(recorded) = &self.binary else {
             return Ordering::Less;
         };
-        crate::update::resolve::compare(recorded, binary).then(self.schema.cmp(&schema))
+        crate::update::resolve::compare(recorded, binary)
     }
 }
 
@@ -294,7 +299,7 @@ fn run_shown(ctx: &Ctx, trigger: Trigger, now: u64, shown: bool) -> Outcome {
     let Ok(record) = Record::read(&root) else {
         return Outcome::skipped(Skip::StateUnreadable);
     };
-    let order = record.compare_with(env!("CARGO_PKG_VERSION"), migrate::schema());
+    let order = record.compare_with(env!("CARGO_PKG_VERSION"));
     if order == Ordering::Greater {
         return Outcome::skipped(Skip::Downgrade);
     }
@@ -430,7 +435,7 @@ fn record_clean(ctx: &Ctx, root: &Path, mut out: Outcome) -> Outcome {
         .and_then(|root| crate::plugin_root::plugin_version(&root));
     out.recorded = Record {
         binary: Some(env!("CARGO_PKG_VERSION").to_string()),
-        schema: migrate::schema(),
+        schema: LEGACY_SCHEMA,
         plugin,
         pending: ids(&out.open),
         failed_at: None,
@@ -520,7 +525,7 @@ fn start(home: &Path, deadline: Instant) -> Option<String> {
         return None;
     }
     let record = Record::read_only(&root).ok()?;
-    if record.compare_with(env!("CARGO_PKG_VERSION"), migrate::schema()) != Ordering::Less {
+    if record.compare_with(env!("CARGO_PKG_VERSION")) != Ordering::Less {
         return None;
     }
     let now = crate::common::time::now_epoch_secs();
@@ -601,7 +606,7 @@ mod tests {
         assert!(out.line().is_none(), "{:?}", out.line());
         let rec = Record::read(&root(&home)).unwrap();
         assert_eq!(rec.binary.as_deref(), Some(env!("CARGO_PKG_VERSION")));
-        assert_eq!(rec.schema, migrate::schema());
+        assert_eq!(rec.schema, LEGACY_SCHEMA);
         assert!(!home.join(".claude").exists());
     }
 
@@ -734,6 +739,60 @@ mod tests {
             Record::read(&root(&home)).unwrap().binary.as_deref(),
             Some(env!("CARGO_PKG_VERSION"))
         );
+    }
+
+    #[test]
+    fn the_record_is_compared_with_the_running_build_by_version_alone() {
+        // Arrange: (recorded binary, recorded schema, running build, order)
+        let cases = [
+            (None, 0, "0.37.0", Ordering::Less),
+            (Some("0.36.0"), 17, "0.37.0", Ordering::Less),
+            (Some("0.37.0"), 19, "0.38.0", Ordering::Less),
+            (Some("0.9.0"), 7, "0.10.0", Ordering::Less),
+            // A dev build of main reports the last release: no heal, even
+            // when the registry gained a migration since.
+            (Some("0.37.0"), 19, "0.37.0", Ordering::Equal),
+            (Some("0.37.0"), LEGACY_SCHEMA, "0.37.0", Ordering::Equal),
+            (Some("0.37.0"), 999, "0.37.0", Ordering::Equal),
+            // A downgrade.
+            (Some("0.38.0"), LEGACY_SCHEMA, "0.37.0", Ordering::Greater),
+            (Some("0.37.1"), 0, "0.37.0", Ordering::Greater),
+        ];
+
+        for (binary, schema, running, want) in cases {
+            let record = Record {
+                binary: binary.map(str::to_string),
+                schema,
+                ..Record::default()
+            };
+
+            // Act
+            let got = record.compare_with(running);
+
+            // Assert
+            assert_eq!(got, want, "{binary:?} schema {schema} against {running}");
+        }
+    }
+
+    #[test]
+    fn a_record_at_this_version_with_any_schema_needs_no_heal() {
+        // Arrange: an older build of this version wrote schema 19.
+        let home = scratch_dir("heal-same-version");
+        let before = seed(&home, env!("CARGO_PKG_VERSION"), 19, None);
+
+        // Act
+        let out = run(
+            &ctx(&home),
+            Trigger::Start {
+                deadline: Instant::now() + START_BUDGET,
+            },
+            1000,
+        );
+
+        // Assert
+        assert!(out.skipped.is_none());
+        assert!(out.changed.is_empty() && !out.recorded);
+        assert_eq!(Record::read(&root(&home)).unwrap(), before);
     }
 
     #[test]
@@ -994,7 +1053,7 @@ mod tests {
         let fix = run(&ctx(&home), Trigger::Fix, 5000);
         let note = start(&home, Instant::now() + START_BUDGET);
         let owned = migrate::run_owned(&ctx(&home), 0, None);
-        let all = migrate::run_with(&migrate::registry(), &ctx(&home));
+        let all = migrate::run_with(&migrate::active(), &ctx(&home));
         let manager = crate::service_manager::manager_for(&home).run("launchctl", &[]);
 
         // Assert

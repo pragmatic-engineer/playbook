@@ -504,7 +504,7 @@ fn heal_row(env: &Env, bin_ver: &str) -> Row {
         std::cmp::Ordering::Equal => Row::new(
             "6",
             Level::Pass,
-            format!("upgrade record: binary {b}, migrations up to {}", record.schema),
+            format!("upgrade record: playbook {b}"),
         ),
         std::cmp::Ordering::Greater => Row::new(
             "6",

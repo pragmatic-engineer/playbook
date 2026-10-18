@@ -9,6 +9,11 @@
 # (ADR 0038 decision 8). The notes keep their sections one heading level
 # lower, and the compare link is left out.
 #
+# Each migration that ships in this release says `since: "next"` in
+# crates/cli/src/init/migrate.rs, and the script writes the version in its
+# place (ADR 0046). It fails when a `next` is left. This runs on every run,
+# before the early exit, so a resumed release fills them in too.
+#
 # Running it again for the same version finishes what is missing: the bump
 # runs only when the files are below the version, and the section is added
 # only when it is not there.
@@ -21,6 +26,24 @@ fail() { echo "FAIL $*" >&2; exit 1; }
 
 version="${1:-}"
 [ -n "$version" ] || { echo "usage: release-prepare.sh <version>" >&2; exit 2; }
+# shellcheck source=scripts/version-lib.sh
+. scripts/version-lib.sh
+printf '%s' "$version" | grep -Eq "$PLAIN_VERSION" || fail "version '$version' is not MAJOR.MINOR.PATCH"
+
+MIGRATIONS="crates/cli/src/init/migrate.rs"
+if [ -f "$MIGRATIONS" ]; then
+  filled="$(mktemp)"
+  sed -E "s/since: \"next\",/since: \"$version\",/" "$MIGRATIONS" > "$filled" \
+    || { rm -f "$filled"; fail "could not read $MIGRATIONS"; }
+  if ! cmp -s "$filled" "$MIGRATIONS"; then
+    cat "$filled" > "$MIGRATIONS"
+    echo "Set since to $version for the next migrations in $MIGRATIONS."
+  fi
+  rm -f "$filled"
+  if grep -nE 'since: *"next"' "$MIGRATIONS" >&2; then
+    fail "$MIGRATIONS still has a since \"next\" the release could not fill in"
+  fi
+fi
 
 current="$(jq -r '.version' plugins/playbook/.claude-plugin/plugin.json)"
 if [ "$current" = "$version" ] && grep -qx "## playbook $version" CHANGELOG.md; then
