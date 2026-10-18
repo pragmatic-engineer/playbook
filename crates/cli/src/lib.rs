@@ -2001,7 +2001,8 @@ pub enum SessionsCommand {
 pub enum DiskCommand {
     /// Show free space per volume, the thresholds, and the biggest folders
     /// playbook and its agents made: cargo target folders, worktrees, caches
-    /// and the ballast
+    /// and the ballast. Also lists cargo target folders of any project under
+    /// the home folder and `disk.paths`
     Status {
         /// Print JSON for tools
         #[arg(long)]
@@ -2015,9 +2016,14 @@ pub enum DiskCommand {
     Reserve,
     /// Delete the ballast file and print the space it gave back
     Release,
-    /// Remove what playbook can prove is disposable and print what it freed:
-    /// idle cargo target folders no build holds, old `/tmp/pb-*` scratch and
-    /// cache entries, orphaned plugin caches and landed worktrees
+    /// Remove what playbook can prove is disposable and print what it freed
+    ///
+    /// Removes idle `cargo-*` target folders under this repo's worktrees
+    /// root that no build holds, `/tmp/pb-*` scratch older than an hour,
+    /// playbook's own cache and tmp entries, plugin cache versions Claude
+    /// Code marked orphaned a day ago or more, and landed worktrees through
+    /// `playbook worktree sweep`. Never removes uncommitted work, a branch,
+    /// the memory store or the config database.
     ///
     /// Example: `playbook disk clean --dry-run`
     Clean {

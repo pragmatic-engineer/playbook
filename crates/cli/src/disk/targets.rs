@@ -52,6 +52,87 @@ pub fn target_for(root: &Path, worktree: &Path) -> Option<PathBuf> {
     Some(root.join(format!("{TARGET_PREFIX}{name}")))
 }
 
+/// How deep below a scan root [`find_cargo_targets`] looks.
+pub const SCAN_DEPTH: usize = 5;
+/// The most folders one scan reads, so a huge home folder stays fast.
+pub const SCAN_MAX_DIRS: usize = 20_000;
+
+/// Folders a scan never enters: big trees that hold no project builds. The
+/// macOS media folders are left out too, so the scan does not ask for
+/// access to them. Desktop, Documents and Downloads are scanned, since code
+/// often lives there.
+const SKIP: &[&str] = &[
+    "Library",
+    "node_modules",
+    ".git",
+    "Applications",
+    ".Trash",
+    "Pictures",
+    "Movies",
+    "Music",
+];
+
+/// Cargo target folders under `roots`, found by the `CACHEDIR.TAG` and
+/// `.rustc_info.json` that cargo writes at the top of each one, and whether
+/// the search finished. Read only and bounded: at most [`SCAN_DEPTH`] levels
+/// and [`SCAN_MAX_DIRS`] folders, skipping hidden folders other than
+/// `.worktrees`, symlinks, and the trees in `SKIP`, and stops at `deadline`.
+/// A found folder is not entered. A root equal to or inside another root is
+/// scanned once. Builds from any project on the volume show up, which
+/// matters because free space is shared.
+pub fn find_cargo_targets(
+    roots: &[PathBuf],
+    deadline: Option<std::time::Instant>,
+) -> (Vec<PathBuf>, bool) {
+    let mut unique = roots.to_vec();
+    unique.sort();
+    unique.dedup();
+    let late = || deadline.is_some_and(|d| std::time::Instant::now() >= d);
+    let mut found = Vec::new();
+    let mut visited = 0usize;
+    let mut complete = true;
+    let mut queue: std::collections::VecDeque<(PathBuf, usize)> = unique
+        .iter()
+        .filter(|r| {
+            !unique
+                .iter()
+                .any(|other| other != *r && r.starts_with(other))
+        })
+        .map(|r| (r.clone(), 0))
+        .collect();
+    while let Some((dir, depth)) = queue.pop_front() {
+        if visited >= SCAN_MAX_DIRS || late() {
+            complete = false;
+            break;
+        }
+        visited += 1;
+        if dir.join("CACHEDIR.TAG").is_file() && dir.join(".rustc_info.json").is_file() {
+            found.push(dir);
+            continue;
+        }
+        if depth >= SCAN_DEPTH {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            if visited + queue.len() >= SCAN_MAX_DIRS || late() {
+                complete = false;
+                break;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let hidden = name.starts_with('.') && name != ".worktrees";
+            let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+            if is_dir && !hidden && !SKIP.contains(&name.as_str()) {
+                queue.push_back((entry.path(), depth + 1));
+            }
+        }
+    }
+    found.sort();
+    (found, complete)
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -69,6 +150,46 @@ mod tests {
         assert_eq!(
             target_dirs(&root),
             vec![root.join("cargo-a"), root.join("cargo-b")]
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_scan_finds_targets_and_stays_out_of_hidden_and_skipped_folders() {
+        let root = std::env::temp_dir().join(format!("pb-disk-scan-{}", crate::testing::run_id()));
+        let target = |rel: &str| {
+            let dir = root.join(rel);
+            fs::create_dir_all(dir.join("debug")).unwrap();
+            fs::write(
+                dir.join("CACHEDIR.TAG"),
+                "Signature: 8a477f597d28d172789f06886806bc55",
+            )
+            .unwrap();
+            fs::write(dir.join(".rustc_info.json"), "{}").unwrap();
+            dir
+        };
+        let a = target("code/app/target");
+        let b = target("code/.worktrees/cargo-x");
+        let deep = target("d1/d2/d3/d4/target");
+        target("code/.hidden/target");
+        target("Library/Caches/x/target");
+        target("Pictures/x/target");
+        target("code/app/target/debug/nested/target");
+        target("e1/e2/e3/e4/e5/target");
+        target("code/n1/n2/n3/n4/target");
+        fs::create_dir_all(root.join("code/plain/target")).unwrap();
+        std::os::unix::fs::symlink(root.join("code"), root.join("loop")).unwrap();
+        let all = vec![b.clone(), a.clone(), deep.clone()];
+        assert_eq!(
+            find_cargo_targets(std::slice::from_ref(&root), None),
+            (all.clone(), true)
+        );
+        let nested = vec![root.join("code"), root.clone(), root.clone()];
+        assert_eq!(find_cargo_targets(&nested, None), (all, true));
+        let past = Some(std::time::Instant::now());
+        assert_eq!(
+            find_cargo_targets(std::slice::from_ref(&root), past),
+            (vec![], false)
         );
         fs::remove_dir_all(&root).unwrap();
     }
