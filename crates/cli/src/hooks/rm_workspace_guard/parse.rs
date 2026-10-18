@@ -25,10 +25,10 @@ use crate::common::shell::{
 
 /// Reported when `rm` is reached through, or takes words from, `$(...)` or a
 /// backtick pair.
-pub const SUBSTITUTION_LABEL: &str = "<command substitution>";
+pub(crate) const SUBSTITUTION_LABEL: &str = "<command substitution>";
 
 /// Reported when `xargs` deletes paths the guard cannot see.
-pub const XARGS_LABEL: &str = "<xargs input>";
+pub(crate) const XARGS_LABEL: &str = "<xargs input>";
 
 /// Reported when strings nest deeper than the scan follows.
 const DEPTH_LABEL: &str = "<nested shell>";
@@ -43,7 +43,7 @@ const MAX_DEPTH: usize = 4;
 
 /// One thing a command deletes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Target {
+pub(crate) enum Target {
     /// A path as the shell passes it. `tilde` is set when a leading `~` is
     /// unquoted, so the shell expands it to the home folder.
     Path { text: String, tilde: bool },
@@ -56,12 +56,12 @@ pub enum Target {
 /// (a shell profile may export one), so judging it here could allow a
 /// deletion outside the roots. `$HOME` is set at login and is the same for
 /// both.
-pub struct Env<'a> {
+pub(crate) struct Env<'a> {
     pub home: &'a str,
 }
 
 /// Everything `command` deletes, in order.
-pub fn targets(command: &str, env: &Env) -> Vec<Target> {
+pub(crate) fn targets(command: &str, env: &Env) -> Vec<Target> {
     let mut scan = Scan {
         env,
         out: Vec::new(),
