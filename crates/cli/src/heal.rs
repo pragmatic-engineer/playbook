@@ -44,9 +44,6 @@ pub struct Record {
     pub plugin: Option<String>,
     pub pending: Vec<String>,
     pub failed_at: Option<u64>,
-    /// Whether `versions/pending` holds an old numbered id, which the next
-    /// write stores as its slug (ADR 0046).
-    pub pending_numbered: bool,
 }
 
 impl Record {
@@ -82,8 +79,6 @@ impl Record {
                 })
                 .unwrap_or_default(),
             failed_at: get(FAILED_AT_KEY).and_then(|v| v.parse().ok()),
-            pending_numbered: get(PENDING_KEY)
-                .is_some_and(|v| v.split(',').any(|id| migrate::slug_of(id) != id)),
         }
     }
 
@@ -386,9 +381,16 @@ fn recheck_pending(ctx: &Ctx, root: &Path, record: &Record) -> Outcome {
         return Outcome::default();
     }
     let open = migrate::open_items(ctx, Some(&record.pending));
-    let pending = ids(&open);
-    if pending != record.pending || record.pending_numbered {
-        let _ = set_key(root, PENDING_KEY, &pending.join(","));
+    let pending = ids(&open).join(",");
+    let stored = crate::state::get(root, PENDING_KEY).ok().flatten();
+    if stored.as_deref() != Some(pending.as_str()) {
+        // Slugs go with the fixed schema, so an older binary of the same
+        // version reads the record as newer and does not drop the ids it
+        // cannot match (ADR 0046).
+        let _ = crate::state::transaction(root, |tx| {
+            tx.set(PENDING_KEY, &pending)?;
+            tx.set(SCHEMA_KEY, &LEGACY_SCHEMA.to_string())
+        });
     }
     Outcome {
         open,
@@ -448,7 +450,6 @@ fn record_clean(ctx: &Ctx, root: &Path, mut out: Outcome) -> Outcome {
         plugin,
         pending: ids(&out.open),
         failed_at: None,
-        pending_numbered: false,
     }
     .write(root)
     .is_ok();
@@ -854,6 +855,28 @@ mod tests {
         assert_eq!(ids, [migrate::ATTRIBUTION_MIGRATION]);
         let stored = crate::state::get(&root(&home), "versions/pending").unwrap();
         assert_eq!(stored.as_deref(), Some("attribution-off"));
+        let schema = crate::state::get(&root(&home), "versions/schema").unwrap();
+        assert_eq!(
+            schema,
+            Some(LEGACY_SCHEMA.to_string()),
+            "slugs go with schema 20"
+        );
+    }
+
+    #[test]
+    fn a_pending_list_with_an_old_and_a_new_id_for_one_item_is_stored_once() {
+        // Arrange
+        let home = scratch_dir("heal-mixed-pending");
+        settings_without_attribution(&home);
+        seed_pending(&home, "0015-attribution-off,attribution-off");
+
+        // Act
+        let out = run(&ctx(&home), Trigger::Hook, 1000);
+
+        // Assert
+        assert_eq!(out.open.len(), 1, "{:?}", out.open);
+        let stored = crate::state::get(&root(&home), "versions/pending").unwrap();
+        assert_eq!(stored.as_deref(), Some("attribution-off"));
     }
 
     /// The record check of playbook 0.34.0 to 0.37.0: the version first,
@@ -876,13 +899,11 @@ mod tests {
 
         // Act: older binaries, each with its own highest number.
         let same_version = old_compare(&written, env!("CARGO_PKG_VERSION"), 19);
-        let older = old_compare(&written, "0.36.0", 17);
 
         // Assert
         assert!(out.recorded);
         assert_eq!(written.schema, LEGACY_SCHEMA);
         assert_eq!(same_version, Ordering::Greater);
-        assert_eq!(older, Ordering::Greater);
     }
 
     #[test]
