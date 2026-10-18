@@ -7,7 +7,8 @@
 //! Every candidate is a direct child of one of a few known bases, and passes
 //! the in-use checks for its kind and the protected-path check before it
 //! goes. Destructive: it deletes folders, so the selection is kept apart
-//! from the deletion and tested on its own.
+//! from the deletion and tested on its own, and a target folder's build
+//! locks are taken again and held while it is deleted.
 
 use super::{ballast, size, targets};
 use std::path::{Path, PathBuf};
@@ -20,6 +21,10 @@ pub const SCRATCH_IDLE: Duration = Duration::from_secs(60 * 60);
 /// A plugin cache marked orphaned more recently than this may still serve a
 /// running session.
 pub const ORPHAN_IDLE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Debug builds read the scratch folders to scan from this variable, so a
+/// test can run a real cleanup without touching the machine's `/tmp`.
+pub const TEST_TMP_VAR: &str = "PLAYBOOK_TEST_DISK_TMP";
 
 /// Why a folder is a candidate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +46,15 @@ impl Kind {
             Kind::Scratch => "scratch",
             Kind::Cache => "cache",
             Kind::OrphanedPlugin => "orphaned plugin",
+        }
+    }
+
+    /// How long a folder of this kind must sit unchanged before it goes.
+    fn idle(self) -> Duration {
+        match self {
+            Kind::Target => TARGET_IDLE,
+            Kind::Scratch | Kind::Cache => SCRATCH_IDLE,
+            Kind::OrphanedPlugin => Duration::ZERO,
         }
     }
 }
@@ -80,14 +94,23 @@ impl Env {
     pub fn from_system(home: &Path, repo_root: Option<&Path>) -> Env {
         Env {
             home: home.to_path_buf(),
-            claude_home: home.join(".claude"),
+            claude_home: super::status::claude_home(home),
             worktrees_root: repo_root.and_then(targets::worktrees_root),
-            tmp_dirs: vec![PathBuf::from("/tmp"), PathBuf::from("/private/tmp")],
+            tmp_dirs: system_tmp_dirs(),
             now: SystemTime::now(),
             process_args: process_args(),
             uid: current_uid(),
         }
     }
+}
+
+fn system_tmp_dirs() -> Vec<PathBuf> {
+    if cfg!(debug_assertions) {
+        if let Some(dir) = std::env::var_os(TEST_TMP_VAR).filter(|v| !v.is_empty()) {
+            return vec![PathBuf::from(dir)];
+        }
+    }
+    vec![PathBuf::from("/tmp"), PathBuf::from("/private/tmp")]
 }
 
 /// Every running process's command line, from `ps`. Empty when `ps` fails,
@@ -102,92 +125,129 @@ fn process_args() -> String {
         .unwrap_or_default()
 }
 
-#[cfg(unix)]
 fn current_uid() -> Option<u32> {
-    // SAFETY: getuid has no preconditions and cannot fail.
-    Some(unsafe { libc::getuid() })
+    cfg!(unix).then(crate::service_manager::uid)
 }
 
-#[cfg(not(unix))]
-fn current_uid() -> Option<u32> {
-    None
-}
-
-/// The playbook data that is never removed, the same list the rm guard
-/// protects (ADR 0045): the memory store, the databases, plans and
-/// handoffs, legacy org config, session state, the effort ledger, the
-/// system prompt and the config file.
+/// The playbook data that is never removed. It is the list the rm guard
+/// protects (ADR 0045, `rm_workspace_guard::roots::protected`), kept here
+/// as a copy because the rm guard keeps its list private: the memory store,
+/// the databases, plans and handoffs, legacy org config, session state, the
+/// effort ledger, the system prompt and the config file. The ballast is
+/// added, and each path is listed as given and with links resolved.
 pub fn protected(home: &Path) -> Vec<PathBuf> {
-    let root = crate::common::paths::playbook_root_from(home);
-    let legacy_db = playbook_data::config::legacy_db_in(&root);
-    let mut paths: Vec<PathBuf> = ["memory", "repos", "orgs", "runtime", "effort", "prompts"]
-        .iter()
-        .map(|name| root.join(name))
-        .collect();
-    paths.push(playbook_data::data_dir_from(home));
-    paths.push(crate::config::global_config_path(&root));
-    paths.push(legacy_db);
-    paths.push(ballast::dir(home));
+    let mut homes = vec![home.to_path_buf()];
+    if let Ok(real) = std::fs::canonicalize(home) {
+        if real != home {
+            homes.push(real);
+        }
+    }
+    let mut paths = Vec::new();
+    for home in &homes {
+        let root = crate::common::paths::playbook_root_from(home);
+        let legacy_db = playbook_data::config::legacy_db_in(&root);
+        paths.extend(
+            ["memory", "repos", "orgs", "runtime", "effort", "prompts"]
+                .iter()
+                .map(|name| root.join(name)),
+        );
+        paths.push(playbook_data::data_dir_from(home));
+        paths.push(crate::config::global_config_path(&root));
+        for suffix in ["-wal", "-shm"] {
+            let mut name = legacy_db.clone().into_os_string();
+            name.push(suffix);
+            paths.push(PathBuf::from(name));
+        }
+        paths.push(legacy_db);
+        paths.push(ballast::dir(home));
+    }
     paths
 }
 
 /// Whether removing `path` could touch protected data: it is a protected
 /// path, sits inside one, or holds one. Compared without letter case, since
-/// macOS disks ignore it by default.
+/// macOS disks ignore it by default, and with links resolved where the path
+/// exists.
 pub fn touches_protected(path: &Path, protected: &[PathBuf]) -> bool {
     let fold = |p: &Path| PathBuf::from(p.to_string_lossy().to_lowercase());
-    let path = fold(path);
-    protected
-        .iter()
-        .map(|p| fold(p))
-        .any(|p| path.starts_with(&p) || p.starts_with(&path))
+    let mut forms = vec![fold(path)];
+    if let Ok(real) = std::fs::canonicalize(path) {
+        forms.push(fold(&real));
+    }
+    protected.iter().map(|p| fold(p)).any(|p| {
+        forms
+            .iter()
+            .any(|form| form.starts_with(&p) || p.starts_with(form))
+    })
+}
+
+/// One folder to judge, with the base it must sit directly in and a reason
+/// to keep it that its source already knows.
+struct Source {
+    kind: Kind,
+    base: PathBuf,
+    path: PathBuf,
+    keep: Option<String>,
 }
 
 /// Picks what to remove. Nothing is deleted here.
 pub fn select(env: &Env) -> (Vec<Candidate>, Vec<Kept>) {
     let protected = protected(&env.home);
-    let mut picked = Vec::new();
     let mut kept = Vec::new();
-    let mut consider =
-        |kind: Kind, base: &Path, path: PathBuf, idle: Duration, extra: Option<String>| {
-            let reason = extra
-                .or_else(|| unsafe_target(base, &path, &protected))
-                .or_else(|| named_by_a_process(&path, &env.process_args))
-                .or_else(|| {
-                    (kind == Kind::Target)
-                        .then(|| build_lock_held(&path))
-                        .flatten()
-                });
-            if let Some(reason) = reason {
-                kept.push(Kept { path, reason });
-                return;
-            }
-            let scan = size::scan(&path);
-            let idle_for = env.now.duration_since(scan.newest).unwrap_or_default();
-            if idle_for < idle {
-                kept.push(Kept {
-                    path,
-                    reason: format!("changed {} minutes ago", idle_for.as_secs() / 60),
-                });
-                return;
-            }
-            picked.push(Candidate {
-                kind,
-                path,
-                bytes: scan.bytes,
-            });
-        };
-
-    if let Some(root) = &env.worktrees_root {
-        for dir in targets::target_dirs(root) {
-            consider(Kind::Target, root, dir, TARGET_IDLE, None);
+    let mut sized = Vec::new();
+    for source in sources(env) {
+        match pre_check(env, &protected, &source) {
+            Some(reason) => kept.push(Kept {
+                path: source.path,
+                reason,
+            }),
+            None => sized.push(source),
         }
+    }
+    let scans = crate::common::par::map(&sized, crate::common::par::MAX_CONCURRENT, |s| {
+        size::scan(&s.path)
+    });
+    let mut picked = Vec::new();
+    for (source, scan) in sized.into_iter().zip(scans) {
+        match idle_check(env, source.kind, &scan) {
+            Some(reason) => kept.push(Kept {
+                path: source.path,
+                reason,
+            }),
+            None => picked.push(Candidate {
+                kind: source.kind,
+                path: source.path,
+                bytes: scan.bytes,
+            }),
+        }
+    }
+    picked.sort_by_key(|c| std::cmp::Reverse(c.bytes));
+    (picked, kept)
+}
+
+/// Every folder the cleanup looks at, from each base.
+fn sources(env: &Env) -> Vec<Source> {
+    let mut found = Vec::new();
+    if let Some(root) = &env.worktrees_root {
+        found.extend(targets::target_dirs(root).into_iter().map(|path| {
+            let keep = (!is_cargo_target(&path)).then(|| "not a cargo target folder".to_string());
+            Source {
+                kind: Kind::Target,
+                base: root.clone(),
+                path,
+                keep,
+            }
+        }));
     }
     for tmp in unique_dirs(&env.tmp_dirs) {
         for path in children(&tmp).into_iter().filter(|p| name_starts(p, "pb-")) {
             let other_owner = env.uid.is_some_and(|uid| owner(&path) != Some(uid));
-            let extra = other_owner.then(|| "owned by another user".to_string());
-            consider(Kind::Scratch, &tmp, path, SCRATCH_IDLE, extra);
+            found.push(Source {
+                kind: Kind::Scratch,
+                base: tmp.clone(),
+                path,
+                keep: other_owner.then(|| "owned by another user".to_string()),
+            });
         }
     }
     let cache_bases = [
@@ -195,11 +255,15 @@ pub fn select(env: &Env) -> (Vec<Candidate>, Vec<Kept>) {
         crate::common::paths::playbook_root_from(&env.home).join("tmp"),
     ];
     for base in cache_bases {
-        for path in children(&base)
-            .into_iter()
-            .filter(|p| p != &ballast::dir(&env.home))
-        {
-            consider(Kind::Cache, &base, path, SCRATCH_IDLE, None);
+        for path in children(&base) {
+            if path != ballast::dir(&env.home) {
+                found.push(Source {
+                    kind: Kind::Cache,
+                    base: base.clone(),
+                    path,
+                    keep: None,
+                });
+            }
         }
     }
     let plugin_base = crate::plugin_root::cache_dir(&env.claude_home);
@@ -209,23 +273,59 @@ pub fn select(env: &Env) -> (Vec<Candidate>, Vec<Kept>) {
             .ok();
         let recent =
             marked.is_none_or(|at| env.now.duration_since(at).unwrap_or_default() < ORPHAN_IDLE);
-        let extra = recent.then(|| "marked orphaned less than a day ago".to_string());
-        consider(
-            Kind::OrphanedPlugin,
-            &plugin_base,
+        found.push(Source {
+            kind: Kind::OrphanedPlugin,
+            base: plugin_base.clone(),
             path,
-            Duration::ZERO,
-            extra,
-        );
+            keep: recent.then(|| "marked orphaned less than a day ago".to_string()),
+        });
     }
-    picked.sort_by_key(|c| std::cmp::Reverse(c.bytes));
-    (picked, kept)
+    found
 }
 
-/// Why `path` must not be removed whatever its age: it is a symlink, not a
-/// direct child of `base`, or touches protected data.
+/// The checks that need no walk of the folder: the reason its source gave,
+/// then the path rules, then whether something uses it.
+fn pre_check(env: &Env, protected: &[PathBuf], source: &Source) -> Option<String> {
+    source
+        .keep
+        .clone()
+        .or_else(|| unsafe_target(&source.base, &source.path, protected))
+        .or_else(|| named_by_a_process(&source.path, &env.process_args))
+        .or_else(|| {
+            (source.kind == Kind::Target)
+                .then(|| build_lock_held(&source.path))
+                .flatten()
+        })
+}
+
+/// Keeps a folder that changed within its kind's idle time, or one whose
+/// change time could not be read.
+fn idle_check(env: &Env, kind: Kind, scan: &size::Scan) -> Option<String> {
+    if scan.newest == SystemTime::UNIX_EPOCH {
+        return Some("unreadable".to_string());
+    }
+    let idle_for = env.now.duration_since(scan.newest).unwrap_or_default();
+    (idle_for < kind.idle()).then(|| format!("changed {} minutes ago", idle_for.as_secs() / 60))
+}
+
+/// A cargo target folder has the `CACHEDIR.TAG` and `.rustc_info.json` cargo
+/// writes at its top, and no git checkout inside. A sibling repo named
+/// `cargo-something` in the same root fails this test and is kept.
+fn is_cargo_target(path: &Path) -> bool {
+    let markers = path.join("CACHEDIR.TAG").is_file() && path.join(".rustc_info.json").is_file();
+    let holds_git = path.join(".git").exists()
+        || children(path)
+            .iter()
+            .any(|child| child.join(".git").exists());
+    markers && !holds_git
+}
+
+/// Why `path` must not be removed whatever its age: it cannot be read, is a
+/// symlink, is not a direct child of `base`, or touches protected data.
 fn unsafe_target(base: &Path, path: &Path, protected: &[PathBuf]) -> Option<String> {
-    let meta = std::fs::symlink_metadata(path).ok()?;
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return Some("unreadable".to_string());
+    };
     if meta.file_type().is_symlink() {
         return Some("a symlink".to_string());
     }
@@ -236,18 +336,23 @@ fn unsafe_target(base: &Path, path: &Path, protected: &[PathBuf]) -> Option<Stri
 }
 
 /// A running process names `path` on its command line, as rustc does with
-/// `--out-dir`.
+/// `--out-dir`. A path under `/private/tmp` also matches when written as
+/// `/tmp`, since macOS links one to the other.
 fn named_by_a_process(path: &Path, process_args: &str) -> Option<String> {
     let text = path.to_string_lossy();
+    let mut forms = vec![text.to_string()];
+    if let Some(rest) = text.strip_prefix("/private/") {
+        forms.push(format!("/{rest}"));
+    }
     process_args
         .lines()
-        .any(|line| line.contains(text.as_ref()))
+        .any(|line| forms.iter().any(|form| line.contains(form.as_str())))
         .then(|| "in use by a running process".to_string())
 }
 
-/// Cargo holds an exclusive lock on `<target>/<profile>/.cargo-lock` for the
-/// whole build. A lock this process cannot take means a build is running.
-fn build_lock_held(target: &Path) -> Option<String> {
+/// The `.cargo-lock` files of a target folder: one per profile, and one per
+/// profile under each target triple folder.
+fn cargo_locks(target: &Path) -> Vec<PathBuf> {
     let mut locks = Vec::new();
     for profile in children(target) {
         locks.push(profile.join(".cargo-lock"));
@@ -255,33 +360,32 @@ fn build_lock_held(target: &Path) -> Option<String> {
             locks.push(nested.join(".cargo-lock"));
         }
     }
+    locks.retain(|lock| lock.is_file());
     locks
-        .iter()
-        .filter(|lock| lock.is_file())
-        .any(|lock| lock_is_held(lock))
+}
+
+/// Cargo holds an exclusive lock on `<target>/<profile>/.cargo-lock` for the
+/// whole build. A lock this process cannot take means a build is running.
+fn build_lock_held(target: &Path) -> Option<String> {
+    take_locks(target)
+        .is_none()
         .then(|| "a cargo build holds its lock".to_string())
 }
 
-#[cfg(unix)]
-pub(crate) fn lock_is_held(path: &Path) -> bool {
-    use std::os::unix::io::AsRawFd;
-    let Ok(file) = std::fs::File::open(path) else {
-        return false;
-    };
-    // SAFETY: the descriptor comes from `file`, which stays open for both
-    // calls. A lock taken here is released at once.
-    unsafe {
-        if libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) != 0 {
-            return true;
+/// Takes every build lock of `target`, or `None` when a build holds one.
+/// The locks are released when the files are dropped.
+fn take_locks(target: &Path) -> Option<Vec<std::fs::File>> {
+    let mut held = Vec::new();
+    for lock in cargo_locks(target) {
+        let Ok(file) = std::fs::File::open(&lock) else {
+            continue;
+        };
+        if !try_lock(&file) {
+            return None;
         }
-        libc::flock(file.as_raw_fd(), libc::LOCK_UN);
+        held.push(file);
     }
-    false
-}
-
-#[cfg(not(unix))]
-pub(crate) fn lock_is_held(_path: &Path) -> bool {
-    true
+    Some(held)
 }
 
 #[cfg(unix)]
@@ -323,11 +427,28 @@ fn unique_dirs(dirs: &[PathBuf]) -> Vec<PathBuf> {
     seen
 }
 
-/// Removes each candidate. Returns what went and what failed.
+/// Removes each candidate. A target folder's build locks are taken again
+/// and held while it is deleted, so a build that started after the
+/// selection keeps its folder and one that starts during the delete waits.
+/// Returns what went and what was kept.
 pub fn remove(candidates: Vec<Candidate>) -> (Vec<Candidate>, Vec<Kept>) {
     let mut removed = Vec::new();
-    let mut failed = Vec::new();
+    let mut kept = Vec::new();
+    let process_args = process_args();
     for candidate in candidates {
+        let busy = named_by_a_process(&candidate.path, &process_args);
+        let locks = if candidate.kind == Kind::Target {
+            take_locks(&candidate.path)
+        } else {
+            Some(Vec::new())
+        };
+        let (Some(_locks), None) = (locks, busy.clone()) else {
+            kept.push(Kept {
+                path: candidate.path,
+                reason: busy.unwrap_or_else(|| "a cargo build started".to_string()),
+            });
+            continue;
+        };
         let result = match std::fs::symlink_metadata(&candidate.path) {
             Ok(meta) if meta.is_dir() => std::fs::remove_dir_all(&candidate.path),
             Ok(_) => std::fs::remove_file(&candidate.path),
@@ -335,33 +456,38 @@ pub fn remove(candidates: Vec<Candidate>) -> (Vec<Candidate>, Vec<Kept>) {
         };
         match result {
             Ok(()) => removed.push(candidate),
-            Err(e) => failed.push(Kept {
+            Err(e) => kept.push(Kept {
                 path: candidate.path,
                 reason: format!("could not remove: {e}"),
             }),
         }
     }
-    (removed, failed)
+    (removed, kept)
 }
 
-/// Holds the cleanup lock until dropped. On a full disk the lock file may
-/// not be creatable, and the cleanup then runs without it.
-pub struct Lock {
-    _file: Option<std::fs::File>,
+/// The cleanup lock, as far as this run could take it.
+pub enum Lock {
+    /// Held until dropped.
+    Held(std::fs::File),
+    /// Another cleanup holds it.
+    Busy,
+    /// The lock file could not be opened, for example on a full disk.
+    Unavailable(std::io::Error),
 }
 
-/// Takes the cleanup lock, or `None` when another cleanup holds it.
-pub fn lock(home: &Path) -> Option<Lock> {
+/// Takes the cleanup lock.
+pub fn lock(home: &Path) -> Lock {
     let path = crate::common::paths::playbook_root_from(home).join("disk-clean.lock");
-    let Ok(file) = std::fs::OpenOptions::new()
+    match std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
         .open(&path)
-    else {
-        return Some(Lock { _file: None });
-    };
-    try_lock(&file).then_some(Lock { _file: Some(file) })
+    {
+        Ok(file) if try_lock(&file) => Lock::Held(file),
+        Ok(_) => Lock::Busy,
+        Err(e) => Lock::Unavailable(e),
+    }
 }
 
 #[cfg(unix)]
@@ -374,7 +500,7 @@ fn try_lock(file: &std::fs::File) -> bool {
 
 #[cfg(not(unix))]
 fn try_lock(_file: &std::fs::File) -> bool {
-    true
+    false
 }
 
 /// Whether an automatic cleanup should run: `disk.autoCleanup` is on and
@@ -392,22 +518,32 @@ pub fn auto_due(home: &Path, cwd: &Path) -> bool {
 /// above, then the worktree sweep. Returns the lines to print. A dry run
 /// takes no lock and writes nothing.
 pub fn run(home: &Path, repo_root: Option<&Path>, dry_run: bool) -> Vec<String> {
+    let mut lines = Vec::new();
     let _lock = if dry_run {
         None
     } else {
-        let Some(held) = lock(home) else {
-            return vec!["disk clean: another cleanup is running, nothing to do".to_string()];
-        };
-        Some(held)
+        match lock(home) {
+            Lock::Busy => {
+                return vec!["disk clean: another cleanup is running, nothing to do".to_string()]
+            }
+            Lock::Unavailable(e) => {
+                lines.push(format!(
+                    "disk clean: running without the cleanup lock ({e})"
+                ));
+                None
+            }
+            Lock::Held(file) => Some(file),
+        }
     };
     let env = Env::from_system(home, repo_root);
-    let (picked, kept) = select(&env);
-    let mut lines = Vec::new();
+    let (picked, mut kept) = select(&env);
     let verb = if dry_run { "would remove" } else { "removed" };
-    let (done, failed) = if dry_run {
-        (picked, Vec::new())
+    let done = if dry_run {
+        picked
     } else {
-        remove(picked)
+        let (removed, late) = remove(picked);
+        kept.extend(late);
+        removed
     };
     for c in &done {
         lines.push(format!(
@@ -417,7 +553,7 @@ pub fn run(home: &Path, repo_root: Option<&Path>, dry_run: bool) -> Vec<String> 
             c.path.display()
         ));
     }
-    for k in kept.iter().chain(&failed) {
+    for k in &kept {
         lines.push(format!("kept {}: {}", k.path.display(), k.reason));
     }
     if let Some(repo) = repo_root {
@@ -455,7 +591,6 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("pb-disk-clean-{}-{tag}", crate::testing::run_id()));
         let _ = fs::remove_dir_all(&root);
-        let home = root.join("home");
         for dir in ["home/.claude", "worktrees", "tmp"] {
             fs::create_dir_all(root.join(dir)).unwrap();
         }
@@ -469,7 +604,6 @@ mod tests {
             process_args: String::new(),
             uid: current_uid(),
         };
-        let _ = home;
         Fixture { root, env }
     }
 
@@ -478,14 +612,33 @@ mod tests {
         fs::write(path, vec![1u8; 4096]).unwrap();
     }
 
+    /// A cargo target folder with the markers cargo writes.
+    fn target(path: &Path) {
+        write(&path.join("debug/deps/x.rlib"));
+        fs::write(
+            path.join("CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55",
+        )
+        .unwrap();
+        fs::write(path.join(".rustc_info.json"), "{}").unwrap();
+    }
+
     fn picked(env: &Env) -> Vec<PathBuf> {
         select(env).0.into_iter().map(|c| c.path).collect()
+    }
+
+    fn reason(env: &Env, path: &Path) -> Option<String> {
+        select(env)
+            .1
+            .into_iter()
+            .find(|k| k.path == path)
+            .map(|k| k.reason)
     }
 
     #[test]
     fn picks_idle_targets_scratch_and_cache() {
         let f = fixture("picks");
-        write(&f.root.join("worktrees/cargo-a/debug/deps/x.rlib"));
+        target(&f.root.join("worktrees/cargo-a"));
         write(&f.root.join("tmp/pb-old/file"));
         write(&f.env.home.join(".cache/playbook/old/file"));
         write(&f.env.home.join(".config/playbook/tmp/doc/file"));
@@ -504,13 +657,35 @@ mod tests {
     }
 
     #[test]
+    fn keeps_a_sibling_repo_named_like_a_target() {
+        let f = fixture("sibling");
+        let repo = f.root.join("worktrees/cargo-nextest");
+        write(&repo.join("feature/.git"));
+        write(&repo.join("feature/src/main.rs"));
+        fs::write(repo.join("CACHEDIR.TAG"), "x").unwrap();
+        fs::write(repo.join(".rustc_info.json"), "{}").unwrap();
+        let plain = f.root.join("worktrees/cargo-plain");
+        write(&plain.join("notes.txt"));
+        assert!(picked(&f.env).is_empty());
+        assert_eq!(
+            reason(&f.env, &repo).as_deref(),
+            Some("not a cargo target folder")
+        );
+        assert_eq!(
+            reason(&f.env, &plain).as_deref(),
+            Some("not a cargo target folder")
+        );
+        fs::remove_dir_all(&f.root).unwrap();
+    }
+
+    #[test]
     fn keeps_a_target_changed_in_the_last_half_hour() {
         let mut f = fixture("fresh");
-        write(&f.root.join("worktrees/cargo-busy/debug/x"));
+        let dir = f.root.join("worktrees/cargo-busy");
+        target(&dir);
         f.env.now = SystemTime::now() + Duration::from_secs(10 * 60);
-        let (got, kept) = select(&f.env);
-        assert!(got.is_empty(), "{got:?}");
-        assert!(kept[0].reason.starts_with("changed"), "{kept:?}");
+        assert!(picked(&f.env).is_empty());
+        assert!(reason(&f.env, &dir).unwrap().starts_with("changed"));
         fs::remove_dir_all(&f.root).unwrap();
     }
 
@@ -518,19 +693,41 @@ mod tests {
     fn keeps_a_target_whose_build_lock_is_held() {
         use std::os::unix::io::AsRawFd;
         let f = fixture("locked");
-        let lock = f.root.join("worktrees/cargo-building/debug/.cargo-lock");
+        let dir = f.root.join("worktrees/cargo-building");
+        target(&dir);
+        let lock = dir.join("debug/.cargo-lock");
+        write(&lock);
+        let held = fs::File::open(&lock).unwrap();
+        // SAFETY: `held` stays open until it is dropped below.
+        assert_eq!(unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX) }, 0);
+        assert!(picked(&f.env).is_empty());
+        assert_eq!(
+            reason(&f.env, &dir).as_deref(),
+            Some("a cargo build holds its lock")
+        );
+        drop(held);
+        assert_eq!(picked(&f.env), vec![dir]);
+        fs::remove_dir_all(&f.root).unwrap();
+    }
+
+    #[test]
+    fn remove_keeps_a_target_whose_build_started_after_selection() {
+        use std::os::unix::io::AsRawFd;
+        let f = fixture("late-lock");
+        let dir = f.root.join("worktrees/cargo-late");
+        target(&dir);
+        let (chosen, _) = select(&f.env);
+        assert_eq!(chosen.len(), 1);
+        let lock = dir.join("debug/.cargo-lock");
         write(&lock);
         let held = fs::File::open(&lock).unwrap();
         // SAFETY: `held` stays open until the end of the test.
         assert_eq!(unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX) }, 0);
-        let (got, kept) = select(&f.env);
-        assert!(got.is_empty(), "{got:?}");
-        assert_eq!(kept[0].reason, "a cargo build holds its lock");
+        let (removed, kept) = remove(chosen);
+        assert!(removed.is_empty());
+        assert_eq!(kept[0].reason, "a cargo build started");
+        assert!(dir.exists());
         drop(held);
-        assert_eq!(
-            picked(&f.env),
-            vec![f.root.join("worktrees/cargo-building")]
-        );
         fs::remove_dir_all(&f.root).unwrap();
     }
 
@@ -538,11 +735,34 @@ mod tests {
     fn keeps_a_folder_a_running_process_names() {
         let mut f = fixture("ps");
         let dir = f.root.join("worktrees/cargo-rustc");
-        write(&dir.join("debug/x"));
+        target(&dir);
         f.env.process_args = format!("rustc --out-dir {}/debug/deps src/lib.rs\n", dir.display());
-        let (got, kept) = select(&f.env);
-        assert!(got.is_empty());
-        assert_eq!(kept[0].reason, "in use by a running process");
+        assert!(picked(&f.env).is_empty());
+        assert_eq!(
+            reason(&f.env, &dir).as_deref(),
+            Some("in use by a running process")
+        );
+        fs::remove_dir_all(&f.root).unwrap();
+    }
+
+    #[test]
+    fn a_tmp_path_matches_its_private_form() {
+        let args = "cargo build --target-dir /tmp/pb-x/target\n";
+        assert!(named_by_a_process(Path::new("/private/tmp/pb-x"), args).is_some());
+        assert!(named_by_a_process(Path::new("/private/tmp/pb-y"), args).is_none());
+    }
+
+    #[test]
+    fn keeps_scratch_owned_by_another_user() {
+        let mut f = fixture("owner");
+        let dir = f.root.join("tmp/pb-theirs");
+        write(&dir.join("file"));
+        f.env.uid = current_uid().map(|uid| uid + 1);
+        assert!(picked(&f.env).is_empty());
+        assert_eq!(
+            reason(&f.env, &dir).as_deref(),
+            Some("owned by another user")
+        );
         fs::remove_dir_all(&f.root).unwrap();
     }
 
@@ -558,9 +778,22 @@ mod tests {
         write(&ballast::file(&f.env.home));
         write(&f.env.home.join(".config/playbook/memory/fact.md"));
         write(&f.env.home.join(".config/playbook/data/config.db"));
-        let got = picked(&f.env);
-        assert!(got.is_empty(), "{got:?}");
+        assert!(picked(&f.env).is_empty());
         assert!(outside.join("keep").exists());
+        fs::remove_dir_all(&f.root).unwrap();
+    }
+
+    #[test]
+    fn a_home_inside_the_tmp_folder_is_protected_data() {
+        let mut f = fixture("home-in-tmp");
+        let home = f.root.join("tmp/pb-home");
+        write(&home.join(".config/playbook/memory/fact.md"));
+        f.env.home = home.clone();
+        assert!(picked(&f.env).is_empty());
+        assert_eq!(
+            reason(&f.env, &home).as_deref(),
+            Some("protected playbook data")
+        );
         fs::remove_dir_all(&f.root).unwrap();
     }
 
@@ -574,6 +807,7 @@ mod tests {
             "/Users/me/.config/playbook",
             "/Users/me/.config/playbook/MEMORY",
             "/Users/me/.config/playbook/data/config.db",
+            "/Users/me/.config/playbook/playbook.db-wal",
             "/Users/me/.cache/playbook/ballast",
             "/Users/me",
         ] {
@@ -605,23 +839,31 @@ mod tests {
     fn a_second_cleanup_waits_for_the_lock() {
         let f = fixture("lock");
         fs::create_dir_all(crate::common::paths::playbook_root_from(&f.env.home)).unwrap();
-        let first = lock(&f.env.home).expect("first lock");
-        assert!(lock(&f.env.home).is_none());
+        let first = lock(&f.env.home);
+        assert!(matches!(first, Lock::Held(_)));
+        assert!(matches!(lock(&f.env.home), Lock::Busy));
         drop(first);
-        assert!(lock(&f.env.home).is_some());
+        assert!(matches!(lock(&f.env.home), Lock::Held(_)));
+        let missing = f.root.join("no-home");
+        assert!(matches!(lock(&missing), Lock::Unavailable(_)));
         fs::remove_dir_all(&f.root).unwrap();
     }
 
     #[test]
-    fn remove_deletes_only_what_was_picked() {
+    fn remove_deletes_only_what_was_picked_and_never_follows_links() {
         let f = fixture("remove");
-        write(&f.root.join("worktrees/cargo-gone/debug/x"));
+        let gone = f.root.join("worktrees/cargo-gone");
+        target(&gone);
+        let outside = f.root.join("outside/keep");
+        write(&outside);
+        std::os::unix::fs::symlink(f.root.join("outside"), gone.join("link")).unwrap();
         write(&f.root.join("worktrees/playbook/keep/src.rs"));
-        let (picked, _) = select(&f.env);
-        let (removed, failed) = remove(picked);
+        let (chosen, _) = select(&f.env);
+        let (removed, kept) = remove(chosen);
         assert_eq!(removed.len(), 1);
-        assert!(failed.is_empty());
-        assert!(!f.root.join("worktrees/cargo-gone").exists());
+        assert!(kept.is_empty(), "{kept:?}");
+        assert!(!gone.exists());
+        assert!(outside.exists());
         assert!(f.root.join("worktrees/playbook/keep/src.rs").exists());
         fs::remove_dir_all(&f.root).unwrap();
     }

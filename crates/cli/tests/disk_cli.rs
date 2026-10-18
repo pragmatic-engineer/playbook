@@ -94,3 +94,54 @@ fn doctor_shows_a_disk_row_by_level() {
         assert!(row.contains(want), "{free} GB: {row}");
     }
 }
+
+#[test]
+fn auto_cleanup_does_nothing_when_space_is_fine_or_it_is_off() {
+    let home = isolated::fresh_home();
+    let out = run(&home, "50", &["disk", "clean", "--auto"]);
+    assert!(out.status.success());
+    assert!(stdout(&out).contains("nothing to do"), "{}", stdout(&out));
+    let set = isolated::playbook_in(&home)
+        .args(["config", "set", "disk.autoCleanup", "false"])
+        .output()
+        .unwrap();
+    assert!(set.status.success());
+    let out = run(&home, "1", &["disk", "clean", "--auto"]);
+    assert!(stdout(&out).contains("nothing to do"), "{}", stdout(&out));
+}
+
+#[test]
+fn clean_removes_idle_scratch_in_a_test_tmp_folder_only() {
+    let home = isolated::fresh_home();
+    let tmp = home.join("tmp");
+    let old = tmp.join("pb-old");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(old.join("file"), vec![1u8; 4096]).unwrap();
+    let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 60 * 60);
+    for path in [old.join("file"), old.clone()] {
+        std::fs::File::open(&path)
+            .unwrap()
+            .set_modified(hour_ago)
+            .unwrap();
+    }
+    let fresh = tmp.join("pb-fresh");
+    std::fs::create_dir_all(&fresh).unwrap();
+    let out = isolated::playbook_in(&home)
+        .args(["disk", "clean"])
+        .env("PLAYBOOK_TEST_DISK_TMP", &tmp)
+        .current_dir(&home)
+        .output()
+        .unwrap();
+    let text = stdout(&out);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        text.contains("removed") && text.contains("pb-old"),
+        "{text}"
+    );
+    assert!(!old.exists());
+    assert!(fresh.exists());
+}

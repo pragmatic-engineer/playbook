@@ -64,15 +64,24 @@ const SKIP: &[&str] = &["Library", "node_modules", ".git", "Applications", ".Tra
 /// `.rustc_info.json` that cargo writes at the top of each one. Read only and
 /// bounded: at most [`SCAN_DEPTH`] levels and [`SCAN_MAX_DIRS`] folders,
 /// skipping hidden folders other than `.worktrees`, symlinks, and the trees
-/// in `SKIP`. A found folder is not entered. Builds from any project on the
+/// in `SKIP`, and stops at `deadline`. A found folder is not entered. A
+/// root inside another root is scanned once. Builds from any project on the
 /// volume show up, which matters because free space is shared.
-pub fn find_cargo_targets(roots: &[PathBuf]) -> Vec<PathBuf> {
+pub fn find_cargo_targets(roots: &[PathBuf], deadline: Option<std::time::Instant>) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut visited = 0usize;
-    let mut queue: std::collections::VecDeque<(PathBuf, usize)> =
-        roots.iter().map(|r| (r.clone(), 0)).collect();
+    let mut queue: std::collections::VecDeque<(PathBuf, usize)> = roots
+        .iter()
+        .filter(|r| {
+            !roots
+                .iter()
+                .any(|other| other != *r && r.starts_with(other))
+        })
+        .map(|r| (r.clone(), 0))
+        .collect();
     while let Some((dir, depth)) = queue.pop_front() {
-        if visited >= SCAN_MAX_DIRS {
+        let late = deadline.is_some_and(|d| std::time::Instant::now() >= d);
+        if visited >= SCAN_MAX_DIRS || late {
             break;
         }
         visited += 1;
@@ -144,7 +153,14 @@ mod tests {
         target("a/b/c/d/e/f/target");
         fs::create_dir_all(root.join("code/plain/target")).unwrap();
         std::os::unix::fs::symlink(root.join("code"), root.join("loop")).unwrap();
-        assert_eq!(find_cargo_targets(std::slice::from_ref(&root)), vec![b, a]);
+        assert_eq!(
+            find_cargo_targets(std::slice::from_ref(&root), None),
+            vec![b.clone(), a.clone()]
+        );
+        let nested = vec![root.clone(), root.join("code")];
+        assert_eq!(find_cargo_targets(&nested, None), vec![b, a]);
+        let past = Some(std::time::Instant::now());
+        assert!(find_cargo_targets(std::slice::from_ref(&root), past).is_empty());
         fs::remove_dir_all(&root).unwrap();
     }
 

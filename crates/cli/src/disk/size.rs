@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn scan_reports_the_newest_change_inside() {
-        let dir = std::env::temp_dir().join(format!("pb-disk-scan-{}", crate::testing::run_id()));
+        let dir = std::env::temp_dir().join(format!("pb-disk-newest-{}", crate::testing::run_id()));
         fs::create_dir_all(dir.join("deep/er")).unwrap();
         let before = SystemTime::now() - std::time::Duration::from_secs(2);
         fs::write(dir.join("deep/er/new"), b"x").unwrap();

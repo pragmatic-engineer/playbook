@@ -117,8 +117,8 @@ pub fn measure(candidates: Vec<(Kind, PathBuf)>) -> Vec<Consumer> {
     measure_until(candidates, None)
 }
 
-/// How long `disk status` spends sizing the target folders of other
-/// projects. A big folder past the budget shows its size so far.
+/// How long `disk status` spends finding and sizing the target folders of
+/// other projects. A big folder past the budget shows its size so far.
 pub const HOME_SIZING_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// [`measure`] that stops sizing at `deadline`.
@@ -160,14 +160,16 @@ pub fn report(home: &Path, claude_home: &Path, cwd: &Path) -> Report {
     let target_count = consumers.iter().filter(|c| c.kind == Kind::Target).count();
     let mut roots = vec![home.to_path_buf()];
     roots.extend(policy.paths.iter().cloned());
-    let home_targets = measure_until(
-        targets::find_cargo_targets(&roots)
+    let deadline = Some(std::time::Instant::now() + HOME_SIZING_BUDGET);
+    let mut home_targets = measure_until(
+        targets::find_cargo_targets(&roots, deadline)
             .into_iter()
             .filter(|p| consumers.iter().all(|c| &c.path != p))
             .map(|p| (Kind::Target, p))
             .collect(),
-        Some(std::time::Instant::now() + HOME_SIZING_BUDGET),
+        deadline,
     );
+    home_targets.sort_by_key(|c| (c.complete, std::cmp::Reverse(c.bytes)));
     Report {
         policy,
         volumes,
@@ -269,6 +271,7 @@ pub fn to_json(report: &Report) -> Value {
         "homeCargoTargets": report.home_targets.iter().map(|c| json!({
             "path": c.path.to_string_lossy(),
             "bytes": c.bytes,
+            "complete": c.complete,
         })).collect::<Vec<_>>(),
     })
 }
@@ -353,6 +356,7 @@ mod tests {
         assert_eq!(value["consumers"][1]["kind"], "ballast");
         assert_eq!(value["targetDirs"], 1);
         assert_eq!(value["homeCargoTargets"][0]["bytes"], 3 * GIB);
+        assert_eq!(value["homeCargoTargets"][0]["complete"], true);
     }
 
     #[test]
