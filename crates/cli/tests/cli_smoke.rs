@@ -602,8 +602,8 @@ fn table() -> Vec<Case> {
         case("handoff check", &["handoff", "check"]).stdin("nothing\n").code(1).err("missing section"),
         case("statusline", &["statusline"]).stdin("{}").plain().writes(),
         // repo checks
-        case( "settings gen", &["settings", "gen", "{ROOT}/src.json", "{ROOT}/perms.json"], ).code(2).err("not readable"),
-        case( "settings check", &[ "settings", "check", "{ROOT}/t.json", "{ROOT}/p.json", "{CWD}", ], ).code(1).err("not readable"),
+        case( "settings gen", &["settings", "gen", "{ROOT}/src.json", "{ROOT}/seed.json"], ).code(2).err("not readable"),
+        case( "settings check", &[ "settings", "check", "{ROOT}/t.json", "{CWD}", ], ).code(1).err("not readable"),
         case("manifest check", &["manifest", "check"]).out("check-manifest: OK"),
         case("agents check", &["agents", "check"]).code(1).err("agents directory not found"),
         case("agents variants", &["agents", "variants"]).out("no variants"),

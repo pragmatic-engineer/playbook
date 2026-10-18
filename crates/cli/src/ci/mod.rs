@@ -144,17 +144,11 @@ pub fn run_in(root: &Path) -> Report {
     });
 
     let template = root.join("settings.shared.json");
-    let perms = root.join("permissions.shared.json");
-    report
-        .checks
-        .push(if template.is_file() && perms.is_file() {
-            from_check(
-                "settings",
-                crate::settings::check::check(&template, &perms, root),
-            )
-        } else {
-            result("settings", Status::Skip, "no shared settings templates")
-        });
+    report.checks.push(if template.is_file() {
+        from_check("settings", crate::settings::check::check(&template, root))
+    } else {
+        result("settings", Status::Skip, "no shared settings template")
+    });
     report
 }
 
@@ -208,14 +202,14 @@ mod tests {
                 "check-manifest: OK (3 tracked files)",
             ),
             ("agents", Status::Fail, "1 problem:\nbad.md: model 'gpt'"),
-            ("settings", Status::Skip, "no shared settings templates"),
+            ("settings", Status::Skip, "no shared settings template"),
         ]);
 
         assert_eq!(
             r.to_text(false),
             "PASS manifest: check-manifest: OK (3 tracked files)\n\
              FAIL agents: 1 problem:\n  bad.md: model 'gpt'\n\
-             SKIP settings: no shared settings templates\n\
+             SKIP settings: no shared settings template\n\
              ci: 1 passed, 1 failed, 1 skipped"
         );
     }

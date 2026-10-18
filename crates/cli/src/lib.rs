@@ -1137,11 +1137,14 @@ impl PathKind {
 #[derive(Subcommand, Debug)]
 pub enum SettingsCommand {
     /// Create the shared settings template from a live settings.json
+    ///
+    /// Takes the hooks and status line from the live file and keeps the
+    /// permissions of the current seed. Prints the new seed.
     Gen {
         /// Live settings.json to start from
         src: PathBuf,
-        /// File holding the default permissions
-        perms: PathBuf,
+        /// Current seed, whose permissions block is kept
+        seed: PathBuf,
     },
     /// Check the shared settings template is valid
     ///
@@ -1149,8 +1152,6 @@ pub enum SettingsCommand {
     Check {
         /// Shared settings template to check
         template: PathBuf,
-        /// Shared permissions file
-        perms: PathBuf,
         /// Repo root that every hook command must resolve inside
         repo_root: PathBuf,
     },

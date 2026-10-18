@@ -1,15 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Port of the retired shell original, guarding what ships in
-//! `settings.shared.json`: a seed that pinned a model, carried a
-//! non-shippable key, or named a hook that does not exist would be
-//! installed verbatim everywhere.
-//!
-//! Message wording and exit status match the python exactly, because
-//! `tests/settings_check.rs` diffs the two implementations.
+//! Guards what ships in the seed (`settings.shared.json`): a seed that
+//! pinned a model, carried a non-shippable key, shipped no permissions or
+//! named a hook that does not exist would be installed everywhere.
 
-use crate::settings::keys::SHIPPABLE_KEYS;
+use crate::settings::keys::{shipped_permissions, SHIPPABLE_KEYS};
 use crate::HookName;
 use clap::ValueEnum;
 use serde_json::Value;
@@ -20,18 +16,11 @@ const INSTALL_PREFIXES: [&str; 2] = ["~/.claude/", "$HOME/.claude/"];
 
 const BASH_WRAPPER: &str = "bash ";
 
-pub fn check(
-    template_path: &Path,
-    permissions_path: &Path,
-    repo_root: &Path,
-) -> Result<String, String> {
+pub fn check(template_path: &Path, repo_root: &Path) -> Result<String, String> {
     let template_display = template_path.display();
-    let permissions_display = permissions_path.display();
 
     let template_raw = std::fs::read_to_string(template_path)
         .map_err(|_| format!("template not readable: {template_display}"))?;
-    let permissions_raw = std::fs::read_to_string(permissions_path)
-        .map_err(|_| format!("permissions not readable: {permissions_display}"))?;
     if !repo_root.is_dir() {
         return Err(format!(
             "repo root is not a directory: {}",
@@ -41,28 +30,11 @@ pub fn check(
 
     let template: Value = serde_json::from_str(&template_raw)
         .map_err(|_| format!("template is not valid JSON: {template_display}"))?;
-    let permissions: Value = serde_json::from_str(&permissions_raw)
-        .map_err(|_| format!("permissions is not valid JSON: {permissions_display}"))?;
 
-    if !permissions.is_object() {
+    if shipped_permissions(&template).is_none() {
         return Err(format!(
-            "permissions file is not a JSON object: {permissions_display}"
+            ".permissions must be an object with a non-empty allow array in {template_display}"
         ));
-    }
-
-    match template.get("permissions") {
-        Some(block) if block.is_object() => {
-            if *block != permissions {
-                return Err(format!(
-                    ".permissions in template does not deep-equal {permissions_display}"
-                ));
-            }
-        }
-        _ => {
-            return Err(format!(
-                ".permissions is missing or not an object in {template_display}"
-            ))
-        }
     }
 
     if template.get("model").is_some() {
@@ -106,9 +78,8 @@ fn check_shippable_keys(template: &Value, template_path: &Path) -> Result<(), St
     Ok(())
 }
 
-/// Malformed shapes are skipped rather than rejected, matching the python's
-/// isinstance guards: this validates commands, and shape is the settings
-/// schema's concern.
+/// Malformed shapes are skipped: this validates commands, and shape is the
+/// settings schema's concern.
 fn check_hook_commands(template: &Value, repo_root: &Path) -> Result<(), String> {
     let Some(hooks) = template.get("hooks").and_then(Value::as_object) else {
         return Ok(());

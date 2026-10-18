@@ -18,7 +18,7 @@ All run with `CI=true`, stdin from `/dev/null`, and an empty `HOME`.
 | `playbook --version` | yes | exit 0, one line |
 | `agents check` | yes | needs a checkout (`agents/`); exit 1 outside one |
 | `manifest check .` | yes | exit 0 on a clean tree |
-| `settings check <template> <perms> <root>` | yes | three required arguments |
+| `settings check <template> <root>` | yes | two required arguments |
 | `ci [--json] [--dir <path>]` | yes | runs the three checks above in one step: one line each, exit 1 if any fails; outside a playbook checkout every check is skipped and it exits 0 |
 | `gate record` and `gate check` | yes | need `--source <plan file>` and a git `origin` remote; no remote exits 1 with a clear message; an edited plan reads `STALE`; a missing phase reads `MISSING`, exit 1 |
 | `usage` | yes | no transcripts: exit 0, "No usage recorded yet" |

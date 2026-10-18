@@ -1,23 +1,13 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: Apache-2.0
 #
-# Task runner for this repo. Replaces the Makefile, which had one target and
-# still shelled out to `python3 shell/gen-shared-settings.py` even after
-# ADR 0007 WU-20 ported that generator into the binary as
-# `playbook settings gen`. WU-20's own acceptance criterion says
-# `grep -c python3 Makefile` is 0, which was false for as long as that file
-# existed. Moving to just and calling the binary makes it true.
-#
-# The recipe is `settings-shared`, not `settings.shared.json`. just recipe
-# names cannot contain dots, so the file-target naming the Makefile used does
-# not carry over. The output file is unchanged.
+# Task runner for this repo: `just --list` shows the recipes.
 
 set shell := ["bash", "-uc"]
 
 # Where to read the live settings from. Override for testing:
 #   just src=/tmp/fixture.json settings-shared
 src := env_var_or_default("SRC", env_var("HOME") / ".claude/settings.json")
-perms := "permissions.shared.json"
 out := "settings.shared.json"
 bin := "./target/release/playbook"
 
@@ -25,7 +15,9 @@ bin := "./target/release/playbook"
 default:
     @just --list
 
-# Regenerate settings.shared.json from a live settings.json. Dry run by default.
+# Refresh the hooks and status line of settings.shared.json from a live
+# settings.json. The permissions block of the seed is kept as it is: edit it
+# by hand. Dry run by default.
 settings-shared write="0": build
     #!/usr/bin/env bash
     # Reads a file that is NOT in the repo, so this is a manual step and never
@@ -44,7 +36,7 @@ settings-shared write="0": build
     # Pass write=1 only after reading the diff this prints.
     set -uo pipefail
     test -r "{{ src }}" || { echo "just: source settings not readable: {{ src }}; nothing regenerated" >&2; exit 1; }
-    {{ bin }} settings gen "{{ src }}" "{{ perms }}" > "{{ out }}.tmp" || exit 1
+    {{ bin }} settings gen "{{ src }}" "{{ out }}" > "{{ out }}.tmp" || exit 1
     if diff -u "{{ out }}" "{{ out }}.tmp" > /dev/null 2>&1; then
         rm -f "{{ out }}.tmp"
         echo "just: {{ out }} is already up to date with {{ src }}"
@@ -63,7 +55,7 @@ settings-shared write="0": build
     fi
     mv "{{ out }}.tmp" "{{ out }}"
     echo "just: regenerated {{ out }} from {{ src }}"
-    {{ bin }} settings check "{{ out }}" "{{ perms }}" .
+    {{ bin }} settings check "{{ out }}" .
 
 # Build the release binary the other recipes call.
 build:
@@ -77,7 +69,7 @@ check: build
     just test
     git ls-files '*.sh' | xargs shellcheck --severity=warning
     @for f in $(git ls-files '*.sh'); do bash -n "$f"; done
-    {{ bin }} settings check "{{ out }}" "{{ perms }}" .
+    {{ bin }} settings check "{{ out }}" .
     {{ bin }} manifest check .
 
 # Run the test suite with cargo-nextest (install: `cargo install cargo-nextest --locked`),

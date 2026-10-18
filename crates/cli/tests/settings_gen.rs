@@ -21,9 +21,10 @@
 //! - A (happy path): `happy_path_canned_perms_model_stripped_only_shippable_keys_survive`
 //! - B (model absent stays absent): `model_absent_in_source_stays_absent`
 //! - C (model present is stripped): `model_in_source_is_stripped`
-//! - D (malformed source JSON), E (missing source file), F (missing
-//!   permissions file), G (degenerate permissions object), H (permissions
-//!   with an empty allow array): `GUARD_CASES` inside
+//! - D (malformed source JSON), E (missing source file), F (missing seed
+//!   file), G (seed with no permissions), H (seed permissions with an empty
+//!   allow array), K (a bare permissions block passed as the seed):
+//!   `GUARD_CASES` inside
 //!   `malformed_or_missing_inputs_guard_rejects_with_no_output`
 //! - I (no arguments): `no_arguments_is_rejected_by_the_rust_cli_parser`
 //! - J (hooks reduced to the safety guards only, functional hooks dropped):
@@ -70,8 +71,8 @@ fn write_file(path: &Path, content: &str) {
     fs::write(path, content).expect("scratch file should be writable");
 }
 
-/// Canned permissions fixture, reused read-only across scenarios, matching
-/// the retired shell test's `PERMS`.
+/// Canned permissions fixture, reused read-only across scenarios. Tests wrap
+/// it in a seed with `seed_of`.
 const CANNED_PERMS: &str = r#"{
   "allow": ["Read", "Bash(git:*)"],
   "deny": ["Read(**/.env)"],
@@ -98,8 +99,14 @@ const SRC_FULL: &str = r#"{
 const SRC_NOMODEL: &str = r#"{"env":{"IS_DEMO":"1"}}"#;
 const SRC_OPUS: &str = r#"{"model":"opus","env":{}}"#;
 const SRC_BAD: &str = "{ this is not json ";
-const PERMS_EMPTY: &str = "{}";
-const PERMS_NOALLOW: &str = r#"{"allow":[],"deny":[],"ask":[]}"#;
+const SEED_NO_PERMS: &str = "{}";
+const SEED_NOALLOW: &str = r#"{"permissions":{"allow":[],"deny":[],"ask":[]}}"#;
+
+/// A seed whose `permissions` block is `perms`, the only part `generate`
+/// reads from the seed.
+fn seed_of(perms: &str) -> String {
+    format!(r#"{{"permissions": {perms}}}"#)
+}
 
 /// Hooks-heavy source matching the shell test's `SRC_HOOKS`: a bare
 /// `session-init` entry plus a `PreToolUse` group mixing two guards already
@@ -132,12 +139,12 @@ fn happy_path_canned_perms_model_stripped_only_shippable_keys_survive() {
     // Arrange
     let dir = scratch_dir("happy-path");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(&src_path, SRC_FULL);
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
-    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+    let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
 
     // Assert
     //
@@ -186,12 +193,12 @@ fn model_absent_in_source_stays_absent() {
     // Arrange
     let dir = scratch_dir("model-absent");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(&src_path, SRC_NOMODEL);
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
-    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+    let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
 
     // Assert
     //
@@ -208,12 +215,12 @@ fn model_in_source_is_stripped() {
     // Arrange
     let dir = scratch_dir("model-present");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(&src_path, SRC_OPUS);
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
-    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+    let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
 
     // Assert against the frozen python oracle rather than a live python run.
     // See tests/fixtures/golden/README.md: the python original is deleted by
@@ -227,40 +234,48 @@ fn model_in_source_is_stripped() {
     assert!(result.get("model").is_none());
 }
 
-/// D, E, F, G, H: every input guard the generator enforces before it
-/// produces output. `src: None` or `perms: None` means that file is never
+/// D to H and K: every input guard the generator enforces before it
+/// produces output. `src: None` or `seed: None` means that file is never
 /// written at all, exercising "missing file" rather than "invalid content".
 struct GuardCase {
     name: &'static str,
     src: Option<&'static str>,
-    perms: Option<&'static str>,
+    seed: Option<&'static str>,
 }
 
-const GUARD_CASES: [GuardCase; 5] = [
+const SEED_CANNED: &str =
+    r#"{"permissions": {"allow": ["Read", "Bash(git:*)"], "deny": [], "ask": []}}"#;
+
+const GUARD_CASES: [GuardCase; 6] = [
     GuardCase {
         name: "D malformed source json",
         src: Some(SRC_BAD),
-        perms: Some(CANNED_PERMS),
+        seed: Some(SEED_CANNED),
     },
     GuardCase {
         name: "E missing source file",
         src: None,
-        perms: Some(CANNED_PERMS),
+        seed: Some(SEED_CANNED),
     },
     GuardCase {
-        name: "F missing permissions file",
+        name: "F missing seed file",
         src: Some(SRC_FULL),
-        perms: None,
+        seed: None,
     },
     GuardCase {
-        name: "G degenerate permissions object",
+        name: "G seed with no permissions",
         src: Some(SRC_FULL),
-        perms: Some(PERMS_EMPTY),
+        seed: Some(SEED_NO_PERMS),
     },
     GuardCase {
-        name: "H permissions with empty allow array",
+        name: "H seed permissions with empty allow array",
         src: Some(SRC_FULL),
-        perms: Some(PERMS_NOALLOW),
+        seed: Some(SEED_NOALLOW),
+    },
+    GuardCase {
+        name: "K bare permissions block passed as the seed",
+        src: Some(SRC_FULL),
+        seed: Some(CANNED_PERMS),
     },
 ];
 
@@ -270,16 +285,16 @@ fn malformed_or_missing_inputs_guard_rejects_with_no_output() {
         // Arrange
         let dir = scratch_dir(&case.name.replace(' ', "-"));
         let src_path = dir.join("src.json");
-        let perms_path = dir.join("perms.json");
+        let seed_path = dir.join("seed.json");
         if let Some(content) = case.src {
             write_file(&src_path, content);
         }
-        if let Some(content) = case.perms {
-            write_file(&perms_path, content);
+        if let Some(content) = case.seed {
+            write_file(&seed_path, content);
         }
 
         // Act
-        let rust = generate(&src_path, &perms_path);
+        let rust = generate(&src_path, &seed_path);
 
         // Assert
         //
@@ -312,7 +327,7 @@ fn no_arguments_is_rejected_by_the_rust_cli_parser() {
     // Assert
     assert!(
         rust_result.is_err(),
-        "rust CLI should guard-reject with no SRC/PERMS given"
+        "rust CLI should guard-reject with no SRC/SEED given"
     );
 }
 
@@ -325,12 +340,12 @@ fn hooks_reduced_to_safety_guards_only_functional_hooks_dropped() {
     // Arrange
     let dir = scratch_dir("hooks-filter");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(&src_path, SRC_HOOKS);
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
-    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+    let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
 
     // Assert against the frozen python oracle rather than a live python run.
     // See tests/fixtures/golden/README.md: the python original is deleted by
@@ -391,12 +406,12 @@ fn new_and_old_config_paths_are_both_filtered_out_identically() {
     // Arrange
     let dir = scratch_dir("hooks-filter-new-and-old-paths");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(&src_path, SRC_HOOKS_NEW_AND_OLD_PATHS);
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
-    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+    let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
 
     // Assert: only the bare form survives; neither path form is safe.
     let result: Value = serde_json::from_str(&rust_output).unwrap();
@@ -422,15 +437,15 @@ fn non_ascii_value_diverges_from_python_named_direction() {
     // could even be observed).
     let dir = scratch_dir("non-ascii");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(
         &src_path,
         r#"{"statusLine":{"type":"command","command":"café ☃"}}"#,
     );
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
-    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+    let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
 
     // Assert against the frozen python oracle rather than a live python run.
     // See tests/fixtures/golden/README.md: the python original is deleted by
@@ -491,16 +506,16 @@ fn regression_pin_mutating_a_shippable_key_changes_the_output() {
     // Arrange: synthetic fixtures, not the committed settings.shared.json.
     let dir = scratch_dir("regression-pin");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(&src_path, SRC_FULL);
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
-    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+    let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
     let mutated_src_path = dir.join("src-mutated.json");
     write_file(&mutated_src_path, SRC_MUTATED);
     let mutated_output =
-        generate(&mutated_src_path, &perms_path).expect("rust generate should succeed");
+        generate(&mutated_src_path, &seed_path).expect("rust generate should succeed");
 
     // Assert: a genuinely different input produces genuinely different
     // output, proving this pin can fail rather than passing vacuously.
@@ -517,15 +532,15 @@ fn settings_gen_works_from_the_cli() {
     // Arrange
     let dir = scratch_dir("cli");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(&src_path, SRC_NOMODEL);
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
     let output = isolated::playbook()
         .args(["settings", "gen"])
         .arg(&src_path)
-        .arg(&perms_path)
+        .arg(&seed_path)
         .output()
         .expect("playbook binary should run");
 
@@ -536,7 +551,7 @@ fn settings_gen_works_from_the_cli() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
-    let expected = generate(&src_path, &perms_path).expect("rust generate should succeed");
+    let expected = generate(&src_path, &seed_path).expect("rust generate should succeed");
     assert_eq!(
         stdout, expected,
         "CLI stdout should match the library function's output exactly"
@@ -559,8 +574,8 @@ fn settings_gen_works_from_the_cli() {
 fn malformed_hooks_shape_fails_in_both_engines_and_writes_no_stdout() {
     // Arrange
     let dir = scratch_dir("malformed-hooks");
-    let perms_path = dir.join("perms.json");
-    write_file(&perms_path, CANNED_PERMS);
+    let seed_path = dir.join("seed.json");
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     let cases = [
         (".hooks is a string", r#"{"hooks": "not-an-object"}"#),
@@ -580,7 +595,7 @@ fn malformed_hooks_shape_fails_in_both_engines_and_writes_no_stdout() {
         write_file(&src_path, src_json);
 
         // Act
-        let rust = generate(&src_path, &perms_path);
+        let rust = generate(&src_path, &seed_path);
 
         // Assert
         //
@@ -605,15 +620,15 @@ fn novel_top_level_key_is_dropped_and_named_on_stderr() {
     // Arrange
     let dir = scratch_dir("novel-key");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(&src_path, r#"{"totallyNovelKey": "x"}"#);
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
     let output = isolated::playbook()
         .args(["settings", "gen"])
         .arg(&src_path)
-        .arg(&perms_path)
+        .arg(&seed_path)
         .output()
         .expect("playbook binary should run");
 
@@ -638,15 +653,15 @@ fn an_env_block_is_dropped_whole() {
     // Arrange
     let dir = scratch_dir("env-dropped");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(
         &src_path,
         r#"{"env":{"TOTALLY_NOVEL_ENV_KEY":"x","DISABLE_TELEMETRY":"1","DISABLE_AUTOUPDATER":"1"}}"#,
     );
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
-    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+    let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
 
     // Assert
     let result: Value = serde_json::from_str(&rust_output).unwrap();
@@ -659,15 +674,15 @@ fn auto_mode_and_enabled_plugins_are_dropped() {
     // Arrange
     let dir = scratch_dir("automode-plugins");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(
         &src_path,
         r#"{"autoMode": {"allow": ["$defaults"]}, "enabledPlugins": {"a@b": true}}"#,
     );
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
-    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+    let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
 
     // Assert
     let result: Value = serde_json::from_str(&rust_output).unwrap();
@@ -694,12 +709,12 @@ fn shape_valid_but_nonexistent_hook_name_is_dropped() {
     // Arrange
     let dir = scratch_dir("hooks-fake-name");
     let src_path = dir.join("src.json");
-    let perms_path = dir.join("perms.json");
+    let seed_path = dir.join("seed.json");
     write_file(&src_path, SRC_HOOKS_FAKE_NAME);
-    write_file(&perms_path, CANNED_PERMS);
+    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
-    let rust_output = generate(&src_path, &perms_path).expect("rust generate should succeed");
+    let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
 
     // Assert
     let result: Value = serde_json::from_str(&rust_output).unwrap();

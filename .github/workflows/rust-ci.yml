@@ -293,8 +293,7 @@ jobs:
         if: env.LANE == 'true'
         run: |
           cargo build
-          ./target/debug/playbook settings check \
-            settings.shared.json permissions.shared.json .
+          ./target/debug/playbook settings check settings.shared.json .
 
       # Moved out of shell-ci with the port, same reasoning: the manifest
       # validator is now a subcommand too, so it needs the binary already
