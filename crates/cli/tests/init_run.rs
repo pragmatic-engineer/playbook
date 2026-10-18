@@ -1086,7 +1086,7 @@ fn existing_install_migrates_settings_and_rcfile_with_doctor_reporting_no_drift(
             .collect::<Vec<_>>()
     );
 
-    // Migration 0018 removes the old launcher block after a backup (ADR 0044).
+    // The `retired-launcher-rc-line` migration removes the old launcher block after a backup (ADR 0044).
     let rc = fs::read_to_string(home.join(".bashrc")).unwrap();
     assert_eq!(rc, "export EDITOR=vim\n");
 

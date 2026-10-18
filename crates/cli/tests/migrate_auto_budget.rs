@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Migration 0017 (ADR 0028, 2026-10-17 amendment): a stored auto budget that
-//! holds the old default of 5 moves to the new default, through `playbook
+//! The `auto-budget-defaults` migration (ADR 0028, 2026-10-17 amendment): a
+//! stored auto budget that holds the old default of 5 moves to the new
+//! default, through `playbook
 //! migrate` and through the first run of any command. Any other value stays,
 //! and a store that holds no budget gets no write.
 
