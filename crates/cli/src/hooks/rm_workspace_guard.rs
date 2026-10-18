@@ -29,13 +29,15 @@
 //! lexer, so only a word in command position is a deletion. Quoted text, a
 //! grep pattern, a commit message, an `echo` and a heredoc read by a program
 //! other than a shell are data. `find -delete`, `find -exec rm` and
-//! `xargs rm` are seen, and judged by `find`'s start paths.
+//! `xargs rm` are judged by `find`'s start paths when the hook runs, but the
+//! hook is wired with `if: Bash(rm:*)`, so Claude Code only starts it for a
+//! command that holds an `rm` word.
 //!
 //! Deliberate conservative blocks: a `cd` before the deletion makes relative
 //! targets unresolvable; a deletion inside, next to or fed by a command
 //! substitution is unresolvable; a target holding a variable is unresolvable,
-//! except `$HOME` and `$TMPDIR`, which the guard expands with its own values
-//! unless the command sets or unsets them. The variable rule fixed a FAIL-OPEN
+//! except `$HOME`, which the guard expands with its own value unless the
+//! command sets or unsets it. The variable rule fixed a FAIL-OPEN
 //! (`"$X/y"` used to resolve under the cwd), so it is the one to be careful
 //! about reverting.
 //!
@@ -79,11 +81,17 @@ pub fn run(payload: &Payload) {
     }
 
     let home = std::env::var("HOME").unwrap_or_default();
+    // Most commands that reach the hook delete nothing, so the roots, which
+    // cost git and config reads, are only worked out when something does.
+    let targets = parse::targets(&cmd, &parse::Env { home: &home });
+    if targets.is_empty() {
+        return;
+    }
     let claude_dir = resolve_existing(&PathBuf::from(&home).join(".claude"));
     let safe_roots = safe_roots();
     let scratch_roots = scratch_roots(&home);
 
-    let outside = offending_targets(&cmd, &home, &claude_dir, &safe_roots, &scratch_roots);
+    let outside = offending_targets(targets, &home, &claude_dir, &safe_roots, &scratch_roots);
     if outside.is_empty() {
         return;
     }
@@ -115,10 +123,12 @@ pub fn run(payload: &Payload) {
         ""
     };
     emit_pre_deny(&format!(
-        "rm blocked: {} is outside {roots}, ~/.claude/** and the scratch roots {scratch} (contents only, symlinks resolved, no bare glob such as /tmp/* but a named prefix such as /tmp/pb-* is fine). Allowed: rm inside the repo or those roots. Ask the user to add extra roots to the `hooks.rmGuard.allowedRoots` config key, since you cannot change it. A quoted path with a space or a stray quote cannot be resolved either. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path. If the label is `<command substitution>`, a `$VAR` or a relative path after `cd`, the guard cannot resolve it: run the rm as its own call with a literal absolute path.{hint}",
-        // Comma with no space: the shell built this with `IFS=', '` and
-        // `${arr[*]}`, which joins on the FIRST character of IFS only.
-        outside.join(",")
+        "rm blocked: {} is outside {roots}, ~/.claude/** and the scratch roots {scratch} (contents only, symlinks resolved, no bare glob such as /tmp/* but a named prefix such as /tmp/pb-* is fine). Allowed: rm inside the repo or those roots. Ask the user to add extra roots to the `hooks.rmGuard.allowedRoots` config key, since you cannot change it. A stray quote or backslash left inside a path cannot be resolved. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path. If the label is `<command substitution>`, `<xargs input>`, a variable other than `$HOME`, or a relative path after `cd`, the guard cannot resolve it: run the rm as its own call with a literal absolute path.{hint}",
+        outside
+            .iter()
+            .map(|t| format!("`{t}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
     ));
 }
 
@@ -414,21 +424,16 @@ fn is_allowed(
     true
 }
 
-/// The targets of every deletion in `cmd` that falls outside the allowed
-/// roots, each as written, or as its label when it cannot be resolved.
+/// The deletion targets that fall outside the allowed roots, each as written,
+/// or as its label when it cannot be resolved.
 fn offending_targets(
-    cmd: &str,
+    targets: Vec<Target>,
     home: &str,
     claude_dir: &Path,
     safe_roots: &[PathBuf],
     scratch_roots: &[PathBuf],
 ) -> Vec<String> {
-    let tmpdir = std::env::var("TMPDIR").ok();
-    let env = parse::Env {
-        home,
-        tmpdir: tmpdir.as_deref(),
-    };
-    parse::targets(cmd, &env)
+    targets
         .into_iter()
         .filter_map(|target| match target {
             Target::Unresolvable(label) => Some(label),

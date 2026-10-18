@@ -647,6 +647,33 @@ mod rm_workspace_guard {
         }
     }
 
+    /// The false positives of the old word splitter, and the forms it missed,
+    /// end to end through the hook entry.
+    #[test]
+    fn only_real_deletions_are_judged() {
+        let (h, d, e) = (home(), del(), etc());
+        let ws = format!("{h}/Workspace");
+        for cmd in [
+            format!("grep -E \"a | {d} -rf {e}/passwd\" f.txt"),
+            format!("{d} -f {ws}/proj/x 2>/dev/null"),
+            format!("cat <<EOF\n{d} -rf {e}/passwd\nEOF"),
+            format!("git commit -F - <<'EOF'\n{d} -rf {e}/passwd is fatal\nEOF"),
+            format!("find {ws}/proj -name '*.o' -delete"),
+            format!("find {ws}/proj -print0 | xargs -0 {d} -f"),
+        ] {
+            assert!(!blocked(&cmd, &ws), "should allow: {cmd}");
+        }
+        for cmd in [
+            format!("{d} -f {e}/passwd 2>/dev/null"),
+            format!("find {e} -name x -delete"),
+            format!("find {e} -exec {d} {{}} +"),
+            format!("ls | xargs {d}"),
+            format!("cd {ws} && find -delete"),
+        ] {
+            assert!(blocked(&cmd, &ws), "should block: {cmd}");
+        }
+    }
+
     /// `$HOME` and `${HOME}` resolve to the home folder this hook sees.
     #[test]
     fn a_home_variable_target_is_expanded_and_judged() {
