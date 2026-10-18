@@ -21,6 +21,8 @@ pub const DEFAULT_BLOCK_FREE_GB: u64 = 6;
 /// Default `disk.maxTargetDirs`: more cargo target folders than this under
 /// a worktrees root earns a warning.
 pub const DEFAULT_MAX_TARGET_DIRS: u64 = 4;
+/// The largest value `disk.maxTargetDirs` accepts.
+pub const MAX_TARGET_DIRS: u64 = 1000;
 /// The largest value either threshold accepts.
 pub const MAX_THRESHOLD_GB: i64 = 10_000;
 /// The most entries `disk.paths` accepts.
@@ -109,7 +111,7 @@ impl Policy {
                     }
                 }
                 "disk.maxTargetDirs" => {
-                    if let Some(n) = value.as_u64().filter(|n| (1..=1000).contains(n)) {
+                    if let Some(n) = value.as_u64().filter(|n| (1..=MAX_TARGET_DIRS).contains(n)) {
                         policy.max_target_dirs = n;
                     }
                 }
@@ -174,35 +176,23 @@ pub fn load(home: &Path) -> Policy {
 /// Every global `disk.*` row, read with one query.
 fn stored_values(home: &Path) -> Vec<(String, Value)> {
     let root = crate::common::paths::playbook_root_from(home);
-    let path = crate::config::store::db_path(&root);
-    if !path.is_file() {
-        return Vec::new();
-    }
-    let Ok(conn) = crate::state::open_read_only(&path) else {
-        return Vec::new();
-    };
-    let Ok(mut stmt) = conn.prepare(
-        "SELECT key, value_json FROM config WHERE tier = 'global' AND scope = '' AND key LIKE 'disk.%'",
-    ) else {
-        return Vec::new();
-    };
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    });
-    let Ok(rows) = rows else {
-        return Vec::new();
-    };
-    rows.flatten()
-        .filter_map(|(key, raw)| Some((key, serde_json::from_str(&raw).ok()?)))
-        .collect()
+    crate::config::store::global_read_only_prefix(&root, "disk.")
 }
 
 /// The paths to measure: the home folder, the repo that holds `cwd` (or
-/// `cwd` itself outside a repo), then `disk.paths`.
+/// `cwd` itself outside a repo), the temp folder where Claude Code writes
+/// its scratch files, an absolute `WORKTREE_BASE_DIR` where worktrees and
+/// target folders grow, then `disk.paths`.
 pub fn measured_paths(policy: &Policy, home: &Path, cwd: Option<&Path>) -> Vec<PathBuf> {
     let mut paths = vec![home.to_path_buf()];
     if let Some(cwd) = cwd {
         paths.push(playbook_common::gitfacts::toplevel(cwd).unwrap_or_else(|| cwd.to_path_buf()));
+    }
+    paths.push(std::env::temp_dir());
+    if let Some(base) = std::env::var_os("WORKTREE_BASE_DIR").map(PathBuf::from) {
+        if base.is_absolute() {
+            paths.push(base);
+        }
     }
     paths.extend(policy.paths.iter().cloned());
     paths
@@ -357,6 +347,7 @@ mod tests {
             ("disk.blockFreeGb", json!(9)),
             ("disk.autoCleanup", json!(false)),
             ("disk.paths", json!(["~/work"])),
+            ("disk.maxTargetDirs", json!(8)),
         ] {
             write::set(Tier::Global, key, value, &home, None).expect(key);
         }
@@ -365,6 +356,7 @@ mod tests {
         assert_eq!(policy.block_free_gb, 9);
         assert!(!policy.auto_cleanup);
         assert_eq!(policy.paths, vec![home.join("work")]);
+        assert_eq!(policy.max_target_dirs, 8);
         let _ = std::fs::remove_dir_all(&home);
     }
 
@@ -382,6 +374,11 @@ mod tests {
             ("disk.paths", json!(["/a/../b"])),
             ("disk.paths", json!("/a")),
             ("disk.maxTargetDirs", json!(0)),
+            ("disk.maxTargetDirs", json!(1001)),
+            (
+                "disk.paths",
+                json!((0..17).map(|i| format!("/v{i}")).collect::<Vec<_>>()),
+            ),
         ];
         for (key, value) in cases {
             let shown = value.to_string();
@@ -413,8 +410,8 @@ mod tests {
         let tmp = std::env::temp_dir();
         let paths = measured_paths(&policy, Path::new("/h"), Some(&tmp));
         assert_eq!(paths.first(), Some(&PathBuf::from("/h")));
+        assert!(paths.contains(&std::env::temp_dir()));
         assert_eq!(paths.last(), Some(&PathBuf::from("/extra")));
-        assert_eq!(paths.len(), 3);
     }
 
     #[test]
@@ -423,5 +420,27 @@ mod tests {
         let found = volumes(&[tmp.clone(), tmp.join("pb-disk-missing-child")]);
         assert_eq!(found.len(), 1);
         assert_eq!(tightest(&found).map(|v| v.path.clone()), Some(tmp));
+    }
+
+    #[test]
+    fn the_volume_with_least_free_space_sets_the_level() {
+        let volume = |name: &str, free: u64, device: u64| Volume {
+            path: PathBuf::from(name),
+            space: Space {
+                free,
+                total: 100 * GIB,
+                device,
+            },
+        };
+        let found = vec![
+            volume("/home", 40 * GIB, 1),
+            volume("/repo", 3 * GIB, 2),
+            volume("/extra", 20 * GIB, 3),
+        ];
+        assert_eq!(
+            tightest(&found).map(|v| v.path.clone()),
+            Some(PathBuf::from("/repo"))
+        );
+        assert!(tightest(&[]).is_none());
     }
 }

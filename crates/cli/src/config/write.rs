@@ -325,7 +325,9 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
             "a whole number of GB between 0 and 10000",
         ),
         "disk.maxTargetDirs" => (
-            whole.is_some_and(|n| (1..=1000).contains(&n)),
+            value
+                .as_u64()
+                .is_some_and(|n| (1..=crate::disk::policy::MAX_TARGET_DIRS).contains(&n)),
             "a whole number between 1 and 1000",
         ),
         "sessions.staleAfterDays" | "sessions.recentDays" => {

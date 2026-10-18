@@ -64,7 +64,12 @@ fn test_free_bytes() -> Option<u64> {
     if !cfg!(debug_assertions) {
         return None;
     }
-    let gb: f64 = std::env::var(TEST_FREE_GB_VAR).ok()?.trim().parse().ok()?;
+    parse_free_gb(&std::env::var(TEST_FREE_GB_VAR).ok()?)
+}
+
+/// A count of GB as bytes: a finite number of 0 or more, else `None`.
+fn parse_free_gb(text: &str) -> Option<u64> {
+    let gb: f64 = text.trim().parse().ok()?;
     (gb.is_finite() && gb >= 0.0).then_some((gb * GIB as f64) as u64)
 }
 
@@ -195,6 +200,23 @@ mod tests {
         assert_eq!(cached(&path), Some(fake));
         forget();
         assert_eq!(cached(&path), None);
+    }
+
+    #[test]
+    fn the_test_override_parses_gb() {
+        let cases = [
+            ("6", Some(6 * GIB)),
+            (" 0.5 ", Some(GIB / 2)),
+            ("0", Some(0)),
+            ("-1", None),
+            ("NaN", None),
+            ("inf", None),
+            ("abc", None),
+            ("", None),
+        ];
+        for (text, want) in cases {
+            assert_eq!(parse_free_gb(text), want, "{text:?}");
+        }
     }
 
     #[test]

@@ -95,7 +95,7 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `disk.warnFreeGb` | `15` | a whole number of GB, 0 to 10000 | Below this much free space the disk guard warns. GB here is what `df -g` shows (1024³ bytes). A value below `disk.blockFreeGb` is raised to it. A per-user setting, like `update.mode`. See [ADR 0047](../adr/0047-disk-guard.md). |
 | `disk.blockFreeGb` | `6` | a whole number of GB, 0 to 10000 | Below this much free space the disk guard stops build commands and new agents, and keeps cleanup, reads and `playbook` commands working. `0` turns blocking off. A per-user setting. |
 | `disk.autoCleanup` | `true` | `true`, `false` | Whether the disk guard removes files playbook can prove are disposable when space is low. A per-user setting. |
-| `disk.paths` | empty list | list of absolute or `~/` paths, at most 16 | Extra paths whose volume the disk guard measures. The home folder's volume and the current repo's volume are always measured. A per-user setting. Example: `playbook config set disk.paths '["/Volumes/Work"]'`. |
+| `disk.paths` | empty list | list of absolute or `~/` paths with no `..` part, at most 16 | Extra paths whose volume the disk guard measures. The home folder's volume and the current repo's volume are always measured. A per-user setting. Example: `playbook config set disk.paths '["/Volumes/Work"]'`. |
 | `disk.maxTargetDirs` | `4` | a whole number, 1 to 1000 | How many cargo target folders (`cargo-*` under a worktrees root) can exist before the disk guard warns. Each one holds 0.5 to 2 GB. A per-user setting. |
 
 The key `launcher.systemPromptMode` was removed. The launcher replaces Claude Code's system prompt with the playbook one and never appends to it. A plain `claude` keeps Claude Code's built-in prompt.
@@ -146,6 +146,6 @@ Off by default. Set it with `playbook config set --global effort.auto suggest` (
 - [Plan and implement](01-plan-and-implement.md): the `/playbook:fix` limits.
 - [Worktree engine](../internals/03-worktree.md): the sweep that the `worktreeCleanup.*` keys control.
 
-The model cannot change `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars` or `pr.ticketPatterns`. The policy guard refuses a model-run `config set`, `import`, `unset` or `edit` on them. Run the change yourself in the prompt with `!`.
+The model cannot change `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`, `pr.ticketPatterns` or `disk.*`. The policy guard refuses a model-run `config set`, `import`, `unset` or `edit` on them. Run the change yourself in the prompt with `!`.
 
 The model cannot write Claude Code's `settings.json` or `settings.local.json` (user or project) with the Edit or Write tools or with a Bash command. Settings change through `playbook setup`, `uninstall`, `config set` and `doctor`, or by you in the prompt with `!`.

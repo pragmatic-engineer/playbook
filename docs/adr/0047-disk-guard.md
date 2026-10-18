@@ -20,7 +20,7 @@ The user keeps a floor of 6 GB free by hand today.
 
 1. **Five config keys, per user.** `disk.warnFreeGb` (default 15), `disk.blockFreeGb` (default 6, the user's own floor), `disk.autoCleanup` (default `true`), `disk.paths` (default empty) and `disk.maxTargetDirs` (default 4). Free space belongs to the machine, so all five live in the global tier, like `update.mode`. Thresholds are whole GB as `df -g` counts them (1024³ bytes), from 0 to 10000. A warn value below the block value is raised to it. `disk.blockFreeGb` at 0 turns blocking off. `disk.paths` holds extra absolute or `~/` paths, at most 16. A bad stored value falls back to its default, so a broken config store does not turn the guard off. The model cannot change `disk.*`: the policy guard refuses it, the same as `hooks.rmGuard.*`, since a model that hits the floor could otherwise lower it.
 
-2. **One cheap probe.** `disk::probe::space` calls `statvfs(2)` once and reports `f_bavail` times `f_frsize`, the space an ordinary user can write. It runs no subprocess and takes a few microseconds (the test checks under 5 ms). A process keeps a reading for 5 seconds, so `disk status` and the doctor read each volume once. A hook is a new process on every tool call, so it reads fresh. A cache file would cost more than the call it saves, and it cannot be written on a full disk. The guard measures the home folder's volume, the current repo's volume and each `disk.paths` entry, counts each volume once, and judges by the one with the least free space.
+2. **One cheap probe.** `disk::probe::space` calls `statvfs(2)` once and reports `f_bavail` times `f_frsize`, the space an ordinary user can write. It runs no subprocess and takes a few microseconds (the test checks under 5 ms). A process keeps a reading for 5 seconds, so `disk status` and the doctor read each volume once. A hook is a new process on every tool call, so it reads fresh. A cache file would cost more than the call it saves, and it cannot be written on a full disk. The guard measures the home folder's volume, the current repo's volume, the temp folder's volume (where Claude Code writes its scratch files), an absolute `WORKTREE_BASE_DIR` (where worktrees and target folders grow) and each `disk.paths` entry. It counts each volume once and judges by the one with the least free space.
 
 3. **A `disk-guard` hook on `PreToolUse` for `Bash`, `Agent` and `Task`.**
    - Under `disk.blockFreeGb` it denies a Bash command that has a build-class command in command position: `cargo build`, `test`, `check`, `clippy`, `nextest`, `run`, `bench`, `doc` and `install`, `rustc`, `npm`, `pnpm` and `yarn` install, add and build, `pip install`, `docker build`, `brew install` and `upgrade`, `git clone`, `git worktree add`, `make` (except `make clean`) and `go build`, `test` and `install`. It reads the command with the shared shell lexer, so a word inside quotes, a commit message or a heredoc is data. It looks behind wrappers such as `env`, `sudo`, `timeout` and `nohup`, and inside `sh -c`.
@@ -29,8 +29,8 @@ The user keeps a floor of 6 GB free by hand today.
    - The denial says how many GB are free, the threshold, the cleanup the model may run (`playbook disk clean`, `cargo clean` in a finished worktree, `git worktree remove` of a merged worktree), and that the user can change the threshold with `playbook config set disk.blockFreeGb <gb>`.
    - Under `disk.warnFreeGb` it adds a warning to the model's context, at most once every 10 minutes per session.
    - With `disk.autoCleanup` on, the first denial in a 10 minute window starts `playbook disk clean --auto` in the background.
-   - `SessionStart` prints the warning and runs the cleanup when space is under `disk.warnFreeGb`.
-   - The hook never writes a file to decide. It only writes its throttle stamp after it has decided, and a failed write changes nothing.
+   - `SessionStart` prints the warning under `disk.warnFreeGb`. With `disk.autoCleanup` on, it also starts `playbook disk clean --auto` in the background at that level.
+   - The hook writes no file to decide. It writes its throttle stamp after it has decided. On a nearly full disk that write can fail, and then the throttle does not hold: the warning repeats and each denial may start another background cleanup. `disk clean` takes an exclusive lock on a file under `~/.config/playbook` and exits at once when another run holds it, so only one cleanup runs at a time.
 
 4. **A ballast file, off by default.** We decided the ballast is worth it. `playbook disk reserve` writes a 1 GB file of real blocks at `~/.cache/playbook/ballast/ballast.bin`. The folder carries a `CACHEDIR.TAG`, and on macOS `tmutil addexclusion` keeps the file out of Time Machine. `playbook setup` offers it and creates it only on a yes. `playbook disk release` deletes it. The guard hook also deletes it when free space falls below 1 GB, which is when tool calls start to fail, and its message says so and names `playbook disk reserve` to put it back after the cleanup. The release is one `unlink`, which needs no free space. `reserve` refuses when it would leave less than `disk.warnFreeGb` free.
 
@@ -38,10 +38,10 @@ The user keeps a floor of 6 GB free by hand today.
    - Cargo target folders named `cargo-*` directly under a worktrees root. A folder is skipped when a cargo process holds its build lock, when any running process names it on its command line, or when anything under it changed in the last 30 minutes.
    - `/tmp/pb-*` and `/private/tmp/pb-*` entries owned by the user and untouched for 60 minutes.
    - The contents of `~/.config/playbook/tmp` and `~/.cache/playbook`, except the ballast.
-   - Worktrees of merged branches, through the existing `playbook worktree` sweep and its `worktreeCleanup.*` keys. The sweep already skips a dirty worktree, a worktree in use and an unmerged branch.
+   - Landed worktrees, through the existing `playbook worktree` sweep and its `worktreeCleanup.*` keys. The sweep removes a worktree whose branch merged into the default branch, and also one whose branch has had no commit for `worktreeCleanup.staleAfterDays` (30 by default). It skips a dirty worktree, a locked one and one in use, and it keeps the branch, so every commit stays in git.
    - Plugin cache folders that Claude Code marked orphaned (`.orphaned_at`, found by `plugin_root::orphaned_cache_dirs`) more than a day ago.
 
-   It never deletes uncommitted work, an unmerged branch, the memory store, `config.db` or any path the rm guard protects. Each target passes the rm guard's protected-path check before it goes.
+   It never deletes uncommitted work, a branch, the memory store, `config.db` or any path the rm guard protects. Each target passes the rm guard's protected-path check before it goes.
 
 6. **`playbook disk status`**, with `--json`, prints the free space per volume, the thresholds, and the biggest playbook-owned consumers with sizes: target folders, worktrees, caches and the ballast. The doctor adds a row that is PASS at or above `disk.warnFreeGb`, WARN below it and FAIL below `disk.blockFreeGb`. The status line shows a red low-disk warning below `disk.warnFreeGb`.
 
@@ -62,7 +62,8 @@ The user keeps a floor of 6 GB free by hand today.
 
 ## Consequences
 
-- Builds stop at 6 GB free by default, with room left for the shell, hook files and cleanup.
+- New builds stop at 6 GB free by default, with room left for the shell, hook files and cleanup.
+- A build that started before space fell under the floor keeps running. Several agents that each start a 0.5 to 2 GB build at 6.5 GB free can still reach 0. The ballast, when the user said yes to it, is the fallback for that case.
 - An agent that hits the floor gets a message that names the fix, and the cleanup it may run stays open.
 - Target folders go away with their worktrees, and stale ones are found by `disk clean`.
 - The ballast costs 1 GB on machines whose user said yes. An APFS local snapshot taken after the ballast was written keeps its blocks until the snapshot goes, so a release may free less than 1 GB on such a machine.
