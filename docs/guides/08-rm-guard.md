@@ -24,8 +24,8 @@ Paths are judged after `~`, `$HOME`, `..`, trailing slashes and every symlink ar
 | The repo (or `PLAYBOOK_SAFE_ROOTS`) and `~/.claude` | Anything inside, and the folder itself. |
 | The `.worktrees` folder next to the main checkout, and `WORKTREE_BASE_DIR` | Contents only. `.worktrees/cargo-*` build folders are covered. |
 | Temp and cache folders for your OS (table below) | Contents only. |
-| Playbook's scratch folders: `~/.config/playbook/tmp`, `staging`, `runtime`, `embedded`, `cc-state`, and any `tmp` folder deeper under `~/.config/playbook` | Contents only. |
-| Playbook's install files: `playbook`, `pb`, `pbtop`, `playbook.<version>.bak` and `.playbook.*` staging files in the install folder (`$PLAYBOOK_BIN_DIR` or `~/.local/bin`), and the collector's launchd or systemd file | By exact name or prefix. A Homebrew install is left to Homebrew. |
+| Playbook's scratch folders: `~/.config/playbook/tmp`, `staging`, `embedded`, `cc-state`, and any `tmp` folder deeper under `~/.config/playbook` | Contents only. |
+| Playbook's install leftovers: `playbook.<version>.bak` backups and `.playbook.*` staging files in the install folder (`$PLAYBOOK_BIN_DIR` or `~/.local/bin`), and the collector's launchd or systemd file. The binary and its `pb` and `pbtop` links stay blocked, because every hook runs the binary | By exact name or prefix. A Homebrew install is left to Homebrew. |
 
 Temp and cache folders per OS:
 
@@ -35,6 +35,8 @@ Temp and cache folders per OS:
 | Linux | `/tmp`, `/var/tmp`, `$TMPDIR`, `$XDG_CACHE_HOME` when it is inside home, `~/.cache`, `/run/user/<uid>` |
 | Windows | `%TEMP%`, `%TMP%`, `%LOCALAPPDATA%\Temp` |
 | All | the folder `std::env::temp_dir()` returns, which covers the session scratchpad |
+
+The Windows roots are in the code and untested: the guard's path logic has not run on Windows yet ([ADR 0045](../adr/0045-rm-guard-roots-and-parser.md)).
 
 A temp folder from the environment (`$TMPDIR`, `%TEMP%` and the like) counts only when it is absolute, at least two folders deep, free of `..`, and neither your home nor a folder above it.
 
@@ -48,7 +50,9 @@ Playbook's own data is never deleted by `rm`, whatever root covers it, a configu
 
 - the memory store `~/.config/playbook/memory`
 - `~/.config/playbook/data`, which holds `config.db`, `memory.db` and the usage database
-- plans, handoffs and per-repo config under `~/.config/playbook/repos`, legacy org config under `orgs`, old handoffs under `runtime/handoff`, and the auto-learn queue under `runtime/to-learn`
+- plans, handoffs and per-repo config under `~/.config/playbook/repos`, and legacy org config under `orgs`
+- session state under `~/.config/playbook/runtime`: the spend ledger the auto mode cap reads, the auto-learn queue and old handoffs
+- the playbook binary and its `pb` and `pbtop` links
 - the effort ledger and its backups under `~/.config/playbook/effort`
 - the system prompt under `~/.config/playbook/prompts`, the legacy `playbook.db` and `config.json`
 - `~/.config/playbook` itself and every folder above it
@@ -70,7 +74,7 @@ Each denied target is listed with the rule that matched:
 | another user's home or a quoted ~ | `~user`, or a `~` inside quotes, which the shell does not expand. |
 | path that cannot be resolved | A link chain too deep to follow, a link that cannot be read, or a working folder that is gone. |
 
-For a path outside the roots, the message gives the exact command that keeps your current roots and adds the folder that holds the target. It offers this only for a folder inside your home that is not under a dot folder, so it never suggests `/etc` or `~/.ssh`. The model cannot change the key, so it asks you to run the command yourself.
+For a path outside the roots, the message gives the exact command that keeps your current roots and adds the folder that holds the target. It offers this only for a folder inside your home whose first folder under home does not start with a dot, so it never suggests `/etc` or `~/.ssh`. The model cannot change the key, so it asks you to run the command yourself.
 
 ## Adding a root
 
@@ -80,7 +84,7 @@ Each root is a plain folder path:
 
 - absolute, or starting with `~/`
 - at least two levels deep for an absolute path (`/opt/scratch` works, `/tmp` does not), and at least one level under home (`~/scratch` works, `~` does not)
-- no `..`, quote or glob characters
+- no `..`, quote, `$`, backtick, backslash or glob characters
 
 A root covers everything under it, so `~/scratch/**` and `~/scratch` mean the same thing. A trailing `/**` or `/*` is accepted and dropped before the list is stored, so the stored list holds plain paths. Any other glob is refused.
 
