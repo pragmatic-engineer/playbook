@@ -14,6 +14,7 @@ use crate::usage::service::{
 };
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Runs the service manager's command line tool.
 pub trait Manager {
@@ -229,15 +230,42 @@ fn known_to_launchd(manager: &dyn Manager, label: &str, uid: u32) -> bool {
     manager.run(program, &args).is_ok()
 }
 
-/// Waits up to two seconds for launchd to let go of the booted out agent
-/// `label`, so the next `bootstrap` does not fail while the old job is torn
-/// down.
-fn wait_until_unloaded(manager: &dyn Manager, label: &str, uid: u32) {
-    for _ in 0..20 {
-        if !known_to_launchd(manager, label, uid) {
-            return;
+/// How long to wait for launchd to let go of a booted out agent. Short in
+/// unit tests, where the fake answers at once or never.
+const UNLOAD_WAIT: Duration = if cfg!(test) {
+    Duration::from_millis(200)
+} else {
+    Duration::from_secs(2)
+};
+
+/// Checks `done` every 100 ms until it holds or `wait` passes, and says
+/// whether it held.
+fn poll_until(wait: Duration, mut done: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if done() {
+            return true;
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Waits for launchd to let go of the booted out agent `label`, so the next
+/// `bootstrap` does not fail while the old job is torn down.
+fn wait_until_unloaded(manager: &dyn Manager, label: &str, uid: u32) {
+    poll_until(UNLOAD_WAIT, || !known_to_launchd(manager, label, uid));
+}
+
+/// `Err` with the note when this build may not change the real home
+/// (`common::real_home`), so files there change only where launchctl may
+/// run.
+fn off_limits(home: &Path) -> Result<(), String> {
+    match crate::common::real_home::refused(home) {
+        true => Err(crate::common::real_home::NOTE.to_string()),
+        false => Ok(()),
     }
 }
 
@@ -255,6 +283,18 @@ pub enum Installed {
     /// The file was written. `started` is `Err` with the reason when the
     /// service manager did not start it.
     Wrote { started: Result<(), String> },
+}
+
+impl Installed {
+    /// `Ok` when the service runs after the install, else why it does not.
+    pub fn outcome(self) -> Result<(), String> {
+        match self {
+            Installed::Unchanged => Ok(()),
+            Installed::Restarted(result)
+            | Installed::Started(result)
+            | Installed::Wrote { started: result } => result,
+        }
+    }
 }
 
 /// Runs `commands` in order and stops at the first failure.
@@ -279,6 +319,7 @@ pub fn install(
     uid: u32,
     outdated: bool,
 ) -> Result<Installed, String> {
+    off_limits(home)?;
     let file = kind.file(home);
     let log = log_path(home);
     checked_text("program", program)?;
@@ -309,6 +350,7 @@ pub fn remove(kind: Kind, home: &Path, manager: &dyn Manager, uid: u32) -> Resul
     if !file.exists() {
         return Ok(false);
     }
+    off_limits(home)?;
     for (program, args) in unload_commands(kind, uid) {
         // Not loaded is fine: the file goes either way.
         let _ = manager.run(program, &args);
@@ -327,6 +369,7 @@ pub fn remove_old(home: &Path, manager: &dyn Manager, uid: u32) -> Result<Option
     let Some(old) = find_old(home).filter(|o| o.ours) else {
         return Ok(None);
     };
+    off_limits(home)?;
     let (program, args) = bootout_command(OLD_LABEL, uid);
     // Not loaded is fine: the file goes either way.
     let _ = manager.run(program, &args);
@@ -349,19 +392,20 @@ pub enum Moved {
 
 /// Moves the agent playbook wrote under [`OLD_LABEL`] to [`LABEL`], with the
 /// same program and log: boots out the old job, loads the new one, then
-/// deletes the old file. The old job stops before the new one starts, so
-/// two collectors never compete for the port. When the new agent does not
-/// start, its file goes again and the old agent is loaded again, so a
-/// failed run leaves the machine as it was. `fallback` is the program to
-/// run when the one the old file names is gone. `up` tells whether a
-/// collector answers, checked for up to `wait` after the move.
+/// deletes the old file. The old job stops before the new one starts, and a
+/// new agent that is loaded but not running is booted out first, so at most
+/// one agent is loaded at any time. When the new agent does not start, it
+/// is booted out, its file goes back to what it was, and the old agent is
+/// loaded again if it was loaded before. `fallback` is the program to run
+/// when the one the old file names is gone. `collector_answers` is checked
+/// for up to `wait` after the move.
 pub fn move_old_agent(
     home: &Path,
     fallback: &Path,
     manager: &dyn Manager,
     uid: u32,
-    up: &dyn Fn() -> bool,
-    wait: std::time::Duration,
+    collector_answers: &dyn Fn() -> bool,
+    wait: Duration,
 ) -> Result<Moved, String> {
     let Some(old) = find_old(home) else {
         return Ok(Moved::Nothing);
@@ -369,42 +413,31 @@ pub fn move_old_agent(
     if !old.ours {
         return Ok(Moved::NotOurs(old.file));
     }
+    off_limits(home)?;
     let program = old
         .program
         .filter(|p| p.is_file())
         .unwrap_or_else(|| fallback.to_path_buf());
-    let (bootout, args) = bootout_command(OLD_LABEL, uid);
-    let stopped = manager.run(bootout, &args);
-    wait_until_unloaded(manager, OLD_LABEL, uid);
-    if known_to_launchd(manager, OLD_LABEL, uid) {
-        let why = stopped.err().unwrap_or_else(|| "it is still loaded".into());
-        return Err(format!("could not stop the agent {OLD_LABEL} ({why})"));
+    let was_loaded = stop(manager, OLD_LABEL, uid)?;
+    if known_to_launchd(manager, LABEL, uid) && !loaded(Kind::Launchd, manager, uid) {
+        stop(manager, LABEL, uid)?;
     }
     let new_file = Kind::Launchd.file(home);
-    let had_new = new_file.exists();
-    let started = match install(Kind::Launchd, home, &program, manager, uid, false) {
-        Ok(
-            Installed::Unchanged
-            | Installed::Started(Ok(()))
-            | Installed::Restarted(Ok(()))
-            | Installed::Wrote { started: Ok(()) },
-        ) => Ok(()),
-        Ok(
-            Installed::Started(Err(why))
-            | Installed::Restarted(Err(why))
-            | Installed::Wrote { started: Err(why) },
-        )
-        | Err(why) => Err(why),
-    };
+    let before = fs::read(&new_file).ok();
+    let started =
+        install(Kind::Launchd, home, &program, manager, uid, false).and_then(Installed::outcome);
     if let Err(why) = started {
-        if !had_new {
-            let _ = run_all(manager, unload_commands(Kind::Launchd, uid));
-            let _ = fs::remove_file(&new_file);
-        }
-        let (program, args) = bootstrap_command(&old.file, uid);
-        let back = match manager.run(program, &args) {
-            Ok(_) => "the old agent runs again".to_string(),
-            Err(e) => format!("the old agent did not start again either ({e})"),
+        let _ = stop(manager, LABEL, uid);
+        let _ = match &before {
+            Some(bytes) => fs::write(&new_file, bytes),
+            None => fs::remove_file(&new_file),
+        };
+        let back = match was_loaded {
+            false => "the old agent was not loaded before, so it stays stopped".to_string(),
+            true => match manager.run("launchctl", &bootstrap_command(&old.file, uid).1) {
+                Ok(_) => "the old agent runs again".to_string(),
+                Err(e) => format!("the old agent did not start again either ({e})"),
+            },
         };
         return Err(format!("the agent {LABEL} did not start ({why}); {back}"));
     }
@@ -414,16 +447,28 @@ pub fn move_old_agent(
             old.file.display()
         )
     })?;
-    let deadline = std::time::Instant::now() + wait;
-    loop {
-        if loaded(Kind::Launchd, manager, uid) || up() {
-            return Ok(Moved::Done { up: true });
-        }
-        if std::time::Instant::now() >= deadline {
-            return Ok(Moved::Done { up: false });
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+    let up = poll_until(wait, || {
+        loaded(Kind::Launchd, manager, uid) || collector_answers()
+    });
+    Ok(Moved::Done { up })
+}
+
+/// Boots out the agent `label` and waits for launchd to let go of it.
+/// `Ok(true)` when it was loaded, `Ok(false)` when it was not, `Err` when it
+/// is still loaded after the wait.
+fn stop(manager: &dyn Manager, label: &str, uid: u32) -> Result<bool, String> {
+    let was_loaded = known_to_launchd(manager, label, uid);
+    if !was_loaded {
+        return Ok(false);
     }
+    let (program, args) = bootout_command(label, uid);
+    let result = manager.run(program, &args);
+    wait_until_unloaded(manager, label, uid);
+    if known_to_launchd(manager, label, uid) {
+        let why = result.err().unwrap_or_else(|| "it is still loaded".into());
+        return Err(format!("could not stop the agent {label} ({why})"));
+    }
+    Ok(true)
 }
 
 /// Creates the log owner-only, or tightens an older one, so the service
@@ -464,14 +509,17 @@ pub(crate) mod fake {
     use std::cell::RefCell;
 
     /// launchd as a set of loaded labels. `bootstrap` loads the label the
-    /// file is named after, `bootout` unloads one, and `fail` makes any call
-    /// naming that word fail. `stuck` keeps the old label loaded.
+    /// file is named after and fails for one already loaded, as launchctl
+    /// does. `bootout` unloads one, and `fail` makes any call naming that
+    /// word fail. `stuck` keeps the old label loaded. A label in `waiting`
+    /// is loaded but not running.
     #[derive(Default)]
     pub(crate) struct Launchd {
         pub(crate) loaded: RefCell<Vec<String>>,
         pub(crate) calls: RefCell<Vec<String>>,
         pub(crate) fail: Option<&'static str>,
         pub(crate) stuck: bool,
+        pub(crate) waiting: Vec<&'static str>,
     }
 
     impl Launchd {
@@ -496,7 +544,13 @@ pub(crate) mod fake {
                 return Err(format!("{word} failed"));
             }
             match args.first().map(String::as_str) {
-                Some("print") if self.has(&label(&args[1])) => Ok("\tstate = running\n".into()),
+                Some("print") if self.has(&label(&args[1])) => {
+                    let gone = label(&args[1]);
+                    Ok(match self.waiting.iter().any(|w| *w == gone) {
+                        true => "\tstate = waiting\n".into(),
+                        false => "\tstate = running\n".into(),
+                    })
+                }
                 Some("print") => Err("Could not find service".into()),
                 Some("bootout") if self.stuck && label(&args[1]) == OLD_LABEL => Ok(String::new()),
                 Some("bootout") => {
@@ -511,9 +565,11 @@ pub(crate) mod fake {
                 }
                 Some("bootstrap") => {
                     let file = label(&args[2]);
-                    self.loaded
-                        .borrow_mut()
-                        .push(file.trim_end_matches(".plist").to_string());
+                    let name = file.trim_end_matches(".plist").to_string();
+                    if self.has(&name) {
+                        return Err("Bootstrap failed: 5: Input/output error".into());
+                    }
+                    self.loaded.borrow_mut().push(name);
                     Ok(String::new())
                 }
                 _ => Ok(String::new()),
@@ -803,14 +859,7 @@ mod tests {
     }
 
     fn move_now(home: &Path, fake: &Launchd) -> Result<Moved, String> {
-        move_old_agent(
-            home,
-            Path::new(PROGRAM),
-            fake,
-            7,
-            &|| false,
-            std::time::Duration::ZERO,
-        )
+        move_old_agent(home, Path::new(PROGRAM), fake, 7, &|| false, Duration::ZERO)
     }
 
     #[test]
@@ -932,32 +981,26 @@ mod tests {
     #[test]
     fn a_new_agent_that_loads_but_does_not_run_reports_it_is_down() {
         let home = old_home("service-move-down", Path::new(PROGRAM));
-        struct Waits;
-        impl Manager for Waits {
-            fn run(&self, _: &str, args: &[String]) -> Result<String, String> {
-                match args.first().map(String::as_str) {
-                    Some("print") if args[1].ends_with(OLD_LABEL) => Err("gone".into()),
-                    Some("print") => Ok("\tstate = waiting\n".into()),
-                    _ => Ok(String::new()),
-                }
-            }
-        }
+        let waits = || Launchd {
+            waiting: vec![LABEL],
+            ..Launchd::with(&[OLD_LABEL])
+        };
 
         let moved = move_old_agent(
             &home,
             Path::new(PROGRAM),
-            &Waits,
+            &waits(),
             7,
             &|| false,
-            std::time::Duration::ZERO,
+            Duration::ZERO,
         );
         let answered = move_old_agent(
             &old_home("service-move-up", Path::new(PROGRAM)),
             Path::new(PROGRAM),
-            &Waits,
+            &waits(),
             7,
             &|| true,
-            std::time::Duration::ZERO,
+            Duration::ZERO,
         );
 
         assert_eq!(moved, Ok(Moved::Done { up: false }));
@@ -966,10 +1009,106 @@ mod tests {
     }
 
     #[test]
+    fn a_loaded_new_agent_that_is_not_running_is_booted_out_first_so_one_agent_stays() {
+        // Arrange: a half moved machine, both files on disk and both loaded.
+        let home = old_home("service-move-half", Path::new(PROGRAM));
+        put(Kind::Launchd, &home, PROGRAM, &Fake::default());
+        let fake = Launchd {
+            waiting: vec![LABEL],
+            ..Launchd::with(&[OLD_LABEL, LABEL])
+        };
+
+        // Act
+        let moved = move_now(&home, &fake);
+
+        // Assert
+        assert!(moved.is_ok(), "{moved:?}");
+        assert_eq!(*fake.loaded.borrow(), vec![LABEL.to_string()]);
+        assert!(!crate::usage::service::old_file(&home).exists());
+    }
+
+    #[test]
+    fn a_failed_start_restores_a_new_file_that_was_there_and_loads_only_the_old_agent() {
+        let home = old_home("service-move-restore", Path::new(PROGRAM));
+        put(Kind::Launchd, &home, "/other/playbook", &Fake::default());
+        let file = Kind::Launchd.file(&home);
+        let before = fs::read(&file).unwrap();
+        let fake = Launchd {
+            fail: Some("enable"),
+            ..Launchd::with(&[OLD_LABEL])
+        };
+
+        let err = move_now(&home, &fake).unwrap_err();
+
+        assert!(err.contains("the old agent runs again"), "{err}");
+        assert_eq!(fs::read(&file).unwrap(), before);
+        assert_eq!(*fake.loaded.borrow(), vec![OLD_LABEL.to_string()]);
+    }
+
+    #[test]
+    fn a_failed_start_leaves_an_old_agent_that_was_not_loaded_stopped() {
+        let home = old_home("service-move-was-stopped", Path::new(PROGRAM));
+        let fake = Launchd {
+            fail: Some(LABEL),
+            ..Launchd::default()
+        };
+
+        let err = move_now(&home, &fake).unwrap_err();
+
+        assert!(err.contains("stays stopped"), "{err}");
+        assert!(fake.loaded.borrow().is_empty());
+        assert!(crate::usage::service::old_file(&home).is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_old_file_that_cannot_be_removed_is_reported_and_the_new_agent_keeps_running() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = old_home("service-move-locked", Path::new(PROGRAM));
+        let fake = Launchd::with(&[OLD_LABEL]);
+        // The new file is written first, then the folder is locked.
+        put(Kind::Launchd, &home, PROGRAM, &Fake::default());
+        let dir = crate::usage::service::old_file(&home)
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let err = move_now(&home, &fake).unwrap_err();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(err.contains("could not be removed"), "{err}");
+        assert!(fake.has(LABEL) && !fake.has(OLD_LABEL));
+    }
+
+    #[test]
+    fn the_real_home_net_stops_every_file_change() {
+        let home = old_home("service-move-net", Path::new(PROGRAM));
+        let _pretend = crate::common::real_home::pretend_account_home(&home);
+        let fake = Launchd::with(&[OLD_LABEL]);
+
+        let moved = move_now(&home, &fake);
+        let removed = remove_old(&home, &fake, 7);
+        let installed = install(Kind::Launchd, &home, Path::new(PROGRAM), &fake, 7, false);
+
+        if std::env::var_os(crate::common::real_home::ALLOW_ENV).is_none() {
+            for err in [
+                moved.unwrap_err(),
+                removed.unwrap_err(),
+                installed.unwrap_err(),
+            ] {
+                assert!(err.contains("PLAYBOOK_ALLOW_REAL_HOME"), "{err}");
+            }
+            assert!(crate::usage::service::old_file(&home).is_file());
+            assert!(fake.calls.borrow().is_empty());
+        }
+    }
+
+    #[test]
     fn remove_old_boots_out_and_deletes_only_the_old_file() {
         let home = old_home("service-remove-old", Path::new(PROGRAM));
         put(Kind::Launchd, &home, PROGRAM, &Fake::default());
-        let fake = Launchd::with(&[OLD_LABEL]);
+        let fake = Launchd::with(&[OLD_LABEL, LABEL]);
 
         let removed = remove_old(&home, &fake, 7).unwrap();
         let again = remove_old(&home, &fake, 7).unwrap();
@@ -978,5 +1117,6 @@ mod tests {
         assert_eq!(again, None);
         assert!(!fake.has(OLD_LABEL));
         assert!(Kind::Launchd.file(&home).is_file(), "the new agent stays");
+        assert!(fake.has(LABEL), "and stays loaded");
     }
 }

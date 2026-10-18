@@ -368,8 +368,8 @@ pub fn find_old(home: &Path) -> Option<OldAgent> {
     })
 }
 
-/// The agent file 0.37.0 wrote for `program`, for tests and for a rollback
-/// that loads the old agent again.
+/// The agent file 0.37.0 wrote for `program`, so tests in other crates
+/// can set up a machine that still has it.
 pub fn render_old(program: &Path, log: &Path) -> String {
     render_labeled(Kind::Launchd, OLD_LABEL, program, log)
 }
@@ -563,5 +563,33 @@ mod tests {
         assert_eq!(ours.file, file);
         assert!(!no_marker.ours);
         assert!(!other_label.ours);
+    }
+
+    #[test]
+    fn installed_names_the_current_agent_else_playbooks_old_one_with_the_fix() {
+        let current = scratch_dir("service-installed-new");
+        let old = scratch_dir("service-installed-old");
+        let foreign = scratch_dir("service-installed-foreign");
+        let Some(kind) = Kind::current() else {
+            return;
+        };
+        let file = kind.file(&current);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, render(kind, Path::new(PROGRAM), Path::new("/l"))).unwrap();
+        for (home, body) in [(&old, OLD_PLIST), (&foreign, "<plist/>")] {
+            let file = old_file(home);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, body).unwrap();
+        }
+
+        let now = installed(&current).unwrap();
+        let left = installed(&old).unwrap();
+
+        assert!(now.contains(kind.id()), "{now}");
+        assert!(
+            left.contains(OLD_LABEL) && left.contains("playbook migrate"),
+            "{left}"
+        );
+        assert_eq!(installed(&foreign), None);
     }
 }
