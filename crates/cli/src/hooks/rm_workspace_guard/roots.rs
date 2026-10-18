@@ -8,13 +8,13 @@
 //!
 //! Three kinds of allowance:
 //! - temp and cache folders per OS, contents only;
-//! - playbook's own scratch folders under `~/.config/playbook`, contents only;
+//! - playbook's footprint (`footprint`): its config, cache, data and state
+//!   folders per OS, whole, as the user ordered on 2026-10-19;
 //! - playbook's install files by exact name (the binary, its links, its
-//!   backups and staging files, the collector's service file), so playbook
-//!   can repair its own install.
+//!   backups and staging files, the collector's service file).
 //!
-//! The protected list and the deny set beat every allowance, the configured
-//! ones included. The deny set is one table, `DENY`, which the guide's table
+//! The protected list (only what cannot be made again) and the deny set beat
+//! every allowance, the configured ones included. The deny set is one table, `DENY`, which the guide's table
 //! is generated from.
 
 use std::path::{Path, PathBuf};
@@ -48,10 +48,15 @@ pub(super) struct RootEnv {
     pub home: PathBuf,
     pub tmpdir: Option<PathBuf>,
     pub xdg_cache_home: Option<PathBuf>,
+    pub xdg_config_home: Option<PathBuf>,
+    pub xdg_data_home: Option<PathBuf>,
+    pub xdg_state_home: Option<PathBuf>,
     /// `TEMP` and `TMP`, used on Windows only.
     pub windows_temp: Vec<PathBuf>,
     /// `LOCALAPPDATA`, used on Windows only.
     pub local_app_data: Option<PathBuf>,
+    /// `APPDATA`, used on Windows only.
+    pub app_data: Option<PathBuf>,
     pub temp_dir: PathBuf,
     pub uid: u32,
     pub bin_dir: PathBuf,
@@ -70,8 +75,12 @@ impl RootEnv {
             os: Os::current(),
             tmpdir: var("TMPDIR"),
             xdg_cache_home: var("XDG_CACHE_HOME"),
+            xdg_config_home: var("XDG_CONFIG_HOME"),
+            xdg_data_home: var("XDG_DATA_HOME"),
+            xdg_state_home: var("XDG_STATE_HOME"),
             windows_temp: ["TEMP", "TMP"].iter().filter_map(|n| var(n)).collect(),
             local_app_data: var("LOCALAPPDATA"),
+            app_data: var("APPDATA"),
             temp_dir: std::env::temp_dir(),
             uid: crate::service_manager::uid(),
             bin_dir: crate::uninstall::install_dir(&home),
@@ -137,20 +146,27 @@ pub(super) fn temp_roots(env: &RootEnv) -> Vec<PathBuf> {
 /// `TMPDIR=/` or `TMPDIR=$HOME` would otherwise hand the allowance to
 /// everything. A Windows path counts as absolute by its drive letter, so a
 /// test on another OS can check the Windows list.
-fn usable(path: &Path, env: &RootEnv) -> bool {
+/// Whether `path` is absolute on `os`: a drive letter path such as `C:/x`
+/// counts on Windows whatever OS runs the check.
+fn absolute(path: &Path, os: Os) -> bool {
     let text = path.to_string_lossy();
     let drive = text.as_bytes();
-    let windows_absolute = env.os == Os::Windows
+    let windows_absolute = os == Os::Windows
         && drive.len() >= 3
         && drive[0].is_ascii_alphabetic()
         && drive[1] == b':'
         && matches!(drive[2], b'/' | b'\\');
+    path.is_absolute() || windows_absolute
+}
+
+fn usable(path: &Path, env: &RootEnv) -> bool {
+    let text = path.to_string_lossy();
     let deep = text
         .split(['/', '\\'])
         .filter(|part| !part.is_empty())
         .count()
         >= 2;
-    (path.is_absolute() || windows_absolute)
+    absolute(path, env.os)
         && deep
         && !path
             .components()
@@ -168,55 +184,113 @@ pub(super) fn macos_temp_base(path: &Path) -> Option<PathBuf> {
     shape.then(|| parts[..7].iter().collect())
 }
 
-/// The folders under `~/.config/playbook` that hold only scratch files
-/// playbook makes again on demand: document scratch (`tmp`), a staging
-/// folder (`staging`), files unpacked from the binary (`embedded`) and config
-/// drift markers (`cc-state`). `runtime` is left out: it holds the live
-/// session's spend ledger, which the auto mode cap reads.
-pub(super) fn playbook_scratch_roots(env: &RootEnv) -> Vec<PathBuf> {
-    let root = env.playbook_root();
-    ["tmp", "staging", "embedded", "cc-state"]
-        .iter()
-        .map(|name| root.join(name))
-        .collect()
-}
-
-/// The `tmp` folder at any depth under `playbook_root` that `path` sits in,
-/// for the `~/.config/playbook/**/tmp/**` allowance. The protected list is
-/// checked first, so a `tmp` inside the memory store does not count.
-pub(super) fn playbook_tmp_base(path: &Path, playbook_root: &Path) -> Option<PathBuf> {
-    let rest = path.strip_prefix(playbook_root).ok()?;
-    let mut base = playbook_root.to_path_buf();
-    for part in rest.components() {
-        base.push(part);
-        if part.as_os_str() == "tmp" {
-            return Some(base);
+/// Every folder playbook owns whole, for the OS in `env`: its config,
+/// cache, data and state folders, and its plugin cache and marketplace
+/// under `~/.claude/plugins`. Each may be deleted with everything in it,
+/// except the protected paths. A folder from the environment counts only
+/// when its value is absolute, and only its `playbook` child is taken, so
+/// `XDG_CONFIG_HOME=/` adds `/playbook` and never `/`.
+pub(super) fn footprint(env: &RootEnv) -> Vec<PathBuf> {
+    let home = &env.home;
+    let mut dirs = vec![env.playbook_root()];
+    let from_env = |value: &Option<PathBuf>| {
+        value
+            .as_ref()
+            .filter(|p| absolute(p, env.os))
+            .map(|p| p.join("playbook"))
+    };
+    match env.os {
+        Os::Windows => {
+            dirs.extend(from_env(&env.app_data));
+            dirs.extend(from_env(&env.local_app_data));
+        }
+        os => {
+            dirs.push(home.join(".cache/playbook"));
+            dirs.push(home.join(".local/share/playbook"));
+            dirs.push(home.join(".local/state/playbook"));
+            if os == Os::Mac {
+                dirs.push(home.join("Library/Caches/playbook"));
+                dirs.push(home.join("Library/Application Support/playbook"));
+                dirs.push(home.join("Library/Logs/playbook"));
+            }
+            for value in [
+                &env.xdg_config_home,
+                &env.xdg_cache_home,
+                &env.xdg_data_home,
+                &env.xdg_state_home,
+            ] {
+                dirs.extend(from_env(value));
+            }
         }
     }
-    None
+    let plugins = home.join(".claude/plugins");
+    dirs.push(plugins.join("cache/pragmatic-engineer"));
+    dirs.push(plugins.join("marketplaces/pragmatic-engineer"));
+    dirs.sort();
+    dirs.dedup();
+    dirs
 }
 
-/// The playbook data that is never deleted, whatever root covers it: the
-/// memory store, the databases, plans and handoffs, legacy org config, the
-/// session state in `runtime` (the auto-learn queue and the spend ledger the
-/// auto mode cap reads), the effort ledger, the system prompt and the config
-/// file. A parent of any of these is protected
-/// too, which the caller checks.
-pub(super) fn protected(env: &RootEnv) -> Vec<PathBuf> {
-    let root = env.playbook_root();
-    let legacy_db = playbook_data::config::legacy_db_in(&root);
-    let mut paths: Vec<PathBuf> = ["memory", "repos", "orgs", "runtime", "effort", "prompts"]
-        .iter()
-        .map(|name| root.join(name))
-        .collect();
-    paths.push(playbook_data::data_dir_from(&env.home));
-    paths.push(crate::config::global_config_path(&root));
-    for suffix in ["-wal", "-shm"] {
-        let mut name = legacy_db.clone().into_os_string();
-        name.push(suffix);
-        paths.push(PathBuf::from(name));
+/// What one protected path holds, which names the command that handles it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Kept {
+    /// The memory store.
+    Memory,
+    /// `data/config.db`: settings, answers and the upgrade record.
+    ConfigDb,
+    /// `repos`: plans, handoffs and per-repo config.
+    Repos,
+    /// `orgs`: per-org config.
+    Orgs,
+    /// `runtime`: the auto mode spend ledger.
+    Runtime,
+}
+
+impl Kept {
+    /// The protected path, as the denial names it.
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Kept::Memory => "~/.config/playbook/memory (the memory store)",
+            Kept::ConfigDb => {
+                "~/.config/playbook/data/config.db (settings, answers, the upgrade record)"
+            }
+            Kept::Repos => "~/.config/playbook/repos (plans, handoffs, per-repo config)",
+            Kept::Orgs => "~/.config/playbook/orgs (per-org config)",
+            Kept::Runtime => "~/.config/playbook/runtime (the auto mode spend ledger)",
+        }
     }
-    paths.push(legacy_db);
+
+    /// What to do instead of `rm`.
+    pub(super) fn instead(self) -> &'static str {
+        match self {
+            Kept::Memory => "keep a copy with `playbook memory export`, then ask the user to delete it",
+            Kept::ConfigDb => "keep a copy with `playbook config export`, then ask the user to delete it",
+            Kept::Repos => "clear plan files with `playbook plan cleanup <slug>` or `playbook plan cleanup --stale`; ask the user before deleting handoffs or per-repo config",
+            Kept::Orgs => "ask the user to delete it",
+            Kept::Runtime => "deleting it resets the auto mode cost cap, so ask the user",
+        }
+    }
+}
+
+/// The playbook data that cannot be made again, and is never deleted
+/// whatever root covers it: the memory store, `data/config.db` with its
+/// `-wal` and `-shm` files, `repos`, `orgs` and `runtime`. A folder that holds
+/// one is protected too, which the caller checks. Everything else playbook
+/// writes can be made again and may go.
+pub(super) fn protected(env: &RootEnv) -> Vec<(PathBuf, Kept)> {
+    let root = env.playbook_root();
+    let db = playbook_data::data_dir_from(&env.home).join("config.db");
+    let mut paths = vec![
+        (root.join("memory"), Kept::Memory),
+        (root.join("repos"), Kept::Repos),
+        (root.join("orgs"), Kept::Orgs),
+        (root.join("runtime"), Kept::Runtime),
+    ];
+    for suffix in ["", "-wal", "-shm"] {
+        let mut name = db.clone().into_os_string();
+        name.push(suffix);
+        paths.push((PathBuf::from(name), Kept::ConfigDb));
+    }
     paths
 }
 
@@ -406,17 +480,20 @@ pub(super) enum InstallFile {
     },
 }
 
-/// Backups (`playbook.<version>.bak`) and staging files (`.playbook.*`) in
-/// the install folder, and the collector's service file. The binary and its
-/// `pb` and `pbtop` links stay blocked: every hook runs the binary, so
-/// deleting it would turn every guard off. A Homebrew install is left to
-/// Homebrew.
+/// The binary and its `pb` and `pbtop` links, backups
+/// (`playbook.<version>.bak`) and staging files (`.playbook.*`) in the
+/// install folder, and the collector's service files. A Homebrew install is
+/// left to Homebrew.
 pub(super) fn install_files(env: &RootEnv) -> Vec<InstallFile> {
     let mut files = Vec::new();
     let bin = &env.bin_dir;
     if bin.is_absolute() && !crate::update::is_homebrew(bin) {
         // The names `update::swap` and `install.sh` write: backups
         // `playbook.<version>.bak`, and temp or staging files `.playbook.*`.
+        let exe = if env.os == Os::Windows { ".exe" } else { "" };
+        for name in ["playbook", "pb", "pbtop"] {
+            files.push(InstallFile::Exact(bin.join(format!("{name}{exe}"))));
+        }
         for (prefix, suffix) in [("playbook.", ".bak"), (".playbook.", "")] {
             files.push(InstallFile::Prefix {
                 dir: bin.clone(),
@@ -484,8 +561,12 @@ mod tests {
             home: PathBuf::from("/h/me"),
             tmpdir: Some(PathBuf::from("/var/folders/ab/xyz/T/")),
             xdg_cache_home: Some(PathBuf::from("/h/me/.xdg-cache")),
+            xdg_config_home: None,
+            xdg_data_home: None,
+            xdg_state_home: None,
             windows_temp: vec![PathBuf::from("C:/Users/me/AppData/Local/Temp")],
             local_app_data: Some(PathBuf::from("C:/Users/me/AppData/Local")),
+            app_data: Some(PathBuf::from("C:/Users/me/AppData/Roaming")),
             temp_dir: PathBuf::from("/sys/temp"),
             uid: 501,
             bin_dir: PathBuf::from("/h/me/.local/bin"),
@@ -581,14 +662,79 @@ mod tests {
     }
 
     #[test]
-    fn playbook_scratch_roots_are_the_four_scratch_folders() {
-        let roots = shown(&playbook_scratch_roots(&env(Os::Mac)));
+    fn each_os_has_its_own_playbook_footprint() {
+        let mut linux = env(Os::Linux);
+        linux.xdg_config_home = Some(PathBuf::from("/x/config"));
+        linux.xdg_data_home = Some(PathBuf::from("/x/data"));
+        linux.xdg_state_home = Some(PathBuf::from("relative/state"));
+        let plugins = [
+            "/h/me/.claude/plugins/cache/pragmatic-engineer",
+            "/h/me/.claude/plugins/marketplaces/pragmatic-engineer",
+        ];
+        let table: Vec<(RootEnv, Vec<&str>)> = vec![
+            (
+                env(Os::Mac),
+                vec![
+                    "/h/me/.cache/playbook",
+                    "/h/me/.config/playbook",
+                    "/h/me/.local/share/playbook",
+                    "/h/me/.local/state/playbook",
+                    "/h/me/.xdg-cache/playbook",
+                    "/h/me/Library/Application Support/playbook",
+                    "/h/me/Library/Caches/playbook",
+                    "/h/me/Library/Logs/playbook",
+                ],
+            ),
+            (
+                linux,
+                vec![
+                    "/h/me/.cache/playbook",
+                    "/h/me/.config/playbook",
+                    "/h/me/.local/share/playbook",
+                    "/h/me/.local/state/playbook",
+                    "/h/me/.xdg-cache/playbook",
+                    "/x/config/playbook",
+                    "/x/data/playbook",
+                ],
+            ),
+            (
+                env(Os::Windows),
+                vec![
+                    "/h/me/.config/playbook",
+                    "C:/Users/me/AppData/Local/playbook",
+                    "C:/Users/me/AppData/Roaming/playbook",
+                ],
+            ),
+        ];
+        for (env, want) in table {
+            let mut want: Vec<String> = want.iter().map(|w| w.to_string()).collect();
+            want.extend(plugins.iter().map(|p| p.to_string()));
+            want.sort();
 
-        let want: Vec<String> = ["tmp", "staging", "embedded", "cc-state"]
-            .iter()
-            .map(|n| format!("/h/me/.config/playbook/{n}"))
-            .collect();
-        assert_eq!(roots, want);
+            let got = shown(&footprint(&env));
+
+            assert_eq!(got, want, "{:?}", env.os);
+        }
+    }
+
+    #[test]
+    fn the_footprint_never_holds_a_bare_config_or_cache_folder() {
+        for os in [Os::Mac, Os::Linux, Os::Windows, Os::Other] {
+            let mut env = env(os);
+            env.xdg_config_home = Some(PathBuf::from("/"));
+            for dir in footprint(&env) {
+                assert_eq!(
+                    dir.file_name().and_then(|n| n.to_str()),
+                    Some(if dir.starts_with("/h/me/.claude") {
+                        "pragmatic-engineer"
+                    } else {
+                        "playbook"
+                    }),
+                    "{os:?}: {}",
+                    dir.display()
+                );
+            }
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -624,50 +770,32 @@ mod tests {
     }
 
     #[test]
-    fn a_tmp_folder_at_any_depth_under_the_playbook_root_is_found() {
-        let root = Path::new("/h/me/.config/playbook");
-        let cases = [
-            (
-                "/h/me/.config/playbook/tmp/doc-1",
-                Some("/h/me/.config/playbook/tmp"),
-            ),
-            (
-                "/h/me/.config/playbook/a/b/tmp/x",
-                Some("/h/me/.config/playbook/a/b/tmp"),
-            ),
-            ("/h/me/.config/playbook/a/tmpx/y", None),
-            ("/h/me/.config/other/tmp/y", None),
-        ];
-        for (path, want) in cases {
-            assert_eq!(
-                playbook_tmp_base(Path::new(path), root),
-                want.map(PathBuf::from),
-                "{path}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_memory_store_and_databases_are_protected() {
-        let shown = shown(&protected(&env(Os::Mac)));
+    fn only_what_cannot_be_made_again_is_protected() {
+        let got: Vec<String> = protected(&env(Os::Mac))
+            .iter()
+            .map(|(p, _)| p.display().to_string())
+            .collect();
 
         let want: Vec<String> = [
             "memory",
             "repos",
             "orgs",
             "runtime",
-            "effort",
-            "prompts",
-            "data",
-            "config.json",
-            "playbook.db-wal",
-            "playbook.db-shm",
-            "playbook.db",
+            "data/config.db",
+            "data/config.db-wal",
+            "data/config.db-shm",
         ]
         .iter()
         .map(|n| format!("/h/me/.config/playbook/{n}"))
         .collect();
-        assert_eq!(shown, want);
+        assert_eq!(got, want);
+        for (_, kept) in protected(&env(Os::Linux)) {
+            let says = kept.instead();
+            assert!(
+                says.contains("playbook ") || says.contains("ask the user"),
+                "{says}"
+            );
+        }
     }
 
     #[test]
@@ -726,9 +854,9 @@ mod tests {
         let files = install_files(&env(Os::Mac));
         let any =
             |path: &str, glob: Option<&str>| files.iter().any(|f| f.covers(Path::new(path), glob));
-        assert!(!any("/h/me/.local/bin/playbook", None));
-        assert!(!any("/h/me/.local/bin/pb", None));
-        assert!(!any("/h/me/.local/bin/pbtop", None));
+        assert!(any("/h/me/.local/bin/playbook", None));
+        assert!(any("/h/me/.local/bin/pb", None));
+        assert!(any("/h/me/.local/bin/pbtop", None));
         assert!(any("/h/me/.local/bin/playbook.0.36.0.bak", None));
         assert!(any("/h/me/.local/bin/.playbook.update.1.2", None));
         assert!(any("/h/me/.local/bin", Some("playbook.*.bak")));
@@ -762,10 +890,10 @@ mod tests {
     }
 
     #[test]
-    fn windows_keeps_the_exe_and_has_no_service_file() {
+    fn windows_names_the_exe_and_has_no_service_file() {
         let files = install_files(&env(Os::Windows));
 
-        assert!(!files
+        assert!(files
             .iter()
             .any(|f| f.covers(Path::new("/h/me/.local/bin/playbook.exe"), None)));
         assert!(!files.iter().any(|f| matches!(

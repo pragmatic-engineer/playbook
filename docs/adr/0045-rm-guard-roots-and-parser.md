@@ -1,8 +1,8 @@
 # ADR-0045: Read rm Commands as Real Words and Build In the Safe Roots
 
-- **Status:** Accepted
+- **Status:** Accepted, amended 2026-10-19 (playbook's footprint hard-coded)
 - **Date created:** 2026-10-18
-- **Date modified:** 2026-10-18
+- **Date modified:** 2026-10-19
 - **Amends:** [ADR 0002](0002-plugin-based-install-safety-hooks.md), which ships the `rm-workspace-guard` always on. Builds on the self-healing goal of [ADR 0034](0034-self-healing-upgrades.md): the model may clean up playbook's leftovers while it repairs an install.
 
 ## Context
@@ -78,6 +78,12 @@ Each was added only where deleting is safe:
 Blocked whatever root covers them: `~/.config/playbook/memory`, `data` (`config.db`, `memory.db`, the usage database), `repos` (plans, handoffs, per-repo config, live worktrees), `orgs` (legacy org config), `runtime` (the spend ledger the auto mode cap reads, the auto-learn queue and old handoffs), `effort`, `prompts`, `playbook.db` with its `-wal` and `-shm` files, `config.json`, any folder that holds one of them (such as `~/.config/playbook` itself), and any `.lock` folder under `~/.config/playbook`. The check compares the path as the disk stores it, so a different letter case on a case-insensitive disk (`MEMORY`, `runtime/HANDOFF`) is caught.
 
 The playbook binary and its `pb` and `pbtop` links are not allowed either. Every hook runs the binary, so deleting it would turn every guard off, the rm guard and the auto mode cap included.
+
+### Amendment 2026-10-19: playbook's footprint is hard-coded
+
+The user ordered playbook's whole footprint hard-coded in the binary as allowed roots, per OS, with no config, no setup step and no migration. `roots::footprint` is the one function the guard reads. It returns the config folder (`~/.config/playbook`, honouring `XDG_CONFIG_HOME`; `%APPDATA%\playbook` on Windows), the cache, data and state folders (`~/.cache/playbook`, `~/.local/share/playbook`, `~/.local/state/playbook`, the `XDG_*_HOME` values, `~/Library/Caches/playbook`, `~/Library/Application Support/playbook` and `~/Library/Logs/playbook` on macOS, `%LOCALAPPDATA%\playbook` on Windows), and the plugin cache and marketplace folders under `~/.claude/plugins`. Each folder may go whole, the folder itself included. Only a folder named for playbook counts, so a bare `~/.config` or `~/.cache` stays blocked. The install files now include the binary and its `pb` and `pbtop` links, and a linked worktree root (its `.git` is a file pointing into the main repo's `worktrees` folder) in a folder playbook makes worktrees in (`.worktrees`, `WORKTREE_BASE_DIR`, `.claude/worktrees`) may go. A main checkout and any `.git` there stay blocked, a worktree folder that is `/`, home or above home is dropped, and a footprint folder that links to a folder not named for playbook is dropped.
+
+The protected paths shrink to what cannot be made again: the memory store, `data/config.db` with its `-wal` and `-shm` files, `repos` (plans, handoffs), `orgs` and `runtime` (the spend ledger). The lock rule is gone. The denial names each protected item and the `playbook` command to use instead, or says to ask the user. This supersedes the protected list above and the rejected alternative to allow the binary: `playbook update` and `install.sh` still replace it, and the user chose to let the model remove a broken install.
 
 ## Alternatives considered
 

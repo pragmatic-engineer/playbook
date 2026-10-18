@@ -103,6 +103,9 @@ impl Fx {
             .env_remove("WORKTREE_BASE_DIR")
             .env_remove("PLAYBOOK_BIN_DIR")
             .env_remove("XDG_CACHE_HOME")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_DATA_HOME")
+            .env_remove("XDG_STATE_HOME")
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .current_dir(cwd);
@@ -161,8 +164,8 @@ fn worktree_and_clone_leftovers_are_allowed_but_never_the_root_or_parents() {
     let cases: Vec<(String, bool)> = vec![
         (format!("{d} -rf {w}/cargo-rm-guard"), false),
         (format!("{d} -rf {w}/new-repos/some-name"), false),
-        // A linked worktree root goes with `git worktree remove`.
-        (format!("{d} -rf {w}/repo/wt1"), true),
+        // A linked worktree root in the folder playbook makes them in may go.
+        (format!("{d} -rf {w}/repo/wt1"), false),
         (format!("{d} -rf {w}/repo/wt1/target"), false),
         (format!("{d} -rf {w}/repo/never-existed/deep"), false),
         (format!("{d} -rf {w}/cargo-rm-guard/"), false),
@@ -549,6 +552,16 @@ fn a_worktree_base_dir_from_the_environment_is_allowed_contents_only() {
         let cmd = format!("{d} -rf {}/.ssh", s(&fx.home));
         assert!(fx.denied(&cmd, &fx.repo, &env), "base {bad:?}");
     }
+    // A main checkout under the base, or its `.git`, is no worktree.
+    let org = fx.base.join("org");
+    let env = [("WORKTREE_BASE_DIR", org.to_str().expect("utf8"))];
+    let r = s(&fx.repo);
+    for cmd in [format!("{d} -rf {r}"), format!("{d} -rf {r}/.git")] {
+        assert!(fx.denied(&cmd, &fx.repo, &env), "{cmd}");
+    }
+    let w1 = s(&fx.wt1);
+    assert!(!fx.denied(&format!("{d} -rf {w1}"), &fx.repo, &env));
+    assert!(fx.denied(&format!("{d} -rf {w1}/.git"), &fx.repo, &env));
 }
 
 #[test]
@@ -571,7 +584,8 @@ fn the_denial_message_names_the_scratch_roots_and_the_config_key() {
     }
     for needle in [
         "/tmp/*",
-        "/**/tmp/*",
+        "playbook's own folders (",
+        ".config/playbook",
         ".worktrees/*",
         "rule: outside the allowed roots",
         "No config root can cover this path",
@@ -638,65 +652,140 @@ fn quoting_braces_and_shell_syntax_cannot_smuggle_a_path_out() {
     check(&fx, &fx.repo, &cases);
 }
 
-/// Playbook's data stays blocked even when a configured root covers it, and
-/// its scratch folders are allowed with no config.
+/// Only playbook data that cannot be made again stays blocked, even when a
+/// configured root covers it. The rest of the playbook folder may go, with
+/// no config.
 #[test]
-fn playbook_data_is_protected_and_its_scratch_folders_are_allowed() {
+fn only_irreplaceable_playbook_data_is_protected() {
     let fx = Fx::new();
     let d = rm();
+    let h = s(&fx.home);
     let pb = s(&fx.home.join(".config/playbook"));
     fs::create_dir_all(fx.home.join(".config/playbook/memory/acme/app")).expect("memory");
     fs::create_dir_all(fx.home.join(".config/playbook/data")).expect("data");
     let cases: Vec<(String, bool)> = vec![
         (format!("{d} -rf {pb}/tmp/doc-1"), false),
+        (format!("{d} -rf {pb}/tmp"), false),
         (format!("{d} -rf {pb}/staging/x"), false),
-        (format!("{d} -rf {pb}/runtime/s1"), true),
-        (format!("{d} -f {pb}/runtime/s1/auto-cost.json"), true),
+        (format!("{d} -rf {pb}/effort"), false),
+        (format!("{d} -rf {pb}/prompts"), false),
+        (format!("{d} -f {pb}/config.json"), false),
+        (format!("{d} -f {pb}/data/memory.db"), false),
+        (format!("{d} -f {pb}/data/usage.db"), false),
         (format!("{d} -rf {pb}/embedded/0.1.0"), false),
+        (format!("{d} -rf {pb}/embedded/ver-*"), false),
         (format!("{d} -rf {pb}/repos-cache/tmp/x"), false),
         (format!("{d} -rf ~/.config/playbook/tmp/doc-1"), false),
+        (format!("{d} -rf {pb}/runtime/s1"), true),
+        (format!("{d} -f {pb}/runtime/s1/auto-cost.json"), true),
+        (format!("{d} -rf {pb}/runtime/s1/edits.jsonl.lock"), true),
+        (format!("{d} -rf {pb}/runtime/han*"), true),
         (format!("{d} -rf {pb}/memory/tmp/x"), true),
         (format!("{d} -rf {pb}/memory/acme/app"), true),
         (format!("{d} -rf ~/.config/playbook/memory"), true),
         (format!("{d} -f {pb}/data/config.db"), true),
-        (format!("{d} -f {pb}/data/memory.db"), true),
+        (format!("{d} -f {pb}/data/config.db-wal"), true),
+        (format!("{d} -f {pb}/data/config.db-shm"), true),
+        (format!("{d} -rf {pb}/data"), true),
+        (format!("{d} -f {pb}/data/*.db"), true),
         (format!("{d} -rf {pb}/repos/acme/app/plans"), true),
-        (format!("{d} -rf {pb}/runtime/handoff/x"), true),
-        (format!("{d} -rf {pb}/runtime/s1/edits.jsonl.lock"), true),
-        (format!("{d} -rf {pb}/runtime/s1/*.lock"), true),
-        (format!("{d} -rf {pb}/embedded/ver-*"), false),
-        (format!("{d} -rf {pb}/runtime/han*"), true),
+        (format!("{d} -rf {pb}/orgs/acme"), true),
         (format!("{d} -f {}/Cargo.lock", s(&fx.repo)), false),
         (format!("{d} -rf {pb}"), true),
         (format!("{d} -rf {pb}/*"), true),
         (format!("{d} -rf {pb}/tmp/../memory"), true),
+        // Never the bare config folder the footprint lives in.
+        (format!("{d} -rf {h}/.config"), true),
     ];
     check(&fx, &fx.repo, &cases);
-    assert!(fx.denied(&format!("{d} -rf {pb}/tmp"), &fx.repo, &[]));
+    // Nor, by default, the bare cache and data folders.
+    for bare in [".cache", ".local/share", ".local/state"] {
+        assert!(
+            fx.denied(&format!("{d} -rf {h}/{bare}"), &fx.repo, &[]),
+            "{bare}"
+        );
+    }
     // A configured root over the whole folder does not open the data.
     assert!(fx.config_set(r#"["~/.config/playbook"]"#).status.success());
     check(&fx, &fx.repo, &cases);
     // Nor does a safe root over the whole home.
-    let h = s(&fx.home);
     let safe = [("PLAYBOOK_SAFE_ROOTS", h.as_str())];
     for (cmd, want) in &cases {
         if *want {
             assert!(fx.denied(cmd, &fx.repo, &safe), "{cmd}");
         }
     }
-    assert!(fx.denied(&format!("{d} -rf {h}/.config"), &fx.repo, &safe));
     let why = fx
         .reason(&format!("{d} -rf {pb}/memory"), &fx.repo, &[])
         .expect("denied");
     assert!(why.contains("rule: protected playbook data"), "{why}");
+    assert!(why.contains("playbook memory export"), "{why}");
     assert!(
         !why.contains("config set"),
         "no fix for protected data: {why}"
     );
+    let why = fx
+        .reason(&format!("{d} -rf {pb}"), &fx.repo, &[])
+        .expect("denied");
+    assert!(why.contains("~/.config/playbook/memory"), "{why}");
 }
 
-/// Backups and staging files of the install are allowed by name. The binary
-/// and its links stay blocked, because every hook runs the binary.
+/// Playbook's other folders per OS may go whole, from the environment too.
+#[test]
+fn the_playbook_footprint_may_go_whole() {
+    let fx = Fx::new();
+    let d = rm();
+    let h = s(&fx.home);
+    let xdg = fx.base.join("xdg");
+    let x = s(&xdg);
+    let plugins = format!("{h}/.claude/plugins");
+    let cases: Vec<(String, bool)> = vec![
+        (format!("{d} -rf {h}/.cache/playbook"), false),
+        (format!("{d} -rf {h}/.local/share/playbook"), false),
+        (format!("{d} -rf {h}/.local/state/playbook"), false),
+        (format!("{d} -rf {plugins}/cache/pragmatic-engineer"), false),
+        (
+            format!("{d} -rf {plugins}/cache/pragmatic-engineer/playbook/0.36.0"),
+            false,
+        ),
+        (
+            format!("{d} -rf {plugins}/marketplaces/pragmatic-engineer"),
+            false,
+        ),
+        (format!("{d} -rf {x}/config/playbook"), false),
+        (format!("{d} -rf {x}/data/playbook/x"), false),
+        (format!("{d} -rf {x}/config"), true),
+        (format!("{d} -rf {x}/config/other"), true),
+    ];
+    let env = [
+        ("XDG_CONFIG_HOME", format!("{x}/config")),
+        ("XDG_DATA_HOME", format!("{x}/data")),
+    ];
+    let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    for (cmd, want) in &cases {
+        assert_eq!(fx.denied(cmd, &fx.repo, &env), *want, "{cmd}");
+    }
+    // `XDG_CONFIG_HOME=/` adds `/playbook`, never `/`.
+    let root = [("XDG_CONFIG_HOME", "/")];
+    assert!(fx.denied(&format!("{d} -rf /etc"), &fx.repo, &root));
+    assert!(fx.denied(&format!("{d} -rf /opt/x"), &fx.repo, &root));
+    // A footprint folder that links out of playbook's folders allows nothing
+    // where it points.
+    let elsewhere = fx.base.join("elsewhere");
+    fs::create_dir_all(elsewhere.join("keep")).expect("elsewhere");
+    fs::create_dir_all(fx.home.join(".local/share")).expect("share");
+    symlink(&elsewhere, fx.home.join(".local/share/playbook")).expect("link");
+    let e = s(&elsewhere);
+    assert!(fx.denied(&format!("{d} -rf {e}/keep"), &fx.repo, &[]));
+    assert!(fx.denied(
+        &format!("{d} -rf {h}/.local/share/playbook/keep"),
+        &fx.repo,
+        &[]
+    ));
+}
+
+/// The binary, its links, backups and staging files of the install are
+/// allowed by name, so playbook can be removed or repaired.
 #[test]
 fn playbook_install_files_are_allowed_by_name() {
     let fx = Fx::new();
@@ -707,9 +796,9 @@ fn playbook_install_files_are_allowed_by_name() {
     symlink("playbook", bin.join("pb")).expect("pb link");
     let b = s(&bin);
     let cases: Vec<(String, bool)> = vec![
-        (format!("{d} -f {b}/playbook"), true),
-        (format!("{d} -f {b}/pb"), true),
-        (format!("{d} -f {b}/pbtop"), true),
+        (format!("{d} -f {b}/playbook"), false),
+        (format!("{d} -f {b}/pb"), false),
+        (format!("{d} -f {b}/pbtop"), false),
         (format!("{d} -f {b}/playbook.0.36.0.bak"), false),
         (format!("{d} -f {b}/.playbook.update.1.2"), false),
         (format!("{d} -f {b}/playbook.*.bak"), false),
