@@ -168,11 +168,12 @@ pub fn macos_temp_base(path: &Path) -> Option<PathBuf> {
 
 /// The folders under `~/.config/playbook` that hold only scratch files
 /// playbook makes again on demand: document scratch (`tmp`), a staging
-/// folder (`staging`), session state (`runtime`), files unpacked from the
-/// binary (`embedded`) and config drift markers (`cc-state`).
+/// folder (`staging`), files unpacked from the binary (`embedded`) and config
+/// drift markers (`cc-state`). `runtime` is left out: it holds the live
+/// session's spend ledger, which the auto mode cap reads.
 pub fn playbook_scratch_roots(env: &RootEnv) -> Vec<PathBuf> {
     let root = env.playbook_root();
-    ["tmp", "staging", "runtime", "embedded", "cc-state"]
+    ["tmp", "staging", "embedded", "cc-state"]
         .iter()
         .map(|name| root.join(name))
         .collect()
@@ -238,21 +239,15 @@ pub enum InstallFile {
     },
 }
 
-/// The binary and its links, backups (`playbook.<version>.bak`) and staging
-/// files (`.playbook.*`) in the install folder, and the collector's service
-/// file. A Homebrew install is left to Homebrew.
+/// Backups (`playbook.<version>.bak`) and staging files (`.playbook.*`) in
+/// the install folder, and the collector's service file. The binary and its
+/// `pb` and `pbtop` links stay blocked: every hook runs the binary, so
+/// deleting it would turn every guard off. A Homebrew install is left to
+/// Homebrew.
 pub fn install_files(env: &RootEnv) -> Vec<InstallFile> {
     let mut files = Vec::new();
     let bin = &env.bin_dir;
     if bin.is_absolute() && !crate::update::is_homebrew(bin) {
-        let exe = if env.os == Os::Windows {
-            "playbook.exe"
-        } else {
-            "playbook"
-        };
-        for name in [exe, "pb", "pbtop"] {
-            files.push(InstallFile::Exact(bin.join(name)));
-        }
         // The names `update::swap` and `install.sh` write: backups
         // `playbook.<version>.bak`, and temp or staging files `.playbook.*`.
         for (prefix, suffix) in [("playbook.", ".bak"), (".playbook.", "")] {
@@ -265,7 +260,14 @@ pub fn install_files(env: &RootEnv) -> Vec<InstallFile> {
     }
     use playbook_telemetry::service::Kind;
     match env.os {
-        Os::Mac => files.push(InstallFile::Exact(Kind::Launchd.file(&env.home))),
+        Os::Mac => {
+            files.push(InstallFile::Exact(Kind::Launchd.file(&env.home)));
+            // The agent under the label 0.37.0 shipped, which migration 0020
+            // moves away.
+            files.push(InstallFile::Exact(playbook_telemetry::service::old_file(
+                &env.home,
+            )));
+        }
         Os::Linux => files.push(InstallFile::Exact(Kind::Systemd.file(&env.home))),
         Os::Windows | Os::Other => {}
     }
@@ -410,10 +412,10 @@ mod tests {
     }
 
     #[test]
-    fn playbook_scratch_roots_are_the_five_scratch_folders() {
+    fn playbook_scratch_roots_are_the_four_scratch_folders() {
         let roots = shown(&playbook_scratch_roots(&env(Os::Mac)));
 
-        let want: Vec<String> = ["tmp", "staging", "runtime", "embedded", "cc-state"]
+        let want: Vec<String> = ["tmp", "staging", "embedded", "cc-state"]
             .iter()
             .map(|n| format!("/h/me/.config/playbook/{n}"))
             .collect();
@@ -505,15 +507,20 @@ mod tests {
         let files = install_files(&env(Os::Mac));
         let any =
             |path: &str, glob: Option<&str>| files.iter().any(|f| f.covers(Path::new(path), glob));
-        assert!(any("/h/me/.local/bin/playbook", None));
-        assert!(any("/h/me/.local/bin/pb", None));
+        assert!(!any("/h/me/.local/bin/playbook", None));
+        assert!(!any("/h/me/.local/bin/pb", None));
+        assert!(!any("/h/me/.local/bin/pbtop", None));
         assert!(any("/h/me/.local/bin/playbook.0.36.0.bak", None));
         assert!(any("/h/me/.local/bin/.playbook.update.1.2", None));
         assert!(any("/h/me/.local/bin", Some("playbook.*.bak")));
-        assert!(any(
-            "/h/me/Library/LaunchAgents/io.github.pragmatic-engineer.playbook.collector.plist",
-            None
-        ));
+        let agents = Path::new("/h/me/Library/LaunchAgents");
+        for label in [
+            playbook_telemetry::service::LABEL,
+            playbook_telemetry::service::OLD_LABEL,
+        ] {
+            let agent = agents.join(format!("{label}.plist"));
+            assert!(any(agent.to_str().expect("utf8"), None), "{label}");
+        }
         assert!(!any("/h/me/.local/bin/playbook.conf", None));
         assert!(!any("/h/me/.local/bin", Some("playbook.*")));
         assert!(!any("/h/me/.local/bin/other", None));
@@ -532,19 +539,16 @@ mod tests {
 
         assert!(!files
             .iter()
-            .any(|f| f.covers(Path::new("/opt/homebrew/bin/playbook"), None)));
+            .any(|f| f.covers(Path::new("/opt/homebrew/bin/playbook.0.1.0.bak"), None)));
     }
 
     #[test]
-    fn windows_uses_the_exe_name_and_no_service_file() {
+    fn windows_keeps_the_exe_and_has_no_service_file() {
         let files = install_files(&env(Os::Windows));
 
-        assert!(files
-            .iter()
-            .any(|f| f.covers(Path::new("/h/me/.local/bin/playbook.exe"), None)));
         assert!(!files
             .iter()
-            .any(|f| f.covers(Path::new("/h/me/.local/bin/playbook"), None)));
+            .any(|f| f.covers(Path::new("/h/me/.local/bin/playbook.exe"), None)));
         assert!(!files.iter().any(|f| matches!(
             f,
             InstallFile::Exact(p) if p.starts_with("/h/me/Library") || p.starts_with("/h/me/.config")
