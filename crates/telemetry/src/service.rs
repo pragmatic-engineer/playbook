@@ -293,6 +293,9 @@ pub fn collector_fix(home: &Path) -> String {
             found.kind.name(),
             log_path(home).display()
         ),
+        None if find_old(home).is_some_and(|o| o.ours) => format!(
+            "start it with `{collect}`; the launchd agent still uses the old label {OLD_LABEL}, so move it with `playbook migrate`"
+        ),
         None => format!(
             "start it with `{collect}`, or keep it running in the background with `{}`",
             crate::host::setup_command("collector-service")

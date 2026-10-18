@@ -839,6 +839,12 @@ fn service_row(home: &Path) -> Row {
             "keep this running yourself: {}",
             service::manual_command("playbook")
         )),
+        None if service::find_old(home).is_some_and(|o| o.ours) => Row::new(
+            "-",
+            Level::Info,
+            "the collector service still uses the old label (see the row above)",
+        )
+        .hint("run: playbook migrate"),
         None if declined(home) => Row::new(
             "-",
             Level::Info,

@@ -1848,6 +1848,9 @@ mod tests {
         // Act
         let failed = move_collector_label(&ctx(&h), &refuses);
         let kept = old_file(&h).is_file();
+        let rolled_back = !crate::usage::service::Kind::Launchd.file(&h).exists()
+            && refuses.has(OLD_LABEL)
+            && !refuses.has(LABEL);
         let retried = move_collector_label(&ctx(&h), &Launchd::with(&[OLD_LABEL]));
 
         // Assert
@@ -1860,6 +1863,7 @@ mod tests {
             step.detail
         );
         assert!(kept, "the old agent stays until the new one runs");
+        assert!(rolled_back, "{:?}", refuses.loaded.borrow());
         assert!(matches!(retried, Outcome::Repeat(_)));
         assert!(!old_file(&h).exists());
     }
@@ -1932,5 +1936,32 @@ mod tests {
         assert!(fake.calls.borrow().is_empty(), "nothing runs");
         assert_eq!(fs::read_to_string(&file).unwrap(), body);
         assert!(fake.has(LABEL));
+    }
+
+    #[test]
+    fn migration_0020_names_the_log_and_kickstart_when_the_collector_is_not_up() {
+        use crate::service_manager::fake::Launchd;
+        use crate::usage::service::{log_path, LABEL, OLD_LABEL};
+        let h = old_agent_home("label-down");
+        let waits = Launchd {
+            waiting: vec![LABEL],
+            ..Launchd::with(&[OLD_LABEL])
+        };
+
+        let out = move_collector_label(&ctx(&h), &waits);
+
+        let Outcome::Failed(step) = out else {
+            panic!("a collector that is not up is a failed migration");
+        };
+        assert!(
+            step.detail.contains(&log_path(&h).display().to_string()),
+            "{}",
+            step.detail
+        );
+        assert!(
+            step.detail.contains("launchctl kickstart -k gui/") && step.detail.contains(LABEL),
+            "{}",
+            step.detail
+        );
     }
 }
