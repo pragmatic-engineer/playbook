@@ -196,24 +196,17 @@ pub(super) fn playbook_tmp_base(path: &Path, playbook_root: &Path) -> Option<Pat
 
 /// The playbook data that is never deleted, whatever root covers it: the
 /// memory store, the databases, plans and handoffs, legacy org config, the
-/// auto-learn queue, the effort ledger, the system prompt and the config
+/// session state in `runtime` (the auto-learn queue and the spend ledger the
+/// auto mode cap reads), the effort ledger, the system prompt and the config
 /// file. A parent of any of these is protected
 /// too, which the caller checks.
 pub(super) fn protected(env: &RootEnv) -> Vec<PathBuf> {
     let root = env.playbook_root();
     let legacy_db = playbook_data::config::legacy_db_in(&root);
-    let mut paths: Vec<PathBuf> = [
-        "memory",
-        "repos",
-        "orgs",
-        "runtime/handoff",
-        "runtime/to-learn",
-        "effort",
-        "prompts",
-    ]
-    .iter()
-    .map(|name| root.join(name))
-    .collect();
+    let mut paths: Vec<PathBuf> = ["memory", "repos", "orgs", "runtime", "effort", "prompts"]
+        .iter()
+        .map(|name| root.join(name))
+        .collect();
     paths.push(playbook_data::data_dir_from(&env.home));
     paths.push(crate::config::global_config_path(&root));
     for suffix in ["-wal", "-shm"] {
@@ -486,8 +479,7 @@ mod tests {
             "memory",
             "repos",
             "orgs",
-            "runtime/handoff",
-            "runtime/to-learn",
+            "runtime",
             "effort",
             "prompts",
             "data",

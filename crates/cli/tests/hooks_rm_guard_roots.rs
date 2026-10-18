@@ -616,7 +616,8 @@ fn playbook_data_is_protected_and_its_scratch_folders_are_allowed() {
     let cases: Vec<(String, bool)> = vec![
         (format!("{d} -rf {pb}/tmp/doc-1"), false),
         (format!("{d} -rf {pb}/staging/x"), false),
-        (format!("{d} -rf {pb}/runtime/s1"), false),
+        (format!("{d} -rf {pb}/runtime/s1"), true),
+        (format!("{d} -f {pb}/runtime/s1/auto-cost.json"), true),
         (format!("{d} -rf {pb}/embedded/0.1.0"), false),
         (format!("{d} -rf {pb}/repos-cache/tmp/x"), false),
         (format!("{d} -rf ~/.config/playbook/tmp/doc-1"), false),
@@ -629,7 +630,7 @@ fn playbook_data_is_protected_and_its_scratch_folders_are_allowed() {
         (format!("{d} -rf {pb}/runtime/handoff/x"), true),
         (format!("{d} -rf {pb}/runtime/s1/edits.jsonl.lock"), true),
         (format!("{d} -rf {pb}/runtime/s1/*.lock"), true),
-        (format!("{d} -rf {pb}/runtime/sess-*"), false),
+        (format!("{d} -rf {pb}/embedded/ver-*"), false),
         (format!("{d} -rf {pb}/runtime/han*"), true),
         (format!("{d} -f {}/Cargo.lock", s(&fx.repo)), false),
         (format!("{d} -rf {pb}"), true),
@@ -660,8 +661,8 @@ fn playbook_data_is_protected_and_its_scratch_folders_are_allowed() {
     );
 }
 
-/// Playbook can repair its own install: the binary, its links, backups and
-/// staging files, by name only.
+/// Backups and staging files of the install are allowed by name. The binary
+/// and its links stay blocked, because every hook runs the binary.
 #[test]
 fn playbook_install_files_are_allowed_by_name() {
     let fx = Fx::new();
@@ -672,13 +673,13 @@ fn playbook_install_files_are_allowed_by_name() {
     symlink("playbook", bin.join("pb")).expect("pb link");
     let b = s(&bin);
     let cases: Vec<(String, bool)> = vec![
-        (format!("{d} -f {b}/playbook"), false),
-        (format!("{d} -f {b}/pb"), false),
-        (format!("{d} -f {b}/pbtop"), false),
+        (format!("{d} -f {b}/playbook"), true),
+        (format!("{d} -f {b}/pb"), true),
+        (format!("{d} -f {b}/pbtop"), true),
         (format!("{d} -f {b}/playbook.0.36.0.bak"), false),
         (format!("{d} -f {b}/.playbook.update.1.2"), false),
         (format!("{d} -f {b}/playbook.*.bak"), false),
-        (format!("{d} -f ~/.local/bin/playbook"), false),
+        (format!("{d} -f ~/.local/bin/playbook.0.36.0.bak"), false),
         (format!("{d} -f {b}/other"), true),
         (format!("{d} -f {b}/*"), true),
         (format!("{d} -f {b}/p*"), true),
@@ -688,13 +689,14 @@ fn playbook_install_files_are_allowed_by_name() {
     check(&fx, &fx.repo, &cases);
     // An install name that links out of every root is judged where it points.
     fs::write(fx.home.join("notes"), "").expect("notes");
-    symlink(fx.home.join("notes"), bin.join("pbtop")).expect("pbtop link");
-    assert!(fx.denied(&format!("{d} -f {b}/pbtop"), &fx.repo, &[]));
+    symlink(fx.home.join("notes"), bin.join("playbook.9.9.9.bak")).expect("bak link");
+    assert!(fx.denied(&format!("{d} -f {b}/playbook.9.9.9.bak"), &fx.repo, &[]));
     // `PLAYBOOK_BIN_DIR` moves the allowance with the install.
     let other = fx.base.join("bin2");
     let env = [("PLAYBOOK_BIN_DIR", other.to_str().expect("utf8"))];
-    assert!(!fx.denied(&format!("{d} -f {}/playbook", s(&other)), &fx.repo, &env));
-    assert!(fx.denied(&format!("{d} -f {b}/playbook"), &fx.repo, &env));
+    let bak = "playbook.0.36.0.bak";
+    assert!(!fx.denied(&format!("{d} -f {}/{bak}", s(&other)), &fx.repo, &env));
+    assert!(fx.denied(&format!("{d} -f {b}/{bak}"), &fx.repo, &env));
 }
 
 #[cfg(target_os = "macos")]
