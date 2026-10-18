@@ -1,20 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for `playbook::settings::gen`, ported from
-//! the retired shell test's 10 scenarios (A through J). The real
-//! the retired shell original WAS the oracle. Every test that compares
-//! generated JSON now asserts against a frozen copy of its stdout under
-//! `tests/fixtures/golden/`; see that directory's README. The python is
-//! deleted by ADR 0007 WU-14, so freezing its output is what keeps those
-//! comparisons meaningful once python is gone, rather than hand-typing an
-//! expected JSON blob.
-//!
-//! The pass/fail-only cases (D through I) no longer invoke python at all.
-//! They asserted that python exited non-zero with empty stdout, which stays
-//! true when the script is absent, so they would have survived WU-14 while
-//! proving nothing. Their Rust assertions are unchanged and are the real
-//! coverage.
+//! Integration tests for `playbook::settings::gen`. Tests that compare
+//! generated JSON assert against frozen output under
+//! `tests/fixtures/golden/`, recorded from the retired Python generator; see
+//! that directory's README.
 //!
 //! Coverage map, so every scenario named in the Work Unit brief is
 //! traceable to one place below:
@@ -34,6 +24,7 @@
 //! - Falsifiable regression pin (a mutated input proving the check can
 //!   fail): `regression_pin_mutating_a_shippable_key_changes_the_output`
 //! - `playbook settings gen` works from the CLI: `settings_gen_works_from_the_cli`
+//! - The committed seed regenerates to itself: `the_real_seed_regenerates_to_itself`
 //! - Allowlist coverage added for the shippable-key inversion:
 //!   `novel_top_level_key_is_dropped_and_named_on_stderr`,
 //!   `an_env_block_is_dropped_whole`,
@@ -71,14 +62,20 @@ fn write_file(path: &Path, content: &str) {
     fs::write(path, content).expect("scratch file should be writable");
 }
 
-/// Canned permissions fixture, reused read-only across scenarios. Tests wrap
-/// it in a seed with `seed_of`.
-const CANNED_PERMS: &str = r#"{
+/// Canned permissions fixture, reused read-only across scenarios.
+macro_rules! canned_perms {
+    () => {
+        r#"{
   "allow": ["Read", "Bash(git:*)"],
   "deny": ["Read(**/.env)"],
   "ask": ["Bash(curl:*)"],
   "defaultMode": "auto"
-}"#;
+}"#
+    };
+}
+const CANNED_PERMS: &str = canned_perms!();
+/// The seed every scenario uses: `CANNED_PERMS` under a `permissions` key.
+const CANNED_SEED: &str = concat!(r#"{"permissions": "#, canned_perms!(), "}");
 
 /// Full live-like source with personal keys, product keys, and an unknown
 /// key, matching the shell test's `SRC_FULL`.
@@ -102,10 +99,15 @@ const SRC_BAD: &str = "{ this is not json ";
 const SEED_NO_PERMS: &str = "{}";
 const SEED_NOALLOW: &str = r#"{"permissions":{"allow":[],"deny":[],"ask":[]}}"#;
 
-/// A seed whose `permissions` block is `perms`, the only part `generate`
-/// reads from the seed.
-fn seed_of(perms: &str) -> String {
-    format!(r#"{{"permissions": {perms}}}"#)
+/// A scratch dir holding `src.json` with `src` and `seed.json` with
+/// `CANNED_SEED`. Returns the dir and both paths.
+fn write_inputs(tag: &str, src: &str) -> (PathBuf, PathBuf, PathBuf) {
+    let dir = scratch_dir(tag);
+    let src_path = dir.join("src.json");
+    let seed_path = dir.join("seed.json");
+    write_file(&src_path, src);
+    write_file(&seed_path, CANNED_SEED);
+    (dir, src_path, seed_path)
 }
 
 /// Hooks-heavy source matching the shell test's `SRC_HOOKS`: a bare
@@ -137,11 +139,7 @@ const SRC_HOOKS: &str = r#"{
 #[test]
 fn happy_path_canned_perms_model_stripped_only_shippable_keys_survive() {
     // Arrange
-    let dir = scratch_dir("happy-path");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(&src_path, SRC_FULL);
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
+    let (_, src_path, seed_path) = write_inputs("happy-path", SRC_FULL);
 
     // Act
     let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
@@ -191,11 +189,7 @@ fn happy_path_canned_perms_model_stripped_only_shippable_keys_survive() {
 #[test]
 fn model_absent_in_source_stays_absent() {
     // Arrange
-    let dir = scratch_dir("model-absent");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(&src_path, SRC_NOMODEL);
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
+    let (_, src_path, seed_path) = write_inputs("model-absent", SRC_NOMODEL);
 
     // Act
     let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
@@ -213,11 +207,7 @@ fn model_absent_in_source_stays_absent() {
 #[test]
 fn model_in_source_is_stripped() {
     // Arrange
-    let dir = scratch_dir("model-present");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(&src_path, SRC_OPUS);
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
+    let (_, src_path, seed_path) = write_inputs("model-present", SRC_OPUS);
 
     // Act
     let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
@@ -243,19 +233,16 @@ struct GuardCase {
     seed: Option<&'static str>,
 }
 
-const SEED_CANNED: &str =
-    r#"{"permissions": {"allow": ["Read", "Bash(git:*)"], "deny": [], "ask": []}}"#;
-
 const GUARD_CASES: [GuardCase; 6] = [
     GuardCase {
         name: "D malformed source json",
         src: Some(SRC_BAD),
-        seed: Some(SEED_CANNED),
+        seed: Some(CANNED_SEED),
     },
     GuardCase {
         name: "E missing source file",
         src: None,
-        seed: Some(SEED_CANNED),
+        seed: Some(CANNED_SEED),
     },
     GuardCase {
         name: "F missing seed file",
@@ -338,11 +325,7 @@ fn no_arguments_is_rejected_by_the_rust_cli_parser() {
 #[test]
 fn hooks_reduced_to_safety_guards_only_functional_hooks_dropped() {
     // Arrange
-    let dir = scratch_dir("hooks-filter");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(&src_path, SRC_HOOKS);
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
+    let (_, src_path, seed_path) = write_inputs("hooks-filter", SRC_HOOKS);
 
     // Act
     let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
@@ -404,11 +387,10 @@ const SRC_HOOKS_NEW_AND_OLD_PATHS: &str = r#"{
 #[test]
 fn new_and_old_config_paths_are_both_filtered_out_identically() {
     // Arrange
-    let dir = scratch_dir("hooks-filter-new-and-old-paths");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(&src_path, SRC_HOOKS_NEW_AND_OLD_PATHS);
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
+    let (_, src_path, seed_path) = write_inputs(
+        "hooks-filter-new-and-old-paths",
+        SRC_HOOKS_NEW_AND_OLD_PATHS,
+    );
 
     // Act
     let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
@@ -435,14 +417,10 @@ fn non_ascii_value_diverges_from_python_named_direction() {
     // key so it survives the allowlist (the golden fixture below still used
     // customUnknownKey, which the allowlist now drops before this divergence
     // could even be observed).
-    let dir = scratch_dir("non-ascii");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(
-        &src_path,
+    let (_, src_path, seed_path) = write_inputs(
+        "non-ascii",
         r#"{"statusLine":{"type":"command","command":"café ☃"}}"#,
     );
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
     let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
@@ -504,11 +482,7 @@ const SRC_MUTATED: &str = r#"{
 #[test]
 fn regression_pin_mutating_a_shippable_key_changes_the_output() {
     // Arrange: synthetic fixtures, not the committed settings.shared.json.
-    let dir = scratch_dir("regression-pin");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(&src_path, SRC_FULL);
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
+    let (dir, src_path, seed_path) = write_inputs("regression-pin", SRC_FULL);
 
     // Act
     let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
@@ -530,11 +504,7 @@ fn regression_pin_mutating_a_shippable_key_changes_the_output() {
 #[test]
 fn settings_gen_works_from_the_cli() {
     // Arrange
-    let dir = scratch_dir("cli");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(&src_path, SRC_NOMODEL);
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
+    let (_, src_path, seed_path) = write_inputs("cli", SRC_NOMODEL);
 
     // Act
     let output = isolated::playbook()
@@ -560,22 +530,16 @@ fn settings_gen_works_from_the_cli() {
 
 /// A malformed `.hooks` shape must FAIL, not quietly yield a hooks-less seed.
 ///
-/// This is a regression pin with a specific history. The first revision of this
-/// port treated a malformed shape as "contributes no hooks" and exited 0,
-/// reasoning that a shape it could not parse could not leak an unsafe command.
-/// That is backwards in the only pipeline that consumes this output:
-/// `Makefile`'s recipe is `gen ... > "$@.tmp" && mv "$@.tmp" "$@"`, so a
-/// nonzero exit leaves the committed seed untouched, while an exit 0 carrying a
-/// hooks-less seed REPLACES it with one that wires nothing.
-///
-/// Asserted against the real python generator in both directions, so the two
-/// agree on rejecting rather than merely on some error appearing.
+/// The `justfile` `settings-shared` recipe writes the output to a temp file
+/// and moves it over the seed only on exit 0. A nonzero exit keeps the
+/// committed seed, while an exit 0 carrying a hooks-less seed would replace it
+/// with one that wires nothing.
 #[test]
 fn malformed_hooks_shape_fails_in_both_engines_and_writes_no_stdout() {
     // Arrange
     let dir = scratch_dir("malformed-hooks");
     let seed_path = dir.join("seed.json");
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
+    write_file(&seed_path, CANNED_SEED);
 
     let cases = [
         (".hooks is a string", r#"{"hooks": "not-an-object"}"#),
@@ -598,16 +562,11 @@ fn malformed_hooks_shape_fails_in_both_engines_and_writes_no_stdout() {
         let rust = generate(&src_path, &seed_path);
 
         // Assert
-        //
-        // The python half was removed for the reason recorded on the
-        // guard-rejection loop above: "python exited non-zero with empty
-        // stdout" is equally true when the script does not exist, so it
-        // would have survived WU-14 while asserting nothing.
         assert!(
             rust.is_err(),
-            "{label}: the Rust port must reject it too. Emitting a hooks-less \
-             seed on exit 0 would let the Makefile replace the committed seed \
-             with one wiring no hooks"
+            "{label}: must be rejected. Emitting a hooks-less seed on exit 0 \
+             would let the justfile recipe replace the committed seed with one \
+             wiring no hooks"
         );
     }
 }
@@ -618,11 +577,7 @@ fn malformed_hooks_shape_fails_in_both_engines_and_writes_no_stdout() {
 #[test]
 fn novel_top_level_key_is_dropped_and_named_on_stderr() {
     // Arrange
-    let dir = scratch_dir("novel-key");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(&src_path, r#"{"totallyNovelKey": "x"}"#);
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
+    let (_, src_path, seed_path) = write_inputs("novel-key", r#"{"totallyNovelKey": "x"}"#);
 
     // Act
     let output = isolated::playbook()
@@ -651,14 +606,10 @@ fn novel_top_level_key_is_dropped_and_named_on_stderr() {
 #[test]
 fn an_env_block_is_dropped_whole() {
     // Arrange
-    let dir = scratch_dir("env-dropped");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(
-        &src_path,
+    let (_, src_path, seed_path) = write_inputs(
+        "env-dropped",
         r#"{"env":{"TOTALLY_NOVEL_ENV_KEY":"x","DISABLE_TELEMETRY":"1","DISABLE_AUTOUPDATER":"1"}}"#,
     );
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
     let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
@@ -672,14 +623,10 @@ fn an_env_block_is_dropped_whole() {
 #[test]
 fn auto_mode_and_enabled_plugins_are_dropped() {
     // Arrange
-    let dir = scratch_dir("automode-plugins");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(
-        &src_path,
+    let (_, src_path, seed_path) = write_inputs(
+        "automode-plugins",
         r#"{"autoMode": {"allow": ["$defaults"]}, "enabledPlugins": {"a@b": true}}"#,
     );
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
 
     // Act
     let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
@@ -707,11 +654,7 @@ const SRC_HOOKS_FAKE_NAME: &str = r#"{
 #[test]
 fn shape_valid_but_nonexistent_hook_name_is_dropped() {
     // Arrange
-    let dir = scratch_dir("hooks-fake-name");
-    let src_path = dir.join("src.json");
-    let seed_path = dir.join("seed.json");
-    write_file(&src_path, SRC_HOOKS_FAKE_NAME);
-    write_file(&seed_path, &seed_of(CANNED_PERMS));
+    let (_, src_path, seed_path) = write_inputs("hooks-fake-name", SRC_HOOKS_FAKE_NAME);
 
     // Act
     let rust_output = generate(&src_path, &seed_path).expect("rust generate should succeed");
@@ -730,4 +673,14 @@ fn shape_valid_but_nonexistent_hook_name_is_dropped() {
         vec!["playbook hook rm-workspace-guard"],
         "a shape-valid but nonexistent hook name must be dropped"
     );
+}
+
+// The real seed regenerates to itself: running gen with the committed seed as
+// both SRC and SEED changes nothing, so `just settings-shared` on an up to date
+// seed is a no-op.
+#[test]
+fn the_real_seed_regenerates_to_itself() {
+    let seed = Path::new(env!("PLAYBOOK_REPO_ROOT")).join("settings.shared.json");
+    let output = generate(&seed, &seed).expect("the real seed should generate");
+    assert_eq!(output, fs::read_to_string(&seed).expect("seed is readable"));
 }

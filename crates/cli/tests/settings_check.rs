@@ -18,7 +18,7 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const PERMISSIONS: &str = r#"{
   "allow": ["Read", "Bash(git:*)"],
-  "deny": ["Read(**/.env)"],
+  "deny": ["Read(**/.env)", "Read(**/.env.*)"],
   "ask": ["Bash(curl:*)"],
   "defaultMode": "auto"
 }"#;
@@ -344,4 +344,63 @@ fn missing_permissions_block_is_rejected() {
         "got: {}",
         stderr_of(&out)
     );
+}
+
+#[test]
+fn a_permissions_block_of_the_wrong_shape_is_rejected() {
+    let f = Fixture::new("perm-shapes");
+    let shapes = [
+        ("no allow key", r#""permissions": {"deny": []}"#),
+        ("allow not an array", r#""permissions": {"allow": "Read"}"#),
+        ("permissions a string", r#""permissions": "allow""#),
+        ("permissions an array", r#""permissions": ["Read"]"#),
+    ];
+    for (label, block) in shapes {
+        let t = f.template(
+            &label.replace(' ', "-"),
+            &format!("{{{block}, \"hooks\": {{}}}}"),
+        );
+        let out = f.run(&t);
+        assert_eq!(out.status.code(), Some(1), "{label}");
+        assert!(
+            stderr_of(&out).contains("non-empty allow array"),
+            "{label}: {}",
+            stderr_of(&out)
+        );
+    }
+}
+
+#[test]
+fn permissions_below_the_shipped_floor_are_rejected() {
+    let f = Fixture::new("floor");
+    let cases = [
+        (
+            "bare Bash",
+            good_template().replace(r#""allow": ["Read","#, r#""allow": ["Bash", "Read","#),
+            "bare Bash",
+        ),
+        (
+            "env deny missing",
+            good_template().replace(r#""Read(**/.env)", "#, ""),
+            "Read(**/.env)",
+        ),
+        (
+            "bypass mode",
+            good_template().replace(
+                r#""defaultMode": "auto""#,
+                r#""defaultMode": "bypassPermissions""#,
+            ),
+            "bypassPermissions",
+        ),
+    ];
+    for (label, json, needle) in cases {
+        let t = f.template(&label.replace(' ', "-"), &json);
+        let out = f.run(&t);
+        assert_eq!(out.status.code(), Some(1), "{label}");
+        assert!(
+            stderr_of(&out).contains(needle),
+            "{label}: {}",
+            stderr_of(&out)
+        );
+    }
 }

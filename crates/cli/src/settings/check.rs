@@ -16,6 +16,9 @@ const INSTALL_PREFIXES: [&str; 2] = ["~/.claude/", "$HOME/.claude/"];
 
 const BASH_WRAPPER: &str = "bash ";
 
+/// Deny rules the shipped permissions always carry.
+const REQUIRED_DENY: [&str; 2] = ["Read(**/.env)", "Read(**/.env.*)"];
+
 pub fn check(template_path: &Path, repo_root: &Path) -> Result<String, String> {
     let template_display = template_path.display();
 
@@ -36,6 +39,7 @@ pub fn check(template_path: &Path, repo_root: &Path) -> Result<String, String> {
             ".permissions must be an object with a non-empty allow array in {template_display}"
         ));
     }
+    check_conservative_permissions(&template, template_path)?;
 
     if template.get("model").is_some() {
         return Err(format!(
@@ -53,6 +57,37 @@ pub fn check(template_path: &Path, repo_root: &Path) -> Result<String, String> {
     check_hook_commands(&template, repo_root)?;
 
     Ok(format!("check-shared-settings: OK ({template_display})"))
+}
+
+/// The floor the README promises for the shipped permissions: no bare `Bash`
+/// in `allow`, the `.env` read rules in `deny`, and no `bypassPermissions`
+/// mode. A hand edit to the seed that breaks one of these fails here.
+fn check_conservative_permissions(template: &Value, template_path: &Path) -> Result<(), String> {
+    let display = template_path.display();
+    let list = |key: &str| -> Vec<&str> {
+        template
+            .pointer(&format!("/permissions/{key}"))
+            .and_then(Value::as_array)
+            .map(|items| items.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default()
+    };
+    if list("allow").contains(&"Bash") {
+        return Err(format!(
+            ".permissions.allow must not hold a bare Bash in {display}"
+        ));
+    }
+    let deny = list("deny");
+    for rule in REQUIRED_DENY {
+        if !deny.contains(&rule) {
+            return Err(format!(".permissions.deny must hold {rule} in {display}"));
+        }
+    }
+    if template.pointer("/permissions/defaultMode") == Some(&Value::from("bypassPermissions")) {
+        return Err(format!(
+            ".permissions.defaultMode must not be bypassPermissions in {display}"
+        ));
+    }
+    Ok(())
 }
 
 /// Every template key must be on `SHIPPABLE_KEYS`: the allowlist inversion of
