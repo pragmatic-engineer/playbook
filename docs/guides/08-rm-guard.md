@@ -36,6 +36,8 @@ Temp and cache folders per OS:
 | Windows | `%TEMP%`, `%TMP%`, `%LOCALAPPDATA%\Temp` |
 | All | the folder `std::env::temp_dir()` returns, which covers the session scratchpad |
 
+A temp folder from the environment (`$TMPDIR`, `%TEMP%` and the like) counts only when it is absolute, at least two folders deep, free of `..`, and neither your home nor a folder above it.
+
 "Contents only" means the folder itself, and any parent of it, stays blocked. A glob directly under one of these folders needs a named prefix of at least three characters: `/tmp/pb-*` is allowed and `/tmp/*` is blocked.
 
 `$TMPDIR` written in a command is not expanded, because the shell that runs the command can have a different value than the hook. Write the literal path instead.
@@ -46,7 +48,7 @@ Playbook's own data is never deleted by `rm`, whatever root covers it, a configu
 
 - the memory store `~/.config/playbook/memory`
 - `~/.config/playbook/data`, which holds `config.db`, `memory.db` and the usage database
-- plans, handoffs and per-repo config under `~/.config/playbook/repos`, and old handoffs under `runtime/handoff`
+- plans, handoffs and per-repo config under `~/.config/playbook/repos`, legacy org config under `orgs`, old handoffs under `runtime/handoff`, and the auto-learn queue under `runtime/to-learn`
 - the effort ledger and its backups under `~/.config/playbook/effort`
 - the system prompt under `~/.config/playbook/prompts`, the legacy `playbook.db` and `config.json`
 - `~/.config/playbook` itself and every folder above it
@@ -80,7 +82,7 @@ Each root is a plain folder path:
 - at least two levels deep for an absolute path (`/opt/scratch` works, `/tmp` does not), and at least one level under home (`~/scratch` works, `~` does not)
 - no `..`, quote or glob characters
 
-A root covers everything under it, so `~/scratch/**` and `~/scratch` mean the same thing. A trailing `/**` or `/*` is accepted and dropped. Any other glob is refused.
+A root covers everything under it, so `~/scratch/**` and `~/scratch` mean the same thing. A trailing `/**` or `/*` is accepted and dropped before the list is stored, so the stored list holds plain paths. Any other glob is refused.
 
 Run it in the Claude Code prompt with `!`, or in a terminal:
 

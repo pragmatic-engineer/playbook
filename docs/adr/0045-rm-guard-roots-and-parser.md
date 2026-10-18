@@ -26,7 +26,7 @@ The allowed roots were also too narrow. `/var/folders`, `~/Library/Caches`, Linu
 4. **Build in playbook's scratch folders and install files** so playbook can heal its own install.
 5. **Protect playbook's data** whatever root covers it, a configured root included.
 6. **Name the rule in each denial**, show where a path resolved to, and give the exact `config set` command with the current roots plus the new one.
-7. **Accept a trailing `/**` or `/*` on a configured root** and drop it, since a root covers everything under it. The error for a refused root says so and gives a working example. `config set` prints the stored value on success. There is no append form, because `playbook config` has none, so the docs show the full `set` command.
+7. **Accept a trailing `/**` or `/*` on a configured root** and drop it before storing, since a root covers everything under it. The stored list holds plain paths, so an older binary still reads it. The error for a refused root says so and gives a working example. `config set` prints the stored value on success. There is no append form, because `playbook config` has none, so the docs show the full `set` command.
 
 ### Built-in roots per OS
 
@@ -45,13 +45,15 @@ All are contents only: the folder itself and every parent stay blocked, and a gl
 | Linux | `/run/user/<uid>` | Per-session runtime files of this user, cleared at logout. A bare glob stays blocked, so a live socket goes only when named. |
 | Windows | `%TEMP%`, `%TMP%`, `%LOCALAPPDATA%\Temp` | The user temp folders. |
 
+A folder from the environment, `std::env::temp_dir()` included, counts only when it is absolute, at least two folders deep, free of `..`, and neither home nor a folder above it. `TMPDIR=/` or `TMPDIR=$HOME` therefore adds nothing.
+
 ### Playbook roots for self-healing
 
 | Root | Kind | Why deleting it is safe |
 | :- | :- | :- |
 | `~/.config/playbook/tmp` | contents | Document scratch, swept by `doc` itself. |
 | `~/.config/playbook/staging` | contents | Reserved for staging files. Nothing durable lives there. |
-| `~/.config/playbook/runtime` | contents | Per-session state, made again by the next session. `runtime/handoff` is protected. |
+| `~/.config/playbook/runtime` | contents | Per-session state, made again by the next session. `runtime/handoff` and `runtime/to-learn` are protected. |
 | `~/.config/playbook/embedded` | contents | Files unpacked from the binary, written again on demand. |
 | `~/.config/playbook/cc-state` | contents | Config drift markers, written again on the next launch. |
 | `~/.config/playbook/**/tmp` | contents | Any deeper `tmp` folder is scratch by name. The protected list is checked first, so a `tmp` inside the memory store does not count. |
@@ -75,7 +77,7 @@ Each was added only where deleting is safe:
 
 ### Protected paths
 
-Blocked whatever root covers them: `~/.config/playbook/memory`, `data` (`config.db`, `memory.db`, the usage database), `repos` (plans, handoffs, per-repo config, live worktrees), `runtime/handoff`, `effort`, `prompts`, `playbook.db` with its `-wal` and `-shm` files, `config.json`, any folder that holds one of them (such as `~/.config/playbook` itself), and any `.lock` folder under `~/.config/playbook`.
+Blocked whatever root covers them: `~/.config/playbook/memory`, `data` (`config.db`, `memory.db`, the usage database), `repos` (plans, handoffs, per-repo config, live worktrees), `orgs` (legacy org config), `runtime/handoff`, `runtime/to-learn` (the auto-learn queue), `effort`, `prompts`, `playbook.db` with its `-wal` and `-shm` files, `config.json`, any folder that holds one of them (such as `~/.config/playbook` itself), and any `.lock` folder under `~/.config/playbook`.
 
 ## Consequences
 
