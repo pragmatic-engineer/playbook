@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 /// The OS whose temp folders apply.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Os {
+pub(super) enum Os {
     Mac,
     Linux,
     Windows,
@@ -27,7 +27,7 @@ pub enum Os {
 }
 
 impl Os {
-    pub fn current() -> Os {
+    pub(super) fn current() -> Os {
         if cfg!(target_os = "macos") {
             Os::Mac
         } else if cfg!(target_os = "linux") {
@@ -41,7 +41,7 @@ impl Os {
 }
 
 /// Everything the built-in roots depend on.
-pub struct RootEnv {
+pub(super) struct RootEnv {
     pub os: Os,
     pub home: PathBuf,
     pub tmpdir: Option<PathBuf>,
@@ -57,7 +57,7 @@ pub struct RootEnv {
 
 impl RootEnv {
     /// The values this process sees.
-    pub fn from_process(home: &str) -> RootEnv {
+    pub(super) fn from_process(home: &str) -> RootEnv {
         let var = |name: &str| {
             std::env::var_os(name)
                 .filter(|v| !v.is_empty())
@@ -84,7 +84,7 @@ impl RootEnv {
 
 /// The temp and cache folders whose contents may be deleted, for the OS in
 /// `env`. A value from the environment counts only when `usable` says so.
-pub fn temp_roots(env: &RootEnv) -> Vec<PathBuf> {
+pub(super) fn temp_roots(env: &RootEnv) -> Vec<PathBuf> {
     let home = &env.home;
     let mut roots = Vec::new();
     let mut push_env = |value: &Option<PathBuf>| {
@@ -102,7 +102,7 @@ pub fn temp_roots(env: &RootEnv) -> Vec<PathBuf> {
         }
         Os::Linux => {
             push_env(&env.tmpdir);
-            roots.extend(["/tmp", "/var/tmp"].map(PathBuf::from));
+            roots.extend(["/tmp", "/private/tmp", "/var/tmp"].map(PathBuf::from));
             roots.push(home.join(".cache"));
             roots.push(PathBuf::from(format!("/run/user/{}", env.uid)));
             // Only under home: a cache home of `/` or `/usr` would hand the
@@ -123,7 +123,7 @@ pub fn temp_roots(env: &RootEnv) -> Vec<PathBuf> {
         }
         Os::Other => {
             push_env(&env.tmpdir);
-            roots.push(PathBuf::from("/tmp"));
+            roots.extend(["/tmp", "/private/tmp"].map(PathBuf::from));
             roots.push(home.join(".cache"));
         }
     }
@@ -159,7 +159,7 @@ fn usable(path: &Path, env: &RootEnv) -> bool {
 /// The per-user macOS temp folder, `/private/var/folders/<xx>/<hash>/T`,
 /// matched by shape because its name is a hash. `path` is resolved, so the
 /// `/var` link is already followed.
-pub fn macos_temp_base(path: &Path) -> Option<PathBuf> {
+pub(super) fn macos_temp_base(path: &Path) -> Option<PathBuf> {
     let parts: Vec<_> = path.components().collect();
     let shape =
         parts.len() >= 7 && path.starts_with("/private/var/folders") && parts[6].as_os_str() == "T";
@@ -171,7 +171,7 @@ pub fn macos_temp_base(path: &Path) -> Option<PathBuf> {
 /// folder (`staging`), files unpacked from the binary (`embedded`) and config
 /// drift markers (`cc-state`). `runtime` is left out: it holds the live
 /// session's spend ledger, which the auto mode cap reads.
-pub fn playbook_scratch_roots(env: &RootEnv) -> Vec<PathBuf> {
+pub(super) fn playbook_scratch_roots(env: &RootEnv) -> Vec<PathBuf> {
     let root = env.playbook_root();
     ["tmp", "staging", "embedded", "cc-state"]
         .iter()
@@ -182,7 +182,7 @@ pub fn playbook_scratch_roots(env: &RootEnv) -> Vec<PathBuf> {
 /// The `tmp` folder at any depth under `playbook_root` that `path` sits in,
 /// for the `~/.config/playbook/**/tmp/**` allowance. The protected list is
 /// checked first, so a `tmp` inside the memory store does not count.
-pub fn playbook_tmp_base(path: &Path, playbook_root: &Path) -> Option<PathBuf> {
+pub(super) fn playbook_tmp_base(path: &Path, playbook_root: &Path) -> Option<PathBuf> {
     let rest = path.strip_prefix(playbook_root).ok()?;
     let mut base = playbook_root.to_path_buf();
     for part in rest.components() {
@@ -196,24 +196,17 @@ pub fn playbook_tmp_base(path: &Path, playbook_root: &Path) -> Option<PathBuf> {
 
 /// The playbook data that is never deleted, whatever root covers it: the
 /// memory store, the databases, plans and handoffs, legacy org config, the
-/// auto-learn queue, the effort ledger, the system prompt and the config
+/// session state in `runtime` (the auto-learn queue and the spend ledger the
+/// auto mode cap reads), the effort ledger, the system prompt and the config
 /// file. A parent of any of these is protected
 /// too, which the caller checks.
-pub fn protected(env: &RootEnv) -> Vec<PathBuf> {
+pub(super) fn protected(env: &RootEnv) -> Vec<PathBuf> {
     let root = env.playbook_root();
     let legacy_db = playbook_data::config::legacy_db_in(&root);
-    let mut paths: Vec<PathBuf> = [
-        "memory",
-        "repos",
-        "orgs",
-        "runtime/handoff",
-        "runtime/to-learn",
-        "effort",
-        "prompts",
-    ]
-    .iter()
-    .map(|name| root.join(name))
-    .collect();
+    let mut paths: Vec<PathBuf> = ["memory", "repos", "orgs", "runtime", "effort", "prompts"]
+        .iter()
+        .map(|name| root.join(name))
+        .collect();
     paths.push(playbook_data::data_dir_from(&env.home));
     paths.push(crate::config::global_config_path(&root));
     for suffix in ["-wal", "-shm"] {
@@ -227,7 +220,7 @@ pub fn protected(env: &RootEnv) -> Vec<PathBuf> {
 
 /// A file playbook installs and may remove or replace by name.
 #[derive(Debug, PartialEq, Eq)]
-pub enum InstallFile {
+pub(super) enum InstallFile {
     /// This exact path.
     Exact(PathBuf),
     /// Any file in `dir` whose name starts with `prefix` and ends with
@@ -244,7 +237,7 @@ pub enum InstallFile {
 /// `pb` and `pbtop` links stay blocked: every hook runs the binary, so
 /// deleting it would turn every guard off. A Homebrew install is left to
 /// Homebrew.
-pub fn install_files(env: &RootEnv) -> Vec<InstallFile> {
+pub(super) fn install_files(env: &RootEnv) -> Vec<InstallFile> {
     let mut files = Vec::new();
     let bin = &env.bin_dir;
     if bin.is_absolute() && !crate::update::is_homebrew(bin) {
@@ -277,7 +270,7 @@ pub fn install_files(env: &RootEnv) -> Vec<InstallFile> {
 impl InstallFile {
     /// Whether `path`, resolved, is this file. `glob` is the last component
     /// when it holds a glob, which must keep this file's name prefix.
-    pub fn covers(&self, path: &Path, glob: Option<&str>) -> bool {
+    pub(super) fn covers(&self, path: &Path, glob: Option<&str>) -> bool {
         match (self, glob) {
             (InstallFile::Exact(file), None) => path == file,
             (InstallFile::Exact(_), Some(_)) => false,
@@ -349,6 +342,7 @@ mod tests {
                     "/sys/temp",
                     "/var/folders/ab/xyz/T/",
                     "/tmp",
+                    "/private/tmp",
                     "/var/tmp",
                     "/h/me/.cache",
                     "/run/user/501",
@@ -369,6 +363,7 @@ mod tests {
                     "/sys/temp",
                     "/var/folders/ab/xyz/T/",
                     "/tmp",
+                    "/private/tmp",
                     "/h/me/.cache",
                 ],
             ),
@@ -486,8 +481,7 @@ mod tests {
             "memory",
             "repos",
             "orgs",
-            "runtime/handoff",
-            "runtime/to-learn",
+            "runtime",
             "effort",
             "prompts",
             "data",

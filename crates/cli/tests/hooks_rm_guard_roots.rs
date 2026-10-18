@@ -88,6 +88,11 @@ impl Fx {
     }
 
     fn denied(&self, command: &str, cwd: &Path, extra_env: &[(&str, &str)]) -> bool {
+        self.reason(command, cwd, extra_env).is_some()
+    }
+
+    /// The denial text, or `None` when the guard allows the command.
+    fn reason(&self, command: &str, cwd: &Path, extra_env: &[(&str, &str)]) -> Option<String> {
         let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
         let mut spawn = Command::new(env!("CARGO_BIN_EXE_playbook"));
         spawn
@@ -96,6 +101,8 @@ impl Fx {
             .env("HOME", &self.home)
             .env_remove("PLAYBOOK_SAFE_ROOTS")
             .env_remove("WORKTREE_BASE_DIR")
+            .env_remove("PLAYBOOK_BIN_DIR")
+            .env_remove("XDG_CACHE_HOME")
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .current_dir(cwd);
@@ -104,7 +111,10 @@ impl Fx {
         }
         let out = spawn.output().expect("spawn");
         assert!(out.status.success(), "a guard exits 0 even when denying");
-        String::from_utf8_lossy(&out.stdout).contains(r#""permissionDecision":"deny""#)
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        stdout
+            .contains(r#""permissionDecision":"deny""#)
+            .then_some(stdout)
     }
 
     fn config_set(&self, value: &str) -> std::process::Output {
@@ -523,11 +533,15 @@ fn the_denial_message_names_the_scratch_roots_and_the_config_key() {
         .output()
         .expect("spawn");
     let text = String::from_utf8_lossy(&out.stdout);
+    if cfg!(target_os = "macos") {
+        assert!(text.contains("/private/var/folders/*/*/T/*"), "{text}");
+    }
     for needle in [
         "/tmp/*",
-        "/private/var/folders",
+        "/**/tmp/*",
         ".worktrees/*",
-        "hooks.rmGuard.allowedRoots",
+        "rule: outside the allowed roots",
+        "No config root can cover this path",
     ] {
         assert!(
             text.contains(needle),
@@ -588,4 +602,206 @@ fn quoting_braces_and_shell_syntax_cannot_smuggle_a_path_out() {
         (format!("cd {t} && {d} -rf sub"), true),
     ];
     check(&fx, &fx.repo, &cases);
+}
+
+/// Playbook's data stays blocked even when a configured root covers it, and
+/// its scratch folders are allowed with no config.
+#[test]
+fn playbook_data_is_protected_and_its_scratch_folders_are_allowed() {
+    let fx = Fx::new();
+    let d = rm();
+    let pb = s(&fx.home.join(".config/playbook"));
+    fs::create_dir_all(fx.home.join(".config/playbook/memory/acme/app")).expect("memory");
+    fs::create_dir_all(fx.home.join(".config/playbook/data")).expect("data");
+    let cases: Vec<(String, bool)> = vec![
+        (format!("{d} -rf {pb}/tmp/doc-1"), false),
+        (format!("{d} -rf {pb}/staging/x"), false),
+        (format!("{d} -rf {pb}/runtime/s1"), true),
+        (format!("{d} -f {pb}/runtime/s1/auto-cost.json"), true),
+        (format!("{d} -rf {pb}/embedded/0.1.0"), false),
+        (format!("{d} -rf {pb}/repos-cache/tmp/x"), false),
+        (format!("{d} -rf ~/.config/playbook/tmp/doc-1"), false),
+        (format!("{d} -rf {pb}/memory/tmp/x"), true),
+        (format!("{d} -rf {pb}/memory/acme/app"), true),
+        (format!("{d} -rf ~/.config/playbook/memory"), true),
+        (format!("{d} -f {pb}/data/config.db"), true),
+        (format!("{d} -f {pb}/data/memory.db"), true),
+        (format!("{d} -rf {pb}/repos/acme/app/plans"), true),
+        (format!("{d} -rf {pb}/runtime/handoff/x"), true),
+        (format!("{d} -rf {pb}/runtime/s1/edits.jsonl.lock"), true),
+        (format!("{d} -rf {pb}/runtime/s1/*.lock"), true),
+        (format!("{d} -rf {pb}/embedded/ver-*"), false),
+        (format!("{d} -rf {pb}/runtime/han*"), true),
+        (format!("{d} -f {}/Cargo.lock", s(&fx.repo)), false),
+        (format!("{d} -rf {pb}"), true),
+        (format!("{d} -rf {pb}/*"), true),
+        (format!("{d} -rf {pb}/tmp/../memory"), true),
+    ];
+    check(&fx, &fx.repo, &cases);
+    assert!(fx.denied(&format!("{d} -rf {pb}/tmp"), &fx.repo, &[]));
+    // A configured root over the whole folder does not open the data.
+    assert!(fx.config_set(r#"["~/.config/playbook"]"#).status.success());
+    check(&fx, &fx.repo, &cases);
+    // Nor does a safe root over the whole home.
+    let h = s(&fx.home);
+    let safe = [("PLAYBOOK_SAFE_ROOTS", h.as_str())];
+    for (cmd, want) in &cases {
+        if *want {
+            assert!(fx.denied(cmd, &fx.repo, &safe), "{cmd}");
+        }
+    }
+    assert!(fx.denied(&format!("{d} -rf {h}/.config"), &fx.repo, &safe));
+    let why = fx
+        .reason(&format!("{d} -rf {pb}/memory"), &fx.repo, &[])
+        .expect("denied");
+    assert!(why.contains("rule: protected playbook data"), "{why}");
+    assert!(
+        !why.contains("config set"),
+        "no fix for protected data: {why}"
+    );
+}
+
+/// Backups and staging files of the install are allowed by name. The binary
+/// and its links stay blocked, because every hook runs the binary.
+#[test]
+fn playbook_install_files_are_allowed_by_name() {
+    let fx = Fx::new();
+    let d = rm();
+    let bin = fx.home.join(".local/bin");
+    fs::create_dir_all(&bin).expect("bin");
+    fs::write(bin.join("playbook"), "").expect("binary");
+    symlink("playbook", bin.join("pb")).expect("pb link");
+    let b = s(&bin);
+    let cases: Vec<(String, bool)> = vec![
+        (format!("{d} -f {b}/playbook"), true),
+        (format!("{d} -f {b}/pb"), true),
+        (format!("{d} -f {b}/pbtop"), true),
+        (format!("{d} -f {b}/playbook.0.36.0.bak"), false),
+        (format!("{d} -f {b}/.playbook.update.1.2"), false),
+        (format!("{d} -f {b}/playbook.*.bak"), false),
+        (format!("{d} -f ~/.local/bin/playbook.0.36.0.bak"), false),
+        (format!("{d} -f {b}/other"), true),
+        (format!("{d} -f {b}/*"), true),
+        (format!("{d} -f {b}/p*"), true),
+        (format!("{d} -rf {b}"), true),
+        (format!("{d} -f {b}/sub/playbook"), true),
+    ];
+    check(&fx, &fx.repo, &cases);
+    // An install name that links out of every root is judged where it points.
+    fs::write(fx.home.join("notes"), "").expect("notes");
+    symlink(fx.home.join("notes"), bin.join("playbook.9.9.9.bak")).expect("bak link");
+    assert!(fx.denied(&format!("{d} -f {b}/playbook.9.9.9.bak"), &fx.repo, &[]));
+    // `PLAYBOOK_BIN_DIR` moves the allowance with the install.
+    let other = fx.base.join("bin2");
+    let env = [("PLAYBOOK_BIN_DIR", other.to_str().expect("utf8"))];
+    let bak = "playbook.0.36.0.bak";
+    assert!(!fx.denied(&format!("{d} -f {}/{bak}", s(&other)), &fx.repo, &env));
+    assert!(fx.denied(&format!("{d} -f {b}/{bak}"), &fx.repo, &env));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_caches_and_the_collector_agent_are_allowed() {
+    let fx = Fx::new();
+    let d = rm();
+    let h = s(&fx.home);
+    let agent = "io.github.pragmatic-engineer.playbook.collector.plist";
+    let cases: Vec<(String, bool)> = vec![
+        (format!("{d} -rf {h}/Library/Caches/some-app"), false),
+        (format!("{d} -rf {h}/.cache/playbook"), false),
+        (format!("{d} -f {h}/Library/LaunchAgents/{agent}"), false),
+        (format!("{d} -rf {h}/Library/Caches"), true),
+        (format!("{d} -rf {h}/Library/Caches/*"), true),
+        (format!("{d} -rf {h}/Library/Preferences/x"), true),
+        (format!("{d} -f {h}/Library/LaunchAgents/other.plist"), true),
+    ];
+    check(&fx, &fx.repo, &cases);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_temp_folders_and_the_collector_unit_are_allowed() {
+    let fx = Fx::new();
+    let d = rm();
+    let h = s(&fx.home);
+    let cases: Vec<(String, bool)> = vec![
+        (format!("{d} -rf /var/tmp/pb-x"), false),
+        (format!("{d} -rf {h}/.cache/playbook"), false),
+        (
+            format!("{d} -f {h}/.config/systemd/user/playbook-collector.service"),
+            false,
+        ),
+        (format!("{d} -rf /var/tmp"), true),
+        (
+            format!("{d} -f {h}/.config/systemd/user/other.service"),
+            true,
+        ),
+    ];
+    check(&fx, &fx.repo, &cases);
+}
+
+/// `$TMPDIR` as the hook sees it is a root, contents only, and a `..` out of
+/// it is judged where it lands.
+#[test]
+fn the_tmpdir_of_the_hook_is_a_root_contents_only() {
+    let fx = Fx::new();
+    let d = rm();
+    let t = fx.base.join("own-tmp");
+    fs::create_dir_all(&t).expect("tmpdir");
+    let ts = s(&t);
+    let env = [("TMPDIR", ts.as_str())];
+    let cases: Vec<(String, bool)> = vec![
+        (format!("{d} -rf {ts}/x"), false),
+        (format!("{d} -rf {ts}/x/"), false),
+        (format!("{d} -rf {ts}"), true),
+        (format!("{d} -rf {ts}/"), true),
+        (format!("{d} -rf {ts}/../home/.ssh"), true),
+        (format!("{d} -rf /tmp/../etc"), true),
+    ];
+    for (cmd, want) in cases {
+        assert_eq!(fx.denied(&cmd, &fx.repo, &env), want, "{cmd}");
+    }
+}
+
+/// A path outside every root gets the exact command that keeps the current
+/// roots and adds its folder.
+#[test]
+fn the_denial_names_the_rule_and_gives_the_exact_fix_command() {
+    let fx = Fx::new();
+    let d = rm();
+    assert!(fx.config_set(r#"["~/scratch/builds"]"#).status.success());
+    let target = fx.home.join("code/acme/old");
+
+    let why = fx
+        .reason(&format!("{d} -rf {}", s(&target)), &fx.repo, &[])
+        .expect("denied");
+
+    assert!(why.contains("rule: outside the allowed roots"), "{why}");
+    let want = r#"! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\",\"~/code/acme\"]'"#;
+    assert!(why.contains(want), "{why}");
+    // A dot folder in home is never offered as a root.
+    let why = fx
+        .reason(&format!("{d} -f ~/.ssh/id_rsa"), &fx.repo, &[])
+        .expect("denied");
+    assert!(!why.contains("config set"), "{why}");
+}
+
+/// On a case-insensitive disk a different spelling of protected data is the
+/// same folder, so it stays blocked.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_different_letter_case_cannot_reach_protected_data() {
+    let fx = Fx::new();
+    let d = rm();
+    let pb = s(&fx.home.join(".config/playbook"));
+    fs::create_dir_all(fx.home.join(".config/playbook/memory")).expect("memory");
+    fs::create_dir_all(fx.home.join(".config/playbook/runtime/handoff")).expect("handoff");
+    assert!(fx.config_set(r#"["~/.config/playbook"]"#).status.success());
+    for cmd in [
+        format!("{d} -rf {pb}/MEMORY"),
+        format!("{d} -rf {pb}/Memory/x"),
+        format!("{d} -rf {pb}/runtime/HANDOFF"),
+    ] {
+        assert!(fx.denied(&cmd, &fx.repo, &[]), "{cmd}");
+    }
 }

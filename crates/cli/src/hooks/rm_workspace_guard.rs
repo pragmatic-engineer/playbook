@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Ports the retired shell original: denies an `rm` whose target sits outside
-//! the safe roots, `~/.claude/**`, and the scratch trees (contents only, never
-//! the tree root itself or a parent of it): `/tmp`, `/private/tmp`, the macOS
-//! per-user temp folder `/private/var/folders/*/*/T`, `~/.cache`, the shared
-//! `.worktrees` folder next to the repo (or next to the main checkout when run
-//! inside a linked worktree), `WORKTREE_BASE_DIR` when set, and the
-//! `hooks.rmGuard.allowedRoots` config list.
+//! the safe roots, `~/.claude/**`, playbook's own install files, and the
+//! scratch trees (contents only, never the tree root itself or a parent of
+//! it): the OS temp and cache folders and playbook's scratch folders listed in
+//! `roots`, the shared `.worktrees` folder next to the repo (or next to the
+//! main checkout when run inside a linked worktree), `WORKTREE_BASE_DIR` when
+//! set, and the `hooks.rmGuard.allowedRoots` config list. Playbook's data (the
+//! memory store, the databases, plans and handoffs) and its lock folders stay
+//! blocked whatever root covers them. A denial names the rule that matched
+//! and, for a plain folder in home, the exact config command that allows it.
 //!
 //! Targets are judged after resolving symlinks and `..` against the real
 //! filesystem, so a link inside an allowed root that leaves it is denied. A
@@ -55,26 +58,15 @@
 //! would mean a second emitter used by exactly one hook, for a consumer that
 //! parses the JSON either way.
 
+mod message;
 mod parse;
-/// Built-in roots. Public until the guard reads them in the next change.
-pub mod roots;
+mod roots;
 
 use crate::common::emit_pre_deny;
 use crate::common::payload::Payload;
 use parse::Target;
+use roots::{InstallFile, RootEnv};
 use std::path::{Path, PathBuf};
-
-/// Scratch space allowed regardless of `PLAYBOOK_SAFE_ROOTS`, the same standing
-/// exemption `~/.claude` already has.
-///
-/// Both spellings are listed for readability: on macOS `/tmp` is a symlink to
-/// `/private/tmp`, and `scratch_roots` resolves and deduplicates them.
-///
-/// The temp root ITSELF stays blocked, unlike a configured safe root, which may
-/// be deleted whole. `rm -rf /tmp` takes out sockets and runtime state that live
-/// processes depend on, which is the class of accident this guard exists to
-/// stop, and no ordinary cleanup needs it.
-const TEMP_ROOTS: [&str; 2] = ["/tmp", "/private/tmp"];
 
 pub fn run(payload: &Payload) {
     let cmd = payload.field(".tool_input.command");
@@ -89,49 +81,105 @@ pub fn run(payload: &Payload) {
     if targets.is_empty() {
         return;
     }
-    let claude_dir = resolve_existing(&PathBuf::from(&home).join(".claude"));
-    let safe_roots = safe_roots();
-    let scratch_roots = scratch_roots(&home);
-
-    let outside = offending_targets(targets, &home, &claude_dir, &safe_roots, &scratch_roots);
-    if outside.is_empty() {
+    let roots = Roots::new(&home, &RootEnv::from_process(&home));
+    let denied = denied_targets(targets, &roots);
+    if denied.is_empty() {
         return;
     }
+    emit_pre_deny(&message::denial(&denied, &roots));
+}
 
-    let roots = if safe_roots.is_empty() {
-        "(no safe roots configured)".to_string()
-    } else {
-        safe_roots
-            .iter()
-            .map(|r| format!("{}/**", r.display()))
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    let scratch = scratch_roots
-        .iter()
-        .map(|r| format!("{}/*", r.display()))
-        .chain(std::iter::once(MACOS_TEMP_LABEL.to_string()))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let state_root = crate::common::paths::playbook_root();
-    let state_root = state_root.to_string_lossy();
-    let hint = if outside.iter().any(|t| t.ends_with(".lock")) {
-        " A leftover `.lock` directory clears itself on the next write once it is 10 seconds old, so do not rm it."
-    } else if outside.iter().any(|t| t.starts_with(state_root.as_ref())) {
-        " This path is playbook's own state: to clear plan scratch files use `playbook plan cleanup <slug>` (or `playbook plan cleanup --stale` for old leftovers), do not rm them."
-    } else if outside.iter().any(|t| t.contains("/.worktrees/")) {
-        " This path looks like a worktree leftover: use `git worktree remove --force <path>` for a registered one, `git worktree prune` for a deleted one, and an empty leftover folder is cleared by the next worktree create."
-    } else {
-        ""
-    };
-    emit_pre_deny(&format!(
-        "rm blocked: {} is outside {roots}, ~/.claude/** and the scratch roots {scratch} (contents only, symlinks resolved, no bare glob such as /tmp/* but a named prefix such as /tmp/pb-* is fine). Allowed: rm inside the repo or those roots. Ask the user to add extra roots to the `hooks.rmGuard.allowedRoots` config key, since you cannot change it. A stray quote or backslash left inside a path cannot be resolved. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path. If the label is `<command substitution>`, `<xargs input>`, a variable other than `$HOME`, or a relative path after `cd`, the guard cannot resolve it: run the rm as its own call with a literal absolute path.{hint}",
-        outside
-            .iter()
-            .map(|t| format!("`{t}`"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    ));
+/// Why a target is denied. Each names the rule in the denial message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Rule {
+    /// A command substitution, a variable, xargs input or a relative path
+    /// after `cd`: the guard cannot tell what it names.
+    Unresolvable,
+    /// A quote, backslash or shell syntax left inside the word.
+    StrayCharacter,
+    /// `~user`, or a `~` inside quotes, which the shell leaves alone.
+    Tilde,
+    /// A symlink chain too deep to follow, a link that cannot be read, or
+    /// a working folder that is gone.
+    LinkLoop,
+    /// Playbook's own data, such as the memory store or a database, or a
+    /// folder that holds it.
+    Protected,
+    /// A playbook lock folder, which clears itself and guards a live write.
+    Lock,
+    /// A scratch root itself: only its contents may go.
+    RootItself,
+    /// A glob the guard cannot judge, such as `/tmp/*`.
+    Glob,
+    /// Outside every allowed root. Holds the resolved path.
+    Outside(PathBuf),
+}
+
+impl Rule {
+    fn name(&self) -> &'static str {
+        match self {
+            Rule::Unresolvable => "unresolvable target",
+            Rule::StrayCharacter => "stray quote or shell character",
+            Rule::Tilde => "another user's home or a quoted ~",
+            Rule::LinkLoop => "path that cannot be resolved",
+            Rule::Protected => "protected playbook data",
+            Rule::Lock => "playbook lock folder",
+            Rule::RootItself => "scratch root itself (contents only)",
+            Rule::Glob => "bare glob",
+            Rule::Outside(_) => "outside the allowed roots",
+        }
+    }
+}
+
+/// Every root the guard judges against, resolved through symlinks.
+struct Roots {
+    home: String,
+    claude_dir: PathBuf,
+    /// The repo, or `PLAYBOOK_SAFE_ROOTS`: deleted whole if asked.
+    safe: Vec<PathBuf>,
+    /// Contents only.
+    scratch: Vec<PathBuf>,
+    playbook_root: PathBuf,
+    protected: Vec<PathBuf>,
+    install: Vec<InstallFile>,
+    /// `hooks.rmGuard.allowedRoots` as stored, for the fix command.
+    configured: Vec<String>,
+}
+
+impl Roots {
+    fn new(home: &str, env: &RootEnv) -> Roots {
+        let configured = configured_values(home);
+        let install = roots::install_files(env)
+            .into_iter()
+            .map(|file| match file {
+                InstallFile::Exact(path) => InstallFile::Exact(resolve_parent(&path)),
+                InstallFile::Prefix {
+                    dir,
+                    prefix,
+                    suffix,
+                } => InstallFile::Prefix {
+                    dir: resolve_existing(&dir),
+                    prefix,
+                    suffix,
+                },
+            })
+            .collect();
+        Roots {
+            claude_dir: resolve_existing(&PathBuf::from(home).join(".claude")),
+            safe: safe_roots(),
+            scratch: scratch_roots(home, env, &configured),
+            playbook_root: resolve_existing(&crate::common::paths::playbook_root_from(Path::new(
+                home,
+            ))),
+            protected: roots::protected(env)
+                .iter()
+                .map(|p| resolve_existing(p))
+                .collect(),
+            install,
+            configured,
+            home: home.to_string(),
+        }
+    }
 }
 
 /// `PLAYBOOK_SAFE_ROOTS` is colon-separated like `$PATH`. Unset or empty falls
@@ -150,22 +198,17 @@ fn safe_roots() -> Vec<PathBuf> {
         .collect()
 }
 
-/// Label for the macOS per-user temp folder in the denial message.
-const MACOS_TEMP_LABEL: &str = "/private/var/folders/*/*/T/*";
-
-/// The directories whose CONTENTS may be deleted, resolved through symlinks.
-/// The macOS per-user temp folder is matched by shape in `strict_base`, because
-/// its name is a hash.
-fn scratch_roots(home: &str) -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = TEMP_ROOTS
-        .iter()
-        .map(|r| resolve_existing(Path::new(r)))
+/// The directories whose CONTENTS may be deleted, resolved through symlinks:
+/// the OS temp and cache folders, playbook's scratch folders, the shared
+/// `.worktrees` folder, `WORKTREE_BASE_DIR` and the configured roots. The
+/// macOS per-user temp folder and `tmp` folders under the playbook root are
+/// matched by shape in `strict_base`.
+fn scratch_roots(home: &str, env: &RootEnv, configured: &[String]) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = roots::temp_roots(env)
+        .into_iter()
+        .chain(roots::playbook_scratch_roots(env))
+        .map(|r| resolve_existing(&r))
         .collect();
-    if !home.is_empty() {
-        // Derived from HOME, deliberately NOT from `XDG_CACHE_HOME`, which could
-        // be set to `/`.
-        roots.push(resolve_existing(&Path::new(home).join(".cache")));
-    }
     let repo = git_repo_root();
     if let Some(parent) =
         main_checkout(repo.as_deref()).and_then(|m| m.parent().map(Path::to_path_buf))
@@ -177,7 +220,7 @@ fn scratch_roots(home: &str) -> Vec<PathBuf> {
             roots.push(resolve_existing(Path::new(&base)));
         }
     }
-    roots.extend(configured_roots(home));
+    roots.extend(configured_roots(home, configured));
     roots.sort();
     roots.dedup();
     // A root that is `/`, the home directory or a parent of it would turn
@@ -204,9 +247,10 @@ fn main_checkout(repo: Option<&Path>) -> Option<PathBuf> {
         .or_else(|| Some(repo.to_path_buf()))
 }
 
-/// `hooks.rmGuard.allowedRoots`, `~/` expanded. An unreadable or malformed
-/// value yields nothing, which only narrows the allowance.
-fn configured_roots(home: &str) -> Vec<PathBuf> {
+/// `hooks.rmGuard.allowedRoots` as stored, each without a trailing `/**`. An
+/// unreadable or malformed value yields nothing, which only narrows the
+/// allowance.
+fn configured_values(home: &str) -> Vec<String> {
     if home.is_empty() {
         return Vec::new();
     }
@@ -222,7 +266,15 @@ fn configured_roots(home: &str) -> Vec<PathBuf> {
         .into_iter()
         .flatten()
         .filter_map(serde_json::Value::as_str)
-        .map(crate::config::write::strip_root_glob)
+        .map(|t| crate::config::write::strip_root_glob(t).to_string())
+        .collect()
+}
+
+/// The configured roots, `~/` expanded and resolved.
+fn configured_roots(home: &str, configured: &[String]) -> Vec<PathBuf> {
+    let home_path = Path::new(home);
+    configured
+        .iter()
         .filter(|t| !t.contains(['*', '?', '[', '{', '$', '`']))
         .filter_map(|t| match t.strip_prefix("~/") {
             // `join` of an absolute remainder replaces home, so `~//etc` would
@@ -310,16 +362,52 @@ fn resolve_existing(path: &Path) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/nonexistent-unresolvable-root"))
 }
 
-/// The scratch root `path` is at or below, or `None`. The macOS per-user temp
-/// folder is matched by shape: `/private/var/folders/<xx>/<hash>/T`.
-fn strict_base(path: &Path, scratch_roots: &[PathBuf]) -> Option<PathBuf> {
-    if let Some(root) = scratch_roots.iter().find(|r| path.starts_with(r)) {
+/// `path` with its longest existing part spelled as the disk stores it, which
+/// fixes the letter case on a case-insensitive disk. A last component that is
+/// a symlink is kept as written, so the link is judged where it sits.
+fn stored_case(path: &Path) -> PathBuf {
+    let is_link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    let mut rest = Vec::new();
+    let mut current = path;
+    if is_link {
+        match (path.parent(), path.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                current = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+    loop {
+        if let Ok(found) = std::fs::canonicalize(current) {
+            return rest.iter().rev().fold(found, |acc, part| acc.join(part));
+        }
+        match (current.parent(), current.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                current = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// `path` with its folder resolved and its own name kept, so a file that is
+/// a link is matched where it sits.
+fn resolve_parent(path: &Path) -> PathBuf {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => resolve_existing(parent).join(name),
+        _ => resolve_existing(path),
+    }
+}
+
+/// The scratch root `path` is at or below, or `None`: a listed root, the
+/// macOS per-user temp folder, or a `tmp` folder under the playbook root.
+fn strict_base(path: &Path, roots: &Roots) -> Option<PathBuf> {
+    if let Some(root) = roots.scratch.iter().find(|r| path.starts_with(r)) {
         return Some(root.clone());
     }
-    let parts: Vec<_> = path.components().collect();
-    let temp_shape =
-        parts.len() >= 7 && path.starts_with("/private/var/folders") && parts[6].as_os_str() == "T";
-    temp_shape.then(|| parts[..7].iter().collect())
+    roots::macos_temp_base(path).or_else(|| roots::playbook_tmp_base(path, &roots.playbook_root))
 }
 
 fn is_glob_char(c: char) -> bool {
@@ -342,31 +430,26 @@ fn join_parts(parts: &[&str], absolute: bool) -> String {
     }
 }
 
-/// Whether deleting `target`, a word as the shell passes it, is allowed.
-/// `tilde` says a leading `~` was unquoted, so the shell expands it.
-fn is_allowed(
-    target: &str,
-    tilde: bool,
-    home: &str,
-    claude_dir: &Path,
-    safe_roots: &[PathBuf],
-    scratch_roots: &[PathBuf],
-) -> bool {
+/// Whether deleting `target`, a word as the shell passes it, is allowed, and
+/// the rule that denies it when it is not. `tilde` says a leading `~` was
+/// unquoted, so the shell expands it.
+fn judge(target: &str, tilde: bool, roots: &Roots) -> Result<(), Rule> {
     // A quote or backslash left in the word is part of the file name, which is
     // more likely a mistake than a real file. The rest are shell syntax (zsh
     // glob qualifiers, redirects) that this guard does not model.
     if target.contains(['"', '\'', '\\', '(', ')', '<', '>', '^']) {
-        return false;
+        return Err(Rule::StrayCharacter);
     }
     // Only `~` and `~/...` are the caller's home, and never inside quotes, where
     // the shell leaves `~` alone. `~other` is somebody else's.
+    let home = &roots.home;
     let expanded = if target == "~" || target.starts_with("~/") {
         if home.is_empty() || !tilde {
-            return false;
+            return Err(Rule::Tilde);
         }
         format!("{home}{}", &target[1..])
     } else if target.starts_with('~') {
-        return false;
+        return Err(Rule::Tilde);
     } else {
         target.to_string()
     };
@@ -380,37 +463,82 @@ fn is_allowed(
         .iter()
         .any(|p| p.matches('{').count() != p.matches('}').count())
     {
-        return false;
+        return Err(Rule::Glob);
     }
     let glob_at = parts.iter().position(|p| p.chars().any(is_glob_char));
     let literal_len = glob_at.unwrap_or(parts.len());
     // A `..` after a glob cannot be resolved, because the expansion may be a link.
     if glob_at.is_some_and(|g| parts[g..].contains(&"..")) {
-        return false;
+        return Err(Rule::Glob);
     }
-    let Some(dir) = resolve(Path::new(&join_parts(&parts[..literal_len], absolute))) else {
-        return false;
-    };
+    let dir =
+        resolve(Path::new(&join_parts(&parts[..literal_len], absolute))).ok_or(Rule::LinkLoop)?;
+    // The glob, when it is the last component and has no trailing slash.
+    let last_glob = glob_at
+        .filter(|g| *g == parts.len() - 1 && !trailing_slash)
+        .map(|g| parts[g]);
 
-    let verdict = |dir: &Path| -> bool {
-        if dir.starts_with(claude_dir) || safe_roots.iter().any(|root| dir.starts_with(root)) {
-            return true;
-        }
-        let Some(base) = strict_base(dir, scratch_roots) else {
-            return false;
+    let verdict = |dir: &Path| -> Result<(), Rule> {
+        // The deny rules compare the path as the disk stores it, so a
+        // different letter case on a case-insensitive disk cannot slip past.
+        let stored = stored_case(dir);
+        let holds_protected = |p: &PathBuf| {
+            if stored.starts_with(p) {
+                return true;
+            }
+            if !p.starts_with(&stored) {
+                return false;
+            }
+            // A glob with a named prefix next to a protected folder cannot
+            // match it, so `runtime/sess-*` stays allowed.
+            match last_glob {
+                Some(glob) if p.parent() == Some(stored.as_path()) => {
+                    let named = glob[..literal_prefix_len(glob)].to_lowercase();
+                    p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().to_lowercase().starts_with(&named))
+                }
+                _ => true,
+            }
         };
-        let Some(g) = glob_at else {
+        if roots.protected.iter().any(holds_protected) {
+            return Err(Rule::Protected);
+        }
+        let ends_lock = |text: &str| text.to_lowercase().ends_with(".lock");
+        let is_lock = stored.strip_prefix(&roots.playbook_root).is_ok_and(|rest| {
+            rest.components()
+                .any(|c| ends_lock(&c.as_os_str().to_string_lossy()))
+                || last_glob.is_some_and(ends_lock)
+        });
+        if is_lock {
+            return Err(Rule::Lock);
+        }
+        if dir.starts_with(&roots.claude_dir) || roots.safe.iter().any(|r| dir.starts_with(r)) {
+            return Ok(());
+        }
+        if (glob_at.is_none() || last_glob.is_some())
+            && roots.install.iter().any(|f| f.covers(dir, last_glob))
+        {
+            return Ok(());
+        }
+        let Some(base) = strict_base(dir, roots) else {
+            return Err(Rule::Outside(dir.to_path_buf()));
+        };
+        let Some(_) = glob_at else {
             // Contents only: the root itself and its parents stay blocked.
-            return dir != base;
+            return if dir == base {
+                Err(Rule::RootItself)
+            } else {
+                Ok(())
+            };
         };
         // A glob under a scratch root: the last component only, no trailing
         // slash, and directly under the root it needs a named prefix.
-        let last = g == parts.len() - 1 && !trailing_slash;
-        last && (dir != base || literal_prefix_len(parts[g]) >= 3)
+        match last_glob {
+            Some(glob) if dir != base || literal_prefix_len(glob) >= 3 => Ok(()),
+            _ => Err(Rule::Glob),
+        }
     };
-    if !verdict(&dir) {
-        return false;
-    }
+    verdict(&dir)?;
     // `rm link` removes the link itself, wherever it points, so the link's own
     // location has to be allowed as well as its destination. This is what stops
     // a link that sits outside every root, but points into one, from being
@@ -418,32 +546,21 @@ fn is_allowed(
     if glob_at.is_none() && !trailing_slash {
         if let Some(name) = parts.last().filter(|n| !matches!(**n, "" | "." | "..")) {
             let parent = &parts[..parts.len() - 1];
-            let Some(parent) = resolve(Path::new(&join_parts(parent, absolute))) else {
-                return false;
-            };
+            let parent = resolve(Path::new(&join_parts(parent, absolute))).ok_or(Rule::LinkLoop)?;
             return verdict(&parent.join(name));
         }
     }
-    true
+    Ok(())
 }
 
-/// The deletion targets that fall outside the allowed roots, each as written,
-/// or as its label when it cannot be resolved.
-fn offending_targets(
-    targets: Vec<Target>,
-    home: &str,
-    claude_dir: &Path,
-    safe_roots: &[PathBuf],
-    scratch_roots: &[PathBuf],
-) -> Vec<String> {
+/// The deletion targets that are denied, each as written, or as its label
+/// when it cannot be resolved, with the rule that denies it.
+fn denied_targets(targets: Vec<Target>, roots: &Roots) -> Vec<(String, Rule)> {
     targets
         .into_iter()
         .filter_map(|target| match target {
-            Target::Unresolvable(label) => Some(label),
-            Target::Path { text, tilde } => {
-                (!is_allowed(&text, tilde, home, claude_dir, safe_roots, scratch_roots))
-                    .then_some(text)
-            }
+            Target::Unresolvable(label) => Some((label, Rule::Unresolvable)),
+            Target::Path { text, tilde } => judge(&text, tilde, roots).err().map(|r| (text, r)),
         })
         .collect()
 }
