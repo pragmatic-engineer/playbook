@@ -660,7 +660,7 @@ mod tests {
         ("X=$(pwd) RM /a", "u:<command substitution>,p:/a"),
         ("echo $(date; RM /a)", "u:<command substitution>,p:/a"),
         ("echo \"$(RM /a)\"", "u:<command substitution>,p:/a"),
-        ("echo `RM /a`", "u:<command substitution>,p:/a"),
+        ("echo `RM /a`", "u:<command substitution>,u:/a"),
         ("echo $(date) && RM /a", "p:/a"),
         ("RM /a && echo $(date)", "p:/a"),
         // Variables, zsh qualifiers and cd.
