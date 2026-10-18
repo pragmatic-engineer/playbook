@@ -10,6 +10,12 @@ The guard reads the command the way the shell does, with the shared shell lexer,
 - `find ... -delete` and `find ... -exec rm`, judged by the start paths of `find`.
 - `xargs rm` fed by a `find` in the same pipeline, judged by that `find`. Other `xargs` input cannot be known, so it is blocked.
 - A script given to `sh -c`, `bash -c`, `eval`, a here-string, or a heredoc that a shell reads.
+- `unlink`, `rmdir` (with `-p`, every parent it names), `trash`, `shred`, `truncate` and `dd of=`, judged like `rm`.
+- `git clean -f` and `git worktree remove`, judged as deleting below the paths they name (the current folder when none), and `cargo clean`, judged by its target folder.
+- `xargs rm` fed by `printf` or `echo` of literal words, judged by those words.
+- Python, Node, Perl and Ruby one-liners (`-c`, `-e`, a here-string, or a heredoc read from standard input) that call `shutil.rmtree`, `os.remove`, `fs.rmSync`, `unlink`, `FileUtils.rm_rf` and the like. A plain string path is judged; any other argument is blocked. A script file is not read.
+
+Two kinds of command change a file without deleting it: the target of a `>`, `2>` or `&>` redirect, and the operands of `chmod -R`, `chown -R` and `chgrp -R`. For these only the deny set and playbook's own data block, so `> ~/.zshrc` and `chmod -R 777 ~/.ssh` stay blocked while `cargo test > /tmp/log` is fine. `>>` appends and is never judged.
 
 The guard follows the folder the shell is in. A relative target is judged against the `cwd` Claude Code sends with the command, and after `cd`, `pushd` or `popd` against the folder the shell changed into. A `cd` inside `( ... )` or `$( ... )` ends with the group. When a `cd` could fail and the next command still runs (after `;`, `||` or a line break rather than `&&`), the target is judged in both the new and the old folder. A folder the guard cannot name, such as `cd "$X"`, `popd` with nothing pushed, or `cd name` while `CDPATH` is set, makes a relative target unresolvable.
 
@@ -17,7 +23,7 @@ Variables are followed when the command itself sets them to something the guard 
 
 Text that is only data is left alone: a quoted grep pattern, a commit message, an `echo`, a file path, and a heredoc read by `cat`, `git commit` or any program other than a shell. A redirect such as `2>/dev/null` is never a target.
 
-Claude Code starts the hook only for a command that holds an `rm` word (`if: Bash(rm:*)`). A `find -delete` with no `rm` anywhere in the command never reaches it.
+Claude Code starts the hook only for a command that holds an `rm` word (`if: Bash(rm:*)`). A command with no `rm` word anywhere, such as a lone `find -delete`, `git clean -fd` or `> file`, never reaches it.
 
 ## What is allowed with no config
 

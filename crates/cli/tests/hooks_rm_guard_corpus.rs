@@ -166,6 +166,7 @@ impl Tree {
             // A fixed value, so `$TMPDIR` cases judge the same everywhere.
             .env("TMPDIR", "/tmp")
             .env_remove("CDPATH")
+            .env_remove("CARGO_TARGET_DIR")
             .env_remove("PLAYBOOK_SAFE_ROOTS")
             .env_remove("WORKTREE_BASE_DIR")
             .env_remove("PLAYBOOK_BIN_DIR")

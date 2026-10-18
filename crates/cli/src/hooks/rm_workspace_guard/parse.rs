@@ -38,6 +38,7 @@
 //! other than a plain `find` prints.
 
 use super::expand::{self, Piece};
+use super::interp::{self, Lang};
 use crate::common::shell::{
     self, is_assignment, program_index, program_name, redirect_len, runner_value_options,
     shell_script_at, skip_options, Span, SHELLS,
@@ -76,6 +77,10 @@ pub(crate) enum Target {
     Below { text: String, tilde: bool },
     /// An option that is always blocked, such as `--no-preserve-root`.
     Forbidden(String),
+    /// A file a command overwrites or changes in place without deleting it,
+    /// such as the target of `>` or `chmod -R`: only the deny set and
+    /// playbook's data block it.
+    Overwrite { text: String, tilde: bool },
 }
 
 /// What the guard knows about the shell that runs the command. `$HOME` and
@@ -90,6 +95,8 @@ pub(crate) struct Env<'a> {
     pub cdpath: bool,
     /// `TMPDIR`, when set to an absolute path.
     pub tmpdir: Option<&'a Path>,
+    /// `CARGO_TARGET_DIR`, where `cargo clean` deletes when it is set.
+    pub cargo_target_dir: Option<&'a Path>,
 }
 
 /// What a command deletes, and where it goes.
@@ -297,8 +304,11 @@ impl Scan<'_> {
                 || commands
                     .get(i + 1)
                     .is_some_and(|n| n.piped && reads_script_from_stdin(&n.words));
+            let interpreter = interpreter_on_stdin(&command.words);
             for heredoc in &command.heredocs {
-                if feeds_shell {
+                if let Some(lang) = interpreter {
+                    self.script_deletions(lang, &heredoc.text);
+                } else if feeds_shell {
                     self.script(&heredoc.text, depth + 1, ctx.substitution);
                 } else if !heredoc.quoted {
                     // An unquoted body still runs its substitutions.
@@ -494,6 +504,7 @@ impl Scan<'_> {
     }
 
     fn command(&mut self, cmd: Words, ctx: &Ctx, producer: Option<&shell::Command>) {
+        self.redirects(cmd, ctx);
         let appends = cmd.words.first().is_some_and(|w| is_append(w));
         let Some(at) = program_at(cmd.words).filter(|_| !appends) else {
             self.assignments(cmd, ctx);
@@ -536,9 +547,24 @@ impl Scan<'_> {
                 self.place.vars.clear();
                 add(&mut self.place.cwds, None);
             }
-            "rm" => {
+            "rm" | "unlink" | "trash" => {
                 self.substitution_note(ctx);
                 self.rm_args(args, ctx, Placeholder::Operand);
+            }
+            "rmdir" => {
+                self.substitution_note(ctx);
+                self.rmdir(args, ctx);
+            }
+            "shred" => self.operands_of(args, ctx, &["-n", "-s", "--iterations", "--size"]),
+            "truncate" => self.operands_of(args, ctx, &["-s", "-r", "--size", "--reference"]),
+            "dd" => self.dd(args, ctx),
+            "chmod" | "chown" | "chgrp" => self.recursive_change(args, ctx),
+            "git" => self.git(args, ctx),
+            "cargo" => self.cargo(args, ctx),
+            name if Lang::of(name).is_some() => {
+                if let Some(lang) = Lang::of(name) {
+                    self.interpreter(lang, args);
+                }
             }
             "find" => self.find(args, ctx),
             "xargs" => self.xargs(args, ctx, producer),
@@ -953,18 +979,372 @@ impl Scan<'_> {
         if from >= args.words.len() || !self.runs_a_deletion(args.tail(from), ctx) {
             return;
         }
-        let find = producer.and_then(|c| {
-            let at = program_at(&c.words)?;
-            lists_paths(&c.words, at).then(|| Words::of(c).tail(at + 1))
-        });
-        match find {
-            Some(find) => {
-                let parts = FindParts::read(find.words);
-                self.find_inputs(find, &parts, ctx);
+        let Some(producer) = producer else {
+            self.unresolvable(XARGS_LABEL);
+            return;
+        };
+        let at = program_at(&producer.words);
+        if let Some(at) = at.filter(|&at| lists_paths(&producer.words, at)) {
+            let find = Words::of(producer).tail(at + 1);
+            let parts = FindParts::read(find.words);
+            self.find_inputs(find, &parts, ctx);
+            return;
+        }
+        match at.and_then(|at| printed_words(producer, at)) {
+            Some(words) => {
+                for word in words {
+                    for target in self.relative_or_absolute(&word) {
+                        self.push(target);
+                    }
+                }
             }
             None => self.unresolvable(XARGS_LABEL),
         }
     }
+
+    /// A literal path: as written when absolute or under `~/`, else in every
+    /// folder the shell may be in.
+    fn relative_or_absolute(&self, word: &str) -> Vec<Target> {
+        if word.starts_with('/') {
+            return vec![Target::Path {
+                text: word.to_string(),
+                tilde: false,
+            }];
+        }
+        if word == "~" || word.starts_with("~/") {
+            return vec![Target::Path {
+                text: word.to_string(),
+                tilde: true,
+            }];
+        }
+        self.relative(word)
+    }
+
+    /// The operands of a command whose options in `takes_value` take a value,
+    /// judged as deletion targets.
+    fn operands_of(&mut self, args: Words, ctx: &Ctx, takes_value: &[&str]) {
+        self.substitution_note(ctx);
+        for k in option_operands(args, ctx, takes_value) {
+            for target in self.classify(&args.words[k], &args.spans[k], ctx) {
+                self.push(target);
+            }
+        }
+    }
+
+    /// `rmdir`, and with `-p` every parent named in the path too.
+    fn rmdir(&mut self, args: Words, ctx: &Ctx) {
+        let parents = args.words.iter().any(|w| {
+            w == "--parents" || (w.starts_with('-') && !w.starts_with("--") && w.contains('p'))
+        });
+        for k in option_operands(args, ctx, &[]) {
+            let word = &args.words[k];
+            let mut targets = self.classify(word, &args.spans[k], ctx);
+            if parents {
+                let mut path = Path::new(word.as_str());
+                while let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                    targets.extend(self.relative_or_absolute(&parent.to_string_lossy()));
+                    path = parent;
+                }
+            }
+            for target in targets {
+                self.push(target);
+            }
+        }
+    }
+
+    /// `dd of=FILE`, which overwrites the file from its start.
+    fn dd(&mut self, args: Words, ctx: &Ctx) {
+        for (word, span) in args.words.iter().zip(args.spans) {
+            let Some(file) = word.strip_prefix("of=") else {
+                continue;
+            };
+            let raw = raw_text(ctx.source, span);
+            let raw_file = raw.strip_prefix("of=").unwrap_or(&raw);
+            let file_span = Span {
+                start: span.start + 3,
+                end: span.end,
+                dynamic: span.dynamic,
+            };
+            let targets = if raw_file.starts_with('~') || file.starts_with('/') || span.dynamic {
+                self.classify(file, &file_span, ctx)
+            } else {
+                self.relative(file)
+            };
+            for target in targets {
+                self.push(target);
+            }
+        }
+    }
+
+    /// `chmod -R`, `chown -R` and `chgrp -R`, which change every file under
+    /// their operands. The first operand is the mode or owner.
+    fn recursive_change(&mut self, args: Words, ctx: &Ctx) {
+        let recursive = args.words.iter().any(|w| {
+            w == "--recursive" || (w.starts_with('-') && !w.starts_with("--") && w.contains('R'))
+        });
+        if !recursive {
+            return;
+        }
+        let operands = option_operands(args, ctx, &["--reference"]);
+        for &k in operands.iter().skip(1) {
+            self.overwrite(&args.words[k], &args.spans[k], ctx);
+        }
+    }
+
+    /// Records a file a command overwrites, when the guard can name it. One it
+    /// cannot name is left alone: only the deny set and playbook's data block
+    /// an overwrite.
+    fn overwrite(&mut self, word: &str, span: &Span, ctx: &Ctx) {
+        if matches!(
+            word,
+            "/dev/null" | "/dev/stdout" | "/dev/stderr" | "/dev/tty"
+        ) || word.starts_with("/dev/fd/")
+        {
+            return;
+        }
+        for target in self.classify(word, span, ctx) {
+            if let Target::Path { text, tilde } = target {
+                self.push(Target::Overwrite { text, tilde });
+            }
+        }
+    }
+
+    /// The files a command's `>`, `>|` and `&>` redirections truncate. An
+    /// append (`>>`) and a copy of a descriptor (`2>&1`) change nothing.
+    fn redirects(&mut self, cmd: Words, ctx: &Ctx) {
+        let mut i = 0;
+        while i < cmd.words.len() {
+            let raw = raw_text(ctx.source, &cmd.spans[i]);
+            let operator = raw.trim_start_matches(|c: char| c.is_ascii_digit() || c == '&');
+            let truncates = operator.starts_with('>')
+                && !operator.starts_with(">>")
+                && !operator.starts_with(">&");
+            if !truncates || raw.starts_with('"') || raw.starts_with('\'') {
+                i += 1;
+                continue;
+            }
+            let rest = operator.trim_start_matches(['>', '|']);
+            if rest.is_empty() {
+                if let (Some(word), Some(span)) = (cmd.words.get(i + 1), cmd.spans.get(i + 1)) {
+                    self.overwrite(word, span, ctx);
+                }
+                i += 2;
+            } else {
+                let skip = raw.len() - rest.len();
+                let word = cmd.words[i].get(skip..).unwrap_or_default().to_string();
+                let span = Span {
+                    start: cmd.spans[i].start + skip,
+                    end: cmd.spans[i].end,
+                    dynamic: cmd.spans[i].dynamic,
+                };
+                self.overwrite(&word, &span, ctx);
+                i += 1;
+            }
+        }
+    }
+
+    /// `git clean` with `-f` deletes untracked files under its paths, and
+    /// `git worktree remove` a whole worktree. Both stay below the paths they
+    /// name, since git never deletes the repo root or `.git` this way.
+    fn git(&mut self, args: Words, ctx: &Ctx) {
+        let mut i = 0;
+        let mut moved = false;
+        while let Some(word) = args.words.get(i) {
+            match word.as_str() {
+                "-C" => {
+                    moved = true;
+                    i += 2;
+                }
+                "-c" | "--git-dir" | "--work-tree" | "--namespace" => i += 2,
+                w if w.starts_with('-') => {
+                    moved |= w.starts_with("--work-tree=") || w.starts_with("--git-dir=");
+                    i += 1;
+                }
+                _ => break,
+            }
+        }
+        let rest = args.tail(i + 1);
+        let below: Vec<usize> = match args.words.get(i).map(String::as_str) {
+            Some("clean") => {
+                let forced = rest.words.iter().any(|w| {
+                    w == "--force"
+                        || (w.starts_with('-') && !w.starts_with("--") && w.contains('f'))
+                });
+                let dry = rest.words.iter().any(|w| {
+                    w == "--dry-run"
+                        || (w.starts_with('-') && !w.starts_with("--") && w.contains('n'))
+                });
+                if !forced || dry {
+                    return;
+                }
+                option_operands(rest, ctx, &["-e", "--exclude"])
+            }
+            Some("worktree") if rest.words.first().map(String::as_str) == Some("remove") => {
+                option_operands(rest.tail(1), ctx, &[])
+                    .into_iter()
+                    .map(|k| k + 1)
+                    .collect()
+            }
+            _ => return,
+        };
+        self.substitution_note(ctx);
+        // `-C dir` or `--work-tree` moves git, so a relative path is unknown.
+        let saved = moved.then(|| std::mem::replace(&mut self.place.cwds, vec![None]));
+        let targets: Vec<Target> = if below.is_empty() {
+            self.relative(".")
+        } else {
+            below
+                .iter()
+                .flat_map(|&k| self.classify(&rest.words[k], &rest.spans[k], ctx))
+                .collect()
+        };
+        if let Some(saved) = saved {
+            self.place.cwds = saved;
+        }
+        for target in targets {
+            self.push(match target {
+                Target::Path { text, tilde } => Target::Below { text, tilde },
+                other => other,
+            });
+        }
+    }
+
+    /// `cargo clean`, which deletes the target folder: `--target-dir`,
+    /// `CARGO_TARGET_DIR`, or `target` in the current folder.
+    fn cargo(&mut self, args: Words, ctx: &Ctx) {
+        let at = args
+            .words
+            .iter()
+            .position(|w| !w.starts_with('+') && !w.starts_with('-'));
+        if at.map(|k| args.words[k].as_str()) != Some("clean") {
+            return;
+        }
+        self.substitution_note(ctx);
+        let dir = args.words.windows(2).position(|w| w[0] == "--target-dir");
+        let inline = args
+            .words
+            .iter()
+            .find_map(|w| w.strip_prefix("--target-dir="));
+        let targets = match (dir, inline, self.env.cargo_target_dir) {
+            (Some(k), _, _) => self.classify(&args.words[k + 1], &args.spans[k + 1], ctx),
+            (None, Some(dir), _) => self.relative_or_absolute(dir),
+            (None, None, Some(dir)) => self.relative_or_absolute(&dir.to_string_lossy()),
+            (None, None, None) => self.relative("target"),
+        };
+        for target in targets {
+            self.push(target);
+        }
+    }
+
+    /// A Python, Node, Perl or Ruby script given inline (`-c`, `-e`) or as a
+    /// here-string, read for the deletions it makes.
+    fn interpreter(&mut self, lang: Lang, args: Words) {
+        let script = args
+            .words
+            .iter()
+            .position(|w| lang.inline_option().contains(&w.as_str()) || w == "<<<")
+            .and_then(|k| args.words.get(k + 1));
+        if let Some(code) = script {
+            self.script_deletions(lang, code);
+        }
+    }
+
+    /// Records each path `code` deletes.
+    fn script_deletions(&mut self, lang: Lang, code: &str) {
+        for arg in interp::deletions(lang, code) {
+            match arg {
+                interp::Arg::Literal(path) => {
+                    // A script does not expand `~`, so it stays a name here.
+                    let targets = if path.starts_with('/') {
+                        vec![Target::Path {
+                            text: path,
+                            tilde: false,
+                        }]
+                    } else {
+                        self.relative(&path)
+                    };
+                    for target in targets {
+                        self.push(target);
+                    }
+                }
+                interp::Arg::Unknown(label) => self.unresolvable(&label),
+            }
+        }
+    }
+}
+
+/// The non-option arguments of a command, by index, with redirections left
+/// out. An option in `takes_value` takes the next word, and `--` ends the
+/// options.
+fn option_operands(args: Words, ctx: &Ctx, takes_value: &[&str]) -> Vec<usize> {
+    let mut found = Vec::new();
+    let mut options = true;
+    let mut i = 0;
+    while i < args.words.len() {
+        let redirect = redirect_len(&raw_text(ctx.source, &args.spans[i]));
+        if redirect > 0 {
+            i += redirect;
+            continue;
+        }
+        let word = &args.words[i];
+        if options && word == "--" {
+            options = false;
+        } else if options && takes_value.contains(&word.as_str()) {
+            i += 1;
+        } else if !(options && word.len() > 1 && word.starts_with('-')) {
+            found.push(i);
+        }
+        i += 1;
+    }
+    found
+}
+
+/// The words a `printf` or `echo` of literal words prints, one path each,
+/// for `xargs` to read. `None` when any of them expands.
+fn printed_words(producer: &shell::Command, at: usize) -> Option<Vec<String>> {
+    let name = program_name(&producer.words[at]);
+    let mut words = producer.words[at + 1..]
+        .iter()
+        .zip(&producer.spans[at + 1..]);
+    match name.as_str() {
+        "printf" => {
+            words.next()?;
+        }
+        "echo" => {}
+        _ => return None,
+    }
+    let mut out = Vec::new();
+    for (word, span) in words {
+        if span.dynamic || redirect_len(word) > 0 {
+            return None;
+        }
+        if name == "echo" && out.is_empty() && matches!(word.as_str(), "-n" | "-e" | "-E") {
+            continue;
+        }
+        out.extend(
+            word.replace("\\n", "\n")
+                .split_whitespace()
+                .map(str::to_string),
+        );
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// The interpreter of a command that reads its script from standard input:
+/// `python3 -` or a bare `python3`, and the same for Node, Perl and Ruby.
+fn interpreter_on_stdin(words: &[String]) -> Option<Lang> {
+    let at = program_at(words)?;
+    let lang = Lang::of(&program_name(&words[at]))?;
+    let args = &words[at + 1..];
+    let inline = args
+        .iter()
+        .any(|w| lang.inline_option().contains(&w.as_str()) || w == "<<<");
+    let mut operands = args
+        .iter()
+        .filter(|w| !w.starts_with('-') || *w == "-")
+        .filter(|w| redirect_len(w) == 0 && !w.starts_with('<'));
+    let script = operands.next();
+    (!inline && script.is_none_or(|w| w == "-")).then_some(lang)
 }
 
 /// Whether `word` appends to a variable, as `NAME+=value` does.
@@ -1278,14 +1658,16 @@ mod tests {
                 cwd: Path::new("/w"),
                 cdpath: false,
                 tmpdir: None,
+                cargo_target_dir: None,
             },
         );
         (command, got)
     }
 
     /// `p:/a` a path, `t:~/a` a path with an unquoted `~`, `b:/a` a path
-    /// the deletion stays under, `f:x` a forbidden option, `u:x` unresolvable
-    /// with label `x`; `,` between targets.
+    /// the deletion stays under, `f:x` a forbidden option, `w:/a` an overwrite
+    /// (`W:` with an unquoted `~`), `u:x` unresolvable with label `x`; `,`
+    /// between targets.
     fn spec(want: &str) -> Vec<Target> {
         let one = |item: &str| {
             let (kind, text) = item.split_at(2);
@@ -1299,6 +1681,10 @@ mod tests {
                     tilde: false,
                 },
                 "f:" => Target::Forbidden(text.to_string()),
+                "w:" | "W:" => Target::Overwrite {
+                    text: text.to_string(),
+                    tilde: kind == "W:",
+                },
                 _ => Target::Unresolvable(text.to_string()),
             }
         };
@@ -1496,6 +1882,49 @@ mod tests {
         ("find /a -delete", "p:/a"),
         ("find . -type f -delete", "b:."),
         ("find /a -mindepth 1 -exec RM -rf {} +", "b:/a"),
+        // Other commands that delete or overwrite.
+        ("unlink /a", "p:/a"),
+        ("rmdir -p a/b", "p:a/b,p:a"),
+        ("shred -u -n 3 ~/k", "t:~/k"),
+        ("truncate -s 0 /a", "p:/a"),
+        ("dd if=/dev/zero of=/a bs=1", "p:/a"),
+        ("trash dist", "p:dist"),
+        ("chmod -R 777 ~/.ssh", "W:~/.ssh"),
+        ("chown -R me:staff /a /b", "w:/a,w:/b"),
+        ("chmod 600 ~/.ssh/id", ""),
+        ("echo x > /a", "w:/a"),
+        ("echo x >/a", "w:/a"),
+        ("echo x 2>/a", "w:/a"),
+        ("echo x &> /a", "w:/a"),
+        ("echo x > ~/.zshrc", "W:~/.zshrc"),
+        ("echo x >> /a", ""),
+        ("echo x > /dev/null 2>&1", ""),
+        ("echo x > \"$UNKNOWN\"", ""),
+        ("S=/a; echo x > $S", "w:/a"),
+        ("git clean -fd sub", "b:sub"),
+        ("git clean -fdx", "b:."),
+        ("git clean -f -e keep -- a", "b:a"),
+        ("git clean -n", ""),
+        ("git clean -fdn", ""),
+        ("git clean -d", ""),
+        ("git -C /x clean -f", "u:."),
+        ("git -C /x clean -f /x/y", "b:/x/y"),
+        ("git worktree remove --force /wt", "b:/wt"),
+        ("git worktree list", ""),
+        ("git rm -r sub", ""),
+        ("cargo clean", "p:target"),
+        ("cargo +nightly clean --target-dir /t", "p:/t"),
+        ("cargo build", ""),
+        ("python3 -c 'import shutil; shutil.rmtree(\"/a\")'", "p:/a"),
+        ("python3 - <<'EOF'\nimport os\nos.remove('x')\nEOF", "p:x"),
+        ("python3 <<'EOF'\nimport os\nos.remove(p)\nEOF", "u:<python expression>"),
+        ("python3 script.py <<'EOF'\nos.remove('x')\nEOF", ""),
+        ("node -e \"require('fs').rmSync('/a')\"", "p:/a"),
+        ("perl -e 'unlink \"x\"'", "p:x"),
+        ("ruby -e 'FileUtils.rm_rf(\"/a\")'", "p:/a"),
+        ("printf '%s\\n' a b | xargs RM -f", "p:a,p:b"),
+        ("echo a b | xargs RM", "p:a,p:b"),
+        ("printf '%s\\n' $X | xargs RM", "u:<xargs input>"),
     ];
 
     /// Commands that only read, search or mention a deletion as data.
@@ -1549,8 +1978,13 @@ mod tests {
     fn data_that_mentions_a_deletion_is_never_a_command() {
         for case in DATA {
             let (command, got) = scan(case);
+            // A redirect target is an overwrite, judged on its own.
+            let deletions: Vec<Target> = got
+                .into_iter()
+                .filter(|t| !matches!(t, Target::Overwrite { .. }))
+                .collect();
 
-            assert_eq!(got, Vec::<Target>::new(), "{command:?}");
+            assert_eq!(deletions, Vec::<Target>::new(), "{command:?}");
         }
     }
 
@@ -1561,6 +1995,7 @@ mod tests {
             cwd: Path::new("/w"),
             cdpath: false,
             tmpdir: Some(Path::new("/var/T")),
+            cargo_target_dir: None,
         };
         let rm = "r".to_string() + "m";
         let cases = [
@@ -1580,6 +2015,7 @@ mod tests {
             cwd: Path::new("/w"),
             cdpath: true,
             tmpdir: None,
+            cargo_target_dir: None,
         };
         let rm = "r".to_string() + "m";
 
@@ -1597,6 +2033,7 @@ mod tests {
             cwd: Path::new("/w"),
             cdpath: false,
             tmpdir: None,
+            cargo_target_dir: None,
         };
         let rm = "r".to_string() + "m";
 
