@@ -101,7 +101,11 @@ pub const PARTS: &[Part] = &[
         flags: "--collector-service, --no-collector-service",
         question: "Keep the usage collector (`playbook usage collect`) running in the background, so telemetry has a receiver after every login? This installs a per-user service: a launchd agent in ~/Library/LaunchAgents on macOS, a systemd user unit on Linux. It acts only when telemetry points at the playbook collector.",
         does: "Installs a per-user service that runs `playbook usage collect --idle-seconds 0` at login and starts it again when it stops. On macOS it is a launchd agent with RunAtLoad and KeepAlive, on Linux a systemd user unit with Restart=always. Other systems get the command to run yourself. Its output goes to collector-service.log next to collector.json. The service file names only the program and the log: the collector reads its token from collector.json, so no secret is written. A no is remembered, so playbook stops reminding you.",
-        changes: "~/Library/LaunchAgents/io.github.pragmatic-engineer.playbook.collector.plist (macOS) or ~/.config/systemd/user/playbook-collector.service (Linux), and the log file",
+        changes: concat!(
+            "~/Library/LaunchAgents/",
+            playbook_telemetry::collector_label!(),
+            ".plist (macOS) or ~/.config/systemd/user/playbook-collector.service (Linux), and the log file"
+        ),
         undo: "`playbook uninstall` stops the service and removes its file.",
     },
     Part {
