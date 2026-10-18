@@ -126,6 +126,44 @@ fn a_bare_hand_written_eval_goes_and_other_content_stays() {
 }
 
 #[test]
+fn a_bare_eval_with_the_old_shell_flag_goes_too() {
+    for shell in ["zsh", "bash"] {
+        // Arrange
+        let home = temp_home(&format!("flag-{shell}"));
+        let rc_file = home.join(".zshrc");
+        write_file(
+            &rc_file,
+            &format!("a=1\neval \"$(playbook shell-init --shell {shell})\"\n"),
+        );
+
+        // Act
+        let changed = strip_retired_rc_lines(&home, 1);
+
+        // Assert
+        assert_eq!(changed.len(), 1, "{shell}");
+        assert_eq!(fs::read_to_string(&rc_file).unwrap(), "a=1\n", "{shell}");
+    }
+}
+
+#[test]
+fn an_indented_bare_eval_inside_the_users_own_block_stays() {
+    // Arrange
+    let home = temp_home("indented");
+    let rc_file = home.join(".bashrc");
+    let before = "if command -v playbook >/dev/null; then\n  eval \"$(playbook shell-init)\"\nfi\n";
+    write_file(&rc_file, before);
+
+    // Act
+    let pending = retired_rc_files(&home);
+    let changed = strip_retired_rc_lines(&home, 1);
+
+    // Assert
+    assert!(pending.is_empty());
+    assert!(changed.is_empty());
+    assert_eq!(fs::read_to_string(&rc_file).unwrap(), before);
+}
+
+#[test]
 fn legacy_source_lines_match_loosely() {
     let forms = [
         "source \"$HOME/.claude/shell/zsh/cc.zsh\"",

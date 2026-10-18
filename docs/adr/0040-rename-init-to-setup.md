@@ -1,8 +1,8 @@
 # ADR-0040: Rename `playbook init` to `playbook setup` and keep `init` as a deprecated name
 
-- **Status:** Accepted
+- **Status:** Accepted. Decision 5 is amended by [ADR 0044](0044-drop-the-shell-launcher.md) on 2026-10-19: the `shell-init` command is removed.
 - **Date created:** 2026-10-16
-- **Date modified:** 2026-10-16
+- **Date modified:** 2026-10-19
 
 ## Context
 

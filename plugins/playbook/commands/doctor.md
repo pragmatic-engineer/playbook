@@ -38,9 +38,11 @@ and stop.
    `policy-guard`) and for the
    `commit-message-sanitizer` backstop on PostToolUse. A legacy `.sh` command or
    a near-miss name does not count. Fix: `playbook setup` (older versions: `playbook init`).
-3. **Launcher (opt-in).** The rc file for your shell has the playbook
-   shell init line and `playbook` is on PATH. An old `source .../cc.zsh` line
-   reads as outdated (run `playbook setup`; older versions: `playbook init`). Not installed is INFO, never FAIL.
+3. **Launcher.** `playbook cc` needs no shell line. WARN when `~/.zshrc` or
+   `~/.bashrc` still has a retired launcher line, such as an old
+   `source .../cc.zsh` line or `eval "$(playbook shell-init)"`. Fix: `playbook setup`
+   (older versions: `playbook init`). A file that is not writable gets a WARN with a
+   permissions hint. PASS otherwise, with a note when no `pb` on PATH runs this binary.
 4. **System prompt (opt-in).** `~/.config/playbook/prompts/SYSTEM_PROMPT.md`
    exists. Absent is INFO.
 5. **Status line command is current.** The binary's status line command passes. The retired

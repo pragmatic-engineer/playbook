@@ -480,7 +480,7 @@ fn the_removed_shell_init_prints_one_stderr_line_and_exits_zero() {
 
 #[test]
 fn the_removed_shell_init_keeps_a_shell_with_the_old_rc_line_working() {
-    let line = "command -v playbook >/dev/null 2>&1 && eval \"$(playbook shell-init)\"";
+    let line = playbook::init::shim::SOURCE_LINE;
     for (shell, rc, flags) in [
         ("zsh", ".zshrc", &["-i", "-c"][..]),
         ("bash", ".bashrc", &["-c"]),

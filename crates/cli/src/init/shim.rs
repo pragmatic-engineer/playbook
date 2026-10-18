@@ -57,10 +57,17 @@ const BLOCK_COMMENTS: [&str; 2] = [
     "# playbook launchers (cc/ccd)",
 ];
 
-/// The `eval` line without the guard, as a user may write it by hand. The
-/// `shell-init` command is gone, so this line now prints a notice on every
-/// shell start, and migration 0018 removes it too.
-const BARE_EVAL: &str = "eval \"$(playbook shell-init)\"";
+/// The `eval` line without the guard, as a user may write it by hand, with
+/// and without the old `--shell` flag. The `shell-init` command is gone, so
+/// this line now prints a notice on every shell start, and migration 0018
+/// removes it too. Only a line that starts at column 0 matches: an indented
+/// one may be the only command of the user's own `if` block, and bash
+/// rejects an empty `then` body.
+const BARE_EVALS: [&str; 3] = [
+    "eval \"$(playbook shell-init)\"",
+    "eval \"$(playbook shell-init --shell zsh)\"",
+    "eval \"$(playbook shell-init --shell bash)\"",
+];
 
 /// An rc file that holds a retired launcher line, and whether setup can
 /// rewrite it.
@@ -198,7 +205,9 @@ fn strip_launcher(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>> {
             let line = lines[i];
             let trimmed = line.trim_ascii();
             let ours = trimmed == SOURCE_LINE.as_bytes()
-                || trimmed == BARE_EVAL.as_bytes()
+                || BARE_EVALS
+                    .iter()
+                    .any(|e| line.trim_ascii_end() == e.as_bytes())
                 || is_block_comment(line);
             usize::from(ours || is_legacy_source_line(line, shell_kind))
         },
