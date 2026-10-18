@@ -2001,7 +2001,8 @@ pub enum SessionsCommand {
 pub enum DiskCommand {
     /// Show free space per volume, the thresholds, and the biggest folders
     /// playbook and its agents made: cargo target folders, worktrees, caches
-    /// and the ballast
+    /// and the ballast. Also lists cargo target folders of any project under
+    /// the home folder and `disk.paths`
     Status {
         /// Print JSON for tools
         #[arg(long)]

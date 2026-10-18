@@ -501,7 +501,7 @@ Write a 1 GB ballast file under ~/.cache/playbook/ballast that `disk release` de
 
 ### `playbook disk status`
 
-Show free space per volume, the thresholds, and the biggest folders playbook and its agents made: cargo target folders, worktrees, caches and the ballast
+Show free space per volume, the thresholds, and the biggest folders playbook and its agents made: cargo target folders, worktrees, caches and the ballast. Also lists cargo target folders of any project under the home folder and `disk.paths`
 
 - `--json`: Print JSON for tools
 

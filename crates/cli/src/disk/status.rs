@@ -50,8 +50,11 @@ pub struct Report {
     pub consumers: Vec<Consumer>,
     pub target_count: usize,
     /// Cargo target folders anywhere under the home folder and `disk.paths`,
-    /// from any project, biggest first.
+    /// from any project, biggest first. The kind is always `Target`.
     pub home_targets: Vec<Consumer>,
+    /// False when the search for them stopped at its budget or folder cap,
+    /// so the list may miss some.
+    pub home_scan_complete: bool,
 }
 
 impl Report {
@@ -120,6 +123,9 @@ pub fn measure(candidates: Vec<(Kind, PathBuf)>) -> Vec<Consumer> {
 /// How long `disk status` spends finding and sizing the target folders of
 /// other projects. A big folder past the budget shows its size so far.
 pub const HOME_SIZING_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+/// The part of [`HOME_SIZING_BUDGET`] finding may use, so sizing always gets
+/// the rest.
+pub const HOME_FIND_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// [`measure`] that stops sizing at `deadline`.
 pub fn measure_until(
@@ -160,23 +166,28 @@ pub fn report(home: &Path, claude_home: &Path, cwd: &Path) -> Report {
     let target_count = consumers.iter().filter(|c| c.kind == Kind::Target).count();
     let mut roots = vec![home.to_path_buf()];
     roots.extend(policy.paths.iter().cloned());
-    let deadline = Some(std::time::Instant::now() + HOME_SIZING_BUDGET);
-    let mut home_targets = measure_until(
-        targets::find_cargo_targets(&roots, deadline)
-            .into_iter()
-            .filter(|p| consumers.iter().all(|c| &c.path != p))
-            .map(|p| (Kind::Target, p))
-            .collect(),
-        deadline,
-    );
-    home_targets.sort_by_key(|c| (c.complete, std::cmp::Reverse(c.bytes)));
+    let start = std::time::Instant::now();
+    let (found, home_scan_complete) =
+        targets::find_cargo_targets(&roots, Some(start + HOME_FIND_BUDGET));
+    let home_targets = measure_until(others(found, &consumers), Some(start + HOME_SIZING_BUDGET));
     Report {
         policy,
         volumes,
         consumers,
         target_count,
         home_targets,
+        home_scan_complete,
     }
+}
+
+/// The found target folders not already listed in `consumers` or inside one
+/// of them, such as a `target` folder in a linked worktree, as candidates.
+fn others(found: Vec<PathBuf>, consumers: &[Consumer]) -> Vec<(Kind, PathBuf)> {
+    found
+        .into_iter()
+        .filter(|p| consumers.iter().all(|c| !p.starts_with(&c.path)))
+        .map(|p| (Kind::Target, p))
+        .collect()
 }
 
 /// How many consumers the text output lists.
@@ -224,7 +235,9 @@ pub fn render(report: &Report) -> String {
         ));
     }
     if !report.home_targets.is_empty() {
-        out.push_str("\nOther cargo target folders under your home folder (any project)\n");
+        out.push_str(
+            "\nOther cargo target folders under your home folder and disk.paths (any project)\n",
+        );
         for c in report.home_targets.iter().take(SHOWN) {
             let floor = if c.complete { " " } else { ">" };
             out.push_str(&format!(
@@ -233,7 +246,16 @@ pub fn render(report: &Report) -> String {
                 c.path.display()
             ));
         }
+        if report.home_targets.len() > SHOWN {
+            out.push_str(&format!(
+                "  ... and {} more (see --json)\n",
+                report.home_targets.len() - SHOWN
+            ));
+        }
         out.push_str("  `cargo clean` in a project you are not building gives its space back.\n");
+    }
+    if !report.home_scan_complete {
+        out.push_str("\nThe search for other cargo target folders stopped at its time or folder limit, so some may be missing.\n");
     }
     if report.target_count as u64 > p.max_target_dirs {
         out.push_str(&format!(
@@ -273,6 +295,7 @@ pub fn to_json(report: &Report) -> Value {
             "bytes": c.bytes,
             "complete": c.complete,
         })).collect::<Vec<_>>(),
+        "homeScanComplete": report.home_scan_complete,
     })
 }
 
@@ -307,12 +330,21 @@ mod tests {
                 },
             ],
             target_count,
-            home_targets: vec![Consumer {
-                kind: Kind::Target,
-                path: PathBuf::from("/Users/me/code/app/target"),
-                bytes: 3 * GIB,
-                complete: true,
-            }],
+            home_targets: vec![
+                Consumer {
+                    kind: Kind::Target,
+                    path: PathBuf::from("/Users/me/code/app/target"),
+                    bytes: 3 * GIB,
+                    complete: true,
+                },
+                Consumer {
+                    kind: Kind::Target,
+                    path: PathBuf::from("/Users/me/code/big/target"),
+                    bytes: GIB,
+                    complete: false,
+                },
+            ],
+            home_scan_complete: true,
         }
     }
 
@@ -332,8 +364,38 @@ mod tests {
         assert!(text.contains("ballast"), "{text}");
         assert!(!text.contains("disk.maxTargetDirs"), "{text}");
         assert!(
-            text.contains("   3.0 GB  /Users/me/code/app/target"),
+            text.contains("\n      3.0 GB  /Users/me/code/app/target\n"),
             "{text}"
+        );
+        assert!(
+            text.contains("\n  >   1.0 GB  /Users/me/code/big/target\n"),
+            "{text}"
+        );
+        assert!(!text.contains("some may be missing"), "{text}");
+    }
+
+    #[test]
+    fn text_says_when_the_search_was_cut_short_or_the_list_is_long() {
+        let mut report = sample(1);
+        report.home_scan_complete = false;
+        let one = report.home_targets[0].clone();
+        report.home_targets = vec![one; SHOWN + 2];
+        let text = render(&report);
+        assert!(text.contains("some may be missing"), "{text}");
+        assert!(text.contains("... and 2 more (see --json)"), "{text}");
+    }
+
+    #[test]
+    fn others_drop_folders_already_listed_or_inside_one() {
+        let consumers = sample(1).consumers;
+        let found = vec![
+            PathBuf::from("/w/.worktrees/cargo-a"),
+            PathBuf::from("/w/.worktrees/cargo-a/nested/target"),
+            PathBuf::from("/Users/me/code/app/target"),
+        ];
+        assert_eq!(
+            others(found, &consumers),
+            vec![(Kind::Target, PathBuf::from("/Users/me/code/app/target"))]
         );
     }
 
@@ -357,6 +419,8 @@ mod tests {
         assert_eq!(value["targetDirs"], 1);
         assert_eq!(value["homeCargoTargets"][0]["bytes"], 3 * GIB);
         assert_eq!(value["homeCargoTargets"][0]["complete"], true);
+        assert_eq!(value["homeCargoTargets"][1]["complete"], false);
+        assert_eq!(value["homeScanComplete"], true);
     }
 
     #[test]
