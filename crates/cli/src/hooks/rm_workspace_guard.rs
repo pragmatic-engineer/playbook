@@ -36,8 +36,12 @@
 //! hook is wired with `if: Bash(rm:*)`, so Claude Code only starts it for a
 //! command that holds an `rm` word.
 //!
-//! Deliberate conservative blocks: a `cd` before the deletion makes relative
-//! targets unresolvable; a deletion inside, next to or fed by a command
+//! Relative targets are judged from the `cwd` in the payload, and after a
+//! `cd` from the folder the shell changed into (see `parse`). The repo of
+//! each folder the command changes into is a safe root too.
+//!
+//! Deliberate conservative blocks: a relative target in a folder only the
+//! shell knows is unresolvable; a deletion inside, next to or fed by a command
 //! substitution is unresolvable; a target holding a variable is unresolvable,
 //! except `$HOME`, which the guard expands with its own value unless the
 //! command sets or unsets it. The variable rule fixed a FAIL-OPEN
@@ -75,18 +79,36 @@ pub fn run(payload: &Payload) {
     }
 
     let home = std::env::var("HOME").unwrap_or_default();
+    let cwd = start_dir(&payload.field(".cwd"));
     // Most commands that reach the hook delete nothing, so the roots, which
     // cost git and config reads, are only worked out when something does.
-    let targets = parse::targets(&cmd, &parse::Env { home: &home });
-    if targets.is_empty() {
+    let found = parse::scan(
+        &cmd,
+        &parse::Env {
+            home: &home,
+            cwd: &cwd,
+            cdpath: std::env::var_os("CDPATH").is_some_and(|v| !v.is_empty()),
+        },
+    );
+    if found.targets.is_empty() {
         return;
     }
-    let roots = Roots::new(&home, &RootEnv::from_process(&home));
-    let denied = denied_targets(targets, &roots);
+    let roots = Roots::new(&home, &cwd, &found.dirs, &RootEnv::from_process(&home));
+    let denied = denied_targets(found.targets, &roots);
     if denied.is_empty() {
         return;
     }
     emit_pre_deny(&message::denial(&denied, &roots));
+}
+
+/// The folder the command runs in: the `cwd` Claude Code sends, which is
+/// where its shell is, or this process's folder when that is missing or gone.
+fn start_dir(sent: &str) -> PathBuf {
+    let sent = Path::new(sent);
+    if sent.is_absolute() && sent.is_dir() {
+        return sent.to_path_buf();
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
 }
 
 /// Why a target is denied. Each names the rule in the denial message.
@@ -134,6 +156,8 @@ impl Rule {
 /// Every root the guard judges against, resolved through symlinks.
 struct Roots {
     home: String,
+    /// The folder the command starts in, for relative targets.
+    cwd: PathBuf,
     claude_dir: PathBuf,
     /// The repo, or `PLAYBOOK_SAFE_ROOTS`: deleted whole if asked.
     safe: Vec<PathBuf>,
@@ -147,7 +171,9 @@ struct Roots {
 }
 
 impl Roots {
-    fn new(home: &str, env: &RootEnv) -> Roots {
+    /// `dirs` are the folders the command changes into: the repo each one
+    /// sits in is a safe root too.
+    fn new(home: &str, cwd: &Path, dirs: &[PathBuf], env: &RootEnv) -> Roots {
         let configured = configured_values(home);
         let install = roots::install_files(env)
             .into_iter()
@@ -166,8 +192,8 @@ impl Roots {
             .collect();
         Roots {
             claude_dir: resolve_existing(&PathBuf::from(home).join(".claude")),
-            safe: safe_roots(),
-            scratch: scratch_roots(home, env, &configured),
+            safe: safe_roots(home, cwd, dirs),
+            scratch: scratch_roots(home, cwd, env, &configured),
             playbook_root: resolve_existing(&crate::common::paths::playbook_root_from(Path::new(
                 home,
             ))),
@@ -178,18 +204,35 @@ impl Roots {
             install,
             configured,
             home: home.to_string(),
+            cwd: cwd.to_path_buf(),
         }
     }
 }
 
 /// `PLAYBOOK_SAFE_ROOTS` is colon-separated like `$PATH`. Unset or empty falls
-/// back to the git repo root, then the cwd. `$HOME` is deliberately not the
-/// default, since that would unblock `~/.ssh` and `~/.aws`.
-fn safe_roots() -> Vec<PathBuf> {
+/// back to the git repo root, then the cwd, plus the repo of each folder the
+/// command changes into. `$HOME` is deliberately not the default, since that
+/// would unblock `~/.ssh` and `~/.aws`, so a repo that is home or holds it
+/// is left out.
+fn safe_roots(home: &str, cwd: &Path, dirs: &[PathBuf]) -> Vec<PathBuf> {
     let configured = std::env::var("PLAYBOOK_SAFE_ROOTS").unwrap_or_default();
     if configured.is_empty() {
-        let root = git_repo_root().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-        return vec![resolve_existing(&root)];
+        let home = resolve_existing(Path::new(home));
+        // `/`, home or a parent of home would turn the allowance into
+        // nearly everything, so the fallback skips them too.
+        let narrow = |root: &Path| root.components().count() >= 2 && !home.starts_with(root);
+        let root = resolve_existing(&git_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf()));
+        let mut roots: Vec<PathBuf> = narrow(&root).then_some(root).into_iter().collect();
+        for dir in dirs.iter().filter(|d| d.is_dir()) {
+            let Some(repo) = crate::common::gitfacts::toplevel(dir) else {
+                continue;
+            };
+            let repo = resolve_existing(&repo);
+            if narrow(&repo) && !roots.contains(&repo) {
+                roots.push(repo);
+            }
+        }
+        return roots;
     }
     configured
         .split(':')
@@ -203,13 +246,13 @@ fn safe_roots() -> Vec<PathBuf> {
 /// `.worktrees` folder, `WORKTREE_BASE_DIR` and the configured roots. The
 /// macOS per-user temp folder and `tmp` folders under the playbook root are
 /// matched by shape in `strict_base`.
-fn scratch_roots(home: &str, env: &RootEnv, configured: &[String]) -> Vec<PathBuf> {
+fn scratch_roots(home: &str, cwd: &Path, env: &RootEnv, configured: &[String]) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = roots::temp_roots(env)
         .into_iter()
         .chain(roots::playbook_scratch_roots(env))
         .map(|r| resolve_existing(&r))
         .collect();
-    let repo = git_repo_root();
+    let repo = git_repo_root(cwd);
     if let Some(parent) =
         main_checkout(repo.as_deref()).and_then(|m| m.parent().map(Path::to_path_buf))
     {
@@ -287,16 +330,13 @@ fn configured_roots(home: &str, configured: &[String]) -> Vec<PathBuf> {
         .collect()
 }
 
-fn git_repo_root() -> Option<PathBuf> {
-    if let Some(top) = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| crate::common::gitfacts::toplevel(&cwd))
-    {
+fn git_repo_root(cwd: &Path) -> Option<PathBuf> {
+    if let Some(top) = crate::common::gitfacts::toplevel(cwd) {
         return Some(top);
     }
     let args = ["rev-parse", "--show-toplevel"];
     let path = crate::common::git::trimmed(crate::common::git::run(
-        None,
+        Some(cwd),
         &args,
         crate::common::git::TIMEOUT,
     ))?;
@@ -306,14 +346,11 @@ fn git_repo_root() -> Option<PathBuf> {
 /// Resolves `.`, `..` and every symlink along the path, the way the kernel
 /// would, but tolerating missing components: the target of an `rm` may not exist,
 /// and a missing component can hold no link. `..` is applied AFTER a link is
-/// followed, so `/tmp/link/../x` is judged where it really points. `None` means
-/// the link chain is too deep to trust.
-fn resolve(path: &Path) -> Option<PathBuf> {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir().ok()?.join(path)
-    };
+/// followed, so `/tmp/link/../x` is judged where it really points. A relative
+/// `path` is taken from `cwd`. `None` means the link chain is too deep to
+/// trust.
+fn resolve(path: &Path, cwd: &Path) -> Option<PathBuf> {
+    let absolute = cwd.join(path);
     let mut pending: std::collections::VecDeque<String> = absolute
         .to_string_lossy()
         .split('/')
@@ -358,7 +395,7 @@ fn resolve_existing(path: &Path) -> PathBuf {
     // root spelled `/users/me` on a case-insensitive disk compares equal to home.
     std::fs::canonicalize(path)
         .ok()
-        .or_else(|| resolve(path))
+        .or_else(|| resolve(path, Path::new("/nonexistent-relative-root")))
         .unwrap_or_else(|| PathBuf::from("/nonexistent-unresolvable-root"))
 }
 
@@ -471,8 +508,11 @@ fn judge(target: &str, tilde: bool, roots: &Roots) -> Result<(), Rule> {
     if glob_at.is_some_and(|g| parts[g..].contains(&"..")) {
         return Err(Rule::Glob);
     }
-    let dir =
-        resolve(Path::new(&join_parts(&parts[..literal_len], absolute))).ok_or(Rule::LinkLoop)?;
+    let dir = resolve(
+        Path::new(&join_parts(&parts[..literal_len], absolute)),
+        &roots.cwd,
+    )
+    .ok_or(Rule::LinkLoop)?;
     // The glob, when it is the last component and has no trailing slash.
     let last_glob = glob_at
         .filter(|g| *g == parts.len() - 1 && !trailing_slash)
@@ -546,7 +586,8 @@ fn judge(target: &str, tilde: bool, roots: &Roots) -> Result<(), Rule> {
     if glob_at.is_none() && !trailing_slash {
         if let Some(name) = parts.last().filter(|n| !matches!(**n, "" | "." | "..")) {
             let parent = &parts[..parts.len() - 1];
-            let parent = resolve(Path::new(&join_parts(parent, absolute))).ok_or(Rule::LinkLoop)?;
+            let parent = resolve(Path::new(&join_parts(parent, absolute)), &roots.cwd)
+                .ok_or(Rule::LinkLoop)?;
             return verdict(&parent.join(name));
         }
     }

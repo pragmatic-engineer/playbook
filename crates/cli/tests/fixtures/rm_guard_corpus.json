@@ -3,25 +3,34 @@
     "id": "cd-repo-rel",
     "cwd": "/Users/<user>",
     "command": "cd /Users/<user>/code/acme/coda && rm -rf target/fake-claude",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "false positive",
     "note": "relative path after cd into a repo"
   },
   {
     "id": "cd-repo-rel-semi",
-    "cwd": "/Users/<user>",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "cd /Users/<user>/code/acme/coda; rm bun.lock",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "false positive",
     "note": "cd then ; then rm: both the old and new folder are judged"
   },
   {
+    "id": "cd-semi-from-home",
+    "cwd": "/Users/<user>",
+    "command": "cd /Users/<user>/code/acme/coda; rm bun.lock",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "if the cd fails, the rm runs in home"
+  },
+  {
     "id": "cd-sub-rel",
     "cwd": "/Users/<user>/code/acme/coda",
     "command": "cd crates/coda-index/src && rm -f symbols.rs.bak",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "false positive",
     "note": "relative cd inside the repo"
@@ -48,7 +57,7 @@
     "id": "cd-wt-rel",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "cd /Users/<user>/code/pragmatic-engineer/.worktrees/playbook/usage-limits && rm -f ../pb-limits-bin.x",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "false positive",
     "note": "../ from a worktree into the .worktrees folder"
@@ -57,7 +66,7 @@
     "id": "cd-wt-tmp-trash",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "cd /Users/<user>/code/pragmatic-engineer/.worktrees/ward-s4 && rm -rf .tmp-trash",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "false positive",
     "note": "repo-local temp folder in a worktree"
@@ -66,7 +75,7 @@
     "id": "cd-scratch-rel",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "cd /private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad && rm -rf repo-config",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "false positive",
     "note": "scratchpad clone, relative after cd"
@@ -75,7 +84,7 @@
     "id": "cd-tmp-rel",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "cd /tmp && rm -rf permuta-relay-check && mkdir -p permuta-relay-check/data",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "false positive",
     "note": "relative after cd /tmp"
@@ -84,7 +93,7 @@
     "id": "subshell-cd",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "(cd /Users/<user>/code/acme/coda && rm -f crates/coda-index/src/update_impl.tmp); git status",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "false positive",
     "note": "cd inside a subshell"
@@ -93,7 +102,7 @@
     "id": "subshell-restores",
     "cwd": "/Users/<user>/code/acme/coda",
     "command": "(cd /tmp && true); rm -f crates/x.tmp",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "correct allow",
     "note": "the subshell's cd ends with it"
@@ -102,7 +111,7 @@
     "id": "pushd-rel",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "pushd /Users/<user>/code/acme/coda >/dev/null && rm -f probe.tmp.ts && popd",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "false positive",
     "note": "pushd then relative"
@@ -462,7 +471,7 @@
     "id": "wt-glob-sub",
     "cwd": "/Users/<user>/code/acme/coda",
     "command": "cd crates/coda-index/src && rm -f *-E",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "false positive",
     "note": "a glob below the repo root"
@@ -480,7 +489,7 @@
     "id": "other-repo-cd",
     "cwd": "/Users/<user>/code/solo/dealwatch",
     "command": "cd /Users/<user>/code/solo/dealwatch-backup && rm -rf /Users/<user>/code/solo/dealwatch-backup/verify",
-    "expect": "deny",
+    "expect": "allow",
     "want": "allow",
     "class": "false positive",
     "note": "a folder in the repo the command cd'd into"

@@ -294,8 +294,9 @@ mod rm_workspace_guard {
     fn unresolvable_commands_are_blocked_conservatively() {
         let (h, d, e) = (home(), del(), etc());
         let ws = format!("{h}/Workspace");
-        // A cd makes a relative target unresolvable.
-        assert!(blocked(&format!("cd /tmp && {d} -rf foo"), &ws));
+        // A cd to a folder only the shell knows makes a relative target
+        // unresolvable.
+        assert!(blocked(&format!("cd \"$X\" && {d} -rf foo"), &ws));
         // A substitution could expand to anything.
         assert!(blocked(&format!("{d} -rf $(echo {e})"), &ws));
     }
@@ -668,7 +669,7 @@ mod rm_workspace_guard {
             format!("find {e} -name x -delete"),
             format!("find {e} -exec {d} {{}} +"),
             format!("ls | xargs {d}"),
-            format!("cd {ws} && find -delete"),
+            "cd \"$X\" && find -delete".to_string(),
         ] {
             assert!(blocked(&cmd, &ws), "should block: {cmd}");
         }

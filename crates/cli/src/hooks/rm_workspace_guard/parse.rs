@@ -12,9 +12,17 @@
 //! `find -exec rm`. A word inside a quoted grep pattern, a commit message, an
 //! `echo` or a heredoc read by another program is never a command.
 //!
+//! The folder the shell is in is followed through `cd`, `pushd` and `popd`,
+//! so a relative target after a change of directory is judged where it
+//! lands. A `cd` inside `( ... )` or `$( ... )` ends with the group. A `cd`
+//! that may fail leaves the old folder current too: unless `&&` joins the
+//! `cd` to the deletion, the target is judged in both folders. A folder only
+//! the running shell knows (`cd "$X"`, `popd` with nothing pushed, `cd name`
+//! while `CDPATH` is set) makes a relative target unresolvable.
+//!
 //! What it cannot resolve it reports as unresolvable, so the guard blocks it:
-//! a target holding a variable other than `$HOME`, a relative
-//! target after a change of directory, a deletion inside or next to a command
+//! a target holding a variable other than `$HOME`, a relative target in a
+//! folder it cannot name, a deletion inside or next to a command
 //! substitution, a shell reading a pipe, and `xargs` deleting what anything
 //! other than a plain `find` prints.
 
@@ -22,6 +30,7 @@ use crate::common::shell::{
     self, program_index, program_name, redirect_len, runner_value_options, shell_script_at,
     skip_options, Span, SHELLS,
 };
+use std::path::{Component, Path, PathBuf};
 
 /// Reported when `rm` is reached through, or takes words from, `$(...)` or a
 /// backtick pair.
@@ -58,18 +67,64 @@ pub(crate) enum Target {
 /// both.
 pub(crate) struct Env<'a> {
     pub home: &'a str,
+    /// The folder the command starts in, absolute.
+    pub cwd: &'a Path,
+    /// `CDPATH` is set, so `cd name` may land somewhere other than `./name`.
+    pub cdpath: bool,
 }
 
-/// Everything `command` deletes, in order.
-pub(crate) fn targets(command: &str, env: &Env) -> Vec<Target> {
+/// What a command deletes, and where it goes.
+pub(crate) struct Found {
+    pub targets: Vec<Target>,
+    /// Every folder the command changes into that the guard can name.
+    pub dirs: Vec<PathBuf>,
+}
+
+/// Everything `command` deletes, in order, and the folders it changes into.
+pub(crate) fn scan(command: &str, env: &Env) -> Found {
+    let start = Place {
+        cwds: vec![Some(env.cwd.to_path_buf())],
+        before_cd: Vec::new(),
+        oldpwd: vec![None],
+        stack: Vec::new(),
+    };
     let mut scan = Scan {
         env,
         out: Vec::new(),
-        saw_cd: false,
+        place: start,
+        dirs: Vec::new(),
+        joined_by: String::new(),
         tainted: false,
     };
     scan.script(command, 0, false);
-    scan.out
+    Found {
+        targets: scan.out,
+        dirs: scan.dirs,
+    }
+}
+
+/// Everything `command` deletes, in order.
+#[cfg(test)]
+pub(crate) fn targets(command: &str, env: &Env) -> Vec<Target> {
+    scan(command, env).targets
+}
+
+/// A folder the shell may be in, or `None` when only the running shell
+/// knows it.
+type Dir = Option<PathBuf>;
+
+/// Where the shell is, as far as the guard can follow it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Place {
+    /// Every folder the shell may be in.
+    cwds: Vec<Dir>,
+    /// The folders the shell was in before a `cd`, still current when the
+    /// `cd` failed and the next command runs anyway.
+    before_cd: Vec<Dir>,
+    /// Where `cd -` goes.
+    oldpwd: Vec<Dir>,
+    /// The folders `pushd` saved, last on top.
+    stack: Vec<Vec<Dir>>,
 }
 
 /// The words of one command with their spans, kept in step.
@@ -111,9 +166,11 @@ enum Placeholder {
 struct Scan<'a> {
     env: &'a Env<'a>,
     out: Vec<Target>,
-    /// The directory changed earlier, so a relative path no longer means the
-    /// cwd.
-    saw_cd: bool,
+    place: Place,
+    dirs: Vec<PathBuf>,
+    /// The operator between the command being read and the one before it,
+    /// such as `&&`, `||` or `;`, empty for the first.
+    joined_by: String,
     /// The command sets or unsets `HOME`, so it is not expanded.
     tainted: bool,
 }
@@ -153,7 +210,17 @@ impl Scan<'_> {
             .iter()
             .flat_map(|c| &c.words)
             .any(|w| names_expanded(w));
+        let entry = self.place.clone();
+        // The place in each enclosing parenthesis group, with the group's
+        // number: what a group changes ends with it.
+        let mut frames: Vec<(usize, Place)> = vec![(0, entry.clone())];
         for (i, command) in commands.iter().enumerate() {
+            self.enter(&mut frames, command.depth, command.group);
+            self.joined_by = i
+                .checked_sub(1)
+                .map(|p| separator(&source, &commands[p], command))
+                .unwrap_or_default();
+            self.settle();
             let fragment = command.joined || command.opens_substitution;
             let ctx = Ctx {
                 source: &source,
@@ -191,7 +258,175 @@ impl Scan<'_> {
                     self.script(&inner, depth + 1, true);
                 }
             }
+            if let Some(top) = frames.last_mut() {
+                top.1 = self.place.clone();
+            }
         }
+        let out = frames.swap_remove(0).1;
+        self.place = if depth == 0 || out.cwds == entry.cwds {
+            out
+        } else {
+            // A nested script that changed folder: `eval` keeps the change,
+            // a child shell does not, so either folder may be current.
+            let mut place = entry;
+            add(&mut place.cwds, None);
+            place
+        };
+    }
+
+    /// Makes the place of the parenthesis group a command at `depth` in
+    /// `group` runs in current, leaving the groups that ended.
+    fn enter(&mut self, frames: &mut Vec<(usize, Place)>, depth: usize, group: usize) {
+        frames.truncate(depth + 1);
+        if depth > 0 && frames.len() == depth + 1 && frames[depth].0 != group {
+            frames.pop();
+        }
+        while frames.len() < depth + 1 {
+            let top = frames
+                .last()
+                .map(|f| f.1.clone())
+                .unwrap_or_else(|| self.place.clone());
+            let own = if frames.len() == depth {
+                group
+            } else {
+                usize::MAX
+            };
+            frames.push((own, top));
+        }
+        if let Some(top) = frames.last() {
+            self.place = top.1.clone();
+        }
+    }
+
+    /// After a `cd`, the next command not joined by `&&` may run where the
+    /// shell was before, if the `cd` failed.
+    fn settle(&mut self) {
+        if self.joined_by == "&&" {
+            return;
+        }
+        for dir in std::mem::take(&mut self.place.before_cd) {
+            add(&mut self.place.cwds, dir);
+        }
+    }
+
+    /// Follows `cd`, `pushd` or `popd`.
+    fn change_dir(&mut self, name: &str, args: Words, ctx: &Ctx) {
+        let operands = operands(args, ctx);
+        // `-P` resolves links before `..`, so the path is left for the judge
+        // to resolve on disk instead of by name.
+        let physical =
+            args.words.iter().take_while(|w| *w != "--").any(|w| {
+                w.len() > 1 && w.starts_with('-') && !w.starts_with("--") && w.contains('P')
+            });
+        let old = self.place.cwds.clone();
+        let mut new = match (name, operands.first()) {
+            ("popd", _) => self.place.stack.pop().unwrap_or_else(|| vec![None]),
+            ("pushd", None) => vec![None],
+            (_, None) => vec![self.home_dir()],
+            (_, Some(&k)) => self.destination(&args.words[k], &args.spans[k], ctx, physical),
+        };
+        // After `||` the `cd` runs only when the command before it failed,
+        // so the shell may not move at all.
+        if self.joined_by == "||" {
+            for dir in &old {
+                add(&mut new, dir.clone());
+            }
+        }
+        if name == "pushd" {
+            self.place.stack.push(old.clone());
+        }
+        for dir in &old {
+            add(&mut self.place.before_cd, dir.clone());
+        }
+        self.place.oldpwd = old;
+        for dir in new.iter().flatten() {
+            if !self.dirs.contains(dir) {
+                self.dirs.push(dir.clone());
+            }
+        }
+        self.place.cwds = new;
+    }
+
+    fn home_dir(&self) -> Dir {
+        self.env
+            .home
+            .starts_with('/')
+            .then(|| PathBuf::from(self.env.home))
+    }
+
+    /// The folders `cd word` may land in.
+    fn destination(&self, word: &str, span: &Span, ctx: &Ctx, physical: bool) -> Vec<Dir> {
+        let normalize = |path: &Path| {
+            if physical {
+                path.to_path_buf()
+            } else {
+                normalize(path)
+            }
+        };
+        if word == "-" {
+            return self.place.oldpwd.clone();
+        }
+        let raw = raw_text(ctx.source, span);
+        let text = if span.dynamic {
+            match self.expand(word, &raw) {
+                Some(text) => text,
+                None => return vec![None],
+            }
+        } else {
+            word.to_string()
+        };
+        if text.contains(['$', '`', '*', '?', '[', '{']) {
+            return vec![None];
+        }
+        let prefix = raw.split('/').next().unwrap_or_default();
+        let tilde = !span.dynamic && raw.starts_with('~') && !prefix.contains(['"', '\'', '\\']);
+        if tilde {
+            let Some(home) = self.home_dir() else {
+                return vec![None];
+            };
+            return match text.strip_prefix('~') {
+                Some("") => vec![Some(home)],
+                Some(rest) if rest.starts_with('/') => {
+                    vec![Some(normalize(&home.join(rest.trim_start_matches('/'))))]
+                }
+                _ => vec![None],
+            };
+        }
+        if text.starts_with('/') {
+            return vec![Some(normalize(Path::new(&text)))];
+        }
+        let explicit =
+            text == "." || text == ".." || text.starts_with("./") || text.starts_with("../");
+        if self.env.cdpath && !explicit {
+            return vec![None];
+        }
+        self.place
+            .cwds
+            .iter()
+            .map(|dir| dir.as_ref().map(|d| normalize(&d.join(&text))))
+            .collect()
+    }
+
+    /// A relative target, judged in every folder the shell may be in. It is
+    /// kept as written while the shell has not moved.
+    fn relative(&self, word: &str) -> Vec<Target> {
+        if self.place.cwds.len() == 1 && self.place.cwds[0].as_deref() == Some(self.env.cwd) {
+            return vec![Target::Path {
+                text: word.to_string(),
+                tilde: false,
+            }];
+        }
+        self.place
+            .cwds
+            .iter()
+            .map(|dir| match dir {
+                Some(dir) => Target::Path {
+                    text: dir.join(word).to_string_lossy().into_owned(),
+                    tilde: false,
+                },
+                None => Target::Unresolvable(word.to_string()),
+            })
+            .collect()
     }
 
     fn command(&mut self, cmd: Words, ctx: &Ctx, producer: Option<&shell::Command>) {
@@ -199,11 +434,19 @@ impl Scan<'_> {
             return;
         };
         if changes_directory(&cmd.words[..at]) {
-            self.saw_cd = true;
+            // `env -C dir` and `sudo -D dir` move this one command only.
+            let saved = std::mem::replace(&mut self.place.cwds, vec![None]);
+            self.program(cmd, at, ctx, producer);
+            self.place.cwds = saved;
+            return;
         }
+        self.program(cmd, at, ctx, producer);
+    }
+
+    fn program(&mut self, cmd: Words, at: usize, ctx: &Ctx, producer: Option<&shell::Command>) {
         let args = cmd.tail(at + 1);
         match program_name(&cmd.words[at]).as_str() {
-            "cd" | "pushd" | "popd" => self.saw_cd = true,
+            name @ ("cd" | "pushd" | "popd") => self.change_dir(name, args, ctx),
             "rm" => {
                 self.substitution_note(ctx);
                 self.rm_args(args, ctx, Placeholder::Operand);
@@ -270,45 +513,48 @@ impl Scan<'_> {
             if placeholder == Placeholder::Skip && word.contains("{}") {
                 continue;
             }
-            let target = self.classify(word, span, ctx);
-            self.push(target);
+            for target in self.classify(word, span, ctx) {
+                self.push(target);
+            }
         }
     }
 
-    fn classify(&self, word: &str, span: &Span, ctx: &Ctx) -> Target {
+    /// What one deletion operand names: one target, or one per folder the
+    /// shell may be in for a relative path.
+    fn classify(&self, word: &str, span: &Span, ctx: &Ctx) -> Vec<Target> {
         let raw = raw_text(ctx.source, span);
         if ctx.source.get(span.end) == Some(&'(') {
             // `$(` opens a substitution. Any other word that runs into `(` is
             // a zsh glob qualifier such as `x(:h)`, which can name a parent.
             if !word.ends_with('$') {
-                return Target::Unresolvable(format!("{raw}("));
+                return vec![Target::Unresolvable(format!("{raw}("))];
             }
-            return Target::Unresolvable(SUBSTITUTION_LABEL.to_string());
+            return vec![Target::Unresolvable(SUBSTITUTION_LABEL.to_string())];
         }
         if span.dynamic {
             if word.contains("$(") || word.contains('`') {
-                return Target::Unresolvable(SUBSTITUTION_LABEL.to_string());
+                return vec![Target::Unresolvable(SUBSTITUTION_LABEL.to_string())];
             }
-            return match self.expand(word, &raw) {
+            return vec![match self.expand(word, &raw) {
                 Some(text) => Target::Path { text, tilde: false },
                 None => Target::Unresolvable(raw),
-            };
+            }];
         }
         // A `$` left by single quotes is literal, but a path naming one is
         // more likely a mistake than a file, so it is not guessed at.
         if word.contains('$') {
-            return Target::Unresolvable(raw);
+            return vec![Target::Unresolvable(raw)];
         }
         // `~` expands only when nothing up to the first `/` is quoted.
         let prefix = raw.split('/').next().unwrap_or_default();
         let tilde = raw.starts_with('~') && !prefix.contains(['"', '\'', '\\']);
-        if self.saw_cd && !word.starts_with('/') && !tilde {
-            return Target::Unresolvable(word.to_string());
+        if !word.starts_with('/') && !tilde {
+            return self.relative(word);
         }
-        Target::Path {
+        vec![Target::Path {
             text: word.to_string(),
             tilde,
-        }
+        }]
     }
 
     /// `$HOME` or `${HOME}` at the start of `word`, expanded with the value
@@ -388,20 +634,16 @@ impl Scan<'_> {
             self.unresolvable(FIND_LINKS_LABEL);
             return;
         }
-        if parts.starts.is_empty() {
-            let dot = Target::Path {
-                text: ".".to_string(),
-                tilde: false,
-            };
-            self.push(if self.saw_cd {
-                Target::Unresolvable(".".to_string())
-            } else {
-                dot
-            });
-            return;
-        }
-        for &k in &parts.starts {
-            let target = self.classify(&args.words[k], &args.spans[k], ctx);
+        let targets: Vec<Target> = if parts.starts.is_empty() {
+            self.relative(".")
+        } else {
+            parts
+                .starts
+                .iter()
+                .flat_map(|&k| self.classify(&args.words[k], &args.spans[k], ctx))
+                .collect()
+        };
+        for target in targets {
             self.push(target);
         }
     }
@@ -423,6 +665,69 @@ impl Scan<'_> {
             None => self.unresolvable(XARGS_LABEL),
         }
     }
+}
+
+/// Adds `dir` to `dirs` unless it is there already.
+fn add(dirs: &mut Vec<Dir>, dir: Dir) {
+    if !dirs.contains(&dir) {
+        dirs.push(dir);
+    }
+}
+
+/// `path` with `.` and `..` applied by name, the way `cd` reads a folder
+/// before it changes into it.
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::from("/");
+    for part in path.components() {
+        match part {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(name) => out.push(name),
+            Component::RootDir | Component::CurDir | Component::Prefix(_) => {}
+        }
+    }
+    out
+}
+
+/// The operands of `cd`, `pushd` or `popd`: options such as `-P` and
+/// redirections left out.
+fn operands(args: Words, ctx: &Ctx) -> Vec<usize> {
+    let mut found = Vec::new();
+    let mut options = true;
+    let mut i = 0;
+    while i < args.words.len() {
+        let redirect = redirect_len(&raw_text(ctx.source, &args.spans[i]));
+        if redirect > 0 {
+            i += redirect;
+            continue;
+        }
+        let word = &args.words[i];
+        if options && word == "--" {
+            options = false;
+        } else if options && word.len() > 1 && word.starts_with('-') {
+            // `-` alone is an operand: the previous folder.
+        } else {
+            found.push(i);
+        }
+        i += 1;
+    }
+    found
+}
+
+/// The operator between `before` and `after`, such as `&&`, `||`, `;` or
+/// `|`, with whitespace and parentheses left out, or `;` for the first
+/// command. A line break alone reads as empty, which is not `&&`.
+fn separator(source: &[char], before: &shell::Command, after: &shell::Command) -> String {
+    let (Some(end), Some(start)) = (before.spans.last(), after.spans.first()) else {
+        return ";".to_string();
+    };
+    source
+        .get(end.end..start.start)
+        .unwrap_or_default()
+        .iter()
+        .filter(|c| !c.is_whitespace() && !matches!(c, '(' | ')'))
+        .collect()
 }
 
 /// The parts of a `find` command line, by index into its arguments.
@@ -581,7 +886,14 @@ mod tests {
     /// literal deletion that the live guard would judge.
     fn scan(case: &str) -> (String, Vec<Target>) {
         let command = case.replace("RM", &("r".to_string() + "m"));
-        let got = targets(&command, &Env { home: "/Users/me" });
+        let got = targets(
+            &command,
+            &Env {
+                home: "/Users/me",
+                cwd: Path::new("/w"),
+                cdpath: false,
+            },
+        );
         (command, got)
     }
 
@@ -671,9 +983,9 @@ mod tests {
         ("RM -rf /a/x(:h)", "u:/a/x("),
         ("HOME=/ RM -rf $HOME/x", "u:$HOME/x"),
         ("export HOME=/; RM -rf $HOME/x", "u:$HOME/x"),
-        ("cd /x && RM -rf build", "u:build"),
+        ("cd /x && RM -rf build", "p:/x/build"),
         ("cd /x && RM -rf /x/build ~/y", "p:/x/build,t:~/y"),
-        ("builtin cd /x && RM b", "u:b"),
+        ("builtin cd /x && RM b", "p:/x/b"),
         ("env -C /x RM b", "u:b"),
         ("sudo -D /x RM b", "u:b"),
         ("export HO''ME=/; RM -rf $HOME/x", "u:$HOME/x"),
@@ -699,12 +1011,40 @@ mod tests {
         ("find -O3 -P /a -delete", "p:/a"),
         ("find -x / -name x -delete", "p:/"),
         ("find -f /a -delete", "p:/a"),
-        ("cd /x && find -delete", "u:."),
+        ("cd /x && find -delete", "p:/x/."),
         ("find $(pwd) -name x -delete", S),
         ("find /a -exec ls {} + | xargs RM", "u:<xargs input>"),
         ("(echo /b; find /a) | xargs RM", "u:<xargs input>"),
         ("ls | xargs nohup RM -rf", "u:<xargs input>"),
         ("ls | xargs -I{} sh -c 'RM -rf {}'", "p:{},u:<xargs input>"),
+        // The folder the shell is in.
+        ("cd /x; RM b", "p:/x/b,p:/w/b"),
+        ("cd /x\nRM b", "p:/x/b,p:/w/b"),
+        ("cd /x && RM a; RM b", "p:/x/a,p:/x/b,p:/w/b"),
+        ("cd /x && cd y && RM b", "p:/x/y/b"),
+        ("cd /x/y/../z && RM b", "p:/x/z/b"),
+        ("cd sub && RM ../b", "p:/w/sub/../b"),
+        ("cd && RM b", "p:/Users/me/b"),
+        ("cd ~ && RM b", "p:/Users/me/b"),
+        ("cd ~/src && RM b", "p:/Users/me/src/b"),
+        ("cd $HOME/src && RM b", "p:/Users/me/src/b"),
+        ("cd -P /x && RM b", "p:/x/b"),
+        ("cd \"$X\" && RM b", "u:b"),
+        ("cd ~other && RM b", "u:b"),
+        ("cd /x && cd - && RM b", "p:b"),
+        ("(cd /x && RM a); RM b", "p:/x/a,p:b"),
+        ("(cd /x); (RM b)", "p:b"),
+        ("X=$(cd /x; pwd) RM b", "u:<command substitution>,p:b"),
+        ("pushd /x && RM a && popd && RM b", "p:/x/a,p:b"),
+        ("popd && RM b", "u:b"),
+        ("eval 'cd /x'; RM b", "p:/w/b,u:b"),
+        ("sh -c 'cd /x && RM a' && RM b", "p:/x/a,p:/w/b,u:b"),
+        ("cd /x && RM /abs ~/y", "p:/abs,t:~/y"),
+        ("cd /x && find . -delete", "p:/x/."),
+        ("cd /x &&\n  RM b", "p:/x/b"),
+        ("true || cd /x && RM b", "p:/x/b,p:/w/b"),
+        ("cd /x || exit 1; RM b", "p:/x/b,p:/w/b"),
+        ("cd -P /x/l/.. && RM b", "p:/x/l/../b"),
     ];
 
     /// Commands that only read, search or mention a deletion as data.
@@ -742,11 +1082,16 @@ mod tests {
 
     #[test]
     fn the_parser_finds_every_real_deletion() {
+        let mut wrong = Vec::new();
         for (case, want) in FOUND {
             let (command, got) = scan(case);
 
-            assert_eq!(got, spec(want), "{command:?}");
+            if got != spec(want) {
+                wrong.push(format!("{command:?}: got {got:?}"));
+            }
         }
+
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     }
 
     #[test]
@@ -756,6 +1101,36 @@ mod tests {
 
             assert_eq!(got, Vec::<Target>::new(), "{command:?}");
         }
+    }
+
+    #[test]
+    fn a_relative_cd_with_cdpath_set_lands_in_an_unknown_folder() {
+        let env = Env {
+            home: "/Users/me",
+            cwd: Path::new("/w"),
+            cdpath: true,
+        };
+        let rm = "r".to_string() + "m";
+
+        let named = targets(&format!("cd sub && {rm} b"), &env);
+        let explicit = targets(&format!("cd ./sub && {rm} b"), &env);
+
+        assert_eq!(named, spec("u:b"));
+        assert_eq!(explicit, spec("p:/w/sub/b"));
+    }
+
+    #[test]
+    fn the_folders_a_command_changes_into_are_reported() {
+        let env = Env {
+            home: "/Users/me",
+            cwd: Path::new("/w"),
+            cdpath: false,
+        };
+        let rm = "r".to_string() + "m";
+
+        let found = super::scan(&format!("cd /x && cd y; cd \"$Z\"; {rm} a"), &env);
+
+        assert_eq!(found.dirs, vec![PathBuf::from("/x"), PathBuf::from("/x/y")]);
     }
 
     #[test]
