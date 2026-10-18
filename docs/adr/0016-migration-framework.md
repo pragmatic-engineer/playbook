@@ -1,8 +1,8 @@
 # ADR-0016: A Registry of Ordered Migrations Run From `playbook init`
 
-- **Status:** Accepted. Decision 7, run only from `playbook init`, is amended by [ADR 0034](0034-self-healing-upgrades.md). The record from decision 2 moved to the `state` table of `config.db` with migration 0010
+- **Status:** Accepted. Decision 7, run only from `playbook init`, is amended by [ADR 0034](0034-self-healing-upgrades.md). The record from decision 2 moved to the `state` table of `config.db` with migration 0010. Decision 1 is amended by [ADR 0046](0046-migrations-by-release-version.md): ids are slugs, and each migration names the release that introduced it.
 - **Date created:** 2026-10-07
-- **Date modified:** 2026-10-15
+- **Date modified:** 2026-10-18
 
 ## Context
 
