@@ -20,36 +20,32 @@
 //! ACCEPTED RISKS, pinned here: a check-then-use race (a link created between
 //! the guard and the `rm`) cannot be closed by a pre-execution hook; the
 //! `.worktrees` allowance covers every repo's folder there, not only this
-//! repo's; `rmdir`, `unlink` and `find -delete` are not seen, as before.
+//! repo's; `rmdir`, `unlink`, `shred` and `>` truncation are not seen.
 //!
 //! Best-effort protection against an accidental `rm`, NOT a security boundary.
-//! It only sees `rm`, so `find -delete`, `unlink` and `>` truncation pass, and
-//! anything it cannot resolve is blocked rather than evaluated.
+//! Anything it cannot resolve is blocked rather than evaluated.
 //!
-//! Four deliberate conservative blocks. Three are carried over unchanged: a
-//! `cd` anywhere makes relative targets unresolvable, a command substitution
-//! could expand to anything, and a quoted path containing a space still splits
-//! into two tokens and is judged as two paths. The fourth was added later: a
-//! target containing `$` or a backtick is unresolvable, because it expands at
-//! runtime to a path the guard never sees. That one fixed a FAIL-OPEN rather
-//! than tightening an existing block, so it is the one to be careful about
-//! reverting.
+//! The command is read into real command words by `parse`, on the shared shell
+//! lexer, so only a word in command position is a deletion. Quoted text, a
+//! grep pattern, a commit message, an `echo` and a heredoc read by a program
+//! other than a shell are data. `find -delete`, `find -exec rm` and
+//! `xargs rm` are judged by `find`'s start paths when the hook runs, but the
+//! hook is wired with `if: Bash(rm:*)`, so Claude Code only starts it for a
+//! command that holds an `rm` word.
 //!
-//! A heredoc body is DATA, not commands, so a mention inside one is prose
-//! unless it starts a line. That was previously an accepted false positive,
-//! revised on 2026-08-23 because commit messages written through a heredoc were
-//! blocking real work. A body line that STARTS with a deletion is still in
-//! command position and still blocks, which is what keeps `bash <<EOF` honest.
+//! Deliberate conservative blocks: a `cd` before the deletion makes relative
+//! targets unresolvable; a deletion inside, next to or fed by a command
+//! substitution is unresolvable; a target holding a variable is unresolvable,
+//! except `$HOME`, which the guard expands with its own value unless the
+//! command sets or unsets it. The variable rule fixed a FAIL-OPEN
+//! (`"$X/y"` used to resolve under the cwd), so it is the one to be careful
+//! about reverting.
 //!
 //! **ACCEPTED MISS**, pinned so it is not re-reported as a vulnerability later:
-//! a command name that is obfuscated or built at runtime is not resolved, so it
-//! is not recognised as a deletion. Escaped and quote-split spellings, and names
-//! produced by command or parameter substitution, all fall in this class.
-//! Closing it needs word expansion, which for the substitution cases cannot be
-//! done statically at all. This is deliberate and in scope for a guard that
-//! exists to catch an ACCIDENT: no agent writes an obfuscated command name by
-//! accident, and the ordinary forms it would write, including `sudo`, `xargs`,
-//! `/bin/rm`, env prefixes and multi-line commands, are all still caught.
+//! a command name built at runtime (`$cmd`, `$(echo rm)`) is not resolved, so it
+//! is not recognised as a deletion. Closing it needs word expansion, which for
+//! substitutions cannot be done statically. Escaped and quote-split spellings
+//! (`\rm`, `r'm'`) are caught, because the lexer removes the quoting.
 //!
 //! **One documented divergence: JSON formatting.** This is the only guard that
 //! never sourced `lib/common.sh`; it piped through `jq -n`, so its output was
@@ -59,16 +55,12 @@
 //! would mean a second emitter used by exactly one hook, for a consumer that
 //! parses the JSON either way.
 
-pub mod parse;
+mod parse;
 
 use crate::common::emit_pre_deny;
 use crate::common::payload::Payload;
+use parse::Target;
 use std::path::{Path, PathBuf};
-
-/// Placeholder reported when `rm` is reached through `$(...)` or a backtick.
-const SUBSTITUTION_LABEL: &str = "<command substitution>";
-
-const SEPARATORS: [&str; 5] = [";", "&&", "||", "|", "&"];
 
 /// Scratch space allowed regardless of `PLAYBOOK_SAFE_ROOTS`, the same standing
 /// exemption `~/.claude` already has.
@@ -89,11 +81,17 @@ pub fn run(payload: &Payload) {
     }
 
     let home = std::env::var("HOME").unwrap_or_default();
+    // Most commands that reach the hook delete nothing, so the roots, which
+    // cost git and config reads, are only worked out when something does.
+    let targets = parse::targets(&cmd, &parse::Env { home: &home });
+    if targets.is_empty() {
+        return;
+    }
     let claude_dir = resolve_existing(&PathBuf::from(&home).join(".claude"));
     let safe_roots = safe_roots();
     let scratch_roots = scratch_roots(&home);
 
-    let outside = offending_targets(&cmd, &home, &claude_dir, &safe_roots, &scratch_roots);
+    let outside = offending_targets(targets, &home, &claude_dir, &safe_roots, &scratch_roots);
     if outside.is_empty() {
         return;
     }
@@ -125,10 +123,12 @@ pub fn run(payload: &Payload) {
         ""
     };
     emit_pre_deny(&format!(
-        "rm blocked: {} is outside {roots}, ~/.claude/** and the scratch roots {scratch} (contents only, symlinks resolved, no bare glob such as /tmp/* but a named prefix such as /tmp/pb-* is fine). Allowed: rm inside the repo or those roots. Ask the user to add extra roots to the `hooks.rmGuard.allowedRoots` config key, since you cannot change it. A quoted path with a space or a stray quote cannot be resolved either. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path. If the label is `<command substitution>`, a `$VAR` or a relative path after `cd`, the guard cannot resolve it: run the rm as its own call with a literal absolute path.{hint}",
-        // Comma with no space: the shell built this with `IFS=', '` and
-        // `${arr[*]}`, which joins on the FIRST character of IFS only.
-        outside.join(",")
+        "rm blocked: {} is outside {roots}, ~/.claude/** and the scratch roots {scratch} (contents only, symlinks resolved, no bare glob such as /tmp/* but a named prefix such as /tmp/pb-* is fine). Allowed: rm inside the repo or those roots. Ask the user to add extra roots to the `hooks.rmGuard.allowedRoots` config key, since you cannot change it. A stray quote or backslash left inside a path cannot be resolved. For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`), or ask the user to delete the path. If the label is `<command substitution>`, `<xargs input>`, a variable other than `$HOME`, or a relative path after `cd`, the guard cannot resolve it: run the rm as its own call with a literal absolute path.{hint}",
+        outside
+            .iter()
+            .map(|t| format!("`{t}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
     ));
 }
 
@@ -328,15 +328,6 @@ fn literal_prefix_len(component: &str) -> usize {
     component.chars().take_while(|c| !is_glob_char(*c)).count()
 }
 
-/// The token with ONE pair of surrounding quotes removed, and whether it had
-/// them. Quotes are shell syntax, so the shell sees the inside as the word.
-fn unquote(token: &str) -> (&str, bool) {
-    ["\"", "'"]
-        .iter()
-        .find_map(|q| token.strip_prefix(q).and_then(|t| t.strip_suffix(q)))
-        .map_or((token, false), |inner| (inner, true))
-}
-
 /// `parts` joined back into a path that `resolve` can take. An empty join of an
 /// absolute path is the root, not the working directory.
 fn join_parts(parts: &[&str], absolute: bool) -> String {
@@ -348,24 +339,26 @@ fn join_parts(parts: &[&str], absolute: bool) -> String {
     }
 }
 
+/// Whether deleting `target`, a word as the shell passes it, is allowed.
+/// `tilde` says a leading `~` was unquoted, so the shell expands it.
 fn is_allowed(
     target: &str,
+    tilde: bool,
     home: &str,
     claude_dir: &Path,
     safe_roots: &[PathBuf],
     scratch_roots: &[PathBuf],
 ) -> bool {
-    let (target, quoted) = unquote(target);
-    // Any other quote or a backslash means the shell would see a different word
-    // than this one. The rest are shell syntax (zsh glob qualifiers, redirects)
-    // that this guard does not model.
+    // A quote or backslash left in the word is part of the file name, which is
+    // more likely a mistake than a real file. The rest are shell syntax (zsh
+    // glob qualifiers, redirects) that this guard does not model.
     if target.contains(['"', '\'', '\\', '(', ')', '<', '>', '^']) {
         return false;
     }
     // Only `~` and `~/...` are the caller's home, and never inside quotes, where
     // the shell leaves `~` alone. `~other` is somebody else's.
     let expanded = if target == "~" || target.starts_with("~/") {
-        if home.is_empty() || quoted {
+        if home.is_empty() || !tilde {
             return false;
         }
         format!("{home}{}", &target[1..])
@@ -431,243 +424,23 @@ fn is_allowed(
     true
 }
 
-/// The delimiter of a heredoc opened on this line, if any.
-///
-/// The delimiter must start with a letter or `_`, which is what keeps an
-/// arithmetic shift like `$((1 << 2))` from being read as a heredoc.
-fn heredoc_delimiter(line: &str) -> Option<String> {
-    let chars: Vec<char> = line.chars().collect();
-    let (mut in_single, mut in_double) = (false, false);
-    let mut i = 0;
-    while i < chars.len() {
-        match chars[i] {
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            '<' if !in_single && !in_double && chars.get(i + 1) == Some(&'<') => {
-                let mut j = i + 2;
-                if chars.get(j) == Some(&'-') {
-                    j += 1;
-                }
-                while chars.get(j) == Some(&' ') {
-                    j += 1;
-                }
-                let quote = match chars.get(j) {
-                    Some(&q @ ('\'' | '"')) => {
-                        j += 1;
-                        Some(q)
-                    }
-                    _ => None,
-                };
-                let start = j;
-                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
-                    j += 1;
-                }
-                let word: String = chars[start..j].iter().collect();
-                let named = word
-                    .chars()
-                    .next()
-                    .is_some_and(|c| c.is_alphabetic() || c == '_');
-                let closed = quote.is_none_or(|q| chars.get(j) == Some(&q));
-                if named && closed {
-                    return Some(word);
-                }
-                i = j;
-                continue;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Marks which lines are heredoc BODY, which is data rather than commands.
-///
-/// Heredoc mode is only entered when the terminator actually appears later. An
-/// unterminated `<<` would otherwise turn the rest of the command into data and
-/// hide a deletion, which is the wrong way for this to fail.
-fn heredoc_body_lines(cmd: &str) -> Vec<bool> {
-    let lines: Vec<&str> = cmd.lines().collect();
-    let mut body = vec![false; lines.len()];
-    let mut i = 0;
-    while i < lines.len() {
-        if let Some(delim) = heredoc_delimiter(lines[i]) {
-            if let Some(end) = lines
-                .iter()
-                .enumerate()
-                .skip(i + 1)
-                .find(|(_, l)| l.trim() == delim)
-                .map(|(j, _)| j)
-            {
-                for flag in body.iter_mut().take(end).skip(i + 1) {
-                    *flag = true;
-                }
-                i = end + 1;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    body
-}
-
-/// Splits on spaces, keeping quote characters in the token text, and reports
-/// whether each token is DATA rather than a command: either inside shell quotes
-/// or inside a heredoc body. A newline becomes a `;` token, so the existing
-/// command-position rule still sees the start of each body line.
-///
-/// Splitting continues INSIDE quotes, which is deliberate: identical tokens mean
-/// target judging is byte-for-byte unchanged, and it is what still catches
-/// `sh -c "cd /x && rm -rf /etc"`.
-///
-/// An unbalanced quote leaves the remaining tokens marked as data. That can only
-/// make the guard demand a separator before believing a deletion, never fewer
-/// checks on the unquoted path, so the failure direction is unchanged.
-fn tokenize(cmd: &str) -> Vec<(String, bool)> {
-    let body = heredoc_body_lines(cmd);
-    let mut tokens = Vec::new();
-    let (mut in_single, mut in_double) = (false, false);
-
-    for (index, line) in cmd.lines().enumerate() {
-        if index > 0 {
-            // A newline resets in-rm state exactly as `;` does.
-            tokens.push((";".to_string(), false));
-        }
-        let is_body = body.get(index).copied().unwrap_or(false);
-        let mut current = String::new();
-        let mut current_data = false;
-
-        for ch in line.replace('\t', " ").chars() {
-            if ch == ' ' {
-                if !current.is_empty() {
-                    tokens.push((std::mem::take(&mut current), current_data));
-                }
-                continue;
-            }
-            if current.is_empty() {
-                current_data = is_body || in_single || in_double;
-            }
-            current.push(ch);
-            // Quote state is NOT tracked inside a heredoc body: the body is
-            // literal text, and an ordinary apostrophe in prose would otherwise
-            // flip the state and mis-mark every token after it.
-            if !is_body {
-                match ch {
-                    '\'' if !in_double => in_single = !in_single,
-                    '"' if !in_single => in_double = !in_double,
-                    _ => {}
-                }
-            }
-        }
-        if !current.is_empty() {
-            tokens.push((current, current_data));
-        }
-    }
-    tokens
-}
-
-/// Walks the command left to right tracking whether the cursor sits inside an
-/// `rm`'s argument list, which is what lets `rm a && ls b` judge only `a`.
+/// The deletion targets that fall outside the allowed roots, each as written,
+/// or as its label when it cannot be resolved.
 fn offending_targets(
-    cmd: &str,
+    targets: Vec<Target>,
     home: &str,
     claude_dir: &Path,
     safe_roots: &[PathBuf],
     scratch_roots: &[PathBuf],
 ) -> Vec<String> {
-    let mut outside = Vec::new();
-    let mut in_rm = false;
-    let mut saw_cd = false;
-    let mut saw_rm = false;
-    // A substitution only matters when it shares a simple command with an `rm`.
-    let mut segment_has_rm = false;
-    let mut segment_has_substitution = false;
-    let mut substitution_in_rm_command = false;
-    // Open `$(` groups and an open backtick span. A command inside one is part
-    // of a substitution whose separators must not hide it.
-    let mut paren_depth = 0usize;
-    let mut in_backtick = false;
-    // The very start of a command is a command position, same as after a `;`.
-    let mut prev_was_separator = true;
-
-    for (token, is_data) in tokenize(cmd) {
-        let whole = token.as_str();
-        let mut token = whole;
-        // A substitution opens a command position: `$(cd` is `cd` and
-        // `x=$(rm` is `rm`.
-        if let Some(at) = token.rfind("$(") {
-            token = &token[at + 2..];
-            prev_was_separator = true;
-        } else if let Some(at) = token.rfind('`') {
-            token = &token[at + 1..];
-            prev_was_separator = true;
-        }
-        paren_depth += whole.matches("$(").count();
-        in_backtick ^= whole.matches('`').count() % 2 == 1;
-        let inside_substitution = paren_depth > 0 || in_backtick;
-        paren_depth = paren_depth.saturating_sub(whole.matches(')').count());
-
-        // A word that is DATA, meaning inside quotes or inside a heredoc body,
-        // is prose unless a separator put it in command position. `-m "fix: stop
-        // using rm"` is a message and a commit message mentioning `rm` is prose,
-        // while `sh -c "cd /x && rm -rf /etc"` and a heredoc line that STARTS
-        // with `rm` really do delete. Outside those regions nothing changes, so
-        // `sudo rm`, `xargs rm` and `find -exec rm` are all still caught.
-        let is_command = !is_data || prev_was_separator;
-
-        if is_command && (token == "cd" || token.ends_with("/cd")) {
-            saw_cd = true;
-            prev_was_separator = false;
-            continue;
-        }
-        if is_command && (token == "rm" || token.ends_with("/rm")) {
-            in_rm = true;
-            saw_rm = true;
-            segment_has_rm = true;
-            substitution_in_rm_command |= segment_has_substitution || inside_substitution;
-            prev_was_separator = false;
-            continue;
-        }
-        if SEPARATORS.contains(&token) {
-            in_rm = false;
-            segment_has_rm = false;
-            segment_has_substitution = false;
-            prev_was_separator = true;
-            continue;
-        }
-        prev_was_separator = false;
-        if whole.contains("$(") || whole.contains('`') {
-            segment_has_substitution = true;
-            substitution_in_rm_command |= segment_has_rm;
-        }
-        if !in_rm || token.starts_with('-') {
-            continue;
-        }
-        // A target carrying `$` or a backtick expands at runtime to a path the
-        // guard cannot see, so it is unresolvable in the same way a relative
-        // target after a `cd` is.
-        //
-        // This one closes a FAIL-OPEN, which is why it is worth the false
-        // positives it adds. `canon` treats a leading `$` as a relative path and
-        // joins it to the cwd, so `rm -rf "$HOME/.cache/x"` resolved to
-        // `<repo>/$HOME/.cache/x`, landed inside a safe root, and was ALLOWED.
-        // The shell then expanded it to a real path outside the workspace, which
-        // is precisely the accident this guard exists to prevent, and agents
-        // write `$VAR` paths as a matter of course.
-        //
-        // The cost is that `rm -rf "$REPO/target"` now blocks too, even though
-        // it would have expanded to somewhere allowed. That is the correct
-        // direction to be wrong in: the caller can retry with a literal path.
-        let unresolvable = whole.contains('$')
-            || whole.contains('`')
-            || (saw_cd && !unquote(token).0.starts_with('/') && !unquote(token).0.starts_with('~'));
-        if unresolvable || !is_allowed(token, home, claude_dir, safe_roots, scratch_roots) {
-            outside.push(token.to_string());
-        }
-    }
-
-    if saw_rm && substitution_in_rm_command {
-        outside.push(SUBSTITUTION_LABEL.to_string());
-    }
-    outside
+    targets
+        .into_iter()
+        .filter_map(|target| match target {
+            Target::Unresolvable(label) => Some(label),
+            Target::Path { text, tilde } => {
+                (!is_allowed(&text, tilde, home, claude_dir, safe_roots, scratch_roots))
+                    .then_some(text)
+            }
+        })
+        .collect()
 }

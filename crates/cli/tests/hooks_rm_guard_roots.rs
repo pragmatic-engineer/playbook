@@ -248,13 +248,13 @@ fn os_temp_directories_are_allowed_but_never_the_root_or_a_bare_glob() {
         (format!("{d} -rf {t}/sub/../../../etc"), true),
         (format!("{d} -rf /tmp/pb-*/../../etc"), true),
         (format!("{d} -rf /tmpfoo/x"), true),
-        (format!("{d} -rf $TMPDIR/x"), true),
-        (format!("{d} -rf \"$TMPDIR\"/x"), true),
+        (format!("{d} -rf $OTHER/x"), true),
+        (format!("{d} -rf \"$OTHER\"/x"), true),
         (format!("{d} -rf $(mktemp -d)"), true),
         (format!("{d} -rf \"/etc/x\""), true),
         (format!("{d} -rf '/tmp/ok\\ x'"), true),
-        (format!("{d} -rf /tmp/with\\ space"), true),
-        (format!("{d} -rf \"/tmp/two words\""), true),
+        (format!("{d} -rf {t}/with\\ space"), false),
+        (format!("{d} -rf \"{t}/two words\""), false),
     ];
     if cfg!(target_os = "macos") {
         cases.push((
@@ -264,6 +264,9 @@ fn os_temp_directories_are_allowed_but_never_the_root_or_a_bare_glob() {
         cases.push((format!("{d} -rf /var/folders/ab/cdef0123/T"), true));
     }
     check(&fx, &fx.repo, &cases);
+    // The shell's `$TMPDIR` can differ from the hook's, so it is not guessed.
+    let env = [("TMPDIR", t.as_str())];
+    assert!(fx.denied(&format!("{d} -rf $TMPDIR/x"), &fx.repo, &env));
 }
 
 #[test]

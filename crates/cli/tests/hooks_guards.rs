@@ -300,14 +300,15 @@ mod rm_workspace_guard {
         assert!(blocked(&format!("{d} -rf $(echo {e})"), &ws));
     }
 
-    /// Newlines and tabs are normalised to separators, so a deletion on any
-    /// line is still seen rather than hidden by the tokenizer.
+    /// A line break ends a command, so a deletion on any line is seen. A tab is
+    /// plain whitespace to the shell, so after `echo` it is only more words.
     #[test]
     fn multiline_and_tab_separated_commands_are_still_inspected() {
         let (h, d, e) = (home(), del(), etc());
         let ws = format!("{h}/Workspace");
         assert!(blocked(&format!("echo hi\n{d} -rf {e}/passwd"), &ws));
-        assert!(blocked(&format!("echo hi\t{d} -rf {e}/passwd"), &ws));
+        assert!(blocked(&format!("echo hi;\t{d} -rf {e}/passwd"), &ws));
+        assert!(!blocked(&format!("echo hi\t{d} -rf {e}/passwd"), &ws));
         assert!(!blocked("echo hi\necho there", &ws));
         assert!(!blocked(&format!("echo hi\n{d} -rf {ws}/proj/build"), &ws));
     }
@@ -489,11 +490,16 @@ mod rm_workspace_guard {
             &format!("bash <<EOF\n{d} -rf {e}/passwd\nEOF"),
             &ws
         ));
-        // An unterminated heredoc is not treated as a body at all. The mention
-        // here is MID-LINE on purpose: a line-start deletion is in command
-        // position either way, so it would pass whether or not the terminator
-        // rule exists and would pin nothing.
-        assert!(blocked(&format!("bash <<EOF\nfoo {d} -rf {e}/passwd"), &ws));
+        // The shell reads an unterminated body to the end, so a deletion that
+        // starts a body line still runs, and one in the middle of a line is an
+        // argument of another program.
+        assert!(blocked(&format!("bash <<EOF\n{d} -rf {e}/passwd"), &ws));
+        assert!(!blocked(
+            &format!("bash <<EOF\nfoo {d} -rf {e}/passwd"),
+            &ws
+        ));
+        // A body that another program reads is data, terminated or not.
+        assert!(!blocked(&format!("cat <<EOF\n{d} -rf {e}/passwd"), &ws));
         // `<<` in arithmetic is not a heredoc, so nothing after it becomes data.
         assert!(blocked(
             &format!("echo $((1 << 2))\n{d} -rf {e}/passwd"),
@@ -622,20 +628,63 @@ mod rm_workspace_guard {
     /// `<repo>/$HOME/.cache/x`, landed inside a safe root and was ALLOWED, while
     /// the shell expanded it to a real path outside the workspace. Unlike the
     /// obfuscation cases this file documents as accepted misses, `$VAR` paths are
-    /// ordinary agent output, so this one had to fail closed.
+    /// ordinary agent output, so this one had to fail closed. `$HOME` and
+    /// `$TMPDIR` are the exception: the guard expands them itself.
     #[test]
     fn an_unexpanded_variable_target_is_unresolvable_and_blocks() {
         let (h, d) = (home(), del());
         let ws = format!("{h}/Workspace");
         for cmd in [
-            format!("{d} -rf \"$HOME/.cache/x\""),
-            format!("{d} -rf $HOME/.cache/x"),
+            format!("{d} -rf \"$OTHER/.cache/x\""),
+            format!("{d} -rf $HOME/.ssh"),
+            format!("HOME=/ {d} -rf $HOME/.cache/x"),
             format!("{d} -rf \"${{BUILD_DIR}}/out\""),
             format!("{d} -rf `echo /etc`/passwd"),
             // Accepted cost: a variable pointing INSIDE the workspace blocks too.
             format!("{d} -rf \"$REPO/target\""),
         ] {
             assert!(blocked(&cmd, &ws), "unresolvable target must block: {cmd}");
+        }
+    }
+
+    /// The false positives of the old word splitter, and the forms it missed,
+    /// end to end through the hook entry.
+    #[test]
+    fn only_real_deletions_are_judged() {
+        let (h, d, e) = (home(), del(), etc());
+        let ws = format!("{h}/Workspace");
+        for cmd in [
+            format!("grep -E \"a | {d} -rf {e}/passwd\" f.txt"),
+            format!("{d} -f {ws}/proj/x 2>/dev/null"),
+            format!("cat <<EOF\n{d} -rf {e}/passwd\nEOF"),
+            format!("git commit -F - <<'EOF'\n{d} -rf {e}/passwd is fatal\nEOF"),
+            format!("find {ws}/proj -name '*.o' -delete"),
+            format!("find {ws}/proj -print0 | xargs -0 {d} -f"),
+        ] {
+            assert!(!blocked(&cmd, &ws), "should allow: {cmd}");
+        }
+        for cmd in [
+            format!("{d} -f {e}/passwd 2>/dev/null"),
+            format!("find {e} -name x -delete"),
+            format!("find {e} -exec {d} {{}} +"),
+            format!("ls | xargs {d}"),
+            format!("cd {ws} && find -delete"),
+        ] {
+            assert!(blocked(&cmd, &ws), "should block: {cmd}");
+        }
+    }
+
+    /// `$HOME` and `${HOME}` resolve to the home folder this hook sees.
+    #[test]
+    fn a_home_variable_target_is_expanded_and_judged() {
+        let (h, d) = (home(), del());
+        let ws = format!("{h}/Workspace");
+        for cmd in [
+            format!("{d} -rf \"$HOME/.cache/x\""),
+            format!("{d} -rf ${{HOME}}/.cache/x/"),
+            format!("{d} -rf $HOME/Workspace/proj/build"),
+        ] {
+            assert!(!blocked(&cmd, &ws), "should allow: {cmd}");
         }
     }
 
