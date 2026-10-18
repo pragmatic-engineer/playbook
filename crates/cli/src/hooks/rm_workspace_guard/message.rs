@@ -54,7 +54,7 @@ pub(super) fn denial(denied: &[(String, Rule)], roots: &Roots) -> String {
             Rule::Unresolvable | Rule::StrayCharacter | Rule::Tilde | Rule::LinkLoop
         )
     }) {
-        text.push_str(" A command substitution, `<xargs input>`, a variable other than `$HOME`, a relative path in a folder only the shell knows or a stray quote cannot be resolved: run the rm as its own call with a literal absolute path.");
+        text.push_str(" A command substitution, `<xargs input>`, a variable the guard cannot follow, a relative path in a folder only the shell knows or a stray quote cannot be resolved: run the rm as its own call with a literal absolute path.");
     }
     text.push_str(" For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`).");
     text.push_str(hint(denied, roots));

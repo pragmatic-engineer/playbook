@@ -42,9 +42,9 @@
 //!
 //! Deliberate conservative blocks: a relative target in a folder only the
 //! shell knows is unresolvable; a deletion inside, next to or fed by a command
-//! substitution is unresolvable; a target holding a variable is unresolvable,
-//! except `$HOME`, which the guard expands with its own value unless the
-//! command sets or unsets it. The variable rule fixed a FAIL-OPEN
+//! substitution is unresolvable; a target holding a variable is unresolvable
+//! unless `parse` can follow it (a value the command sets, `$HOME`, `$PWD`,
+//! `$TMPDIR` and a few more). The variable rule fixed a FAIL-OPEN
 //! (`"$X/y"` used to resolve under the cwd), so it is the one to be careful
 //! about reverting.
 //!
@@ -62,6 +62,7 @@
 //! would mean a second emitter used by exactly one hook, for a consumer that
 //! parses the JSON either way.
 
+mod expand;
 mod message;
 mod parse;
 mod roots;
@@ -80,6 +81,9 @@ pub fn run(payload: &Payload) {
 
     let home = std::env::var("HOME").unwrap_or_default();
     let cwd = start_dir(&payload.field(".cwd"));
+    let tmpdir = std::env::var_os("TMPDIR")
+        .map(PathBuf::from)
+        .filter(|t| t.is_absolute());
     // Most commands that reach the hook delete nothing, so the roots, which
     // cost git and config reads, are only worked out when something does.
     let found = parse::scan(
@@ -88,6 +92,7 @@ pub fn run(payload: &Payload) {
             home: &home,
             cwd: &cwd,
             cdpath: std::env::var_os("CDPATH").is_some_and(|v| !v.is_empty()),
+            tmpdir: tmpdir.as_deref(),
         },
     );
     if found.targets.is_empty() {

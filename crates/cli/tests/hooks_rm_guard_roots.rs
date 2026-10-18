@@ -277,9 +277,11 @@ fn os_temp_directories_are_allowed_but_never_the_root_or_a_bare_glob() {
         cases.push((format!("{d} -rf /var/folders/ab/cdef0123/T"), true));
     }
     check(&fx, &fx.repo, &cases);
-    // The shell's `$TMPDIR` can differ from the hook's, so it is not guessed.
+    // `$TMPDIR` takes the hook's value, and the result is still judged.
     let env = [("TMPDIR", t.as_str())];
-    assert!(fx.denied(&format!("{d} -rf $TMPDIR/x"), &fx.repo, &env));
+    assert!(!fx.denied(&format!("{d} -rf $TMPDIR/x"), &fx.repo, &env));
+    assert!(fx.denied(&format!("{d} -rf $TMPDIR"), &fx.repo, &[("TMPDIR", "/tmp")]));
+    assert!(fx.denied(&format!("{d} -rf $TMPDIR/x"), &fx.repo, &[("TMPDIR", "/")]));
 }
 
 #[test]

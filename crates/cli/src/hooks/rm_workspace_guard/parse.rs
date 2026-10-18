@@ -20,16 +20,29 @@
 //! the running shell knows (`cd "$X"`, `popd` with nothing pushed, `cd name`
 //! while `CDPATH` is set) makes a relative target unresolvable.
 //!
+//! Variables the command sets to something the guard can name are expanded:
+//! `S=/x; rm $S/y`, `export`, a chain such as `N=$S/z`, a `for` loop over
+//! literal words, `$$`, `$PWD`, `$OLDPWD`, `$(pwd)`, `$TMPDIR` (with this
+//! hook's value, the same one the shell inherits) and a folder made by a
+//! plain `$(mktemp -d)`. An assignment that may not run (after `&&` or `||`,
+//! inside `if` or a loop) keeps the old value possible too, so one with no
+//! old value is unknown. An assignment in a pipeline or a background job, or
+//! in a child shell, leaves the variable unknown. A value with whitespace is
+//! unknown, since the shell would split it. A command that defines a
+//! function or reads a file with `source` expands nothing it set.
+//!
 //! What it cannot resolve it reports as unresolvable, so the guard blocks it:
-//! a target holding a variable other than `$HOME`, a relative target in a
+//! a target holding any other variable, a relative target in a
 //! folder it cannot name, a deletion inside or next to a command
 //! substitution, a shell reading a pipe, and `xargs` deleting what anything
 //! other than a plain `find` prints.
 
+use super::expand::{self, Piece};
 use crate::common::shell::{
-    self, program_index, program_name, redirect_len, runner_value_options, shell_script_at,
-    skip_options, Span, SHELLS,
+    self, is_assignment, program_index, program_name, redirect_len, runner_value_options,
+    shell_script_at, skip_options, Span, SHELLS,
 };
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 /// Reported when `rm` is reached through, or takes words from, `$(...)` or a
@@ -60,17 +73,18 @@ pub(crate) enum Target {
     Unresolvable(String),
 }
 
-/// The values the guard may expand itself. `$TMPDIR` is left out on purpose:
-/// the shell that runs the command can have a different value than this hook
-/// (a shell profile may export one), so judging it here could allow a
-/// deletion outside the roots. `$HOME` is set at login and is the same for
-/// both.
+/// What the guard knows about the shell that runs the command. `$HOME` and
+/// `$TMPDIR` are taken from this hook, which Claude Code starts with the
+/// same environment as its shell. A shell profile that exports another
+/// `$TMPDIR` is an accepted risk: the judge still checks where it points.
 pub(crate) struct Env<'a> {
     pub home: &'a str,
     /// The folder the command starts in, absolute.
     pub cwd: &'a Path,
     /// `CDPATH` is set, so `cd name` may land somewhere other than `./name`.
     pub cdpath: bool,
+    /// `TMPDIR`, when set to an absolute path.
+    pub tmpdir: Option<&'a Path>,
 }
 
 /// What a command deletes, and where it goes.
@@ -87,6 +101,7 @@ pub(crate) fn scan(command: &str, env: &Env) -> Found {
         before_cd: Vec::new(),
         oldpwd: vec![None],
         stack: Vec::new(),
+        vars: BTreeMap::new(),
     };
     let mut scan = Scan {
         env,
@@ -94,6 +109,10 @@ pub(crate) fn scan(command: &str, env: &Env) -> Found {
         place: start,
         dirs: Vec::new(),
         joined_by: String::new(),
+        maybe: false,
+        isolated: false,
+        no_vars: false,
+        sourced: false,
         tainted: false,
     };
     scan.script(command, 0, false);
@@ -125,7 +144,13 @@ struct Place {
     oldpwd: Vec<Dir>,
     /// The folders `pushd` saved, last on top.
     stack: Vec<Vec<Dir>>,
+    /// Variables the command sets: every value each may hold, or `None`
+    /// when only the running shell knows.
+    vars: BTreeMap<String, Option<Vec<String>>>,
 }
+
+/// The most values one word may expand to before it counts as unknown.
+const MAX_VALUES: usize = 32;
 
 /// The words of one command with their spans, kept in step.
 #[derive(Clone, Copy)]
@@ -171,6 +196,17 @@ struct Scan<'a> {
     /// The operator between the command being read and the one before it,
     /// such as `&&`, `||` or `;`, empty for the first.
     joined_by: String,
+    /// The command being read may not run: it follows `&&` or `||`, or sits
+    /// inside `if`, `case` or a loop.
+    maybe: bool,
+    /// The command being read runs in a child of this shell: a pipeline
+    /// part or a background job.
+    isolated: bool,
+    /// The command defines a function, which can set anything when called,
+    /// so no assignment is trusted.
+    no_vars: bool,
+    /// A file was read with `source`, which can set anything.
+    sourced: bool,
     /// The command sets or unsets `HOME`, so it is not expanded.
     tainted: bool,
 }
@@ -210,17 +246,28 @@ impl Scan<'_> {
             .iter()
             .flat_map(|c| &c.words)
             .any(|w| names_expanded(w));
+        self.no_vars |= defines_function(text);
         let entry = self.place.clone();
         // The place in each enclosing parenthesis group, with the group's
         // number: what a group changes ends with it.
         let mut frames: Vec<(usize, Place)> = vec![(0, entry.clone())];
+        // How many `if`, `case` and loop bodies enclose the command.
+        let mut blocks = 0usize;
         for (i, command) in commands.iter().enumerate() {
             self.enter(&mut frames, command.depth, command.group);
             self.joined_by = i
                 .checked_sub(1)
                 .map(|p| separator(&source, &commands[p], command))
                 .unwrap_or_default();
+            let next = commands.get(i + 1);
+            let joined_after = next.map(|n| separator(&source, command, n));
+            self.maybe = blocks > 0 || matches!(self.joined_by.as_str(), "&&" | "||");
+            self.isolated = command.piped
+                || next.is_some_and(|n| n.piped && same_pipeline(command, n))
+                || joined_after.as_deref() == Some("&");
+            blocks = track_blocks(&command.words, blocks);
             self.settle();
+            let substituted = substituted_assignment(&commands, i);
             let fragment = command.joined || command.opens_substitution;
             let ctx = Ctx {
                 source: &source,
@@ -231,6 +278,9 @@ impl Scan<'_> {
             let before = i.checked_sub(1).map(|p| &commands[p]);
             let producer = before.filter(|p| command.piped && same_pipeline(p, command));
             self.command(Words::of(command), &ctx, producer);
+            if let Some(word) = substituted {
+                self.assign_text(&word, &word, true);
+            }
 
             if command.piped
                 && reads_script_from_stdin(&command.words)
@@ -263,15 +313,23 @@ impl Scan<'_> {
             }
         }
         let out = frames.swap_remove(0).1;
-        self.place = if depth == 0 || out.cwds == entry.cwds {
-            out
-        } else {
-            // A nested script that changed folder: `eval` keeps the change,
-            // a child shell does not, so either folder may be current.
-            let mut place = entry;
+        if depth == 0 {
+            self.place = out;
+            return;
+        }
+        // A nested script: `eval` keeps what it changes, a child shell does
+        // not, so either folder may be current and a variable it set is
+        // unknown.
+        let mut place = entry.clone();
+        if out.cwds != entry.cwds {
             add(&mut place.cwds, None);
-            place
-        };
+        }
+        for (name, value) in &out.vars {
+            if entry.vars.get(name) != Some(value) {
+                place.vars.insert(name.clone(), None);
+            }
+        }
+        self.place = place;
     }
 
     /// Makes the place of the parenthesis group a command at `depth` in
@@ -326,8 +384,9 @@ impl Scan<'_> {
             (_, Some(&k)) => self.destination(&args.words[k], &args.spans[k], ctx, physical),
         };
         // After `||` the `cd` runs only when the command before it failed,
+        // and in a pipeline part or a background job it moves a child shell,
         // so the shell may not move at all.
-        if self.joined_by == "||" {
+        if self.joined_by == "||" || self.isolated {
             for dir in &old {
                 add(&mut new, dir.clone());
             }
@@ -368,9 +427,9 @@ impl Scan<'_> {
         }
         let raw = raw_text(ctx.source, span);
         let text = if span.dynamic {
-            match self.expand(word, &raw) {
-                Some(text) => text,
-                None => return vec![None],
+            match self.expand(word, &raw).as_deref() {
+                Some([one]) => one.clone(),
+                _ => return vec![None],
             }
         } else {
             word.to_string()
@@ -430,7 +489,9 @@ impl Scan<'_> {
     }
 
     fn command(&mut self, cmd: Words, ctx: &Ctx, producer: Option<&shell::Command>) {
-        let Some(at) = program_at(cmd.words) else {
+        let appends = cmd.words.first().is_some_and(|w| is_append(w));
+        let Some(at) = program_at(cmd.words).filter(|_| !appends) else {
+            self.assignments(cmd, ctx);
             return;
         };
         if changes_directory(&cmd.words[..at]) {
@@ -445,8 +506,31 @@ impl Scan<'_> {
 
     fn program(&mut self, cmd: Words, at: usize, ctx: &Ctx, producer: Option<&shell::Command>) {
         let args = cmd.tail(at + 1);
-        match program_name(&cmd.words[at]).as_str() {
+        // `.` has no file name, so `program_name` would read it as empty.
+        let name = match cmd.words[at].as_str() {
+            "." => ".".to_string(),
+            word => program_name(word),
+        };
+        match name.as_str() {
             name @ ("cd" | "pushd" | "popd") => self.change_dir(name, args, ctx),
+            "export" | "readonly" | "local" | "declare" | "typeset" => self.declare(args, ctx),
+            "for" => self.for_loop(args, ctx),
+            "unset" | "read" | "mapfile" | "readarray" | "getopts" => {
+                self.forget(args.words.iter().filter(|w| is_name(w)));
+            }
+            "printf" => {
+                let named = args
+                    .words
+                    .windows(2)
+                    .filter(|w| w[0] == "-v")
+                    .map(|w| &w[1]);
+                self.forget(named);
+            }
+            "source" | "." => {
+                self.sourced = true;
+                self.place.vars.clear();
+                add(&mut self.place.cwds, None);
+            }
             "rm" => {
                 self.substitution_note(ctx);
                 self.rm_args(args, ctx, Placeholder::Operand);
@@ -532,13 +616,22 @@ impl Scan<'_> {
             return vec![Target::Unresolvable(SUBSTITUTION_LABEL.to_string())];
         }
         if span.dynamic {
-            if word.contains("$(") || word.contains('`') {
-                return vec![Target::Unresolvable(SUBSTITUTION_LABEL.to_string())];
-            }
-            return vec![match self.expand(word, &raw) {
-                Some(text) => Target::Path { text, tilde: false },
-                None => Target::Unresolvable(raw),
-            }];
+            return match self.expand(word, &raw) {
+                Some(values) => values
+                    .into_iter()
+                    .flat_map(|text| {
+                        if text.starts_with('/') {
+                            vec![Target::Path { text, tilde: false }]
+                        } else {
+                            self.relative(&text)
+                        }
+                    })
+                    .collect(),
+                None if word.contains("$(") || word.contains('`') => {
+                    vec![Target::Unresolvable(SUBSTITUTION_LABEL.to_string())]
+                }
+                None => vec![Target::Unresolvable(raw)],
+            };
         }
         // A `$` left by single quotes is literal, but a path naming one is
         // more likely a mistake than a file, so it is not guessed at.
@@ -557,25 +650,215 @@ impl Scan<'_> {
         }]
     }
 
-    /// `$HOME` or `${HOME}` at the start of `word`, expanded with the value
-    /// this hook sees, when nothing else in the word expands and the command
-    /// never redefines it.
-    fn expand(&self, word: &str, raw: &str) -> Option<String> {
-        if self.tainted || raw.starts_with('\'') || !self.env.home.starts_with('/') {
+    /// Every value `word`, with its quotes removed, may expand to, or `None`
+    /// when any part of it is unknown. `raw` is the word as written: a single
+    /// quote or backslash in it could make a `$` literal, so that is unknown
+    /// too.
+    fn expand(&self, word: &str, raw: &str) -> Option<Vec<String>> {
+        if raw.contains(['\'', '\\']) {
             return None;
         }
-        let rest = word
-            .strip_prefix("${HOME}")
-            .or_else(|| word.strip_prefix("$HOME"))?;
-        if !(rest.is_empty() || rest.starts_with('/')) || rest.contains(['$', '`']) {
+        let mut values = vec![String::new()];
+        for piece in expand::pieces(word)? {
+            let options = match piece {
+                Piece::Text(text) => vec![text],
+                Piece::Var { name, default } => match (self.lookup(&name), default) {
+                    (Some(found), Some(default)) => found
+                        .into_iter()
+                        .map(|v| if v.is_empty() { default.clone() } else { v })
+                        .collect(),
+                    (Some(found), None) => found,
+                    // An unset `TMPDIR` falls back to the default, as the
+                    // shell's does.
+                    (None, Some(default)) if name == "TMPDIR" && self.env.tmpdir.is_none() => {
+                        vec![default]
+                    }
+                    (None, _) => return None,
+                },
+                Piece::Pid => vec!["12345".to_string()],
+                Piece::Pwd => self.lookup("PWD")?,
+                Piece::Mktemp(args) => vec![expand::mktemp_path(&args, &self.temp())?],
+            };
+            if values.len() * options.len() > MAX_VALUES {
+                return None;
+            }
+            values = values
+                .iter()
+                .flat_map(|v| options.iter().map(move |o| format!("{v}{o}")))
+                .collect();
+        }
+        // The shell splits an unquoted value on whitespace, and the guard
+        // does not follow that.
+        if values.iter().any(|v| v.contains(char::is_whitespace)) {
             return None;
         }
-        let joined = format!("{}{rest}", self.env.home.trim_end_matches('/'));
-        Some(if joined.is_empty() {
-            "/".to_string()
+        Some(values)
+    }
+
+    /// Every value variable `name` may hold, or `None` when it is unknown.
+    fn lookup(&self, name: &str) -> Option<Vec<String>> {
+        if name == "HOME" && self.tainted {
+            return None;
+        }
+        if let Some(value) = self.place.vars.get(name) {
+            return value.clone();
+        }
+        if self.sourced {
+            return None;
+        }
+        let one = |dirs: &[Dir]| {
+            dirs.iter()
+                .map(|d| d.as_ref().map(|d| d.to_string_lossy().into_owned()))
+                .collect::<Option<Vec<_>>>()
+        };
+        match name {
+            "HOME" => self
+                .home_dir()
+                .map(|h| vec![h.to_string_lossy().into_owned()]),
+            "PWD" => one(&self.place.cwds),
+            "OLDPWD" => one(&self.place.oldpwd),
+            "TMPDIR" => self
+                .env
+                .tmpdir
+                .map(|t| vec![t.to_string_lossy().into_owned()]),
+            _ => None,
+        }
+    }
+
+    /// The folder `mktemp` uses: `TMPDIR`, or `/tmp`.
+    fn temp(&self) -> String {
+        self.env
+            .tmpdir
+            .map_or_else(|| "/tmp".to_string(), |t| t.to_string_lossy().into_owned())
+    }
+
+    /// The assignments of a command with no program, such as `S=/x`.
+    fn assignments(&mut self, cmd: Words, ctx: &Ctx) {
+        for (word, span) in cmd.words.iter().zip(cmd.spans) {
+            if is_assignment(word) || is_append(word) {
+                let raw = raw_text(ctx.source, span);
+                self.assign_text(word, &raw, span.dynamic);
+            }
+        }
+    }
+
+    /// Records `NAME=value` (or `NAME+=value`): `word` without its quotes,
+    /// `raw` as written.
+    fn assign_text(&mut self, word: &str, raw: &str, dynamic: bool) {
+        let Some((name, value)) = word.split_once('=') else {
+            return;
+        };
+        let (name, append) = match name.strip_suffix('+') {
+            Some(name) => (name, true),
+            None => (name, false),
+        };
+        if !is_name(name) {
+            return;
+        }
+        let raw_value = raw.split_once('=').map_or("", |(_, v)| v);
+        let new = if self.no_vars || self.isolated || value.starts_with('(') {
+            None
+        } else if dynamic {
+            self.expand(value, raw_value)
+        } else if raw_value == "~" || raw_value.starts_with("~/") {
+            self.home_dir()
+                .map(|h| vec![format!("{}{}", h.to_string_lossy(), &value[1..])])
         } else {
-            joined
-        })
+            Some(vec![value.to_string()])
+        };
+        let old = self.lookup(name);
+        let new = match (append, new) {
+            (true, Some(tail)) => old.clone().map(|o| {
+                o.iter()
+                    .flat_map(|v| tail.iter().map(move |t| format!("{v}{t}")))
+                    .collect()
+            }),
+            (_, new) => new,
+        };
+        let value = if self.maybe {
+            // The assignment may not run, so the old value stays possible.
+            match (old, new) {
+                (Some(mut old), Some(new)) => {
+                    for v in new {
+                        if !old.contains(&v) {
+                            old.push(v);
+                        }
+                    }
+                    Some(old)
+                }
+                _ => None,
+            }
+        } else {
+            new
+        };
+        let value = value.filter(|v| v.len() <= MAX_VALUES);
+        self.place.vars.insert(name.to_string(), value);
+    }
+
+    /// The assignments of `export`, `local` and the like. An option other
+    /// than `-x`, `-r`, `-g` or `-l` (an array, a reference, an integer)
+    /// makes each name it sets unknown.
+    fn declare(&mut self, args: Words, ctx: &Ctx) {
+        let plain = args
+            .words
+            .iter()
+            .filter(|w| w.starts_with('-') && w.len() > 1)
+            .all(|w| w[1..].chars().all(|c| matches!(c, 'x' | 'r' | 'g' | 'l')));
+        for (word, span) in args.words.iter().zip(args.spans) {
+            if !is_assignment(word) {
+                continue;
+            }
+            if plain {
+                let raw = raw_text(ctx.source, span);
+                self.assign_text(word, &raw, span.dynamic);
+            } else if let Some((name, _)) = word.split_once('=') {
+                self.place.vars.insert(name.to_string(), None);
+            }
+        }
+    }
+
+    /// `for NAME in words`: `NAME` takes each word in turn.
+    fn for_loop(&mut self, args: Words, ctx: &Ctx) {
+        let Some(name) = args.words.first().filter(|n| is_name(n)) else {
+            return;
+        };
+        let mut values = Some(Vec::new());
+        if args.words.get(1).map(String::as_str) != Some("in") || args.words.len() < 3 {
+            values = None;
+        }
+        for (word, span) in args.words.iter().zip(args.spans).skip(2) {
+            let Some(list) = values.as_mut() else {
+                break;
+            };
+            if span.dynamic {
+                match self.expand(word, &raw_text(ctx.source, span)) {
+                    Some(found) => list.extend(found),
+                    None => values = None,
+                }
+            } else {
+                list.push(word.clone());
+            }
+        }
+        let value = values.filter(|v| !self.no_vars && v.len() <= MAX_VALUES);
+        let value = if self.maybe {
+            match (self.lookup(name), value) {
+                (Some(mut old), Some(new)) => {
+                    old.extend(new);
+                    Some(old)
+                }
+                _ => None,
+            }
+        } else {
+            value
+        };
+        self.place.vars.insert(name.clone(), value);
+    }
+
+    /// Makes each named variable unknown.
+    fn forget<'n>(&mut self, names: impl Iterator<Item = &'n String>) {
+        for name in names {
+            self.place.vars.insert(name.clone(), None);
+        }
     }
 
     fn find(&mut self, args: Words, ctx: &Ctx) {
@@ -619,8 +902,12 @@ impl Scan<'_> {
                 true
             }
             Some(_) => {
+                // A command `find` or `xargs` runs is a child process: what it
+                // changes does not reach this shell.
+                let saved = self.place.clone();
                 let before = self.out.len();
                 self.command(inner, ctx, None);
+                self.place = saved;
                 self.out.len() > before
             }
             None => false,
@@ -665,6 +952,64 @@ impl Scan<'_> {
             None => self.unresolvable(XARGS_LABEL),
         }
     }
+}
+
+/// Whether `word` appends to a variable, as `NAME+=value` does.
+fn is_append(word: &str) -> bool {
+    word.split_once("+=").is_some_and(|(name, _)| is_name(name))
+}
+
+/// Whether `word` is a shell variable name.
+fn is_name(word: &str) -> bool {
+    !word.is_empty() && expand::identifier_len(word) == word.len()
+}
+
+/// Whether `text` may define a shell function: `name()` or `function`.
+fn defines_function(text: &str) -> bool {
+    text.contains("()")
+        || text
+            .split(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|' | '('))
+            .any(|w| w == "function")
+}
+
+/// The `if`, `case` and loop bodies open after `words`, from `open` before.
+fn track_blocks(words: &[String], open: usize) -> usize {
+    let mut open = open;
+    for word in words {
+        match word.as_str() {
+            "if" | "while" | "until" => open += 1,
+            "for" | "select" | "case" => return open + 1,
+            "fi" | "done" | "esac" => open = open.saturating_sub(1),
+            "then" | "else" | "elif" | "do" | "!" | "{" | "}" => {}
+            _ => break,
+        }
+    }
+    open
+}
+
+/// `NAME=$(...)` written without quotes, which the lexer splits around the
+/// substitution: the assignment put back as one word, when the substitution
+/// is a lone `pwd` or `mktemp` and nothing is joined after it.
+fn substituted_assignment(commands: &[shell::Command], i: usize) -> Option<String> {
+    let command = &commands[i];
+    let [word] = command.words.as_slice() else {
+        return None;
+    };
+    let name = word.strip_suffix("=$")?;
+    if !command.opens_substitution || !is_name(name) {
+        return None;
+    }
+    let inner = commands.get(i + 1)?;
+    let alone = inner.substitution
+        && inner.depth == command.depth + 1
+        && commands
+            .get(i + 2)
+            .is_none_or(|n| !n.joined && n.depth <= command.depth);
+    let program = inner.words.first()?;
+    if !alone || !matches!(program.as_str(), "pwd" | "mktemp") {
+        return None;
+    }
+    Some(format!("{name}=$({})", inner.words.join(" ")))
 }
 
 /// Adds `dir` to `dirs` unless it is there already.
@@ -892,6 +1237,7 @@ mod tests {
                 home: "/Users/me",
                 cwd: Path::new("/w"),
                 cdpath: false,
+                tmpdir: None,
             },
         );
         (command, got)
@@ -968,7 +1314,7 @@ mod tests {
         ("X=$(pwd) RM /a", "u:<command substitution>,p:/a"),
         ("echo $(date; RM /a)", "u:<command substitution>,p:/a"),
         ("echo \"$(RM /a)\"", "u:<command substitution>,p:/a"),
-        ("echo `RM /a`", "u:<command substitution>,u:/a"),
+        ("echo `RM /a`", "u:<command substitution>,p:/a"),
         ("echo $(date) && RM /a", "p:/a"),
         ("RM /a && echo $(date)", "p:/a"),
         // Variables, zsh qualifiers and cd.
@@ -1045,6 +1391,59 @@ mod tests {
         ("true || cd /x && RM b", "p:/x/b,p:/w/b"),
         ("cd /x || exit 1; RM b", "p:/x/b,p:/w/b"),
         ("cd -P /x/l/.. && RM b", "p:/x/l/../b"),
+        ("cd /x | true; RM b", "p:/x/b,p:/w/b"),
+        // Variables the command sets.
+        ("S=/x; RM -rf $S/y", "p:/x/y"),
+        ("S=\"/x\" ; RM -rf \"$S\"", "p:/x"),
+        ("S=/x; RM -rf \"${S}/y\"", "p:/x/y"),
+        ("export O=/x/o; RM -f $O/r", "p:/x/o/r"),
+        ("S=/x; N=$S/n; RM -rf $N", "p:/x/n"),
+        ("S=/x; S+=/y; RM $S", "p:/x/y"),
+        ("S=~/x; RM $S", "p:/Users/me/x"),
+        ("S='~/x'; RM $S", "p:~/x"),
+        ("S=rel; RM $S", "p:rel"),
+        ("cd /x && S=rel; RM $S", "u:$S"),
+        ("cd /x; S=rel; RM $S", "p:/x/rel,p:/w/rel"),
+        ("d=/x; for f in a b; do RM \"$d/$f\"; done", "p:/x/a,p:/x/b"),
+        ("for f in $(ls); do RM $f; done", "u:$f"),
+        ("for f; do RM $f; done", "u:$f"),
+        ("S=/x; S=$(cat w); RM $S/y", "u:$S/y"),
+        ("S=/x; unset S; RM $S/y", "u:$S/y"),
+        ("S=/x; read S; RM $S/y", "u:$S/y"),
+        ("S=/x; printf -v S y; RM $S/y", "u:$S/y"),
+        ("S=/x; source env.sh; RM $S/y", "u:$S/y"),
+        ("S=/x; . ./env.sh; RM $HOME/y", "u:$HOME/y"),
+        ("true && S=/x; RM $S/y", "u:$S/y"),
+        ("S=/a; true && S=/b; RM $S", "p:/a,p:/b"),
+        ("if c; then S=/x; fi; RM $S", "u:$S"),
+        ("S=/x; if c; then S=/y; fi; RM $S", "p:/x,p:/y"),
+        ("S=/x | cat; RM $S", "u:$S"),
+        ("S=/x & RM $S", "u:$S"),
+        ("f() { S=/x; }; RM $S", "u:$S"),
+        ("S=/x; f() { :; }; RM $S", "u:$S"),
+        ("sh -c 'S=/x'; RM $S", "u:$S"),
+        ("eval 'S=/x'; RM $S", "u:$S"),
+        ("X=1 RM $X", "u:$X"),
+        ("S='/a /b'; RM $S", "u:$S"),
+        ("declare -a S=(/x); RM $S", "u:$S"),
+        ("declare -x S=/x; RM $S", "p:/x"),
+        ("S=/x; RM '$S'", "u:'$S'"),
+        ("S=/x; RM \\$S", "u:\\$S"),
+        ("RM /tmp/st.$$", "p:/tmp/st.12345"),
+        ("RM \"$PWD/x\"", "p:/w/x"),
+        ("cd /x; RM \"$PWD/y\"", "p:/x/y,p:/w/y"),
+        ("cd \"$Z\"; RM \"$PWD/y\"", "u:\"$PWD/y\""),
+        ("cd /x && cd /y && RM \"$OLDPWD/z\"", "p:/x/z"),
+        ("RM \"$OLDPWD/z\"", "u:\"$OLDPWD/z\""),
+        ("RM -rf \"$(pwd)/t\"", "p:/w/t"),
+        ("RM -rf \"$(cat x)/t\"", S),
+        ("d=$(mktemp -d); RM -r $d", "p:/tmp/tmp.mktemp"),
+        ("d=\"$(mktemp)\"; RM -f \"$d\"", "p:/tmp/tmp.mktemp"),
+        ("d=$(mktemp -d ./x.XXXX); RM -rf $d", "u:$d"),
+        ("d=$(mktemp -d)x; RM -rf $d", "u:$d"),
+        ("RM \"${TMPDIR:-/tmp}/p.json\"", "p:/tmp/p.json"),
+        ("RM ${X:-/tmp}/p", "u:${X:-/tmp}/p"),
+        ("RM $1/x", "u:$1/x"),
     ];
 
     /// Commands that only read, search or mention a deletion as data.
@@ -1104,11 +1503,31 @@ mod tests {
     }
 
     #[test]
+    fn tmpdir_expands_to_the_value_this_hook_sees() {
+        let env = Env {
+            home: "/Users/me",
+            cwd: Path::new("/w"),
+            cdpath: false,
+            tmpdir: Some(Path::new("/var/T")),
+        };
+        let rm = "r".to_string() + "m";
+        let cases = [
+            (format!("{rm} $TMPDIR/x"), "p:/var/T/x"),
+            (format!("{rm} \"${{TMPDIR:-/tmp}}/x\""), "p:/var/T/x"),
+            (format!("d=$(mktemp -d); {rm} -r $d"), "p:/var/T/tmp.mktemp"),
+        ];
+        for (command, want) in cases {
+            assert_eq!(targets(&command, &env), spec(want), "{command}");
+        }
+    }
+
+    #[test]
     fn a_relative_cd_with_cdpath_set_lands_in_an_unknown_folder() {
         let env = Env {
             home: "/Users/me",
             cwd: Path::new("/w"),
             cdpath: true,
+            tmpdir: None,
         };
         let rm = "r".to_string() + "m";
 
@@ -1125,6 +1544,7 @@ mod tests {
             home: "/Users/me",
             cwd: Path::new("/w"),
             cdpath: false,
+            tmpdir: None,
         };
         let rm = "r".to_string() + "m";
 

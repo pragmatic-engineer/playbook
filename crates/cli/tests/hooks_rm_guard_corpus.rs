@@ -163,6 +163,9 @@ impl Tree {
             .args(["hook", "rm-workspace-guard"])
             .env("HOOK_INPUT", payload)
             .env("HOME", &self.home)
+            // A fixed value, so `$TMPDIR` cases judge the same everywhere.
+            .env("TMPDIR", "/tmp")
+            .env_remove("CDPATH")
             .env_remove("PLAYBOOK_SAFE_ROOTS")
             .env_remove("WORKTREE_BASE_DIR")
             .env_remove("PLAYBOOK_BIN_DIR")

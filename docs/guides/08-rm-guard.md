@@ -13,6 +13,8 @@ The guard reads the command the way the shell does, with the shared shell lexer,
 
 The guard follows the folder the shell is in. A relative target is judged against the `cwd` Claude Code sends with the command, and after `cd`, `pushd` or `popd` against the folder the shell changed into. A `cd` inside `( ... )` or `$( ... )` ends with the group. When a `cd` could fail and the next command still runs (after `;`, `||` or a line break rather than `&&`), the target is judged in both the new and the old folder. A folder the guard cannot name, such as `cd "$X"`, `popd` with nothing pushed, or `cd name` while `CDPATH` is set, makes a relative target unresolvable.
 
+Variables are followed when the command itself sets them to something the guard can name: `S=/x; rm -rf $S/y`, `export`, a chain such as `N=$S/z`, `+=`, and a `for` loop over literal words. It also knows `$HOME`, `$PWD`, `$OLDPWD`, `$(pwd)`, `$$` (digits only), `$TMPDIR` and `${TMPDIR:-/tmp}` (with the hook's own value, which the shell inherits from Claude Code), and a file or folder made by a plain `$(mktemp)` or `$(mktemp -d)`. An assignment that may not run, after `&&` or `||` or inside `if` or a loop, keeps the old value possible too; with no old value the variable is unknown. A variable set in a pipeline part, a background job, a child shell, by `read`, or in a command that defines a function or runs `source`, is unknown. A value holding whitespace is unknown, since the shell would split it.
+
 Text that is only data is left alone: a quoted grep pattern, a commit message, an `echo`, a file path, and a heredoc read by `cat`, `git commit` or any program other than a shell. A redirect such as `2>/dev/null` is never a target.
 
 Claude Code starts the hook only for a command that holds an `rm` word (`if: Bash(rm:*)`). A `find -delete` with no `rm` anywhere in the command never reaches it.
@@ -44,7 +46,7 @@ A temp folder from the environment (`$TMPDIR`, `%TEMP%` and the like) counts onl
 
 "Contents only" means the folder itself, and any parent of it, stays blocked. A glob directly under one of these folders needs a named prefix of at least three characters: `/tmp/pb-*` is allowed and `/tmp/*` is blocked.
 
-`$TMPDIR` written in a command is not expanded, because the shell that runs the command can have a different value than the hook. Write the literal path instead.
+`$TMPDIR` written in a command is expanded with the hook's value. A shell profile that exports a different `$TMPDIR` is an accepted risk: the expanded path is still judged against the roots.
 
 ## What stays blocked
 
@@ -71,7 +73,7 @@ Each denied target is listed with the rule that matched:
 | bare glob | A glob the guard cannot judge, such as `/tmp/*`. |
 | protected playbook data | One of the paths in the list above. |
 | playbook lock folder | A `.lock` folder that clears itself. |
-| unresolvable target | A command substitution, `<xargs input>`, a variable other than `$HOME`, or a relative path in a folder the guard cannot name. Run the `rm` as its own call with a literal absolute path. |
+| unresolvable target | A command substitution, `<xargs input>`, a variable the guard cannot follow, or a relative path in a folder the guard cannot name. Run the `rm` as its own call with a literal absolute path. |
 | stray quote or shell character | A quote, backslash or shell syntax left inside the path. |
 | another user's home or a quoted ~ | `~user`, or a `~` inside quotes, which the shell does not expand. |
 | path that cannot be resolved | A link chain too deep to follow, a link that cannot be read, or a working folder that is gone. |
