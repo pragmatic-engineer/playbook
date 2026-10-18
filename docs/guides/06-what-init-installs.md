@@ -6,7 +6,7 @@
 
 - In a terminal, `playbook setup` is a guided wizard. It shows one screen per part ("Step 3 of 8"), with what happens if you accept and what happens if you decline, a mark for the recommended answer, and the keys y, n, b (back), s (use the default) and q (quit). A summary and a confirm come last. Nothing is written before you confirm.
 - `--yes` (or `--defaults`) skips the wizard and takes the defaults. Each part also has a `--x` and `--no-x` flag, and a flag wins over the wizard and shows in the summary as set by a flag.
-- Without a terminal there are no questions. Hooks and the status line change Claude Code's settings, so they stay off unless you pass `--yes` or their own flag. The other defaults apply.
+- Without a terminal there are no questions. Only `PATH` is on: hooks, the status line, the system prompt, the `pb` link, telemetry, the collector service and attribution-off stay off unless you pass `--yes` or their own flag.
 - `playbook setup --dry-run` prints exactly what would change for each part and changes nothing.
 - `playbook setup --explain` describes every part. `playbook setup --explain <part>` describes one, for example `--explain hooks`.
 - `playbook hooks list` prints every hook with its event, matcher and one line of purpose.

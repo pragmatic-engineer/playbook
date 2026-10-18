@@ -135,6 +135,25 @@ json() {
       --arg prefix "$prefix" \
       --arg date "$date" '
       def clean: gsub("[[:cntrl:]]"; "") | gsub("^\\s+|\\s+$"; "");
+      # The text of the first BREAKING CHANGE footer that has some, or null.
+      # The footer line must start at column 0. The text runs on over the
+      # lines below it, joined with single spaces, up to a blank line or a
+      # run of trailers ("Token: " or "Token #" lines up to the next blank
+      # line or the end), so a prose line such as "Note: x" does not end it.
+      def footer:
+        split("\n")[1:] as $raw
+        | ($raw | map(clean)) as $l
+        | ($l | length) as $n
+        | def trailer: test("^(BREAKING[ -]CHANGE|[A-Za-z0-9-]+)(: | #)");
+          def para_end($j): [range($j; $n) | select($l[.] == "")] | first // $n;
+          [range(0; $n) | select($raw[.] | test("^BREAKING[ -]CHANGE: "))
+           | . as $s
+           | (first(range($s + 1; $n)
+                    | select($l[.] == "" or (. as $j | all($l[$j:para_end($j)][]; trailer))))
+              // $n) as $e
+           | $l[$s:$e] | .[0] |= sub("^BREAKING[ -]CHANGE: "; "") | join(" ") | clean
+           | select(length > 0)]
+          | first;
       def item:
         . as $body
         | (split("\n")[0] | clean) as $subject
@@ -142,8 +161,7 @@ json() {
            | capture("^(?<type>[a-z]+)(\\((?<scope>[^)]*)\\))?(?<bang>!)?: (?<text>.+)$")
           ) // {type: "other", scope: null, bang: null, text: $subject}
         | . as $c
-        | ([$body | split("\n")[1:][] | capture("^BREAKING[ -]CHANGE: (?<t>.+)$") | .t | clean]
-           | map(select(length > 0)) | first) as $footer
+        | ($body | footer) as $footer
         | ($c.text | capture("^(?<t>.*?) *\\(#(?<pr>[0-9]+)\\)$") // {t: $c.text, pr: null}) as $p
         | ($footer != null or $c.bang == "!") as $breaking
         | {
@@ -190,8 +208,19 @@ markdown() {
   jq -r --arg repo "$REPO" '
     # Markup characters show as they are, so a subject cannot add link or
     # image markup, HTML, emphasis or a mention to the release page. GitHub
-    # still links a bare URL.
-    def esc: gsub("(?<c>[\\\\`*_\\[\\]<>|~&#@])"; "\\\(.c)");
+    # still links a bare URL. When every backtick stands alone and they
+    # pair up, each pair is a code span, which shows its text as it is, so
+    # only the text outside them is escaped. A run of two or more backticks
+    # or an odd one escapes the whole text, since a code span closes only on
+    # a run of the same length.
+    def esc_all: gsub("(?<c>[\\\\`*_\\[\\]<>|~&#@])"; "\\\(.c)");
+    def esc:
+      split("`") as $parts
+      | if ($parts | length) % 2 == 1 and (test("``") | not) then
+          [range(0; $parts | length) as $i
+           | if $i % 2 == 0 then $parts[$i] | esc_all else $parts[$i] end]
+          | join("`")
+        else esc_all end;
     def link: if .pr == null then "" else " ([#\(.pr)](https://github.com/\($repo)/pull/\(.pr)))" end;
     def line($name):
       if $name == "other" then

@@ -466,7 +466,7 @@ fn markup_in_a_subject_is_escaped_in_the_markdown_and_kept_in_the_json() {
     );
     assert!(
         md.contains(
-            r"- **cli**: keep \`code\`, \*stars\*, \_under\_, \<b\>tags\</b\>, \[x\](y), a\|b, \~s\~, \& and \# \\ \@me ([#30]"
+            r"- **cli**: keep `code`, \*stars\*, \_under\_, \<b\>tags\</b\>, \[x\](y), a\|b, \~s\~, \& and \# \\ \@me ([#30]"
         ),
         "{md}"
     );
@@ -526,4 +526,194 @@ fn the_release_commit_of_a_version_is_left_out() {
 
     // Assert
     assert_eq!(r.query(&notes, "[.sections[].items[].pr]"), "[41,42]");
+}
+
+/// The full message of 6989495b, "feat(setup)!: retire the aliases and
+/// claude-override parts (#1119)", as it is on main.
+const PR_1119: &str = r#"feat(setup)!: retire the aliases and claude-override parts (#1119)
+
+## Summary
+
+Retires the `aliases` and `claude-override` setup parts (ADR 0044
+decisions 1 and 7). Setup stops writing the `eval "$(playbook
+shell-init)"` line and the `launcher.claudeOverride` key. The four old
+flags and the two `--only` names stay accepted until 1.0, hidden from
+`--help`, and do nothing. In a terminal each prints one stderr line that
+names ADR 0044, also with `--explain`. Migration 0007 no longer rewrites
+old `source` lines. setup.md and install.sh drop the retired words with
+a note, install.sh no longer asks the shell wrapper question, and doctor
+layer 3 passes without a shell line.
+
+BREAKING CHANGE: `playbook setup --aliases` and `--claude-override` do
+nothing now. Start sessions with `pb cc` or `playbook cc`, which load
+the playbook system prompt. A plain `claude` no longer goes through the
+launcher.
+
+## Notes for reviewers
+
+An rc file that still evaluates `shell-init` keeps working here. The
+next PRs make `shell-init` print a comment, delete the now unused rc
+writers in shim.rs, and add migration 0018, which removes the old line
+after consent. Both land before the next release.
+
+---------
+
+Signed-off-by: igorjs <2278164+igorjs@users.noreply.github.com>
+"#;
+
+/// The full message of 845e5a2c, "feat(setup)!: load the system prompt in pb
+/// cc by default (#1122)", as it is on main.
+const PR_1122: &str = r#"feat(setup)!: load the system prompt in pb cc by default (#1122)
+
+## Summary
+
+`pb cc` and `playbook cc` now load the playbook system prompt by
+default, and `setup --yes` turns every part on (ADR 0044 decisions 4, 5,
+8 and 9). A new per-user key `systemPrompt.enabled`, default true,
+decides it. With false, cc adds no prompt flag and passes your own
+prompt flags through, append flags included. Setup stores the answer: a
+yes stores true, a no or `--no-system-prompt` stores false, and a run
+that asked nothing stores nothing. A plain `claude` still loads no
+playbook prompt.
+
+`--yes` keeps the prompt off when the key is false, or on an earlier
+install that had none, and prints the `--only system-prompt` command.
+Migration 0019 asks those installs, and goes quiet once an answer is
+stored. install.sh asks the prompt question on its own and passes
+`--no-system-prompt` on a no. With `--yes` it asks nothing and passes no
+prompt flag, so a stored no stays, and `--binary-only` passes
+`--no-system-prompt`. Doctor layer 3 warns about the old rc lines and
+notes a missing `pb`, and layer 4 says whether `pb cc` loads the prompt.
+
+BREAKING CHANGE: `setup --yes` now installs the system prompt and links
+`pb`. Pass `--no-system-prompt` or `--no-short-name` to keep them off.
+
+## Notes for reviewers
+
+The `--yes` defaults change for two parts: system-prompt and short-name
+go from off to on. Hooks, status line, PATH, telemetry,
+collector-service and attribution-off stay on, and security stays behind
+its flag. Tests run `pb cc` through a `pb` symlink with a fake `claude`
+and assert the argv with the prompt on and off, and run `setup --yes` in
+a scratch HOME and check every part.
+
+---------
+
+Signed-off-by: igorjs <2278164+igorjs@users.noreply.github.com>
+"#;
+
+#[test]
+fn a_footer_over_several_lines_is_kept_whole() {
+    // Arrange: the two footers that v0.37.0 cut after their first line.
+    let repo = Repo::new();
+    repo.change("crates/cli/src/a.rs", PR_1119);
+    repo.change("crates/cli/src/b.rs", PR_1122);
+
+    // Act
+    let notes = repo.notes("playbook", "0.2.0");
+    let md = repo.markdown(&notes);
+
+    // Assert: the lines join with single spaces, the footer stops at the
+    // blank line, and backticks stay plain in the json and the markdown.
+    assert_eq!(
+        repo.query(&notes, "[.sections[] | [.name, [.items[] | [.pr, .text]]]]"),
+        concat!(
+            r#"[["breaking",[[1119,"`playbook setup --aliases` and `--claude-override` do nothing now. "#,
+            r#"Start sessions with `pb cc` or `playbook cc`, which load the playbook system prompt. "#,
+            r#"A plain `claude` no longer goes through the launcher."],"#,
+            r#"[1122,"`setup --yes` now installs the system prompt and links `pb`. "#,
+            r#"Pass `--no-system-prompt` or `--no-short-name` to keep them off."]]]]"#
+        )
+    );
+    assert!(
+        md.contains(concat!(
+            "- **setup**: `setup --yes` now installs the system prompt and links `pb`. ",
+            "Pass `--no-system-prompt` or `--no-short-name` to keep them off. ([#1122]"
+        )),
+        "{md}"
+    );
+    assert!(
+        md.contains(
+            "- **setup**: `playbook setup --aliases` and `--claude-override` do nothing now."
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn a_footer_stops_at_a_run_of_trailers_and_not_at_a_prose_line() {
+    // Arrange: "Note: " inside the footer is prose, since the line after it
+    // is no trailer. "Fixes #78" and the sign-off are a run of trailers. An
+    // indented footer line, as in a quoted example, is no footer.
+    let repo = Repo::new();
+    repo.change(
+        "crates/cli/src/a.rs",
+        "feat(cli)!: move it (#80)\n\nBREAKING CHANGE: the a flag is gone.\nNote: run setup\nagain after this.\nFixes #78\nSigned-off-by: t <t@example.invalid>\n",
+    );
+    repo.change(
+        "crates/cli/src/b.rs",
+        "fix(cli): quote it (#81)\n\nAn example:\n\n    BREAKING CHANGE: not this one\n",
+    );
+
+    // Act
+    let notes = repo.notes("playbook", "0.2.0");
+
+    // Assert
+    assert_eq!(
+        repo.query(&notes, "[.sections[] | [.name, [.items[] | [.pr, .text]]]]"),
+        concat!(
+            r#"[["breaking",[[80,"the a flag is gone. Note: run setup again after this."]]],"#,
+            r#"["fixes",[[81,"quote it"]]]]"#
+        )
+    );
+}
+
+#[test]
+fn markup_inside_a_code_span_stays_raw_and_a_backtick_run_escapes_all() {
+    // Arrange: a pair of single backticks is a code span. A run of three has
+    // no closing run, so GitHub would show the text after it as markup.
+    let repo = Repo::new();
+    repo.change(
+        "crates/cli/src/a.rs",
+        "fix(cli): keep `[x](y) <b>` and *s* (#82)",
+    );
+    repo.change("crates/cli/src/b.rs", "fix(cli): a ```<b>x</b> @me ` (#83)");
+
+    // Act
+    let notes = repo.notes("playbook", "0.2.0");
+    let md = repo.markdown(&notes);
+
+    // Assert
+    assert!(
+        md.contains(r"- **cli**: keep `[x](y) <b>` and \*s\* ([#82]"),
+        "{md}"
+    );
+    assert!(
+        md.contains(r"- **cli**: a \`\`\`\<b\>x\</b\> \@me \` ([#83]"),
+        "{md}"
+    );
+}
+
+#[test]
+fn a_footer_stops_at_the_next_trailer_and_an_odd_backtick_is_escaped() {
+    // Arrange
+    let repo = Repo::new();
+    repo.change(
+        "crates/cli/src/a.rs",
+        "feat(cli)!: move it (#80)\n\nBREAKING CHANGE: the `a` flag\n  is gone, use b`\nFixes #78\nRefs: #79\nSigned-off-by: t <t@example.invalid>\n",
+    );
+
+    // Act
+    let notes = repo.notes("playbook", "0.2.0");
+    let md = repo.markdown(&notes);
+
+    // Assert
+    assert_eq!(
+        repo.query(&notes, ".sections[0].items[0].text"),
+        r#""the `a` flag is gone, use b`""#
+    );
+    assert!(
+        md.contains(r"- **cli**: the \`a\` flag is gone, use b\` ([#80]"),
+        "{md}"
+    );
 }

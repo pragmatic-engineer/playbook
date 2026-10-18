@@ -274,11 +274,14 @@ pub enum Command {
     /// In a terminal it asks about each optional part (hooks, status line,
     /// PATH, the system prompt, the `pb` short name) unless you answer with a flag.
     /// Each part has `--x` and `--no-x`. With `--yes`,
-    /// unanswered parts use their defaults: hooks, the status line and PATH on, the
-    /// system prompt and `pb` off. Telemetry is on by default too: the
+    /// unanswered parts use their defaults, and every asked part is on: hooks,
+    /// the status line, PATH, the system prompt and `pb`. The system prompt
+    /// stays off when `systemPrompt.enabled` is false or an earlier install
+    /// had none, and `pb` stays off after a stored no. Telemetry is on by default too: the
     /// question defaults to yes and `--yes` is a yes, but `--yes` alone never
     /// replaces an off switch you set. Without a terminal and without `--yes`,
-    /// hooks, the status line and telemetry stay off unless you pass their flag.
+    /// only PATH is on: hooks, the status line, the system prompt, `pb` and
+    /// telemetry stay off unless you pass their flag.
     /// `--only telemetry` (or a bare `--telemetry`) runs just that part;
     /// `--only` takes any parts and leaves everything else alone.
     ///
