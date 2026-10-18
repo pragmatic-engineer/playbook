@@ -59,6 +59,8 @@
 //! would mean a second emitter used by exactly one hook, for a consumer that
 //! parses the JSON either way.
 
+pub mod parse;
+
 use crate::common::emit_pre_deny;
 use crate::common::payload::Payload;
 use std::path::{Path, PathBuf};
