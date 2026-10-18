@@ -474,11 +474,11 @@ Keep each tool on PATH and install only the missing ones with Homebrew, from the
 
 Check free disk space and keep builds from filling the disk
 
-Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb`, and the folders that use the most of it.
+Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb` and the folders that use the most of it. `disk reserve` can keep a ballast file that gives space back when the disk is full.
 
 Example: `playbook disk status`
 
-Subcommands: `clean`, `status`
+Subcommands: `clean`, `release`, `reserve`, `status`
 
 ### `playbook disk clean`
 
@@ -488,6 +488,14 @@ Example: `playbook disk clean --dry-run`
 
 - `--dry-run`: Show what would be removed without removing anything
 - `--auto`: Run only when `disk.autoCleanup` is on and free space is below `disk.warnFreeGb`, as the disk guard hooks do
+
+### `playbook disk release`
+
+Delete the ballast file and print the space it gave back
+
+### `playbook disk reserve`
+
+Write a 1 GB ballast file under ~/.cache/playbook/ballast that `disk release` deletes to give space back on a full disk. The folder carries a CACHEDIR.TAG and, on macOS, a Time Machine exclusion. Refuses, with exit code 1, when less than `disk.warnFreeGb` would stay free
 
 ### `playbook disk status`
 

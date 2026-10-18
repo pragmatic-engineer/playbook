@@ -487,7 +487,7 @@ pub fn lock(home: &Path) -> Lock {
 }
 
 #[cfg(unix)]
-fn try_lock(file: &std::fs::File) -> bool {
+pub(super) fn try_lock(file: &std::fs::File) -> bool {
     use std::os::unix::io::AsRawFd;
     // SAFETY: the descriptor belongs to `file`, which outlives the call. The
     // lock is released when the file is closed.
@@ -495,7 +495,7 @@ fn try_lock(file: &std::fs::File) -> bool {
 }
 
 #[cfg(not(unix))]
-fn try_lock(_file: &std::fs::File) -> bool {
+pub(super) fn try_lock(_file: &std::fs::File) -> bool {
     false
 }
 

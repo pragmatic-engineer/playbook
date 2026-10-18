@@ -582,6 +582,8 @@ fn table() -> Vec<Case> {
         case("pr merge", &["pr", "merge", "1"]).out("merge_rc=-1"),
         // worktrees and memory
         case("disk status", &["disk", "status"]).out("Thresholds"),
+        case("disk reserve", &["disk", "reserve"]).pre(&["config", "set", "disk.warnFreeGb", "10000"]).code(1).err("refused"),
+        case("disk release", &["disk", "release"]).out("no ballast"),
         case("disk clean", &["disk", "clean", "--dry-run"]).out("disk clean: would remove"),
         case("worktree sweep", &["worktree", "sweep"]),
         case("worktree remove", &["worktree", "remove", "{ROOT}/none"]).code(1).err("not a registered git worktree"),

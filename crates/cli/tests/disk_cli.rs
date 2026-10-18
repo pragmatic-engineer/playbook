@@ -145,3 +145,29 @@ fn clean_removes_idle_scratch_in_a_test_tmp_folder_only() {
     assert!(!old.exists());
     assert!(fresh.exists());
 }
+
+#[test]
+fn reserve_refuses_when_space_is_low_and_release_reports_nothing_to_do() {
+    let home = isolated::fresh_home();
+    let out = run(&home, "10", &["disk", "reserve"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("refused"));
+    assert!(!home.join(".cache/playbook/ballast/ballast.bin").exists());
+    let out = run(&home, "10", &["disk", "release"]);
+    assert!(out.status.success());
+    assert!(stdout(&out).contains("no ballast"), "{}", stdout(&out));
+}
+
+#[test]
+fn release_deletes_an_existing_ballast() {
+    let home = isolated::fresh_home();
+    let ballast = home.join(".cache/playbook/ballast/ballast.bin");
+    std::fs::create_dir_all(ballast.parent().unwrap()).unwrap();
+    std::fs::write(&ballast, vec![1u8; 64 * 1024]).unwrap();
+    let status = run(&home, "50", &["disk", "status"]);
+    assert!(stdout(&status).contains("ballast"), "{}", stdout(&status));
+    let out = run(&home, "50", &["disk", "release"]);
+    assert!(out.status.success());
+    assert!(stdout(&out).contains("given back"), "{}", stdout(&out));
+    assert!(!ballast.exists());
+}
