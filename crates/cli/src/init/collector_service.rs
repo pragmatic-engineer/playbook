@@ -277,24 +277,41 @@ pub fn record_reminder(home: &Path) {
     let _ = crate::state::set(&root(home), REMINDED_KEY, "1");
 }
 
-/// The step `playbook uninstall` runs: stops and deletes the service file.
-/// `Ok(None)` when there is none.
+/// The commands that remove an agent file under the old label that
+/// playbook did not write, which playbook never touches itself.
+pub fn foreign_old_agent_fix(file: &Path) -> String {
+    format!(
+        "launchctl bootout gui/{}/{}; rm {}",
+        manager::uid(),
+        service::OLD_LABEL,
+        crate::common::shell::word(&file.to_string_lossy())
+    )
+}
+
+/// The step `playbook uninstall` runs: stops and deletes the service file,
+/// and the agent playbook wrote under the label 0.37.0 used. `Ok(None)` when
+/// there is neither.
 pub fn remove(home: &Path, dry_run: bool) -> Result<Option<String>, String> {
-    let Some(found) = service::find(home) else {
+    let found = service::find(home);
+    let old = service::find_old(home).filter(|o| o.ours);
+    let names: Vec<String> = found
+        .iter()
+        .map(service::Found::describe)
+        .chain(old.iter().map(service::OldAgent::describe))
+        .collect();
+    if names.is_empty() {
         return Ok(None);
-    };
+    }
+    let names = names.join(" and the ");
     if dry_run {
-        return Ok(Some(format!(
-            "would stop and remove the {}",
-            found.describe()
-        )));
+        return Ok(Some(format!("would stop and remove the {names}")));
     }
     let manager = manager::manager_for(home);
-    manager::remove(found.kind, home, manager.as_ref(), manager::uid())?;
-    Ok(Some(format!(
-        "stopped and removed the {}",
-        found.describe()
-    )))
+    if let Some(found) = &found {
+        manager::remove(found.kind, home, manager.as_ref(), manager::uid())?;
+    }
+    manager::remove_old(home, manager.as_ref(), manager::uid())?;
+    Ok(Some(format!("stopped and removed the {names}")))
 }
 
 #[cfg(test)]
