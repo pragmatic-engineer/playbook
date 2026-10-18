@@ -221,10 +221,10 @@ impl Cache {
     }
 }
 
-/// Whether `command` may run the check. Hooks, the status line,
-/// `shell-init` (it runs on every new shell), `version`, `json`, `update`
-/// itself, the background `usage warm` and `usage collect` runs that the
-/// session hooks start, and any run with a `--json` argument never do.
+/// Whether `command` may run the check. Hooks, the status line, `version`,
+/// `json`, `update` itself, the background `usage warm` and `usage collect`
+/// runs that the session hooks start, and any run with a `--json` argument
+/// never do.
 pub fn applies(command: &Command, args: &[OsString]) -> bool {
     use crate::UsageCommand;
     let skipped = command.is_hot_path()
@@ -962,7 +962,6 @@ mod tests {
         for parts in [
             &["playbook", "hook", "session-init"][..],
             &["playbook", "statusline"],
-            &["playbook", "shell-init"],
             &["playbook", "json", "memory-context", "g.json", "o/r"],
             &["playbook", "mode", "status", "--json"],
             &["playbook", "update", "--check"],

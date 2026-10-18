@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! End-to-end tests for `playbook cc launch` and `playbook shell-init`, with a
-//! fake `claude` on PATH that records its argv. They replace the shell launcher
+//! End-to-end tests for `playbook cc launch`, with a fake `claude` on PATH
+//! that records its argv, and for the notice the removed `shell-init` prints. They replace the shell launcher
 //! suites that covered `dispatch.sh`, `config-drift.sh` and the bash/zsh parity.
 
 #[path = "support/isolated.rs"]
@@ -446,41 +446,76 @@ fn worktree_outside_a_repo_fails_without_launching() {
     assert!(!String::from_utf8_lossy(&out.stderr).contains("run: cd"));
 }
 
-fn shell_init(shell: &str) -> String {
-    let out = isolated::playbook()
-        .args(["shell-init", "--shell", shell])
-        .output()
-        .unwrap();
-    assert!(out.status.success());
-    String::from_utf8(out.stdout).unwrap()
+/// The scratch home a removed `shell-init` test runs in, with a `bin`
+/// folder that holds `playbook` as a link to the built binary.
+fn removed_shell_init_home(tag: &str) -> (PathBuf, PathBuf) {
+    let home = isolated::fresh_home();
+    let bin = home.join(format!("bin-{tag}"));
+    fs::create_dir_all(&bin).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_playbook"), bin.join("playbook")).unwrap();
+    (home, bin)
 }
 
 #[test]
-fn shell_init_prints_a_comment_that_every_available_shell_loads_as_a_no_op() {
-    for shell in ["bash", "zsh"] {
+fn the_removed_shell_init_prints_one_stderr_line_and_exits_zero() {
+    for args in [&["shell-init"][..], &["shell-init", "--shell", "zsh"]] {
+        let home = isolated::fresh_home();
+
+        let out = isolated::playbook_in(&home).args(args).output().unwrap();
+
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+        assert!(out.stdout.is_empty(), "{args:?}: {out:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr),
+            format!("{}\n", playbook::fastpath::SHELL_INIT_REMOVED),
+            "{args:?}"
+        );
+        assert_eq!(
+            fs::read_dir(&home).unwrap().count(),
+            0,
+            "{args:?} wrote under home"
+        );
+    }
+}
+
+#[test]
+fn the_removed_shell_init_keeps_a_shell_with_the_old_rc_line_working() {
+    let line = playbook::init::shim::SOURCE_LINE;
+    for (shell, rc, flags) in [
+        ("zsh", ".zshrc", &["-i", "-c"][..]),
+        ("bash", ".bashrc", &["-c"]),
+    ] {
         if Command::new(shell).arg("--version").output().is_err() {
             eprintln!("SKIP: {shell} not available");
             continue;
         }
-        let e = env(&format!("fn-{shell}"));
-        let script = format!(
-            "{}\ntype playbook >/dev/null 2>&1 && echo defined; echo rc=$?",
-            shell_init(shell)
-        );
+        let (home, bin) = removed_shell_init_home(shell);
+        fs::write(home.join(rc), format!("{line}\n")).unwrap();
+        // zsh -i reads the rc file itself; bash -c gets it sourced.
+        let script = match shell {
+            "zsh" => "echo rc=$?; echo alive".to_string(),
+            _ => format!(". {}/{rc}; echo rc=$?; echo alive", home.display()),
+        };
+        let mut cmd = Command::new(shell);
+        isolated::isolate(&mut cmd, &home);
 
-        let out = Command::new(shell)
-            .arg("-c")
+        let out = cmd
+            .args(flags)
             .arg(&script)
-            .env("PATH", "/usr/bin:/bin")
-            .env("HOME", &e.home)
-            .env("ZDOTDIR", &e.home)
+            .env("ZDOTDIR", &home)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
             .output()
             .unwrap();
 
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(out.status.success(), "{shell}: {stdout}");
-        assert!(!stdout.contains("defined"), "{shell}: {stdout}");
-        assert!(out.stderr.is_empty(), "{shell}: {:?}", out.stderr);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{shell}: {stdout} {stderr}");
+        assert_eq!(stdout, "rc=0\nalive\n", "{shell}: {stderr}");
+        assert!(
+            stderr.contains(playbook::fastpath::SHELL_INIT_REMOVED),
+            "{shell}: {stderr}"
+        );
+        assert!(!stderr.contains("unrecognized"), "{shell}: {stderr}");
     }
 }
 

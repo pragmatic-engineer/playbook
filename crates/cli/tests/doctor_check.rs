@@ -300,9 +300,16 @@ fn l3_and_l4_are_opt_in_and_never_fail() {
 }
 
 #[test]
-fn l3_passes_with_a_bare_shell_init_line_and_notes_a_missing_pb() {
-    let b = Box::new("l3p");
+fn l3_warns_on_a_bare_shell_init_line() {
+    let b = Box::new("l3b");
     fs::write(b.home().join(".zshrc"), "eval \"$(playbook shell-init)\"\n").unwrap();
+    let rows = b.run(&[], "/bin/zsh", None);
+    assert_eq!(layer(&rows, "3")[0]["level"], "WARN");
+}
+
+#[test]
+fn l3_passes_and_notes_a_missing_pb() {
+    let b = Box::new("l3p");
     let bin = b.stub("bin1", "0.19.0", true);
     let rows = b.run(&[&bin], "/bin/zsh", None);
     assert_eq!(layer(&rows, "3")[0]["level"], "PASS");

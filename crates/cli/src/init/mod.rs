@@ -41,7 +41,6 @@ pub mod pb_link;
 pub mod preview;
 pub mod run;
 pub mod self_root;
-pub mod shell_init;
 pub mod shim;
 pub mod statusline;
 pub mod system_prompt;

@@ -648,7 +648,6 @@ mod tests {
         for args in [
             &["hook", "session-init"][..],
             &["statusline"],
-            &["shell-init"],
             &["version"],
             &["json", "valid-json"],
             &["usage", "warm"],

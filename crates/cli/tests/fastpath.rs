@@ -91,3 +91,18 @@ fn a_code_argv_is_never_taken_by_the_fast_path() {
         assert!(classify(&argv(parts)).is_none(), "{parts:?}");
     }
 }
+
+#[test]
+fn shell_init_is_gone_from_clap_the_help_and_the_cli_reference() {
+    assert!(Cli::command().find_subcommand("shell-init").is_none());
+    assert!(Cli::try_parse_from(["playbook", "shell-init"]).is_err());
+    let (code, help, _) = run(&["--help"]);
+    assert_eq!(code, 0);
+    assert!(!help.contains("shell-init"), "{help}");
+    let reference = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/reference/cli-and-config.md"
+    ))
+    .unwrap();
+    assert!(!reference.contains("shell-init"));
+}

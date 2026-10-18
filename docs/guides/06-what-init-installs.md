@@ -115,7 +115,7 @@ Setup adds a block that starts with `# playbook binary` to your shell startup fi
 
 ### No shell line
 
-Setup writes no line to your `.zshrc` or `.bashrc`. `playbook cc`, `playbook ccd`, `pb cc` and `pb ccd` start Claude Code from the binary with the playbook system prompt, the model chain and your effort ceiling. `playbook ccd` also skips permission prompts, so use it only where you would use `--dangerously-skip-permissions`. After a session in a new worktree, `playbook cc` prints the `cd` command to run. Older setups wrote a launcher line: `playbook migrate` lists it, and a full `playbook setup` removes it after a backup (migration 0018). A hand-written `eval "$(playbook shell-init)"` stays, because `shell-init` now prints only a comment. See [the launcher](../internals/01-launcher-and-hooks.md).
+Setup writes no line to your `.zshrc` or `.bashrc`. `playbook cc`, `playbook ccd`, `pb cc` and `pb ccd` start Claude Code from the binary with the playbook system prompt, the model chain and your effort ceiling. `playbook ccd` also skips permission prompts, so use it only where you would use `--dangerously-skip-permissions`. After a session in a new worktree, `playbook cc` prints the `cd` command to run. Older setups wrote a launcher line: `playbook migrate` lists it, and a full `playbook setup` removes it after a backup (migration 0018). A hand-written `eval "$(playbook shell-init)"` goes too: the command is removed, and until 1.0 it only prints a line on stderr asking you to delete the rc line. See [the launcher](../internals/01-launcher-and-hooks.md).
 
 ### System prompt
 
