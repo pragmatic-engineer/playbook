@@ -190,7 +190,10 @@ impl Outcome {
     /// run, or the record was not written, so `playbook update` reports it.
     /// A downgrade is not a failure.
     pub fn exit_code(&self) -> i32 {
-        let blocked = matches!(self.skipped, Some(Skip::StateUnreadable | Skip::LockBusy));
+        let blocked = matches!(
+            self.skipped,
+            Some(Skip::StateUnreadable | Skip::LockBusy | Skip::RealHomeUnderTest)
+        );
         let unrecorded = self.skipped.is_none() && !self.recorded;
         i32::from(blocked || unrecorded || !self.failed.is_empty())
     }
@@ -974,5 +977,40 @@ mod tests {
             "fixed: config-hash: removed\nnote: 0003-system-prompt-edited: edited\n"
         );
         assert_eq!(out.exit_code(), 0);
+    }
+
+    #[test]
+    fn a_home_that_counts_as_the_real_one_is_never_healed_or_migrated() {
+        // Arrange
+        if std::env::var_os(crate::common::real_home::ALLOW_ENV).is_some() {
+            return;
+        }
+        let home = scratch_dir("heal-real-home");
+        seed(&home, "0.0.1", 1, None);
+        let before = Record::read(&root(&home)).unwrap();
+        let _pretend = crate::common::real_home::pretend_account_home(&home);
+
+        // Act
+        let fix = run(&ctx(&home), Trigger::Fix, 5000);
+        let note = start(&home, Instant::now() + START_BUDGET);
+        let owned = migrate::run_owned(&ctx(&home), 0, None);
+        let all = migrate::run_with(&migrate::registry(), &ctx(&home));
+        let manager = crate::service_manager::manager_for(&home).run("launchctl", &[]);
+
+        // Assert
+        assert_eq!(fix.skipped, Some(Skip::RealHomeUnderTest));
+        assert_eq!(fix.exit_code(), 1, "nothing ran, so the caller hears it");
+        assert!(note.is_some_and(|n| n.contains("PLAYBOOK_ALLOW_REAL_HOME")));
+        for report in [&owned, &all] {
+            assert!(report.steps.is_empty());
+            assert!(
+                report.warnings[0].starts_with("migrations skipped"),
+                "{:?}",
+                report.warnings
+            );
+        }
+        assert!(manager.is_err(), "no real launchctl");
+        let after = Record::read(&root(&home)).unwrap();
+        assert_eq!((after.binary, after.schema), (before.binary, before.schema));
     }
 }

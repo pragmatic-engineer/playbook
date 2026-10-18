@@ -13,14 +13,18 @@ mod isolated;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const SPAWN: &str = "::new(env!(\"CARGO_BIN_EXE_playbook\"))";
+const SPAWNS: [&str; 2] = [
+    "Command::new(env!(\"CARGO_BIN_EXE_playbook\"))",
+    "Proc::new(env!(\"CARGO_BIN_EXE_playbook\"))",
+];
 
-/// Files that start the binary with the real `HOME` on purpose. Each only
-/// runs `playbook hook ...`, a hot path that never runs the first-run heal,
-/// and the binary refuses to heal the real home from a cargo test anyway.
-const EXEMPT: [&str; 1] = [
+/// Files the check skips, each with its reason. The binary refuses to heal
+/// the real home from a cargo test anyway.
+const EXEMPT: [&str; 2] = [
     // The rm guard resolves `$HOME/...` paths against the real home.
     "cli/tests/hooks_guards.rs",
+    // Copies the binary for shell scripts; each caller sets HOME.
+    "cli/tests/support/shell_fixture.rs",
 ];
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -37,8 +41,32 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The files under `crates/*/tests` that start the built `playbook` with neither
-/// the helper nor their own `HOME`.
+/// How far after a spawn its own `.env("HOME", ...)` may sit.
+const WINDOW: usize = 20;
+
+/// The spawns in `text` that set no `HOME` within [`WINDOW`] lines, by line
+/// number. A file that names the binary in some other way, as a `bin()`
+/// helper does, must set `HOME` or use the helper somewhere.
+fn bare_spawns(text: &str) -> Vec<usize> {
+    let lines: Vec<&str> = text.lines().collect();
+    let homed = |i: usize| {
+        lines[i..lines.len().min(i + WINDOW)]
+            .iter()
+            .any(|l| l.contains(".env(\"HOME\"") || l.contains("isolate("))
+    };
+    let mut bare: Vec<usize> = (0..lines.len())
+        .filter(|&i| SPAWNS.iter().any(|s| lines[i].contains(s)) && !homed(i))
+        .map(|i| i + 1)
+        .collect();
+    let isolated = text.contains("isolated::") || text.contains(".env(\"HOME\"");
+    if bare.is_empty() && text.contains("env!(\"CARGO_BIN_EXE_playbook\")") && !isolated {
+        bare.push(0);
+    }
+    bare
+}
+
+/// The files under `crates/*/tests` that start the built `playbook` without
+/// the helper or their own `HOME`, with the line of each bare spawn.
 fn unisolated(crates: &Path) -> Vec<String> {
     let mut files = Vec::new();
     for krate in fs::read_dir(crates).into_iter().flatten().flatten() {
@@ -46,12 +74,11 @@ fn unisolated(crates: &Path) -> Vec<String> {
     }
     files
         .iter()
-        .filter(|f| !f.ends_with("support/isolated.rs"))
+        .filter(|f| !f.ends_with("support/isolated.rs") && !f.ends_with("test_isolation.rs"))
         .filter(|f| !EXEMPT.iter().any(|e| f.ends_with(e)))
         .filter_map(|f| {
-            let text = fs::read_to_string(f).ok()?;
-            let isolated = text.contains("isolated::") || text.contains(".env(\"HOME\"");
-            (text.contains(SPAWN) && !isolated).then(|| f.display().to_string())
+            let bare = bare_spawns(&fs::read_to_string(f).ok()?);
+            (!bare.is_empty()).then(|| format!("{}:{bare:?}", f.display()))
         })
         .collect()
 }
@@ -69,21 +96,28 @@ fn every_test_that_starts_playbook_gives_it_a_scratch_home() {
 }
 
 #[test]
-fn the_check_catches_a_spawn_without_a_home() {
-    let root = isolated::fresh_home();
-    let tests = root.join("demo/tests");
-    fs::create_dir_all(&tests).unwrap();
-    fs::write(
-        tests.join("bad.rs"),
-        "fn f() { std::process::Command::new(env!(\"CARGO_BIN_EXE_playbook\")); }",
-    )
-    .unwrap();
-    fs::write(tests.join("good.rs"), "fn f() { isolated::playbook(); }").unwrap();
+fn the_check_catches_each_spawn_without_a_home() {
+    let spawn = "Command::new(env!(\"CARGO_BIN_EXE_playbook\"))";
+    let homed = format!("{spawn}\n    .env(\"HOME\", &h)\n");
+    let bare = format!("{spawn}\n    .arg(\"x\")\n");
+    let filler = "\n".repeat(WINDOW);
 
-    let bad = unisolated(&root);
-
-    assert_eq!(bad.len(), 1, "{bad:?}");
-    assert!(bad[0].ends_with("bad.rs"));
+    assert_eq!(bare_spawns(&homed), Vec::<usize>::new());
+    assert_eq!(bare_spawns(&bare), vec![1]);
+    assert_eq!(
+        bare_spawns(&format!("{homed}{filler}{bare}")),
+        vec![WINDOW + 3],
+        "one HOME does not cover another spawn in the same file"
+    );
+    assert_eq!(
+        bare_spawns("fn f() { isolated::playbook(); }"),
+        Vec::<usize>::new()
+    );
+    assert_eq!(
+        bare_spawns("fn bin() -> &'static str { env!(\"CARGO_BIN_EXE_playbook\") }"),
+        vec![0],
+        "a helper that names the binary needs a HOME somewhere"
+    );
 }
 
 #[test]
@@ -119,4 +153,18 @@ fn the_helper_points_every_home_at_the_scratch_home_and_drops_playbook_variables
         "a variable set after isolate reaches the child"
     );
     assert!(!String::from_utf8_lossy(&dropped.stdout).contains("PLAYBOOK_LEAK_PROBE"));
+}
+
+#[test]
+fn a_child_of_a_cargo_test_inherits_the_signal_the_net_reads() {
+    // The binary's net reads CARGO_MANIFEST_DIR or NEXTEST_RUN_ID at run
+    // time, so both cargo test and nextest must pass one to a child.
+    let out = std::process::Command::new("/usr/bin/env").output().unwrap();
+    let env = String::from_utf8_lossy(&out.stdout);
+
+    assert!(
+        env.lines()
+            .any(|l| l.starts_with("CARGO_MANIFEST_DIR=") || l.starts_with("NEXTEST_RUN_ID=")),
+        "{env}"
+    );
 }

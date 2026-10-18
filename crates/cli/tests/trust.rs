@@ -4,6 +4,9 @@
 //! Binary-spawn tests for `playbook trust`: exit code, stdout, and stderr
 //! against a scratch `$HOME`, never the real `~/.claude.json`.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -137,7 +140,7 @@ fn a_relative_path_exits_zero_warns_and_writes_nothing() {
 #[test]
 fn help_describes_the_path_argument() {
     // Act
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["trust", "--help"])
         .output()
         .expect("playbook binary runs");

@@ -18,10 +18,7 @@ static N: AtomicU64 = AtomicU64::new(0);
 /// A fresh, empty scratch home.
 pub fn fresh_home() -> PathBuf {
     let n = N.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let home = std::env::temp_dir().join(format!("pb-it-home-{}-{nanos}-{n}", std::process::id()));
+    let home = std::env::temp_dir().join(format!("pb-it-home-{}-{n}", playbook::testing::run_id()));
     std::fs::create_dir_all(&home).expect("scratch home");
     home
 }
