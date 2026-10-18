@@ -81,6 +81,11 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `hooks.proseLint.mode` | `warn` | `warn`, `block`, `off` |
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
 | `update.checkIntervalHours` | `24` | a number, see the config keys guide for the range |
+| `disk.warnFreeGb` | `15` | a number, see the config keys guide for the range |
+| `disk.blockFreeGb` | `6` | a number, see the config keys guide for the range |
+| `disk.autoCleanup` | `true` | `true`, `false` |
+| `disk.paths` | `[]` | see the config keys guide |
+| `disk.maxTargetDirs` | `4` | a number, see the config keys guide for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands

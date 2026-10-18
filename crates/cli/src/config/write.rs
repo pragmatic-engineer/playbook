@@ -147,6 +147,15 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
     if key == "hooks.rmGuard.allowedRoots" {
         validate_root_list(key, value)?;
     }
+    if key == "disk.paths" {
+        if let Some(constraint) = crate::disk::policy::path_list_error(value) {
+            return Err(ConfigError::OutOfRange {
+                key: key.to_string(),
+                value: value.to_string(),
+                constraint,
+            });
+        }
+    }
     Ok(())
 }
 
@@ -310,6 +319,14 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         "usage.refreshSeconds" => (
             whole.is_some_and(|n| (1..=3600).contains(&n)),
             "a whole number between 1 and 3600",
+        ),
+        "disk.warnFreeGb" | "disk.blockFreeGb" => (
+            whole.is_some_and(|n| (0..=crate::disk::policy::MAX_THRESHOLD_GB).contains(&n)),
+            "a whole number of GB between 0 and 10000",
+        ),
+        "disk.maxTargetDirs" => (
+            whole.is_some_and(|n| (1..=1000).contains(&n)),
+            "a whole number between 1 and 1000",
         ),
         "sessions.staleAfterDays" | "sessions.recentDays" => {
             (whole.is_some_and(|n| n >= 1), "a positive integer")
