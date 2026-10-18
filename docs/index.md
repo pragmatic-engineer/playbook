@@ -71,7 +71,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0013](adr/0013-org-level-memory-scoping.md) | Org-level memory scoping | Accepted | 2026-09-04 |
 | [0014](adr/0014-retire-memory-md-index.md) | Retire MEMORY.md as a parallel memory index | Accepted | 2026-09-09 |
 | [0015](adr/0015-multi-agent-support.md) | Multi-agent support via a thin agent-neutral core and per-agent adapters | Accepted | 2026-10-07 |
-| [0016](adr/0016-migration-framework.md) | A registry of ordered migrations run from `playbook init` | Accepted, amended by 0034 | 2026-10-07 |
+| [0016](adr/0016-migration-framework.md) | A registry of ordered migrations run from `playbook init` | Accepted, amended by 0034 and 0046 | 2026-10-07 |
 | [0017](adr/0017-per-component-effort-ceilings.md) | Per-component effort ceilings | Accepted | 2026-10-09 |
 | [0018](adr/0018-tls-platform-verifier-not-adopted.md) | Keep the bundled root certificates, do not adopt the TLS platform verifier yet | Accepted | 2026-10-09 |
 | [0019](adr/0019-pr-stack-review.md) | Review a whole pull request stack with shared context | Accepted | 2026-10-09 |
@@ -89,7 +89,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0031](adr/0031-hooks-in-settings-json.md) | Put the hooks in settings.json | Accepted, amended by 0034 | 2026-10-14 |
 | [0032](adr/0032-plugin-in-the-playbook-repo.md) | Keep the plugin in the playbook repository | Accepted, amended by 0037, partly superseded by 0038 | 2026-10-14 |
 | [0033](adr/0033-telemetry-on-by-default.md) | Turn Claude Code telemetry on by default at install | Accepted, amended by 0044 | 2026-10-15 |
-| [0034](adr/0034-self-healing-upgrades.md) | One plugin root resolver and migrations between versions | Accepted, amended by 0037, 0038, 0042 and 0044 | 2026-10-15 |
+| [0034](adr/0034-self-healing-upgrades.md) | One plugin root resolver and migrations between versions | Accepted, amended by 0037, 0038, 0042, 0044 and 0046 | 2026-10-15 |
 | [0035](adr/0035-breaking-change-notices.md) | Breaking change notices on every update channel | Superseded by 0037 | 2026-10-15 |
 | [0036](adr/0036-release-check-and-automatic-updates.md) | A release check and automatic updates | Accepted, amended by 0037 | 2026-10-15 |
 | [0037](adr/0037-release-notes-from-conventional-commits.md) | Release notes built from Conventional Commits | Accepted, amended by 0038 and 0039 | 2026-10-16 |
@@ -100,3 +100,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0042](adr/0042-attribution-off-in-setup.md) | Turn off Claude Code attribution in setup | Accepted, amended by 0044 | 2026-10-17 |
 | [0043](adr/0043-collector-service-in-setup.md) | Keep the usage collector running with a per-user service | Accepted, amended by 0044 | 2026-10-17 |
 | [0044](adr/0044-drop-the-shell-launcher.md) | Drop the shell launcher and turn every setup part on with `--yes` | Accepted | 2026-10-18 |
+| [0046](adr/0046-migrations-by-release-version.md) | Attach each migration to the release that introduced it | Accepted | 2026-10-18 |
