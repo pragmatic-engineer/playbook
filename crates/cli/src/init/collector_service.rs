@@ -157,6 +157,16 @@ pub fn step(
             ),
         );
     };
+    if kind == Kind::Launchd {
+        // An agent left under the old label moves first, so setup never
+        // loads a second collector next to it.
+        let up = || collector_running(home);
+        if let Err(why) =
+            manager::move_old_agent(home, program, manager, manager::uid(), &up, Duration::ZERO)
+        {
+            return StepReport::failed(PART, format!("{why}; to try again, run: playbook migrate"));
+        }
+    }
     let file = kind.file(home);
     let outdated =
         collector_state(home).is_some_and(|s| crate::usage::collector::runs_other_build(&s));
@@ -261,6 +271,7 @@ pub fn pending(home: &Path) -> Option<String> {
         || declined(home)
         || has_key(home, REMINDED_KEY)
         || service::find(home).is_some()
+        || service::find_old(home).is_some_and(|o| o.ours)
         || !telemetry_points_here(home)
     {
         return None;
@@ -277,24 +288,41 @@ pub fn record_reminder(home: &Path) {
     let _ = crate::state::set(&root(home), REMINDED_KEY, "1");
 }
 
-/// The step `playbook uninstall` runs: stops and deletes the service file.
-/// `Ok(None)` when there is none.
+/// The commands that remove an agent file under the old label that
+/// playbook did not write, which playbook never touches itself.
+pub fn foreign_old_agent_fix(file: &Path) -> String {
+    format!(
+        "launchctl bootout gui/{}/{}; rm {}",
+        manager::uid(),
+        service::OLD_LABEL,
+        crate::common::shell::word(&file.to_string_lossy())
+    )
+}
+
+/// The step `playbook uninstall` runs: stops and deletes the service file,
+/// and the agent playbook wrote under the label 0.37.0 used. `Ok(None)` when
+/// there is neither.
 pub fn remove(home: &Path, dry_run: bool) -> Result<Option<String>, String> {
-    let Some(found) = service::find(home) else {
+    let found = service::find(home);
+    let old = service::find_old(home).filter(|o| o.ours);
+    let names: Vec<String> = found
+        .iter()
+        .map(service::Found::describe)
+        .chain(old.iter().map(service::OldAgent::describe))
+        .collect();
+    if names.is_empty() {
         return Ok(None);
-    };
+    }
+    let names = names.join(" and the ");
     if dry_run {
-        return Ok(Some(format!(
-            "would stop and remove the {}",
-            found.describe()
-        )));
+        return Ok(Some(format!("would stop and remove the {names}")));
     }
     let manager = manager::manager_for(home);
-    manager::remove(found.kind, home, manager.as_ref(), manager::uid())?;
-    Ok(Some(format!(
-        "stopped and removed the {}",
-        found.describe()
-    )))
+    if let Some(found) = &found {
+        manager::remove(found.kind, home, manager.as_ref(), manager::uid())?;
+    }
+    manager::remove_old(home, manager.as_ref(), manager::uid())?;
+    Ok(Some(format!("stopped and removed the {names}")))
 }
 
 #[cfg(test)]
@@ -610,5 +638,78 @@ pub(crate) mod tests {
         assert!(done.starts_with("stopped and removed"), "{done}");
         assert!(!kind.file(&home).exists());
         assert_eq!(remove(&home, false).unwrap(), None);
+    }
+
+    /// Writes the agent 0.37.0 wrote into `home`.
+    fn put_old(home: &Path) {
+        let file = service::old_file(home);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(
+            &file,
+            service::render_old(Path::new("/p"), &service::log_path(home)),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn an_old_agent_needs_no_reminder() {
+        if Kind::current().is_none() {
+            return;
+        }
+        let home = telemetry_home("remind-old");
+        put_old(&home);
+
+        assert_eq!(pending(&home), None);
+    }
+
+    #[test]
+    fn setup_moves_an_old_agent_before_it_installs_so_one_agent_is_loaded() {
+        use crate::service_manager::fake::Launchd;
+        let home = telemetry_home("setup-old");
+        put_old(&home);
+        let fake = Launchd::with(&[service::OLD_LABEL]);
+
+        let report = step(
+            &home,
+            Path::new("/p"),
+            Choice::Install,
+            Some(Kind::Launchd),
+            &fake,
+        );
+
+        assert_ne!(report.status, StepStatus::Failed, "{}", report.detail);
+        assert_eq!(*fake.loaded.borrow(), vec![service::LABEL.to_string()]);
+        assert!(!service::old_file(&home).exists());
+    }
+
+    #[test]
+    fn uninstall_removes_both_agents_and_leaves_a_foreign_old_file() {
+        if Kind::current() != Some(Kind::Launchd) {
+            return;
+        }
+        let both = telemetry_home("remove-both");
+        step(
+            &both,
+            Path::new("/p"),
+            Choice::Install,
+            Some(Kind::Launchd),
+            &Stopped,
+        );
+        put_old(&both);
+        let foreign = telemetry_home("remove-foreign");
+        let file = service::old_file(&foreign);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "<plist/>").unwrap();
+
+        let done = remove(&both, false).unwrap().unwrap();
+        let none = remove(&foreign, false).unwrap();
+
+        assert!(
+            done.contains(service::LABEL) && done.contains(service::OLD_LABEL),
+            "{done}"
+        );
+        assert!(!Kind::Launchd.file(&both).exists() && !service::old_file(&both).exists());
+        assert_eq!(none, None);
+        assert!(file.is_file(), "a file playbook did not write stays");
     }
 }

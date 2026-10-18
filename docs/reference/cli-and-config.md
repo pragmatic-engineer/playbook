@@ -1411,7 +1411,7 @@ Writes to `~/.claude.json` so Claude Code's first-launch trust prompt does not b
 
 Remove what playbook installed from this machine
 
-Takes out the hook entries and status line that `playbook setup` wrote into `settings.json`, the launcher block in your shell rc files, and the files playbook placed under `~/.config/playbook`. Everything else in `settings.json` and the rc files stays, each changed file is backed up first, and memory, sessions and history are never touched. The `playbook` binary stays unless you pass `--remove-binary`. It changes nothing without `--yes`; `--dry-run` lists what would go.
+Takes out the hook entries and status line that `playbook setup` wrote into `settings.json`, the launcher block in your shell rc files, and the files playbook placed under `~/.config/playbook`. It stops and removes the collector service, and also the agent that playbook 0.37.0 wrote under its old launchd label. Everything else in `settings.json` and the rc files stays, each changed file is backed up first, and memory, sessions and history are never touched. The `playbook` binary stays unless you pass `--remove-binary`. It changes nothing without `--yes`; `--dry-run` lists what would go.
 
 Example: `playbook uninstall --dry-run`
 

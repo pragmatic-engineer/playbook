@@ -111,7 +111,12 @@ const PROBES: [Probe; 18] = [
     hooks_rows,
     atlassian_rows,
     old_launcher_rows,
-    telemetry_rows,
+    |env| {
+        old_agent_row(&env.home)
+            .into_iter()
+            .chain(telemetry_rows(env))
+            .collect()
+    },
     |env| vec![attribution_row(env)],
     update_rows,
 ];
@@ -771,6 +776,37 @@ fn attribution_row(env: &Env) -> Row {
     }
 }
 
+/// A collector agent left under the label 0.37.0 used (ADR 0043, 2026-10-18
+/// amendment). Shown whatever telemetry says, since launchd loads it at the
+/// next login.
+fn old_agent_row(home: &Path) -> Option<Row> {
+    let old = crate::usage::service::find_old(home)?;
+    Some(if old.ours {
+        Row::new(
+            "-",
+            Level::Warn,
+            format!(
+                "the collector service still uses the old label: {}",
+                old.describe()
+            ),
+        )
+        .hint("run: playbook migrate")
+    } else {
+        Row::new(
+            "-",
+            Level::Warn,
+            format!(
+                "{} uses the old collector label but playbook did not write it",
+                old.file.display()
+            ),
+        )
+        .hint(format!(
+            "to remove it, run: {}",
+            crate::init::collector_service::foreign_old_agent_fix(&old.file)
+        ))
+    })
+}
+
 /// The background service that keeps the collector running (ADR 0043), for
 /// a user whose telemetry points at the collector.
 fn service_row(home: &Path) -> Row {
@@ -803,6 +839,12 @@ fn service_row(home: &Path) -> Row {
             "keep this running yourself: {}",
             service::manual_command("playbook")
         )),
+        None if service::find_old(home).is_some_and(|o| o.ours) => Row::new(
+            "-",
+            Level::Info,
+            "the collector service still uses the old label (see the row above)",
+        )
+        .hint("run: playbook migrate"),
         None if declined(home) => Row::new(
             "-",
             Level::Info,

@@ -647,3 +647,50 @@ fn setup_installs_the_collector_service_and_uninstall_removes_it() {
     );
     assert!(!file.exists());
 }
+
+#[test]
+fn an_agent_under_the_old_label_is_left_alone_in_a_scratch_home_and_uninstall_removes_it() {
+    use playbook::usage::service::{log_path, old_file, render_old, Kind};
+    if Kind::current() != Some(Kind::Launchd) {
+        return;
+    }
+    // Arrange: the agent playbook 0.37.0 wrote, under the old label.
+    let sb = Sandbox::new("old-label");
+    let old = old_file(&sb.home);
+    let program = std::path::Path::new(env!("CARGO_BIN_EXE_playbook"));
+    sb.write(
+        old.strip_prefix(&sb.home).unwrap().to_str().unwrap(),
+        &render_old(program, &log_path(&sb.home)),
+    );
+
+    // Act
+    let migrate = sb.run(&["migrate"]);
+    let status = sb.run(&["usage", "status"]);
+    let kept = old.is_file();
+    let dry = sb.run(&["uninstall", "--yes", "--dry-run"]);
+    let removed = sb.run(&["uninstall", "--yes"]);
+
+    // Assert
+    // A scratch HOME never reaches the real launchd, so nothing moves.
+    assert!(
+        text(&migrate).contains("0020-collector-service-label")
+            && text(&migrate).contains("did not move it"),
+        "{}",
+        text(&migrate)
+    );
+    assert!(kept);
+    assert!(!Kind::Launchd.file(&sb.home).exists());
+    assert!(
+        text(&status).contains("io.github.pragmatic-engineer.playbook.collector")
+            && text(&status).contains("playbook migrate"),
+        "{}",
+        text(&status)
+    );
+    assert!(
+        text(&dry).contains("would stop and remove the launchd agent io.github"),
+        "{}",
+        text(&dry)
+    );
+    assert!(removed.status.success(), "{}", text(&removed));
+    assert!(!old.exists(), "{}", text(&removed));
+}

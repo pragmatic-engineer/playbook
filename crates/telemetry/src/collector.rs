@@ -334,7 +334,7 @@ pub fn status(paths: &Paths, retention: Retention) -> Result<Status, String> {
         last_event,
         telemetry: mode.text().to_string(),
         telemetry_fix: mode.fix().map(str::to_string),
-        service: super::service::find(&super::host::home_dir()).map(|f| f.describe()),
+        service: super::service::installed(&super::host::home_dir()),
         collector_fix: super::service::collector_fix(&super::host::home_dir()),
     })
 }

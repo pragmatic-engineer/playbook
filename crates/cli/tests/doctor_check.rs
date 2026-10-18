@@ -1561,3 +1561,53 @@ fn a_no_to_the_collector_service_shows_in_doctor() {
         );
     }
 }
+
+#[test]
+fn doctor_flags_a_collector_agent_left_under_the_old_label() {
+    use playbook::usage::service::{log_path, old_file, render_old};
+    // Arrange
+    let ours = Box::new("svc-old-label");
+    let foreign = Box::new("svc-old-foreign");
+    for (b, body) in [
+        (
+            &ours,
+            render_old(
+                Path::new("/opt/homebrew/bin/playbook"),
+                &log_path(&ours.home()),
+            ),
+        ),
+        (&foreign, "<plist/>".to_string()),
+    ] {
+        let file = old_file(&b.home());
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, body).unwrap();
+    }
+
+    // Act
+    let ours = ours.run_with_env(&[]);
+    let foreign = foreign.run_with_env(&[]);
+
+    // Assert
+    let ours = telemetry_rows(&ours);
+    assert!(
+        text(&ours).contains("WARN the collector service still uses the old label: launchd agent io.github.pragmatic-engineer.playbook.collector"),
+        "{}",
+        text(&ours)
+    );
+    assert!(
+        hints(&ours).contains("run: playbook migrate"),
+        "{}",
+        hints(&ours)
+    );
+    let foreign = telemetry_rows(&foreign);
+    assert!(
+        text(&foreign).contains("uses the old collector label but playbook did not write it"),
+        "{}",
+        text(&foreign)
+    );
+    assert!(
+        hints(&foreign).contains("launchctl bootout gui/"),
+        "{}",
+        hints(&foreign)
+    );
+}

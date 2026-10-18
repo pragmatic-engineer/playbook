@@ -319,7 +319,9 @@ pub enum Command {
     ///
     /// Takes out the hook entries and status line that `playbook setup` wrote
     /// into `settings.json`, the launcher block in your shell rc files, and
-    /// the files playbook placed under `~/.config/playbook`. Everything else
+    /// the files playbook placed under `~/.config/playbook`. It stops and
+    /// removes the collector service, and also the agent that playbook
+    /// 0.37.0 wrote under its old launchd label. Everything else
     /// in `settings.json` and the rc files stays, each changed file is backed
     /// up first, and memory, sessions and history are never touched. The
     /// `playbook` binary stays unless you pass `--remove-binary`. It changes
