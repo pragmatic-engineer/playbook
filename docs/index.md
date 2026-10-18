@@ -93,12 +93,15 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0034](adr/0034-self-healing-upgrades.md) | One plugin root resolver and migrations between versions | Accepted, amended by 0037, 0038, 0042, 0044 and 0046 | 2026-10-15 |
 | [0035](adr/0035-breaking-change-notices.md) | Breaking change notices on every update channel | Superseded by 0037 | 2026-10-15 |
 | [0036](adr/0036-release-check-and-automatic-updates.md) | A release check and automatic updates | Accepted, amended by 0037 | 2026-10-15 |
-| [0037](adr/0037-release-notes-from-conventional-commits.md) | Release notes built from Conventional Commits | Accepted, amended by 0038 and 0039 | 2026-10-16 |
+| [0037](adr/0037-release-notes-from-conventional-commits.md) | Release notes built from Conventional Commits | Accepted, amended by 0038, 0039 and 0048 | 2026-10-16 |
 | [0038](adr/0038-one-release-line.md) | One release line for the binary and the plugin | Accepted, amended by 0041 | 2026-10-16 |
 | [0039](adr/0039-release-workflow.md) | A release workflow that runs every step | Accepted, amended by 0041, 0046 and on 2026-10-17 | 2026-10-16 |
 | [0040](adr/0040-rename-init-to-setup.md) | Rename `playbook init` to `playbook setup` and keep `init` as a deprecated name | Accepted, amended by 0044 | 2026-10-16 |
-| [0041](adr/0041-retire-playbook-telemetry.md) | Retire the `playbook-telemetry` binary and formula, and keep `pbtop` | Accepted, amended by 0043 | 2026-10-16 |
+| [0041](adr/0041-retire-playbook-telemetry.md) | Retire the `playbook-telemetry` binary and formula, and keep `pbtop` | Accepted, amended by 0043 and 0048 | 2026-10-16 |
 | [0042](adr/0042-attribution-off-in-setup.md) | Turn off Claude Code attribution in setup | Accepted, amended by 0044 | 2026-10-17 |
 | [0043](adr/0043-collector-service-in-setup.md) | Keep the usage collector running with a per-user service | Accepted, amended by 0044 and on 2026-10-18 (launchd label) | 2026-10-17 |
 | [0044](adr/0044-drop-the-shell-launcher.md) | Drop the shell launcher and turn every setup part on with `--yes` | Accepted, amended on 2026-10-19 | 2026-10-18 |
+| [0045](adr/0045-rm-guard-roots-and-parser.md) | Read rm commands as real words and build in the safe roots | Accepted | 2026-10-18 |
 | [0046](adr/0046-migrations-by-release-version.md) | Attach each migration to the release that introduced it | Accepted | 2026-10-18 |
+| [0047](adr/0047-disk-guard.md) | Guard free disk space while agents build | Accepted | 2026-10-19 |
+| [0048](adr/0048-repo-tidy.md) | Tidy the repo root, the settings seed and the leftovers | Accepted | 2026-10-19 |
