@@ -261,6 +261,7 @@ pub fn pending(home: &Path) -> Option<String> {
         || declined(home)
         || has_key(home, REMINDED_KEY)
         || service::find(home).is_some()
+        || service::find_old(home).is_some_and(|o| o.ours)
         || !telemetry_points_here(home)
     {
         return None;
