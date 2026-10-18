@@ -1,8 +1,8 @@
 # ADR-0046: Attach Each Migration to the Release That Introduced It
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended 2026-10-19 in implementation: `release-prepare.sh` also refuses a version that already has its tag, so a manual run cannot mark a `next` migration as shipped in a released build; a `since` that is not a plain X.Y.Z stays unreleased, because `update::resolve::compare` reads a word as 0; and the hook writes slug pending ids together with schema 20, so an older binary of the same version backs off before it drops ids it cannot match.
 - **Date created:** 2026-10-18
-- **Date modified:** 2026-10-18
+- **Date modified:** 2026-10-19
 - **Amends:** [ADR 0034](0034-self-healing-upgrades.md) decision 5, which records `versions/schema` as the highest migration number, decision 7, which compares the running version and schema with the record, and decision 12, whose `--status` shows the record as a version and a migration number. [ADR 0016](0016-migration-framework.md) decision 1, whose entries are `Migration { id, kind, run }` with numbered ids. [ADR 0039](0039-release-workflow.md) decision 3, whose `release-prepare.sh` only bumps the version and adds the changelog section.
 
 ## Context
