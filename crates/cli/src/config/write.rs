@@ -33,7 +33,27 @@ pub fn set(
     require_global_for_user_key(key, tier == Tier::Global)?;
     check_cap_order(tier, key, &value, home, repo_slug)?;
     let root = crate::common::paths::playbook_root_from(home);
-    super::store::put(&root, tier, repo_slug, key, &value)
+    super::store::put(&root, tier, repo_slug, key, &normalize(key, value))
+}
+
+/// `value` in the form it is stored: a root list loses each trailing `/**`
+/// or `/*`, so an older binary that refuses globs still reads it.
+pub fn normalize(key: &str, value: Value) -> Value {
+    if key != "hooks.rmGuard.allowedRoots" {
+        return value;
+    }
+    match value {
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| match item {
+                    Value::String(text) => Value::String(strip_root_glob(&text).to_string()),
+                    other => other,
+                })
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 /// Reject a per-user key bound for the org or repo tier.

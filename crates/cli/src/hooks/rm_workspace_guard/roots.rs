@@ -46,8 +46,9 @@ pub struct RootEnv {
     pub home: PathBuf,
     pub tmpdir: Option<PathBuf>,
     pub xdg_cache_home: Option<PathBuf>,
-    /// `TEMP`, `TMP` and `LOCALAPPDATA`, read on Windows only.
+    /// `TEMP` and `TMP`, used on Windows only.
     pub windows_temp: Vec<PathBuf>,
+    /// `LOCALAPPDATA`, used on Windows only.
     pub local_app_data: Option<PathBuf>,
     pub temp_dir: PathBuf,
     pub uid: u32,
@@ -82,15 +83,16 @@ impl RootEnv {
 }
 
 /// The temp and cache folders whose contents may be deleted, for the OS in
-/// `env`. A value from the environment counts only when it is absolute.
+/// `env`. A value from the environment counts only when `usable` says so.
 pub fn temp_roots(env: &RootEnv) -> Vec<PathBuf> {
     let home = &env.home;
-    let mut roots = vec![env.temp_dir.clone()];
+    let mut roots = Vec::new();
     let mut push_env = |value: &Option<PathBuf>| {
-        if let Some(path) = value.as_ref().filter(|p| is_absolute(p)) {
+        if let Some(path) = value.as_ref().filter(|p| usable(p, env)) {
             roots.push(path.clone());
         }
     };
+    push_env(&Some(env.temp_dir.clone()));
     match env.os {
         Os::Mac => {
             push_env(&env.tmpdir);
@@ -108,7 +110,7 @@ pub fn temp_roots(env: &RootEnv) -> Vec<PathBuf> {
             if let Some(cache) = env
                 .xdg_cache_home
                 .as_ref()
-                .filter(|c| c.starts_with(home) && *c != home)
+                .filter(|c| c.starts_with(home) && *c != home && usable(c, env))
             {
                 roots.push(cache.clone());
             }
@@ -117,9 +119,7 @@ pub fn temp_roots(env: &RootEnv) -> Vec<PathBuf> {
             for temp in &env.windows_temp {
                 push_env(&Some(temp.clone()));
             }
-            if let Some(local) = env.local_app_data.as_ref().filter(|p| is_absolute(p)) {
-                roots.push(local.join("Temp"));
-            }
+            push_env(&env.local_app_data.as_ref().map(|local| local.join("Temp")));
         }
         Os::Other => {
             push_env(&env.tmpdir);
@@ -130,16 +130,30 @@ pub fn temp_roots(env: &RootEnv) -> Vec<PathBuf> {
     roots
 }
 
-/// Whether `path` is absolute here, or is a Windows path with a drive
-/// letter, which a test on another OS still has to accept.
-fn is_absolute(path: &Path) -> bool {
+/// Whether a temp folder from the environment may be a root: absolute, with
+/// no `..`, at least two folders deep, and neither home nor a parent of it.
+/// `TMPDIR=/` or `TMPDIR=$HOME` would otherwise hand the allowance to
+/// everything. A Windows path counts as absolute by its drive letter, so a
+/// test on another OS can check the Windows list.
+fn usable(path: &Path, env: &RootEnv) -> bool {
     let text = path.to_string_lossy();
     let drive = text.as_bytes();
-    path.is_absolute()
-        || (drive.len() >= 3
-            && drive[0].is_ascii_alphabetic()
-            && drive[1] == b':'
-            && matches!(drive[2], b'/' | b'\\'))
+    let windows_absolute = env.os == Os::Windows
+        && drive.len() >= 3
+        && drive[0].is_ascii_alphabetic()
+        && drive[1] == b':'
+        && matches!(drive[2], b'/' | b'\\');
+    let deep = text
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty())
+        .count()
+        >= 2;
+    (path.is_absolute() || windows_absolute)
+        && deep
+        && !path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        && !env.home.starts_with(path)
 }
 
 /// The per-user macOS temp folder, `/private/var/folders/<xx>/<hash>/T`,
@@ -180,26 +194,34 @@ pub fn playbook_tmp_base(path: &Path, playbook_root: &Path) -> Option<PathBuf> {
 }
 
 /// The playbook data that is never deleted, whatever root covers it: the
-/// memory store, the databases, plans and handoffs, the effort ledger, the
-/// system prompt and the config file. A parent of any of these is protected
+/// memory store, the databases, plans and handoffs, legacy org config, the
+/// auto-learn queue, the effort ledger, the system prompt and the config
+/// file. A parent of any of these is protected
 /// too, which the caller checks.
 pub fn protected(env: &RootEnv) -> Vec<PathBuf> {
     let root = env.playbook_root();
-    [
+    let legacy_db = playbook_data::config::legacy_db_in(&root);
+    let mut paths: Vec<PathBuf> = [
         "memory",
-        "data",
         "repos",
+        "orgs",
         "runtime/handoff",
+        "runtime/to-learn",
         "effort",
         "prompts",
-        "playbook.db",
-        "playbook.db-wal",
-        "playbook.db-shm",
-        "config.json",
     ]
     .iter()
     .map(|name| root.join(name))
-    .collect()
+    .collect();
+    paths.push(playbook_data::data_dir_from(&env.home));
+    paths.push(crate::config::global_config_path(&root));
+    for suffix in ["-wal", "-shm"] {
+        let mut name = legacy_db.clone().into_os_string();
+        name.push(suffix);
+        paths.push(PathBuf::from(name));
+    }
+    paths.push(legacy_db);
+    paths
 }
 
 /// A file playbook installs and may remove or replace by name.
@@ -207,8 +229,13 @@ pub fn protected(env: &RootEnv) -> Vec<PathBuf> {
 pub enum InstallFile {
     /// This exact path.
     Exact(PathBuf),
-    /// Any file in `dir` whose name starts with `prefix`.
-    Prefix { dir: PathBuf, prefix: &'static str },
+    /// Any file in `dir` whose name starts with `prefix` and ends with
+    /// `suffix`.
+    Prefix {
+        dir: PathBuf,
+        prefix: &'static str,
+        suffix: &'static str,
+    },
 }
 
 /// The binary and its links, backups (`playbook.<version>.bak`) and staging
@@ -226,10 +253,13 @@ pub fn install_files(env: &RootEnv) -> Vec<InstallFile> {
         for name in [exe, "pb", "pbtop"] {
             files.push(InstallFile::Exact(bin.join(name)));
         }
-        for prefix in ["playbook.", ".playbook."] {
+        // The names `update::swap` and `install.sh` write: backups
+        // `playbook.<version>.bak`, and temp or staging files `.playbook.*`.
+        for (prefix, suffix) in [("playbook.", ".bak"), (".playbook.", "")] {
             files.push(InstallFile::Prefix {
                 dir: bin.clone(),
                 prefix,
+                suffix,
             });
         }
     }
@@ -249,15 +279,28 @@ impl InstallFile {
         match (self, glob) {
             (InstallFile::Exact(file), None) => path == file,
             (InstallFile::Exact(_), Some(_)) => false,
-            (InstallFile::Prefix { dir, prefix }, None) => {
+            (
+                InstallFile::Prefix {
+                    dir,
+                    prefix,
+                    suffix,
+                },
+                None,
+            ) => {
                 path.parent() == Some(dir.as_path())
-                    && path
-                        .file_name()
-                        .is_some_and(|n| n.to_string_lossy().starts_with(prefix))
+                    && path.file_name().is_some_and(|n| {
+                        let name = n.to_string_lossy();
+                        name.starts_with(prefix) && name.ends_with(suffix)
+                    })
             }
-            (InstallFile::Prefix { dir, prefix }, Some(pattern)) => {
-                path == dir && pattern.starts_with(prefix)
-            }
+            (
+                InstallFile::Prefix {
+                    dir,
+                    prefix,
+                    suffix,
+                },
+                Some(pattern),
+            ) => path == dir && pattern.starts_with(prefix) && pattern.ends_with(suffix),
         }
     }
 }
@@ -274,7 +317,7 @@ mod tests {
             xdg_cache_home: Some(PathBuf::from("/h/me/.xdg-cache")),
             windows_temp: vec![PathBuf::from("C:/Users/me/AppData/Local/Temp")],
             local_app_data: Some(PathBuf::from("C:/Users/me/AppData/Local")),
-            temp_dir: PathBuf::from("/sys-temp"),
+            temp_dir: PathBuf::from("/sys/temp"),
             uid: 501,
             bin_dir: PathBuf::from("/h/me/.local/bin"),
         }
@@ -290,7 +333,7 @@ mod tests {
             (
                 Os::Mac,
                 &[
-                    "/sys-temp",
+                    "/sys/temp",
                     "/var/folders/ab/xyz/T/",
                     "/tmp",
                     "/private/tmp",
@@ -301,7 +344,7 @@ mod tests {
             (
                 Os::Linux,
                 &[
-                    "/sys-temp",
+                    "/sys/temp",
                     "/var/folders/ab/xyz/T/",
                     "/tmp",
                     "/var/tmp",
@@ -313,7 +356,7 @@ mod tests {
             (
                 Os::Windows,
                 &[
-                    "/sys-temp",
+                    "/sys/temp",
                     "C:/Users/me/AppData/Local/Temp",
                     "C:/Users/me/AppData/Local/Temp",
                 ],
@@ -321,7 +364,7 @@ mod tests {
             (
                 Os::Other,
                 &[
-                    "/sys-temp",
+                    "/sys/temp",
                     "/var/folders/ab/xyz/T/",
                     "/tmp",
                     "/h/me/.cache",
@@ -334,20 +377,47 @@ mod tests {
     }
 
     #[test]
-    fn a_cache_home_outside_home_or_a_relative_tmpdir_is_ignored() {
+    fn an_environment_value_that_would_cover_too_much_is_ignored() {
+        let table = [
+            "/",
+            "/h",
+            "/h/me",
+            "/usr",
+            "relative/tmp",
+            "/h/me/../..",
+            "C:/Temp",
+        ];
+        for bad in table {
+            let mut linux = env(Os::Linux);
+            linux.tmpdir = Some(PathBuf::from(bad));
+            linux.xdg_cache_home = Some(PathBuf::from(bad));
+            linux.temp_dir = PathBuf::from(bad);
+
+            let roots = shown(&temp_roots(&linux));
+
+            assert!(!roots.contains(&bad.to_string()), "{bad}: {roots:?}");
+        }
+    }
+
+    #[test]
+    fn a_cache_home_equal_to_home_is_ignored() {
         let mut linux = env(Os::Linux);
-        linux.xdg_cache_home = Some(PathBuf::from("/"));
-        linux.tmpdir = Some(PathBuf::from("relative/tmp"));
+        linux.xdg_cache_home = Some(PathBuf::from("/h/me"));
 
         let roots = shown(&temp_roots(&linux));
 
-        assert!(!roots.contains(&"/".to_string()), "{roots:?}");
-        assert!(
-            !roots.iter().any(|r| r.starts_with("relative")),
-            "{roots:?}"
-        );
-        linux.xdg_cache_home = Some(PathBuf::from("/h/me"));
-        assert!(!shown(&temp_roots(&linux)).contains(&"/h/me".to_string()));
+        assert!(!roots.contains(&"/h/me".to_string()), "{roots:?}");
+    }
+
+    #[test]
+    fn playbook_scratch_roots_are_the_five_scratch_folders() {
+        let roots = shown(&playbook_scratch_roots(&env(Os::Mac)));
+
+        let want: Vec<String> = ["tmp", "staging", "runtime", "embedded", "cc-state"]
+            .iter()
+            .map(|n| format!("/h/me/.config/playbook/{n}"))
+            .collect();
+        assert_eq!(roots, want);
     }
 
     #[cfg(target_os = "macos")]
@@ -409,12 +479,25 @@ mod tests {
     #[test]
     fn the_memory_store_and_databases_are_protected() {
         let shown = shown(&protected(&env(Os::Mac)));
-        for want in ["memory", "data", "repos", "effort", "playbook.db"] {
-            assert!(
-                shown.contains(&format!("/h/me/.config/playbook/{want}")),
-                "{want}: {shown:?}"
-            );
-        }
+
+        let want: Vec<String> = [
+            "memory",
+            "repos",
+            "orgs",
+            "runtime/handoff",
+            "runtime/to-learn",
+            "effort",
+            "prompts",
+            "data",
+            "config.json",
+            "playbook.db-wal",
+            "playbook.db-shm",
+            "playbook.db",
+        ]
+        .iter()
+        .map(|n| format!("/h/me/.config/playbook/{n}"))
+        .collect();
+        assert_eq!(shown, want);
     }
 
     #[test]
@@ -431,6 +514,8 @@ mod tests {
             "/h/me/Library/LaunchAgents/io.github.pragmatic-engineer.playbook.collector.plist",
             None
         ));
+        assert!(!any("/h/me/.local/bin/playbook.conf", None));
+        assert!(!any("/h/me/.local/bin", Some("playbook.*")));
         assert!(!any("/h/me/.local/bin/other", None));
         assert!(!any("/h/me/.local/bin", Some("*")));
         assert!(!any("/h/me/.local/bin", Some("p*")));
@@ -448,6 +533,22 @@ mod tests {
         assert!(!files
             .iter()
             .any(|f| f.covers(Path::new("/opt/homebrew/bin/playbook"), None)));
+    }
+
+    #[test]
+    fn windows_uses_the_exe_name_and_no_service_file() {
+        let files = install_files(&env(Os::Windows));
+
+        assert!(files
+            .iter()
+            .any(|f| f.covers(Path::new("/h/me/.local/bin/playbook.exe"), None)));
+        assert!(!files
+            .iter()
+            .any(|f| f.covers(Path::new("/h/me/.local/bin/playbook"), None)));
+        assert!(!files.iter().any(|f| matches!(
+            f,
+            InstallFile::Exact(p) if p.starts_with("/h/me/Library") || p.starts_with("/h/me/.config")
+        )));
     }
 
     #[test]

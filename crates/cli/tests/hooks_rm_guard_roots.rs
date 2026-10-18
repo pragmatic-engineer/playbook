@@ -445,7 +445,7 @@ fn the_config_key_rejects_dangerous_or_malformed_values() {
 }
 
 /// The exact form the user typed, with a trailing `/**` on each root, is
-/// accepted and the guard honours it.
+/// accepted, stored as plain paths and honoured by the guard.
 #[test]
 fn a_root_with_a_trailing_double_star_is_accepted_and_honoured() {
     let fx = Fx::new();
@@ -456,15 +456,24 @@ fn a_root_with_a_trailing_double_star_is_accepted_and_honoured() {
     let out = fx.config_set(&value);
 
     assert!(out.status.success(), "{out:?}");
+    let plain = format!(r#"["~/Workspace/acme/.worktrees","{w}"]"#);
     let printed = String::from_utf8_lossy(&out.stdout);
-    assert!(printed.contains(&value), "success prints the list: {printed}");
+    assert!(
+        printed.contains(&plain),
+        "success prints the list: {printed}"
+    );
     let stored = std::process::Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["config", "get", "hooks.rmGuard.allowedRoots"])
         .env("HOME", &fx.home)
         .output()
         .expect("config get");
     let stored = String::from_utf8_lossy(&stored.stdout);
-    assert!(stored.contains("~/Workspace/acme/.worktrees/**"), "{stored}");
+    assert!(stored.contains("~/Workspace/acme/.worktrees"), "{stored}");
+    assert!(!stored.contains('*'), "stored without the glob: {stored}");
+    assert!(!fx.denied(&format!("{d} -rf {w}/x"), &fx.repo, &[]));
+    assert!(fx.denied(&format!("{d} -rf {w}"), &fx.repo, &[]));
+    // A single `/*` means the same.
+    assert!(fx.config_set(&format!(r#"["{w}/*"]"#)).status.success());
     assert!(!fx.denied(&format!("{d} -rf {w}/x"), &fx.repo, &[]));
     assert!(fx.denied(&format!("{d} -rf {w}"), &fx.repo, &[]));
 }
