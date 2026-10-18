@@ -10,6 +10,9 @@
 //! plain-list unit tests; these drive the real CLI against real git repos so
 //! the `git ls-files` wiring is proven too.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -116,7 +119,7 @@ fn seed_skeleton(dir: &Path) {
 }
 
 fn run(repo: &Path) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_playbook"))
+    isolated::playbook()
         .args(["manifest", "check"])
         .arg(repo)
         .output()

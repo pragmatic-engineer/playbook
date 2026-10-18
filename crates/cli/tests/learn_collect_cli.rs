@@ -3,6 +3,9 @@
 
 //! `playbook learn collect` reads a real git repo and prints counted JSON.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -43,7 +46,7 @@ fn repo(tag: &str) -> PathBuf {
 }
 
 fn run(dir: &Path, roles: &[&str]) -> serde_json::Value {
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["learn", "collect"])
         .args(roles)
         .current_dir(dir)
@@ -60,7 +63,7 @@ fn run(dir: &Path, roles: &[&str]) -> serde_json::Value {
 #[test]
 fn git_role_counts_history_without_emails() {
     let dir = repo("git");
-    let raw = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let raw = isolated::playbook()
         .args(["learn", "collect", "git"])
         .current_dir(dir)
         .output()
@@ -99,7 +102,7 @@ fn both_roles_print_in_one_object() {
 #[test]
 fn an_unknown_role_is_refused() {
     let dir = repo("bad");
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["learn", "collect", "jira"])
         .current_dir(dir)
         .output()
@@ -127,7 +130,7 @@ fn a_hung_git_scan_is_named_in_scans_timed_out() {
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
 
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["learn", "collect", "git"])
         .current_dir(&dir)
         .env("PATH", path)

@@ -33,6 +33,9 @@
 //! commands would pass every assertion below trivially, which is the same
 //! class of bug as the two defects this module exists to catch.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use serde_json::Value;
 use std::env;
 use std::fs;
@@ -98,7 +101,7 @@ fn all_hook_commands(settings: &Value) -> Vec<String> {
 /// would still agree with each other while disagreeing with what `wire`
 /// actually wrote.
 fn accepted_hook_names() -> Vec<String> {
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")
         .args(["hook", "--help"])

@@ -7,9 +7,11 @@
 //! a validator whose failure paths are untested is worse than none, because it
 //! reports success on inputs it never actually examined.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -54,7 +56,7 @@ impl Fixture {
     }
 
     fn run(&self, template: &Path) -> std::process::Output {
-        Command::new(env!("CARGO_BIN_EXE_playbook"))
+        isolated::playbook()
             .args(["settings", "check"])
             .arg(template)
             .arg(&self.perms)
@@ -271,7 +273,7 @@ fn real_settings_shared_json_validates() {
     let repo_root = Path::new(env!("PLAYBOOK_REPO_ROOT"));
     let template = repo_root.join("settings.shared.json");
     let perms = repo_root.join("permissions.shared.json");
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["settings", "check"])
         .arg(&template)
         .arg(&perms)

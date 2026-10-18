@@ -4,13 +4,16 @@
 //! `playbook review triage-merge` and `review size`: the triage fail-open
 //! merge and the reviewer-count rule the review commands call.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 fn playbook(args: &[&str], stdin: Option<&str>) -> (i32, String, String) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let mut child = isolated::playbook()
         .args(args)
         .env_remove("CLAUDE_PLUGIN_ROOT")
         .stdin(Stdio::piped())

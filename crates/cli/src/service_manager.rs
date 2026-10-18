@@ -56,12 +56,10 @@ impl Manager for NotThisHome {
 }
 
 /// The real manager when `home` is the home of the account, else one that
-/// runs nothing.
+/// runs nothing. A debug build that cargo started never gets the real one
+/// (`common::real_home`).
 pub fn manager_for(home: &Path) -> Box<dyn Manager> {
-    let same = account_home().is_some_and(|real| {
-        fs::canonicalize(&real).unwrap_or(real) == fs::canonicalize(home).unwrap_or_default()
-    });
-    if same {
+    if crate::common::real_home::is_account_home(home) && !crate::common::real_home::refused(home) {
         Box::new(System)
     } else {
         Box::new(NotThisHome)

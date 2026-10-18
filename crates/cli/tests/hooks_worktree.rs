@@ -5,6 +5,9 @@
 //! real binary against real scratch git repos. Env is set per child process,
 //! never on the test process, so no env lock is needed.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -86,7 +89,7 @@ fn fixture(tag: &str) -> Fixture {
 }
 
 fn run_hook(name: &str, payload: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let mut child = isolated::playbook()
         .args(["hook", name])
         .env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")

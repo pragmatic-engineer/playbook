@@ -5,6 +5,9 @@
 //! fake `claude` on PATH that records its argv. They replace the shell launcher
 //! suites that covered `dispatch.sh`, `config-drift.sh` and the bash/zsh parity.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -444,7 +447,7 @@ fn worktree_outside_a_repo_fails_without_launching() {
 }
 
 fn shell_init(shell: &str) -> String {
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["shell-init", "--shell", shell])
         .output()
         .unwrap();

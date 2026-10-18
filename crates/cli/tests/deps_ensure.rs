@@ -5,6 +5,9 @@
 //! the binary with a PATH of stub tools (a fake `brew` that logs its
 //! arguments, fake commands that count as already installed).
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -47,7 +50,7 @@ fn brew(dir: &Path, log: &Path, tap_list: &str, install_exit: i32) {
 fn run(stubs: &Path, brewfile: &str) -> (Output, String, String) {
     let file = stubs.join("Brewfile");
     fs::write(&file, brewfile).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["deps", "ensure"])
         .arg(&file)
         .env("PATH", format!("{}:/usr/bin:/bin", stubs.display()))
@@ -177,7 +180,7 @@ fn a_failed_tapped_install_prints_the_trust_hint_and_fails() {
 fn a_missing_brewfile_is_a_clean_no_op() {
     let d = scratch("nofile");
 
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["deps", "ensure"])
         .arg(d.join("does-not-exist"))
         .env("PATH", "/usr/bin:/bin")
@@ -190,7 +193,7 @@ fn a_missing_brewfile_is_a_clean_no_op() {
 
 #[test]
 fn builtin_and_an_explicit_brewfile_are_mutually_exclusive() {
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["deps", "ensure", "--builtin", "Brewfile"])
         .env("PATH", "/usr/bin:/bin")
         .output()

@@ -130,6 +130,7 @@ pub enum Skip {
     Downgrade,
     WaitingAfterFailure,
     LockBusy,
+    RealHomeUnderTest,
 }
 
 impl Skip {
@@ -140,6 +141,7 @@ impl Skip {
             Skip::Downgrade => "downgrade",
             Skip::WaitingAfterFailure => "waiting_after_failure",
             Skip::LockBusy => "lock_busy",
+            Skip::RealHomeUnderTest => "real_home_under_test",
         }
     }
 
@@ -149,6 +151,7 @@ impl Skip {
             Skip::Downgrade => "a newer playbook ran here; nothing runs after a downgrade",
             Skip::WaitingAfterFailure => "the last run failed; the hook retries once a day",
             Skip::LockBusy => "another playbook process holds the migration lock",
+            Skip::RealHomeUnderTest => crate::common::real_home::NOTE,
         }
     }
 }
@@ -187,7 +190,10 @@ impl Outcome {
     /// run, or the record was not written, so `playbook update` reports it.
     /// A downgrade is not a failure.
     pub fn exit_code(&self) -> i32 {
-        let blocked = matches!(self.skipped, Some(Skip::StateUnreadable | Skip::LockBusy));
+        let blocked = matches!(
+            self.skipped,
+            Some(Skip::StateUnreadable | Skip::LockBusy | Skip::RealHomeUnderTest)
+        );
         let unrecorded = self.skipped.is_none() && !self.recorded;
         i32::from(blocked || unrecorded || !self.failed.is_empty())
     }
@@ -279,6 +285,9 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
 /// [`run`], where `shown` says whether a person sees the open items. A
 /// headless session hook passes false, so it does not use up a reminder.
 fn run_shown(ctx: &Ctx, trigger: Trigger, now: u64, shown: bool) -> Outcome {
+    if crate::common::real_home::refused(&ctx.home) {
+        return Outcome::skipped(Skip::RealHomeUnderTest);
+    }
     let root = crate::common::paths::playbook_root_from(&ctx.home);
     // Before the store opens for writing, which imports the old files.
     let older = crate::notices::older_binary_ran(&root);
@@ -522,6 +531,9 @@ fn start(home: &Path, deadline: Instant) -> Option<String> {
         return None;
     }
     let out = run(&Ctx::for_home(home), Trigger::Start { deadline }, now);
+    if out.skipped == Some(Skip::RealHomeUnderTest) {
+        return Some(format!("playbook: {}", crate::common::real_home::NOTE));
+    }
     if out.skipped.is_some() {
         return notice(None, &out.notices);
     }
@@ -965,5 +977,40 @@ mod tests {
             "fixed: config-hash: removed\nnote: 0003-system-prompt-edited: edited\n"
         );
         assert_eq!(out.exit_code(), 0);
+    }
+
+    #[test]
+    fn a_home_that_counts_as_the_real_one_is_never_healed_or_migrated() {
+        // Arrange
+        if std::env::var_os(crate::common::real_home::ALLOW_ENV).is_some() {
+            return;
+        }
+        let home = scratch_dir("heal-real-home");
+        seed(&home, "0.0.1", 1, None);
+        let before = Record::read(&root(&home)).unwrap();
+        let _pretend = crate::common::real_home::pretend_account_home(&home);
+
+        // Act
+        let fix = run(&ctx(&home), Trigger::Fix, 5000);
+        let note = start(&home, Instant::now() + START_BUDGET);
+        let owned = migrate::run_owned(&ctx(&home), 0, None);
+        let all = migrate::run_with(&migrate::registry(), &ctx(&home));
+        let manager = crate::service_manager::manager_for(&home).run("launchctl", &[]);
+
+        // Assert
+        assert_eq!(fix.skipped, Some(Skip::RealHomeUnderTest));
+        assert_eq!(fix.exit_code(), 1, "nothing ran, so the caller hears it");
+        assert!(note.is_some_and(|n| n.contains("PLAYBOOK_ALLOW_REAL_HOME")));
+        for report in [&owned, &all] {
+            assert!(report.steps.is_empty());
+            assert!(
+                report.warnings[0].starts_with("migrations skipped"),
+                "{:?}",
+                report.warnings
+            );
+        }
+        assert!(manager.is_err(), "no real launchctl");
+        let after = Record::read(&root(&home)).unwrap();
+        assert_eq!((after.binary, after.schema), (before.binary, before.schema));
     }
 }

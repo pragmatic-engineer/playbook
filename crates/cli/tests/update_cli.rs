@@ -6,10 +6,13 @@
 
 #![cfg(unix)]
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::process::Command;
 
 fn playbook() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_playbook"))
+    isolated::playbook()
 }
 
 #[test]

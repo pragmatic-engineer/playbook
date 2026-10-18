@@ -39,6 +39,9 @@
 //!   `auto_mode_and_enabled_plugins_are_dropped`,
 //!   `shape_valid_but_nonexistent_hook_name_is_dropped`
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use clap::Parser;
 use playbook::settings::gen::generate;
 use playbook::Cli;
@@ -46,7 +49,6 @@ use serde_json::Value;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -520,7 +522,7 @@ fn settings_gen_works_from_the_cli() {
     write_file(&perms_path, CANNED_PERMS);
 
     // Act
-    let output = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let output = isolated::playbook()
         .args(["settings", "gen"])
         .arg(&src_path)
         .arg(&perms_path)
@@ -608,7 +610,7 @@ fn novel_top_level_key_is_dropped_and_named_on_stderr() {
     write_file(&perms_path, CANNED_PERMS);
 
     // Act
-    let output = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let output = isolated::playbook()
         .args(["settings", "gen"])
         .arg(&src_path)
         .arg(&perms_path)

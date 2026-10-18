@@ -20,6 +20,7 @@ pub mod plugin_state;
 pub mod prose;
 pub mod prose_lint;
 pub mod re;
+pub mod real_home;
 pub mod shell;
 pub mod stdin;
 pub mod time;
