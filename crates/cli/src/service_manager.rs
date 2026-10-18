@@ -9,7 +9,9 @@
 //! is the home of the account, so a run with a scratch `HOME` never loads a
 //! real service.
 
-use crate::usage::service::{checked_text, is_current, log_path, render, Kind, LABEL, UNIT};
+use crate::usage::service::{
+    checked_text, find_old, is_current, log_path, render, Kind, LABEL, OLD_LABEL, UNIT,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -43,26 +45,34 @@ impl Manager for System {
     }
 }
 
-/// A manager that runs nothing: `HOME` is not the home of the account, so a
-/// real service would run against other files.
-pub struct NotThisHome;
+/// A manager that runs nothing and says why: `HOME` is not the home of the
+/// account, so a real service would run against other files, or this is a
+/// debug build that cargo started (`common::real_home`).
+pub struct Refuses(pub &'static str);
 
-impl Manager for NotThisHome {
+impl Manager for Refuses {
     fn run(&self, program: &str, _: &[String]) -> Result<String, String> {
-        Err(format!(
-            "{program} not run, because HOME is not the home of your account"
-        ))
+        Err(format!("{program} not run, because {}", self.0))
     }
 }
 
-/// The real manager when `home` is the home of the account, else one that
-/// runs nothing. A debug build that cargo started never gets the real one
-/// (`common::real_home`).
-pub fn manager_for(home: &Path) -> Box<dyn Manager> {
-    if crate::common::real_home::is_account_home(home) && !crate::common::real_home::refused(home) {
-        Box::new(System)
+/// Why the real tools may not run for `home`, or `None` when they may.
+pub fn refusal(home: &Path) -> Option<&'static str> {
+    use crate::common::real_home;
+    if !real_home::is_account_home(home) {
+        Some("HOME is not the home of your account")
+    } else if real_home::refused(home) {
+        Some(real_home::NOTE)
     } else {
-        Box::new(NotThisHome)
+        None
+    }
+}
+
+/// The real manager when [`refusal`] allows it, else one that runs nothing.
+pub fn manager_for(home: &Path) -> Box<dyn Manager> {
+    match refusal(home) {
+        None => Box::new(System),
+        Some(why) => Box::new(Refuses(why)),
     }
 }
 
@@ -107,13 +117,38 @@ fn words(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| (*s).to_string()).collect()
 }
 
+/// The `launchctl print` command for the agent `label`.
+fn print_command(label: &str, uid: u32) -> (&'static str, Vec<String>) {
+    (
+        "launchctl",
+        vec!["print".into(), format!("gui/{uid}/{label}")],
+    )
+}
+
+/// The `launchctl bootout` command for the agent `label`.
+fn bootout_command(label: &str, uid: u32) -> (&'static str, Vec<String>) {
+    (
+        "launchctl",
+        vec!["bootout".into(), format!("gui/{uid}/{label}")],
+    )
+}
+
+/// The `launchctl bootstrap` command for the agent file `file`.
+fn bootstrap_command(file: &Path, uid: u32) -> (&'static str, Vec<String>) {
+    (
+        "launchctl",
+        vec![
+            "bootstrap".into(),
+            format!("gui/{uid}"),
+            file.to_string_lossy().into_owned(),
+        ],
+    )
+}
+
 /// The command that tells whether the service runs.
 fn check_command(kind: Kind, uid: u32) -> (&'static str, Vec<String>) {
     match kind {
-        Kind::Launchd => (
-            "launchctl",
-            vec!["print".into(), format!("gui/{uid}/{LABEL}")],
-        ),
+        Kind::Launchd => print_command(LABEL, uid),
         Kind::Systemd => (
             "systemctl",
             words(&["--user", "is-active", "--quiet", UNIT]),
@@ -129,14 +164,7 @@ pub fn load_commands(kind: Kind, file: &Path, uid: u32) -> Vec<(&'static str, Ve
                 "launchctl",
                 vec!["enable".into(), format!("gui/{uid}/{LABEL}")],
             ),
-            (
-                "launchctl",
-                vec![
-                    "bootstrap".into(),
-                    format!("gui/{uid}"),
-                    file.to_string_lossy().into_owned(),
-                ],
-            ),
+            bootstrap_command(file, uid),
         ],
         Kind::Systemd => vec![
             ("systemctl", words(&["--user", "daemon-reload"])),
@@ -165,10 +193,7 @@ pub fn restart_commands(kind: Kind, uid: u32) -> Vec<(&'static str, Vec<String>)
 /// The commands that stop the service and keep it from starting again.
 pub fn unload_commands(kind: Kind, uid: u32) -> Vec<(&'static str, Vec<String>)> {
     match kind {
-        Kind::Launchd => vec![(
-            "launchctl",
-            vec!["bootout".into(), format!("gui/{uid}/{LABEL}")],
-        )],
+        Kind::Launchd => vec![bootout_command(LABEL, uid)],
         Kind::Systemd => vec![("systemctl", words(&["--user", "disable", "--now", UNIT]))],
     }
 }
@@ -198,17 +223,18 @@ pub fn loaded(kind: Kind, manager: &dyn Manager, uid: u32) -> bool {
     }
 }
 
-/// Whether launchd still knows the agent, running or not.
-fn known_to_launchd(manager: &dyn Manager, uid: u32) -> bool {
-    let (program, args) = check_command(Kind::Launchd, uid);
+/// Whether launchd still knows the agent `label`, running or not.
+fn known_to_launchd(manager: &dyn Manager, label: &str, uid: u32) -> bool {
+    let (program, args) = print_command(label, uid);
     manager.run(program, &args).is_ok()
 }
 
-/// Waits up to two seconds for launchd to let go of a booted out agent, so
-/// the next `bootstrap` does not fail while the old job is torn down.
-fn wait_until_unloaded(manager: &dyn Manager, uid: u32) {
+/// Waits up to two seconds for launchd to let go of the booted out agent
+/// `label`, so the next `bootstrap` does not fail while the old job is torn
+/// down.
+fn wait_until_unloaded(manager: &dyn Manager, label: &str, uid: u32) {
     for _ in 0..20 {
-        if !known_to_launchd(manager, uid) {
+        if !known_to_launchd(manager, label, uid) {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -267,10 +293,10 @@ pub fn install(
     }
     prepare_log(&log)?;
     write_file(&file, &render(kind, program, &log))?;
-    if kind == Kind::Launchd && known_to_launchd(manager, uid) {
+    if kind == Kind::Launchd && known_to_launchd(manager, LABEL, uid) {
         // launchd keeps the old definition until the agent is booted out.
         let _ = run_all(manager, unload_commands(kind, uid));
-        wait_until_unloaded(manager, uid);
+        wait_until_unloaded(manager, LABEL, uid);
     }
     Ok(Installed::Wrote {
         started: run_all(manager, load_commands(kind, &file, uid)),
@@ -292,6 +318,112 @@ pub fn remove(kind: Kind, home: &Path, manager: &dyn Manager, uid: u32) -> Resul
         let _ = manager.run("systemctl", &words(&["--user", "daemon-reload"]));
     }
     Ok(true)
+}
+
+/// Stops the agent playbook wrote under [`OLD_LABEL`] and deletes its file.
+/// `Ok(None)` when there is no such file, or it is not one playbook wrote,
+/// which stays.
+pub fn remove_old(home: &Path, manager: &dyn Manager, uid: u32) -> Result<Option<PathBuf>, String> {
+    let Some(old) = find_old(home).filter(|o| o.ours) else {
+        return Ok(None);
+    };
+    let (program, args) = bootout_command(OLD_LABEL, uid);
+    // Not loaded is fine: the file goes either way.
+    let _ = manager.run(program, &args);
+    fs::remove_file(&old.file)
+        .map_err(|e| format!("could not remove {}: {e}", old.file.display()))?;
+    Ok(Some(old.file))
+}
+
+/// What [`move_old_agent`] did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Moved {
+    /// No agent file under [`OLD_LABEL`].
+    Nothing,
+    /// A file under [`OLD_LABEL`] that playbook did not write. It stays.
+    NotOurs(PathBuf),
+    /// The old agent is gone and the agent under [`LABEL`] is loaded. `up`
+    /// says whether the collector ran within the wait.
+    Done { up: bool },
+}
+
+/// Moves the agent playbook wrote under [`OLD_LABEL`] to [`LABEL`], with the
+/// same program and log: boots out the old job, loads the new one, then
+/// deletes the old file. The old job stops before the new one starts, so
+/// two collectors never compete for the port. When the new agent does not
+/// start, its file goes again and the old agent is loaded again, so a
+/// failed run leaves the machine as it was. `fallback` is the program to
+/// run when the one the old file names is gone. `up` tells whether a
+/// collector answers, checked for up to `wait` after the move.
+pub fn move_old_agent(
+    home: &Path,
+    fallback: &Path,
+    manager: &dyn Manager,
+    uid: u32,
+    up: &dyn Fn() -> bool,
+    wait: std::time::Duration,
+) -> Result<Moved, String> {
+    let Some(old) = find_old(home) else {
+        return Ok(Moved::Nothing);
+    };
+    if !old.ours {
+        return Ok(Moved::NotOurs(old.file));
+    }
+    let program = old
+        .program
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| fallback.to_path_buf());
+    let (bootout, args) = bootout_command(OLD_LABEL, uid);
+    let stopped = manager.run(bootout, &args);
+    wait_until_unloaded(manager, OLD_LABEL, uid);
+    if known_to_launchd(manager, OLD_LABEL, uid) {
+        let why = stopped.err().unwrap_or_else(|| "it is still loaded".into());
+        return Err(format!("could not stop the agent {OLD_LABEL} ({why})"));
+    }
+    let new_file = Kind::Launchd.file(home);
+    let had_new = new_file.exists();
+    let started = match install(Kind::Launchd, home, &program, manager, uid, false) {
+        Ok(
+            Installed::Unchanged
+            | Installed::Started(Ok(()))
+            | Installed::Restarted(Ok(()))
+            | Installed::Wrote { started: Ok(()) },
+        ) => Ok(()),
+        Ok(
+            Installed::Started(Err(why))
+            | Installed::Restarted(Err(why))
+            | Installed::Wrote { started: Err(why) },
+        )
+        | Err(why) => Err(why),
+    };
+    if let Err(why) = started {
+        if !had_new {
+            let _ = run_all(manager, unload_commands(Kind::Launchd, uid));
+            let _ = fs::remove_file(&new_file);
+        }
+        let (program, args) = bootstrap_command(&old.file, uid);
+        let back = match manager.run(program, &args) {
+            Ok(_) => "the old agent runs again".to_string(),
+            Err(e) => format!("the old agent did not start again either ({e})"),
+        };
+        return Err(format!("the agent {LABEL} did not start ({why}); {back}"));
+    }
+    fs::remove_file(&old.file).map_err(|e| {
+        format!(
+            "the collector now runs as {LABEL}, but {} could not be removed ({e}), so launchd loads both at the next login",
+            old.file.display()
+        )
+    })?;
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if loaded(Kind::Launchd, manager, uid) || up() {
+            return Ok(Moved::Done { up: true });
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(Moved::Done { up: false });
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 /// Creates the log owner-only, or tightens an older one, so the service
@@ -325,8 +457,74 @@ fn set_mode(_: &Path, _: u32) -> std::io::Result<()> {
     Ok(())
 }
 
+/// A fake launchd for the tests of this module and of migration 0020.
+#[cfg(test)]
+pub(crate) mod fake {
+    use super::{Manager, OLD_LABEL};
+    use std::cell::RefCell;
+
+    /// launchd as a set of loaded labels. `bootstrap` loads the label the
+    /// file is named after, `bootout` unloads one, and `fail` makes any call
+    /// naming that word fail. `stuck` keeps the old label loaded.
+    #[derive(Default)]
+    pub(crate) struct Launchd {
+        pub(crate) loaded: RefCell<Vec<String>>,
+        pub(crate) calls: RefCell<Vec<String>>,
+        pub(crate) fail: Option<&'static str>,
+        pub(crate) stuck: bool,
+    }
+
+    impl Launchd {
+        pub(crate) fn with(labels: &[&str]) -> Launchd {
+            Launchd {
+                loaded: RefCell::new(labels.iter().map(|l| (*l).to_string()).collect()),
+                ..Launchd::default()
+            }
+        }
+
+        pub(crate) fn has(&self, label: &str) -> bool {
+            self.loaded.borrow().iter().any(|l| l == label)
+        }
+    }
+
+    impl Manager for Launchd {
+        fn run(&self, program: &str, args: &[String]) -> Result<String, String> {
+            let line = format!("{program} {}", args.join(" "));
+            self.calls.borrow_mut().push(line.clone());
+            let label = |arg: &str| arg.rsplit('/').next().unwrap_or_default().to_string();
+            if let Some(word) = self.fail.filter(|w| line.contains(*w)) {
+                return Err(format!("{word} failed"));
+            }
+            match args.first().map(String::as_str) {
+                Some("print") if self.has(&label(&args[1])) => Ok("\tstate = running\n".into()),
+                Some("print") => Err("Could not find service".into()),
+                Some("bootout") if self.stuck && label(&args[1]) == OLD_LABEL => Ok(String::new()),
+                Some("bootout") => {
+                    let gone = label(&args[1]);
+                    let had = self.has(&gone);
+                    self.loaded.borrow_mut().retain(|l| *l != gone);
+                    if had {
+                        Ok(String::new())
+                    } else {
+                        Err("No such process".into())
+                    }
+                }
+                Some("bootstrap") => {
+                    let file = label(&args[2]);
+                    self.loaded
+                        .borrow_mut()
+                        .push(file.trim_end_matches(".plist").to_string());
+                    Ok(String::new())
+                }
+                _ => Ok(String::new()),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::fake::Launchd;
     use super::*;
     use crate::common::test_support::scratch_dir;
     use std::cell::RefCell;
@@ -589,5 +787,196 @@ mod tests {
             agent.ends_with("launchctl bootstrap gui/5 '/Users/a b/it'\\''s;x.plist'"),
             "{agent}"
         );
+    }
+
+    /// A scratch home with the agent 0.37.0 wrote for `program`.
+    fn old_home(tag: &str, program: &Path) -> PathBuf {
+        let home = scratch_dir(tag);
+        let file = crate::usage::service::old_file(&home);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(
+            &file,
+            crate::usage::service::render_old(program, &log_path(&home)),
+        )
+        .unwrap();
+        home
+    }
+
+    fn move_now(home: &Path, fake: &Launchd) -> Result<Moved, String> {
+        move_old_agent(
+            home,
+            Path::new(PROGRAM),
+            fake,
+            7,
+            &|| false,
+            std::time::Duration::ZERO,
+        )
+    }
+
+    #[test]
+    fn the_old_agent_is_booted_out_before_the_new_one_loads_and_its_file_goes() {
+        // Arrange
+        let bin = scratch_dir("service-move-bin").join("playbook");
+        fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        fs::write(&bin, "").unwrap();
+        let home = old_home("service-move", &bin);
+        let fake = Launchd::with(&[OLD_LABEL]);
+
+        // Act
+        let moved = move_now(&home, &fake);
+
+        // Assert
+        assert_eq!(moved, Ok(Moved::Done { up: true }));
+        assert!(!crate::usage::service::old_file(&home).exists());
+        assert!(
+            fake.has(LABEL) && !fake.has(OLD_LABEL),
+            "{:?}",
+            fake.loaded.borrow()
+        );
+        let found = crate::usage::service::find_kind(Kind::Launchd, &home).unwrap();
+        assert_eq!(
+            found.program.as_deref(),
+            Some(bin.as_path()),
+            "same program as before"
+        );
+        let calls = fake.calls.borrow();
+        let bootout = calls
+            .iter()
+            .position(|c| c.contains(&format!("bootout gui/7/{OLD_LABEL}")))
+            .unwrap();
+        let bootstrap = calls.iter().position(|c| c.contains("bootstrap")).unwrap();
+        assert!(bootout < bootstrap, "{calls:?}");
+    }
+
+    #[test]
+    fn a_second_move_finds_nothing_and_runs_nothing() {
+        let home = old_home("service-move-again", Path::new("/gone/playbook"));
+        let fake = Launchd::with(&[OLD_LABEL]);
+        move_now(&home, &fake).unwrap();
+        let again = Launchd::with(&[LABEL]);
+
+        let moved = move_now(&home, &again);
+
+        assert_eq!(moved, Ok(Moved::Nothing));
+        assert!(again.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_gone_program_moves_to_the_fallback_and_a_not_loaded_old_agent_is_fine() {
+        let home = old_home("service-move-fallback", Path::new("/gone/playbook"));
+        let fake = Launchd::default();
+
+        let moved = move_now(&home, &fake);
+
+        assert_eq!(moved, Ok(Moved::Done { up: true }));
+        let found = crate::usage::service::find_kind(Kind::Launchd, &home).unwrap();
+        assert_eq!(found.program.as_deref(), Some(Path::new(PROGRAM)));
+    }
+
+    #[test]
+    fn a_file_playbook_did_not_write_is_left_alone() {
+        let home = scratch_dir("service-move-foreign");
+        let file = crate::usage::service::old_file(&home);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "<plist>mine</plist>").unwrap();
+        let fake = Launchd::with(&[OLD_LABEL]);
+
+        let moved = move_now(&home, &fake);
+        let removed = remove_old(&home, &fake, 7).unwrap();
+
+        assert_eq!(moved, Ok(Moved::NotOurs(file.clone())));
+        assert_eq!(removed, None);
+        assert!(file.is_file());
+        assert!(fake.calls.borrow().is_empty());
+        assert!(!Kind::Launchd.file(&home).exists());
+    }
+
+    #[test]
+    fn a_new_agent_that_does_not_start_is_rolled_back_and_the_old_one_loads_again() {
+        // Arrange
+        let home = old_home("service-move-rollback", Path::new(PROGRAM));
+        let fake = Launchd {
+            fail: Some(LABEL),
+            ..Launchd::with(&[OLD_LABEL])
+        };
+
+        // Act
+        let err = move_now(&home, &fake).unwrap_err();
+
+        // Assert
+        assert!(
+            err.contains("did not start") && err.contains("the old agent runs again"),
+            "{err}"
+        );
+        assert!(crate::usage::service::old_file(&home).is_file());
+        assert!(!Kind::Launchd.file(&home).exists());
+        assert!(fake.has(OLD_LABEL));
+    }
+
+    #[test]
+    fn an_old_agent_that_will_not_stop_blocks_the_move() {
+        let home = old_home("service-move-stuck", Path::new(PROGRAM));
+        let fake = Launchd {
+            stuck: true,
+            ..Launchd::with(&[OLD_LABEL])
+        };
+
+        let err = move_now(&home, &fake).unwrap_err();
+
+        assert!(err.contains("could not stop"), "{err}");
+        assert!(crate::usage::service::old_file(&home).is_file());
+        assert!(!Kind::Launchd.file(&home).exists());
+        assert!(!fake.has(LABEL), "no second collector");
+    }
+
+    #[test]
+    fn a_new_agent_that_loads_but_does_not_run_reports_it_is_down() {
+        let home = old_home("service-move-down", Path::new(PROGRAM));
+        struct Waits;
+        impl Manager for Waits {
+            fn run(&self, _: &str, args: &[String]) -> Result<String, String> {
+                match args.first().map(String::as_str) {
+                    Some("print") if args[1].ends_with(OLD_LABEL) => Err("gone".into()),
+                    Some("print") => Ok("\tstate = waiting\n".into()),
+                    _ => Ok(String::new()),
+                }
+            }
+        }
+
+        let moved = move_old_agent(
+            &home,
+            Path::new(PROGRAM),
+            &Waits,
+            7,
+            &|| false,
+            std::time::Duration::ZERO,
+        );
+        let answered = move_old_agent(
+            &old_home("service-move-up", Path::new(PROGRAM)),
+            Path::new(PROGRAM),
+            &Waits,
+            7,
+            &|| true,
+            std::time::Duration::ZERO,
+        );
+
+        assert_eq!(moved, Ok(Moved::Done { up: false }));
+        assert_eq!(answered, Ok(Moved::Done { up: true }));
+        assert!(!crate::usage::service::old_file(&home).exists());
+    }
+
+    #[test]
+    fn remove_old_boots_out_and_deletes_only_the_old_file() {
+        let home = old_home("service-remove-old", Path::new(PROGRAM));
+        put(Kind::Launchd, &home, PROGRAM, &Fake::default());
+        let fake = Launchd::with(&[OLD_LABEL]);
+
+        let removed = remove_old(&home, &fake, 7).unwrap();
+        let again = remove_old(&home, &fake, 7).unwrap();
+
+        assert_eq!(removed, Some(crate::usage::service::old_file(&home)));
+        assert_eq!(again, None);
+        assert!(!fake.has(OLD_LABEL));
+        assert!(Kind::Launchd.file(&home).is_file(), "the new agent stays");
     }
 }
