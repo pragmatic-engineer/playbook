@@ -873,6 +873,13 @@ pub fn open_items(ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
 pub fn run_owned(ctx: &Ctx, retries: u32, deadline: Option<Instant>) -> Report {
     let owned: Vec<Migration> = registry().into_iter().filter(heal_runs).collect();
     let mut report = Report::default();
+    if crate::common::real_home::refused(&ctx.home) {
+        report.warnings.push(format!(
+            "migrations skipped: {}",
+            crate::common::real_home::NOTE
+        ));
+        return report;
+    }
     let locked = with_lock_retry(&ctx.home, retries, || {
         run_idempotent(&owned, ctx, &mut report, deadline);
         run_auto(&owned, ctx, &mut report, deadline);
@@ -1110,6 +1117,13 @@ pub fn run_with(migrations: &[Migration], ctx: &Ctx) -> Report {
 
 fn run_with_retries(migrations: &[Migration], ctx: &Ctx, retries: u32) -> Report {
     let mut report = Report::default();
+    if crate::common::real_home::refused(&ctx.home) {
+        report.warnings.push(format!(
+            "migrations skipped: {}",
+            crate::common::real_home::NOTE
+        ));
+        return report;
+    }
     for m in migrations.iter().filter(|m| matches!(m.kind, Kind::Manual)) {
         if let Outcome::Warn(msg) = (m.run)(ctx) {
             report.warnings.push(format!("{}: {msg}", m.id));

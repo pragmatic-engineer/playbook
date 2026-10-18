@@ -3,10 +3,12 @@
 
 //! `playbook tools map`: the text, JSON and budget check a session start reads.
 
-use std::process::{Command, Output};
+#[path = "support/isolated.rs"]
+mod isolated;
 
+use std::process::Output;
 fn map(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_playbook"))
+    isolated::playbook()
         .args(["tools", "map"])
         .args(args)
         .output()

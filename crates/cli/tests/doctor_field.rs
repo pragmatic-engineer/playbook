@@ -8,6 +8,9 @@
 //! `commands/doctor.md`'s Layer 6, Layer 5, Layer 7, and Layer 2 blocks call
 //! in place of `jq`.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -39,7 +42,7 @@ impl Drop for Fixture {
 }
 
 fn run(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_playbook"))
+    isolated::playbook()
         .args(args)
         .output()
         .expect("playbook binary should spawn")

@@ -5,6 +5,9 @@
 //! scratch git repos and real `git worktree add` calls rather than mocked
 //! git plumbing, matching `tests/cc_worktree.rs`'s convention.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use playbook::worktree::{
     classify, named_branch_landed, parse_lock_pid, pid_is_alive, review_worktree_landed,
     wu_worktree_landed, Convention, PrState,
@@ -377,7 +380,7 @@ fn classify_recognises_a_worktree_created_by_the_worktree_create_hook() {
         r#"{{"cwd":"{}","worktree_name":"probe"}}"#,
         repo_root.display()
     );
-    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let mut child = isolated::playbook()
         .args(["hook", "worktree-create"])
         .env_remove("HOOK_INPUT")
         .env_remove("WORKTREE_BASE_DIR")

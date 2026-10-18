@@ -6,9 +6,11 @@
 //! when anything would be removed and 2 when the file cannot be read, and
 //! stderr never carries a removed line's text.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -24,7 +26,7 @@ fn message_file(text: &str) -> PathBuf {
 }
 
 fn sanitize(kind: &str, file: &PathBuf, check: bool) -> (i32, String, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_playbook"));
+    let mut command = isolated::playbook();
     command.args(["sanitize", kind]).arg(file);
     if check {
         command.arg("--check");

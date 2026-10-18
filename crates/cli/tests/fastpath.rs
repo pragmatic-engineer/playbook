@@ -4,11 +4,13 @@
 //! The pre-clap fast path must agree with clap on every form it handles, and
 //! hand everything else to clap unchanged.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use clap::{CommandFactory, Parser, ValueEnum};
 use playbook::fastpath::{classify, version_text, Fast};
 use playbook::{Cli, Command, HookName};
 use std::ffi::OsString;
-use std::process::Command as Proc;
 
 fn argv(parts: &[&str]) -> Vec<OsString> {
     parts.iter().map(OsString::from).collect()
@@ -52,10 +54,7 @@ fn version_text_equals_what_clap_renders() {
 }
 
 fn run(args: &[&str]) -> (i32, String, String) {
-    let out = Proc::new(env!("CARGO_BIN_EXE_playbook"))
-        .args(args)
-        .output()
-        .unwrap();
+    let out = isolated::playbook().args(args).output().unwrap();
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),

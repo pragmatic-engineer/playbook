@@ -5,10 +5,12 @@
 //! and `claude` are stub executables on PATH, so no test touches the network
 //! or spends an API call.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -70,7 +72,7 @@ fn run_with(cases: &str, response: &str, gh_ok: bool, extra: &[(&str, &str)]) ->
         "---\nname: t\n---\nClassify each lens.\n",
     )
     .unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["eval", "review-triage"])
         .arg(dir.join("cases.json"))
         .arg("--prompt")
@@ -196,7 +198,7 @@ fn a_fenced_or_prose_wrapped_reply_still_parses() {
 fn a_missing_case_file_is_a_setup_error() {
     let dir = scratch();
     shims(&dir, true);
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["eval", "review-triage"])
         .arg(dir.join("absent.json"))
         .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
@@ -246,7 +248,7 @@ fn the_default_prompt_is_found_in_this_checkout() {
     shims(&dir, true);
     fs::write(dir.join("response.json"), SEC_FULL).unwrap();
     fs::write(dir.join("cases.json"), one(true)).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["eval", "review-triage"])
         .arg(dir.join("cases.json"))
         .current_dir(env!("PLAYBOOK_REPO_ROOT"))

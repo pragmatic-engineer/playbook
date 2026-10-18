@@ -130,6 +130,7 @@ pub enum Skip {
     Downgrade,
     WaitingAfterFailure,
     LockBusy,
+    RealHomeUnderTest,
 }
 
 impl Skip {
@@ -140,6 +141,7 @@ impl Skip {
             Skip::Downgrade => "downgrade",
             Skip::WaitingAfterFailure => "waiting_after_failure",
             Skip::LockBusy => "lock_busy",
+            Skip::RealHomeUnderTest => "real_home_under_test",
         }
     }
 
@@ -149,6 +151,7 @@ impl Skip {
             Skip::Downgrade => "a newer playbook ran here; nothing runs after a downgrade",
             Skip::WaitingAfterFailure => "the last run failed; the hook retries once a day",
             Skip::LockBusy => "another playbook process holds the migration lock",
+            Skip::RealHomeUnderTest => crate::common::real_home::NOTE,
         }
     }
 }
@@ -279,6 +282,9 @@ pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
 /// [`run`], where `shown` says whether a person sees the open items. A
 /// headless session hook passes false, so it does not use up a reminder.
 fn run_shown(ctx: &Ctx, trigger: Trigger, now: u64, shown: bool) -> Outcome {
+    if crate::common::real_home::refused(&ctx.home) {
+        return Outcome::skipped(Skip::RealHomeUnderTest);
+    }
     let root = crate::common::paths::playbook_root_from(&ctx.home);
     // Before the store opens for writing, which imports the old files.
     let older = crate::notices::older_binary_ran(&root);
@@ -522,6 +528,9 @@ fn start(home: &Path, deadline: Instant) -> Option<String> {
         return None;
     }
     let out = run(&Ctx::for_home(home), Trigger::Start { deadline }, now);
+    if out.skipped == Some(Skip::RealHomeUnderTest) {
+        return Some(format!("playbook: {}", crate::common::real_home::NOTE));
+    }
     if out.skipped.is_some() {
         return notice(None, &out.notices);
     }

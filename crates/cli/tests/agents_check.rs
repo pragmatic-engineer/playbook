@@ -14,6 +14,9 @@
 //! `_TEMPLATE.md` skipping and the CLI-wiring cases need different
 //! postconditions so they stay as their own tests.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -44,7 +47,7 @@ fn agent(name: &str, desc: &str, tools: &str, model: &str, effort: &str, tail: &
 }
 
 fn run(agents_dir: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_playbook"))
+    isolated::playbook()
         .args(["agents", "check"])
         .arg(agents_dir)
         .output()
@@ -55,7 +58,7 @@ fn run(agents_dir: &Path) -> Output {
 /// the CHILD process's working directory only, never the test harness's own
 /// (`set_current_dir` is process-global and would corrupt parallel tests).
 fn run_default_from(cwd: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_playbook"))
+    isolated::playbook()
         .args(["agents", "check"])
         .current_dir(cwd)
         .output()
@@ -273,7 +276,7 @@ fn nonexistent_agents_dir_argument_errors() {
 // --- Effort-tier variants: rendered per session, never committed ---
 
 fn run_sub(sub: &str, agents_dir: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_playbook"))
+    isolated::playbook()
         .args(["agents", sub])
         .arg(agents_dir)
         .output()
@@ -349,7 +352,7 @@ fn a_base_that_cannot_render_a_tier_fails() {
 #[test]
 fn the_variants_command_shows_what_a_session_would_hold() {
     let dir = reviewer_fixture("variant-show");
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["agents", "variants", "--json"])
         .arg(&dir)
         .output()
@@ -367,7 +370,7 @@ fn the_variants_command_shows_what_a_session_would_hold() {
     assert_eq!(map["reviewer-low"]["effort"], "low");
     assert!(map.get("reviewer-max").is_none(), "max needs mode all");
 
-    let capped = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let capped = isolated::playbook()
         .args(["agents", "variants", "--ceiling", "medium", "--json"])
         .arg(&dir)
         .output()
@@ -376,7 +379,7 @@ fn the_variants_command_shows_what_a_session_would_hold() {
     assert!(map.get("reviewer-xhigh").is_none());
     assert!(map.get("reviewer-medium").is_some());
 
-    let off = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let off = isolated::playbook()
         .args(["agents", "variants", "--mode", "off"])
         .arg(&dir)
         .output()

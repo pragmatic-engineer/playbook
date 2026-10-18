@@ -3,15 +3,17 @@
 
 //! `playbook prose check` as the real binary runs it.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
-use std::process::Command;
 
 fn run(tag: &str, text: &str, strict: bool) -> (i32, String) {
     let dir = std::env::temp_dir().join(format!("prose-cli-{}-{tag}", playbook::testing::run_id()));
     fs::create_dir_all(&dir).expect("scratch dir");
     let file = dir.join("a.md");
     fs::write(&file, text).expect("scratch file");
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+    let mut cmd = isolated::playbook();
     cmd.args(["prose", "check"]).env_remove("GITHUB_ACTIONS");
     if strict {
         cmd.arg("--strict");

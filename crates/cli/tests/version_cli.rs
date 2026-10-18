@@ -3,10 +3,11 @@
 
 //! `playbook version` must print exactly what `playbook --version` prints.
 
-use std::process::Command;
+#[path = "support/isolated.rs"]
+mod isolated;
 
 fn run(arg: &str) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_playbook"))
+    isolated::playbook()
         .arg(arg)
         .output()
         .expect("spawn playbook")

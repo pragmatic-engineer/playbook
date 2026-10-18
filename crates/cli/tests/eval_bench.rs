@@ -4,6 +4,9 @@
 //! `playbook eval bench`. `claude` is a stub executable on PATH, so no test
 //! makes an API call.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -80,7 +83,7 @@ fn bench(args: &[&str], reply: &str, cost: f64, with_claude: bool) -> Run {
         );
     }
     fs::write(dir.join("cases.json"), CASES).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["eval", "bench", "--cases"])
         .arg(dir.join("cases.json"))
         .args(args)
@@ -171,7 +174,7 @@ fn claims_are_scored_per_claim() {
 
 #[test]
 fn the_shipped_fixtures_load_and_cover_every_role() {
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["eval", "bench", "--list", "--cases"])
         .arg(Path::new(env!("PLAYBOOK_REPO_ROOT")).join("crates/cli/tests/fixtures/bench"))
         .current_dir(agents_checkout())
@@ -195,7 +198,7 @@ fn the_shipped_fixtures_load_and_cover_every_role() {
 
 #[test]
 fn the_default_cases_find_their_agent_files_in_this_checkout() {
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["eval", "bench", "--list"])
         .current_dir(env!("PLAYBOOK_REPO_ROOT"))
         .output()
@@ -210,7 +213,7 @@ fn the_default_cases_find_their_agent_files_in_this_checkout() {
 
 #[test]
 fn the_lens_split_fixture_pairs_one_single_reviewer_with_five_lens_reviewers_per_diff() {
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["eval", "bench", "--list", "--cases"])
         .arg(Path::new(env!("PLAYBOOK_REPO_ROOT")).join("crates/cli/tests/fixtures/bench-extra"))
         .current_dir(agents_checkout())
@@ -250,7 +253,7 @@ fn wu_bench(args: &[&str]) -> Run {
         &format!("export STUB_LOG='{d}/prompts'\n{WU_STUB}"),
     );
     fs::write(dir.join("cases.json"), WU_CASE).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["eval", "bench", "--cases"])
         .arg(dir.join("cases.json"))
         .args(args)
@@ -318,7 +321,7 @@ fn a_run_that_skips_red_is_a_failure() {
         ),
     );
     fs::write(dir.join("cases.json"), WU_CASE).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook()
         .args(["eval", "bench", "--cases"])
         .arg(dir.join("cases.json"))
         .args(["--strategy", "per-wu", "--json"])
