@@ -89,7 +89,8 @@ fn ends_at_boundary(rest: &str, merge: &str) -> bool {
 }
 
 fn is_closing_step(command: &Command, source: &[char], cwd: Option<&Path>) -> bool {
-    if command.spans.iter().any(|span| span.dynamic) {
+    // A command inside a substitution feeds another command's words.
+    if command.substitution || command.spans.iter().any(|span| span.dynamic) {
         return false;
     }
     // An unquoted heredoc expands `$` and backticks in its body.

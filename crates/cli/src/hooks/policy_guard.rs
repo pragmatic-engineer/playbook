@@ -48,7 +48,9 @@
 mod settings_writes;
 
 use crate::common::payload::Payload;
-use crate::common::shell::{program_index, program_name, simple_commands};
+use crate::common::shell::{
+    program_index, program_name, runner_value_options, shell_script_at, simple_commands, SHELLS,
+};
 use crate::common::{emit_pre_context, emit_pre_deny};
 use std::path::{Component, Path, PathBuf};
 
@@ -176,23 +178,6 @@ fn is_fact_file(path: &str, memory_dir: &Path) -> bool {
         && !path.components().any(|c| c == Component::ParentDir)
 }
 
-/// Programs that run another command given as plain words, so `playbook` can
-/// sit after them.
-const RUNNER_PROGRAMS: [&str; 9] = [
-    "nohup",
-    "xargs",
-    "setsid",
-    "stdbuf",
-    "watch",
-    "parallel",
-    "ionice",
-    "caffeinate",
-    "unbuffer",
-];
-
-/// Shells that run the string after `-c`.
-const SHELL_PROGRAMS: [&str; 4] = ["sh", "bash", "zsh", "dash"];
-
 /// Programs that can write a file or database they are handed, on top of
 /// `WRITER_PROGRAMS`.
 const DB_WRITER_PROGRAMS: [&str; 8] = [
@@ -239,18 +224,15 @@ fn changes_rm_guard_config_at(
     // searches are left alone.
     let writes = WRITER_PROGRAMS.contains(&program.as_str())
         || DB_WRITER_PROGRAMS.contains(&program.as_str())
-        || SHELL_PROGRAMS.contains(&program.as_str())
+        || SHELLS.contains(&program.as_str())
         || words.iter().any(|w| redirects(w));
     if writes && words.iter().any(|w| names_config_store(w, home)) {
         return true;
     }
     if depth < 3 {
-        if SHELL_PROGRAMS.contains(&program.as_str()) {
-            if let Some(at) = rest
-                .iter()
-                .position(|w| w == "-c" || is_short_cluster_with(w, 'c'))
-            {
-                if let Some(script) = rest.get(at + 1) {
+        if SHELLS.contains(&program.as_str()) {
+            if let Some(at) = shell_script_at(rest) {
+                if let Some(script) = rest.get(at) {
                     return simple_commands(script).iter().any(|inner| {
                         program_index(inner)
                             .is_some_and(|i| changes_rm_guard_config_at(inner, i, home, depth + 1))
@@ -258,7 +240,7 @@ fn changes_rm_guard_config_at(
                 }
             }
         }
-        if RUNNER_PROGRAMS.contains(&program.as_str()) {
+        if runner_value_options(&program).is_some() {
             return rest
                 .iter()
                 .position(|w| matches!(program_name(w).as_str(), "playbook" | "pb"))
@@ -400,14 +382,11 @@ fn lexical(path: &Path) -> PathBuf {
 fn wrapped_commands(words: &[String], program_at: usize) -> Vec<Vec<String>> {
     let program = program_name(&words[program_at]);
     let rest = &words[program_at + 1..];
-    if SHELL_PROGRAMS.contains(&program.as_str()) {
-        let script = rest
-            .iter()
-            .position(|w| w == "-c" || is_short_cluster_with(w, 'c'))
-            .and_then(|at| rest.get(at + 1));
+    if SHELLS.contains(&program.as_str()) {
+        let script = shell_script_at(rest).and_then(|at| rest.get(at));
         return script.map(|s| simple_commands(s)).unwrap_or_default();
     }
-    if RUNNER_PROGRAMS.contains(&program.as_str()) {
+    if runner_value_options(&program).is_some() {
         return rest
             .iter()
             .position(|w| matches!(program_name(w).as_str(), "playbook" | "pb"))
