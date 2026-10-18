@@ -129,7 +129,7 @@ jobs:
       - name: Personal-identifier grep
         # Regression guard for everything S2-S4 of the product-hardening
         # wrap-up removed from the shipped surface (settings.shared.json,
-        # permissions.shared.json, README.md, docs, Brewfile): a maintainer
+        # README.md, docs, Brewfile): a maintainer
         # home-directory convention, a Jira host, the `rtk` local CLI wrapper,
         # and the maintainer's own username. Excludes docs/adr/**: ADRs are
         # a historical record (ADR 0001/0002/0006 alone carry 10+ legitimate

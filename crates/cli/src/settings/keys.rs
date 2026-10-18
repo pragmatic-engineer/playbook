@@ -16,3 +16,14 @@ pub const SHIPPABLE_KEYS: &[&str] = &["permissions", "hooks", "statusLine"];
 /// `init::run::neutralise_security`. Update control (the autoupdater) is left
 /// to the user, `playbook update` and Homebrew.
 pub const SECURITY_KEYS: &[&str] = &["permissions"];
+
+/// The `permissions` block of a seed when it is an object with a non-empty
+/// `allow` array, the shape `gen` keeps and `check` accepts.
+pub fn shipped_permissions(seed: &serde_json::Value) -> Option<&serde_json::Value> {
+    seed.get("permissions").filter(|block| {
+        block
+            .get("allow")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|allow| !allow.is_empty())
+    })
+}

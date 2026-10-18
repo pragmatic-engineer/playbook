@@ -1,50 +1,28 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Settings seed generator, ported from the retired shell original. That
-//! file's header comment was the original specification: replace
-//! `.permissions` with a canned permissions object, and filter `.hooks` down to entries
-//! whose command matches the safety pattern. Output is
-//! `json.dumps(result, indent=2)` followed by the newline `print` adds.
+//! Settings seed generator behind `playbook settings gen SRC SEED`. It
+//! reads a live `settings.json` (SRC) and the current seed (SEED), and prints
+//! a new seed: the shippable keys of SRC with `.hooks` filtered down to
+//! `playbook hook <name>` entries, and the `permissions` block of SEED. The
+//! seed is the only source of the shipped permissions (ADR 0048), so the
+//! maintainer's own permissions in SRC never ship.
 //!
-//! Top-level keys are now filtered through `settings::keys`'s
-//! `SHIPPABLE_KEYS` ALLOWLIST, inverted from the python
-//! original's `PERSONAL_KEYS` denylist: any key not explicitly shippable is
-//! dropped, rather than any key not explicitly personal leaking through.
+//! Top-level keys go through `settings::keys::SHIPPABLE_KEYS`, an allowlist:
+//! any key not on it is dropped and named on stderr.
 //!
-//! Three divergences from the python original, all deliberate:
-//!
-//! - **Non-ASCII output.** python's `json.dumps` defaults to
-//!   `ensure_ascii=True` and escapes every non-ASCII character to `\uXXXX`;
-//!   `serde_json::to_string_pretty` writes raw UTF-8 instead. No real
-//!   settings file has a non-ASCII byte today; `tests/settings_gen.rs`
-//!   pins the direction of the divergence with a dedicated fixture rather
-//!   than leaving it to this comment.
-//! - **`SAFETY_REGEXP`.** `is_safe_hook_command` below reimplements python's
-//!   `SAFETY_REGEXP.fullmatch` as explicit string matching rather than adding a
-//!   `regex` dependency for one fixed-shape pattern; the set of accepted
-//!   strings is identical, only the mechanism differs.
-//! - **`PERMS`'s default path.** python defaults an omitted `PERMS` argument
-//!   to `<repo root>/permissions.shared.json`, computed from the running
-//!   script's own path. An installed `playbook` binary has no script-relative
-//!   repo root to infer, so this port makes `PERMS` a required argument
-//!   instead of guessing a path that could silently be wrong. No ported
-//!   scenario exercises the omitted-PERMS default, and the Makefile
-//!   invocation this serves already passes both paths explicitly.
+//! Output is pretty JSON with two-space indent and a trailing newline. Non
+//! ASCII text is written as raw UTF-8; `tests/settings_gen.rs` pins this.
 
-use crate::settings::keys::SHIPPABLE_KEYS;
+use crate::settings::keys::{shipped_permissions, SHIPPABLE_KEYS};
 use crate::HookName;
 use clap::ValueEnum;
 use serde_json::{Map, Value};
 use std::fs;
 use std::path::Path;
 
-/// Everything that can stop generation before it produces output, one
-/// variant per `die()` call site in the retired shell original. Every
-/// python `die()` call there exits with code 2; `generate` below returns
-/// `Err` instead and leaves picking an exit code to the caller (`playbook
-/// settings gen`, wired in `src/main.rs`), the same split
-/// `src/init/merge.rs` uses for its own `MergeError`.
+/// Why generation stopped before it produced output. The caller in
+/// `src/main.rs` prints it and exits 2.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenError(pub String);
 
@@ -54,11 +32,8 @@ impl std::fmt::Display for GenError {
     }
 }
 
-/// Read `path` as JSON, failing with the same two-way split
-/// the retired shell original's `load_json` uses: unreadable file versus
-/// readable-but-invalid JSON. Unlike that helper, the result is not yet
-/// required to be a JSON object; SRC and PERMS validate that separately,
-/// matching where python's own type checks happen.
+/// Read `path` as JSON, with one error for an unreadable file and another
+/// for invalid JSON. The shape is checked by the caller.
 fn load_json(path: &Path, label: &str) -> Result<Value, GenError> {
     let text = fs::read_to_string(path)
         .map_err(|_| GenError(format!("{label} not readable: {}", path.display())))?;
@@ -66,13 +41,8 @@ fn load_json(path: &Path, label: &str) -> Result<Value, GenError> {
         .map_err(|_| GenError(format!("{label} is not valid JSON: {}", path.display())))
 }
 
-/// Ports `SAFETY_REGEXP.fullmatch` from the retired shell original as
-/// explicit string matching: a bare `playbook hook <name>` invocation,
-/// where `<name>` starts with an ASCII lowercase letter and continues with
-/// ASCII lowercase letters, digits or hyphens. Before WU-13 this also
-/// accepted the four safety guards' legacy `~/.claude/hooks/<name>.sh`
-/// script; that branch is gone on both sides now that all four guards are
-/// ported and `wire::wire` never writes that form any more.
+/// True for a bare `playbook hook <name>` command whose name is a real hook,
+/// the only hook command form `wire::wire` writes.
 fn is_safe_hook_command(command: &str) -> bool {
     command
         .strip_prefix(crate::init::wire::HOOK_COMMAND_PREFIX)
@@ -91,19 +61,10 @@ fn is_valid_hook_name(name: &str) -> bool {
     shape_ok && HookName::from_str(name, true).is_ok()
 }
 
-/// Ports `filter_hooks` from the retired shell original: within each
-/// event, keep only the hook groups that have at least one entry whose
-/// command passes `is_safe_hook_command`, and within a kept group, only its
-/// safe entries; drop an event entirely once none of its groups have any
-/// safe entries left.
-///
-/// An event's groups not being a JSON array, or a group not being a JSON
-/// object, cannot reach here: `validate_hooks_shape` rejects every malformed
-/// shape before `build` runs, matching python's crash. The `continue` arms
-/// below are therefore unreachable belt-and-braces rather than a fallback
-/// policy. An earlier revision of this port did treat them as a policy and
-/// emitted a hooks-less seed on exit 0, which is strictly worse than crashing
-/// here; see `validate_hooks_shape` for why.
+/// Within each event, keep the hook groups that have at least one entry
+/// whose command passes `is_safe_hook_command`, and within a kept group only
+/// those entries. An event with no group left is dropped. The `continue`
+/// arms cannot run: `validate_hooks_shape` rejects a malformed shape first.
 fn filter_hooks(hooks: &Map<String, Value>) -> Map<String, Value> {
     let mut result = Map::new();
     for (event, groups_value) in hooks {
@@ -144,11 +105,9 @@ fn filter_hooks(hooks: &Map<String, Value>) -> Map<String, Value> {
 }
 
 /// Removes every key not in `allowed`, returning the dropped keys' names in
-/// their original order. `shift_remove`, not `remove`: with `preserve_order`
-/// enabled, plain `Map::remove` is `swap_remove` underneath (moves the last
-/// key into the removed slot, perturbing every other key's position), so
-/// this uses `shift_remove` to leave the surviving keys' order untouched,
-/// matching python's `dict.pop(key, None)`.
+/// their original order. `shift_remove` keeps the order of the keys that
+/// stay; with `preserve_order`, plain `Map::remove` swaps the last key into
+/// the gap.
 fn keep_only(map: &mut Map<String, Value>, allowed: &[&str]) -> Vec<String> {
     let dropped: Vec<String> = map
         .keys()
@@ -161,12 +120,10 @@ fn keep_only(map: &mut Map<String, Value>, allowed: &[&str]) -> Vec<String> {
     dropped
 }
 
-/// The transform itself, ported from the retired shell original's
-/// `main`: replace `.permissions`, keep only the shippable top-level keys, and filter `.hooks` if
-/// present. `serde_json`'s `Map::insert` updates a key already present in
-/// place and appends a genuinely new key at the end, so key order in `src`
-/// decides key order in the result exactly as it does in the python
-/// original.
+/// Set `.permissions` to the seed's block, keep only the shippable top-level
+/// keys, and filter `.hooks` when present. `Map::insert` keeps a present key
+/// in place and appends a new one, so the key order of `src` decides the key
+/// order of the result.
 fn build(mut src: Map<String, Value>, perms: Value) -> Map<String, Value> {
     src.insert("permissions".to_string(), perms);
 
@@ -185,17 +142,10 @@ fn build(mut src: Map<String, Value>, perms: Value) -> Map<String, Value> {
     src
 }
 
-/// Reject a malformed `.hooks` shape loudly, matching python's crash rather
-/// than quietly emitting a seed with no hooks.
-///
-/// The tempting reading is that dropping hooks "fails safe", since a shape the
-/// filter cannot parse then cannot leak an unfiltered command. In this
-/// pipeline that is backwards. `Makefile`'s recipe is
-/// `gen ... > "$@.tmp" && mv "$@.tmp" "$@"`: python exits nonzero on a
-/// malformed shape, so `mv` never runs and the committed seed survives. An
-/// exit 0 carrying a hooks-less seed instead REPLACES the committed seed with
-/// one that wires nothing, which is the failure this whole file exists to
-/// prevent. Loud beats silent when the output is a committed artefact.
+/// Reject a malformed `.hooks` shape with an error. The `justfile` recipe
+/// writes the output to a temp file and moves it over the seed only on exit
+/// 0, so an error keeps the committed seed. Emitting a seed with no hooks on
+/// exit 0 would replace it with one that wires nothing.
 fn validate_hooks_shape(src: &Map<String, Value>, src_path: &Path) -> Result<(), GenError> {
     let Some(hooks) = src.get("hooks") else {
         return Ok(());
@@ -222,37 +172,21 @@ fn validate_hooks_shape(src: &Map<String, Value>, src_path: &Path) -> Result<(),
     Ok(())
 }
 
-/// Load `src_path` and `perms_path`, validate PERMS the way
-/// the retired shell original's guard does (a JSON object with a
-/// non-empty `allow` array), then run `build` and serialise the result as
-/// `json.dumps(result, indent=2)` plus the trailing newline `print` adds.
-///
-/// `serde_json::to_string_pretty` reproduces python's `json.dumps(obj,
-/// indent=2)` byte for byte on every ASCII fixture, including empty objects
-/// and empty arrays; see `tests/settings_gen.rs`'s differential tests, which
-/// run the real python generator as the oracle rather than hand-typing an
-/// expected JSON blob.
-pub fn generate(src_path: &Path, perms_path: &Path) -> Result<String, GenError> {
+/// Load `src_path` and `seed_path`, take the seed's `permissions` block (an
+/// object with a non-empty `allow` array, else an error), then run `build`
+/// and serialise the result as pretty JSON plus a trailing newline. The
+/// permissions of SRC are never used, even when the seed has none.
+pub fn generate(src_path: &Path, seed_path: &Path) -> Result<String, GenError> {
     let src_value = load_json(src_path, "source settings")?;
-    let perms_value = load_json(perms_path, "permissions file")?;
+    let seed_value = load_json(seed_path, "seed")?;
 
-    let perms_valid = perms_value
-        .as_object()
-        .and_then(|p| p.get("allow"))
-        .and_then(Value::as_array)
-        .is_some_and(|allow| !allow.is_empty());
-    if !perms_valid {
+    let Some(perms_value) = shipped_permissions(&seed_value).cloned() else {
         return Err(GenError(format!(
-            "permissions file must be an object with a non-empty allow array: {}",
-            perms_path.display()
+            "seed must hold a permissions object with a non-empty allow array: {}",
+            seed_path.display()
         )));
-    }
+    };
 
-    // python's `dict(src)` raises an uncaught TypeError here if `src` is not
-    // itself a JSON object, crashing with the same externally visible
-    // outcome as every other guard: nonzero exit, nothing on stdout. This
-    // port names that outcome explicitly instead of relying on an incidental
-    // exception; no ported scenario exercises this shape.
     let Value::Object(src) = src_value else {
         return Err(GenError(format!(
             "source settings is not a JSON object: {}",

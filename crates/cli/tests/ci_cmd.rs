@@ -97,7 +97,7 @@ fn one_failing_check_exits_one_and_names_the_problem() {
     assert!(run.stdout.contains("model 'gpt'"), "{}", run.stdout);
     assert!(run
         .stdout
-        .contains("SKIP settings: no shared settings templates"));
+        .contains("SKIP settings: no shared settings template"));
     assert_eq!(*lines.last().unwrap(), "ci: 1 passed, 1 failed, 1 skipped");
 }
 

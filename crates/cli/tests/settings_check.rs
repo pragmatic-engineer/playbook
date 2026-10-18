@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Every scenario in the retired shell test, ported.
+//! `playbook settings check` against fixture seeds and the real one.
 //!
 //! Each rejection case is asserted individually rather than as "some error":
 //! a validator whose failure paths are untested is worse than none, because it
@@ -18,7 +18,7 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const PERMISSIONS: &str = r#"{
   "allow": ["Read", "Bash(git:*)"],
-  "deny": ["Read(**/.env)"],
+  "deny": ["Read(**/.env)", "Read(**/.env.*)"],
   "ask": ["Bash(curl:*)"],
   "defaultMode": "auto"
 }"#;
@@ -26,12 +26,10 @@ const PERMISSIONS: &str = r#"{
 struct Fixture {
     dir: PathBuf,
     repo: PathBuf,
-    perms: PathBuf,
 }
 
 impl Fixture {
-    /// A scratch repo holding the two files the fixture hook commands point at,
-    /// plus the tracked permissions object the template must deep-equal.
+    /// A scratch repo holding the two files the fixture hook commands point at.
     fn new(tag: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
@@ -43,10 +41,7 @@ impl Fixture {
         fs::write(repo.join("hooks/session-init.sh"), "").expect("fixture hook");
         fs::write(repo.join("x.sh"), "").expect("fixture hook");
 
-        let perms = dir.join("permissions.json");
-        fs::write(&perms, PERMISSIONS).expect("permissions fixture");
-
-        Self { dir, repo, perms }
+        Self { dir, repo }
     }
 
     fn template(&self, name: &str, json: &str) -> PathBuf {
@@ -59,7 +54,6 @@ impl Fixture {
         isolated::playbook()
             .args(["settings", "check"])
             .arg(template)
-            .arg(&self.perms)
             .arg(&self.repo)
             .output()
             .expect("playbook binary should spawn")
@@ -105,17 +99,14 @@ fn good_template_validates() {
 }
 
 #[test]
-fn wrong_permissions_is_rejected() {
-    let f = Fixture::new("bad-perms");
-    let bad = good_template().replace(
-        r#""allow": ["Read", "Bash(git:*)"]"#,
-        r#""allow": ["Sneaky"]"#,
-    );
-    let t = f.template("bad-perms", &bad);
+fn an_empty_allow_list_is_rejected() {
+    let f = Fixture::new("empty-allow");
+    let bad = good_template().replace(r#""allow": ["Read", "Bash(git:*)"]"#, r#""allow": []"#);
+    let t = f.template("empty-allow", &bad);
     let out = f.run(&t);
     assert_eq!(out.status.code(), Some(1));
     assert!(
-        stderr_of(&out).contains("does not deep-equal"),
+        stderr_of(&out).contains("non-empty allow array"),
         "got: {}",
         stderr_of(&out)
     );
@@ -266,17 +257,15 @@ fn playbook_hook_command_naming_a_nonexistent_hook_is_rejected() {
     );
 }
 
-// The real, tracked settings.shared.json must validate once this change
-// regenerates it, exercised the same way the justfile's own recipe does.
+// The real, tracked settings.shared.json validates, checked the same way the
+// justfile's own recipe does.
 #[test]
 fn real_settings_shared_json_validates() {
     let repo_root = Path::new(env!("PLAYBOOK_REPO_ROOT"));
     let template = repo_root.join("settings.shared.json");
-    let perms = repo_root.join("permissions.shared.json");
     let out = isolated::playbook()
         .args(["settings", "check"])
         .arg(&template)
-        .arg(&perms)
         .arg(repo_root)
         .output()
         .expect("playbook binary should spawn");
@@ -288,33 +277,25 @@ fn real_settings_shared_json_validates() {
 #[test]
 fn shipped_permissions_allow_only_the_safe_playbook_mode_commands() {
     let repo_root = Path::new(env!("PLAYBOOK_REPO_ROOT"));
-    let allow_list = |file: &str, pointer: &str| -> Vec<String> {
-        let raw = fs::read_to_string(repo_root.join(file)).expect("shipped file is readable");
-        let json: serde_json::Value = serde_json::from_str(&raw).expect("shipped file is JSON");
-        json.pointer(pointer)
-            .and_then(|allow| allow.as_array())
-            .expect("allow list is an array")
-            .iter()
-            .filter_map(|entry| entry.as_str().map(str::to_string))
-            .collect()
-    };
-
-    for (file, pointer) in [
-        ("permissions.shared.json", "/allow"),
-        ("settings.shared.json", "/permissions/allow"),
-    ] {
-        let allow = allow_list(file, pointer);
-        let mode_entries: Vec<&str> = allow
-            .iter()
-            .map(String::as_str)
-            .filter(|entry| entry.starts_with("Bash(playbook mode"))
-            .collect();
-        assert_eq!(
-            mode_entries,
-            ["Bash(playbook mode status:*)", "Bash(playbook mode ask)"],
-            "{file} must allow exactly status and ask"
-        );
-    }
+    let raw = fs::read_to_string(repo_root.join("settings.shared.json"))
+        .expect("shipped file is readable");
+    let json: serde_json::Value = serde_json::from_str(&raw).expect("shipped file is JSON");
+    let allow: Vec<&str> = json
+        .pointer("/permissions/allow")
+        .and_then(|allow| allow.as_array())
+        .expect("allow list is an array")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    let mode_entries: Vec<&str> = allow
+        .into_iter()
+        .filter(|entry| entry.starts_with("Bash(playbook mode"))
+        .collect();
+    assert_eq!(
+        mode_entries,
+        ["Bash(playbook mode status:*)", "Bash(playbook mode ask)"],
+        "settings.shared.json must allow exactly status and ask"
+    );
 }
 
 #[test]
@@ -359,8 +340,67 @@ fn missing_permissions_block_is_rejected() {
     let out = f.run(&t);
     assert_eq!(out.status.code(), Some(1));
     assert!(
-        stderr_of(&out).contains(".permissions is missing or not an object"),
+        stderr_of(&out).contains(".permissions must be an object with a non-empty allow array"),
         "got: {}",
         stderr_of(&out)
     );
+}
+
+#[test]
+fn a_permissions_block_of_the_wrong_shape_is_rejected() {
+    let f = Fixture::new("perm-shapes");
+    let shapes = [
+        ("no allow key", r#""permissions": {"deny": []}"#),
+        ("allow not an array", r#""permissions": {"allow": "Read"}"#),
+        ("permissions a string", r#""permissions": "allow""#),
+        ("permissions an array", r#""permissions": ["Read"]"#),
+    ];
+    for (label, block) in shapes {
+        let t = f.template(
+            &label.replace(' ', "-"),
+            &format!("{{{block}, \"hooks\": {{}}}}"),
+        );
+        let out = f.run(&t);
+        assert_eq!(out.status.code(), Some(1), "{label}");
+        assert!(
+            stderr_of(&out).contains("non-empty allow array"),
+            "{label}: {}",
+            stderr_of(&out)
+        );
+    }
+}
+
+#[test]
+fn permissions_below_the_shipped_floor_are_rejected() {
+    let f = Fixture::new("floor");
+    let cases = [
+        (
+            "bare Bash",
+            good_template().replace(r#""allow": ["Read","#, r#""allow": ["Bash", "Read","#),
+            "bare Bash",
+        ),
+        (
+            "env deny missing",
+            good_template().replace(r#""Read(**/.env)", "#, ""),
+            "Read(**/.env)",
+        ),
+        (
+            "bypass mode",
+            good_template().replace(
+                r#""defaultMode": "auto""#,
+                r#""defaultMode": "bypassPermissions""#,
+            ),
+            "bypassPermissions",
+        ),
+    ];
+    for (label, json, needle) in cases {
+        let t = f.template(&label.replace(' ', "-"), &json);
+        let out = f.run(&t);
+        assert_eq!(out.status.code(), Some(1), "{label}");
+        assert!(
+            stderr_of(&out).contains(needle),
+            "{label}: {}",
+            stderr_of(&out)
+        );
+    }
 }

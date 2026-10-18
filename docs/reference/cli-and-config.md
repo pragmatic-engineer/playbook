@@ -1358,15 +1358,16 @@ Check the shared settings template is valid
 Exits 0 when valid and 1 with a message when not.
 
 - `<TEMPLATE>`: Shared settings template to check
-- `<PERMS>`: Shared permissions file
 - `<REPO_ROOT>`: Repo root that every hook command must resolve inside
 
 ### `playbook settings gen`
 
 Create the shared settings template from a live settings.json
 
+Takes the hooks and status line from the live file and keeps the permissions of the current seed. Prints the new seed.
+
 - `<SRC>`: Live settings.json to start from
-- `<PERMS>`: File holding the default permissions
+- `<SEED>`: Current seed, whose permissions block is kept
 
 ### `playbook setup`
 

@@ -706,19 +706,18 @@ fn main() {
             playbook::HooksCommand::List => print!("{}", init::catalog::hooks_list()),
         },
         Command::Settings { sub } => match sub {
-            SettingsCommand::Gen { src, perms } => match settings::gen::generate(&src, &perms) {
+            SettingsCommand::Gen { src, seed } => match settings::gen::generate(&src, &seed) {
                 Ok(output) => print!("{output}"),
                 Err(err) => {
                     eprintln!("gen-shared-settings: {err}");
                     std::process::exit(2);
                 }
             },
-            // Exit 1, not 2: the python original used it and CI keys on it.
+            // Exit 1: CI keys on it.
             SettingsCommand::Check {
                 template,
-                perms,
                 repo_root,
-            } => match settings::check::check(&template, &perms, &repo_root) {
+            } => match settings::check::check(&template, &repo_root) {
                 Ok(msg) => println!("{msg}"),
                 Err(err) => {
                     eprintln!("check-shared-settings: {err}");
