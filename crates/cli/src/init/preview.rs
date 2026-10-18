@@ -6,6 +6,7 @@
 //! edit into a scratch home, runs the same step code against that copy and
 //! reports the difference. The scratch home is removed afterwards.
 
+use crate::init::attribution::Choice as Attribution;
 use crate::init::catalog;
 use crate::init::choices::Choices;
 use crate::init::path;
@@ -34,7 +35,7 @@ fn part_of_key(key: &str) -> &'static str {
         "hooks" => "hooks",
         "statusLine" => "statusline",
         "permissions" => "security",
-        "attribution" => "attribution-off",
+        "attribution" => "attribution",
         _ => "hooks", // a key no part claims, never shipped
     }
 }
@@ -196,11 +197,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         only: paths.only,
         short_name: paths.short_name,
         pb_target: paths.pb_target.clone(),
-        // A no is previewed as nothing to do, so the dry run records nothing.
-        attribution: match paths.attribution {
-            crate::init::attribution::Choice::Declined => crate::init::attribution::Choice::Skip,
-            other => other,
-        },
+        attribution: paths.attribution,
         path_setup: paths.path_setup.as_ref().map(|s| path::Setup {
             bin_dir: s.bin_dir.clone(),
             shell: s.shell,
@@ -239,15 +236,24 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("telemetry", choices.telemetry),
         ("collector-service", choices.collector_service),
         ("short-name", choices.short_name),
-        ("attribution-off", choices.attribution_off),
+        ("attribution", paths.attribution != Attribution::Skip),
     ];
     for (id, enabled) in flags {
         if paths.only && !enabled {
             continue;
         }
-        let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{id} ({})\n", on(enabled)));
+        let state = match (id, paths.attribution) {
+            ("attribution", Attribution::On) => crate::init::attribution::ON_LABEL,
+            ("attribution", Attribution::Skip) => "left as it is",
+            ("attribution", _) => crate::init::attribution::OFF_LABEL,
+            _ => on(enabled),
+        };
+        let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{id} ({state})\n"));
         if !enabled {
-            out.push_str("  skipped, you chose off\n\n");
+            out.push_str(match id {
+                "attribution" => "  skipped, no flag and no answer\n\n",
+                _ => "  skipped, you chose off\n\n",
+            });
             continue;
         }
         let lines: Vec<String> = match id {
@@ -277,7 +283,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
                 }
             }
             "telemetry" => own_key_lines(&changes, id, &settings_file, &telemetry_step),
-            "attribution-off" => own_key_lines(&changes, id, &settings_file, &attribution_step),
+            "attribution" => own_key_lines(&changes, id, &settings_file, &attribution_step),
             "collector-service" => vec![crate::init::collector_service::preview(
                 &paths.home,
                 // The scratch copy has the telemetry this run writes; the

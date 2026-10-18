@@ -9,7 +9,7 @@
 //!   first.
 //! - `path` puts the binary's directory on PATH for every shell start.
 //! - `shim` installs the bash and zsh launcher shim idempotently.
-//! - `attribution` turns off the commit and PR attribution, with consent.
+//! - `attribution` sets the commit and PR attribution OFF (the default) or ON.
 //! - `collector_service` installs the background service for the usage collector, with consent.
 //! - `statusline` moves a legacy `statusLine.command` to `playbook statusline`.
 //! - `system_prompt` places the opt-in `prompts/SYSTEM_PROMPT.md`.

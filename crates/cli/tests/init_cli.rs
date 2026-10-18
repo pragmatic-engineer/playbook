@@ -128,7 +128,8 @@ fn json(raw: &str) -> Value {
 fn a_clean_install_matches_the_golden_settings() {
     let sb = Sandbox::new("golden-clean");
     let (settings, base) = golden("init.clean-install.json");
-    sb.init("/bin/bash", &["--no-attribution-off"]);
+    // Attribution ON writes nothing to a file with no attribution key.
+    sb.init("/bin/bash", &["--attribution"]);
     assert_eq!(json(&sb.read(".claude/settings.json")), json(&settings));
     assert_eq!(json(&sb.read(".claude/.settings.base.json")), json(&base));
 }
@@ -141,7 +142,8 @@ fn a_contested_key_matches_the_golden_bytes_and_leaves_a_skip_report() {
         ".claude/settings.json",
         "{\"statusLine\":{\"type\":\"command\",\"command\":\"my-status\"}}\n",
     );
-    sb.init("/bin/bash", &["--no-attribution-off"]);
+    // Attribution ON writes nothing to a file with no attribution key.
+    sb.init("/bin/bash", &["--attribution"]);
     assert_eq!(sb.read(".claude/settings.json"), settings);
     assert_eq!(sb.read(".claude/.settings.base.json"), base);
     assert!(sb.count(".claude", "settings-merge-skipped.") >= 1);
@@ -267,7 +269,7 @@ fn yes_turns_every_part_on_in_a_scratch_home() {
         settings.contains("OTEL_EXPORTER_OTLP_ENDPOINT"),
         "telemetry"
     );
-    assert!(settings.contains("\"attribution\""), "attribution-off");
+    assert!(settings.contains("\"attribution\""), "attribution OFF");
     assert!(sb.path(".zshenv").is_file(), "path: {}", text(&out));
     assert!(sb
         .path(".config/playbook/prompts/SYSTEM_PROMPT.md")
@@ -601,7 +603,8 @@ fn turning_every_settings_part_off_leaves_settings_json_alone() {
             "--no-hooks",
             "--no-statusline",
             "--no-security",
-            "--no-attribution-off",
+            // Attribution ON writes nothing to a file with no attribution key.
+            "--attribution",
         ],
     ));
 
@@ -617,7 +620,7 @@ fn a_run_with_no_terminal_and_no_yes_leaves_the_claude_settings_alone() {
 
     let t = text(&out);
     assert!(t.contains("playbook setup --yes"), "{t}");
-    assert!(t.contains("hooks, status line and attribution-off"), "{t}");
+    assert!(t.contains("hooks, status line and attribution off"), "{t}");
     let settings = fs::read_to_string(h.path(".claude/settings.json")).unwrap_or_default();
     assert!(!settings.contains("playbook hook"), "{settings}");
     assert!(!settings.contains("statusLine"), "{settings}");
@@ -631,7 +634,7 @@ fn an_explicit_hooks_flag_with_no_terminal_adds_only_the_hooks() {
     let out = h.init_raw("/bin/zsh", &["--hooks"]);
     let t = text(&out);
     assert!(
-        t.contains("settings: status line and attribution-off."),
+        t.contains("settings: status line and attribution off."),
         "{t}"
     );
 
@@ -664,7 +667,7 @@ fn yes_turns_attribution_off_and_keeps_the_other_settings() {
 }
 
 #[test]
-fn yes_and_only_keep_a_user_attribution_value_and_the_explicit_flag_replaces_it() {
+fn yes_and_only_keep_a_user_attribution_value_and_no_attribution_replaces_it() {
     // Arrange
     let sb = Sandbox::new("attribution-user");
     sb.write(
@@ -675,12 +678,9 @@ fn yes_and_only_keep_a_user_attribution_value_and_the_explicit_flag_replaces_it(
     // Act
     sb.init("/bin/bash", &["--no-hooks", "--no-statusline"]);
     let after_yes = attribution_of(&sb);
-    let kept = text(&sb.init_raw("/bin/bash", &["--only", "attribution-off"]));
+    let kept = text(&sb.init_raw("/bin/bash", &["--only", "attribution"]));
     let after_only = attribution_of(&sb);
-    sb.init_raw(
-        "/bin/bash",
-        &["--only", "attribution-off", "--attribution-off"],
-    );
+    sb.init_raw("/bin/bash", &["--only", "attribution", "--no-attribution"]);
 
     // Assert
     assert_eq!(
@@ -688,9 +688,39 @@ fn yes_and_only_keep_a_user_attribution_value_and_the_explicit_flag_replaces_it(
         serde_json::json!({"commit": "Made by me", "pr": "", "sessionUrl": false})
     );
     assert!(
-        kept.contains("--only attribution-off --attribution-off"),
+        kept.contains("--only attribution --no-attribution"),
         "{kept}"
     );
     assert_eq!(after_only["commit"], "Made by me");
     assert_eq!(attribution_of(&sb)["commit"], "");
+}
+
+#[test]
+fn attribution_on_removes_only_the_off_values_and_yes_keeps_it_on() {
+    // Arrange
+    let sb = Sandbox::new("attribution-on");
+    sb.write(
+        ".claude/settings.json",
+        "{\"theme\":\"dark\",\"attribution\":{\"commit\":\"custom\",\"pr\":\"\",\"sessionUrl\":false},\"model\":\"opus\"}\n",
+    );
+
+    // Act
+    let on = text(&sb.init_raw("/bin/bash", &["--only", "attribution", "--attribution"]));
+    let after_on = sb.read(".claude/settings.json");
+    sb.init("/bin/bash", &["--no-hooks", "--no-statusline"]);
+    let after_yes = sb.read(".claude/settings.json");
+
+    // Assert
+    assert!(
+        on.contains("attribution on: removed attribution.pr, attribution.sessionUrl"),
+        "{on}"
+    );
+    let settings: Value = serde_json::from_str(&after_on).unwrap();
+    let keys: Vec<&String> = settings.as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["theme", "attribution", "model"], "{after_on}");
+    assert_eq!(
+        settings["attribution"],
+        serde_json::json!({"commit": "custom"})
+    );
+    assert_eq!(after_yes, after_on, "--yes keeps the stored ON");
 }

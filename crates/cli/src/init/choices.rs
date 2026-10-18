@@ -71,14 +71,25 @@ pub struct Flags {
     /// Do not add the `pb` short name
     #[arg(long, overrides_with = "short_name")]
     pub no_short_name: bool,
-    /// Turn off the commit, PR and session link attribution Claude Code adds (sets `attribution` in settings.json)
-    #[arg(long, overrides_with = "no_attribution_off")]
-    pub attribution_off: bool,
-    /// Do not set or change attribution in settings.json
-    #[arg(long, overrides_with = "attribution_off")]
-    pub no_attribution_off: bool,
-    /// Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
-    #[arg(long, value_name = "PART", value_delimiter = ',', num_args = 1..)]
+    #[arg(
+        long,
+        overrides_with = "no_attribution",
+        help = "Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true"
+    )]
+    pub attribution: bool,
+    #[arg(
+        long,
+        overrides_with = "attribution",
+        help = "Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values"
+    )]
+    pub no_attribution: bool,
+    #[arg(
+        long,
+        value_name = "PART",
+        value_delimiter = ',',
+        num_args = 1..,
+        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
+    )]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
     #[arg(long, short = 'y', visible_alias = "defaults")]
@@ -102,7 +113,8 @@ pub struct Choices {
     pub telemetry: bool,
     pub collector_service: bool,
     pub short_name: bool,
-    pub attribution_off: bool,
+    /// Attribution OFF (the default), ON, or left as it is.
+    pub attribution: attribution::Choice,
 }
 
 fn pick(on: bool, off: bool) -> Option<bool> {
@@ -125,7 +137,7 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
         "telemetry" => (flags.telemetry, flags.no_telemetry),
         "collector-service" => (flags.collector_service, flags.no_collector_service),
         "short-name" => (flags.short_name, flags.no_short_name),
-        "attribution-off" => (flags.attribution_off, flags.no_attribution_off),
+        "attribution" => (flags.attribution, flags.no_attribution),
         _ => return None,
     })
 }
@@ -149,6 +161,15 @@ pub fn retired_notes(flags: &Flags) -> Vec<String> {
             )
         })
         .collect()
+}
+
+/// Prints the retired notes when stderr is a terminal (ADR 0040).
+pub fn note_retired(flags: &Flags) {
+    if io::stderr().is_terminal() {
+        for note in retired_notes(flags) {
+            eprintln!("{note}");
+        }
+    }
 }
 
 /// Whether `--only` names only retired parts, so setup has nothing to run.
@@ -198,12 +219,17 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
     for id in &valid {
         let chosen = named.iter().any(|n| n == id);
         let (on, off) = part_pair(flags, id).unwrap_or((false, false));
+        // Both attribution flags pick a state, so either may go with `--only`.
+        let (on, off, typed) = match (*id == attribution::PART, off) {
+            (true, true) => (true, false, format!("--no-{id}")),
+            _ => (on, off, format!("--{id}")),
+        };
         if chosen && off {
             return Err(format!("--only {id} conflicts with --no-{id}"));
         }
         if !chosen && on && !flags.only.is_empty() {
             return Err(format!(
-                "--{id} is not in --only {}; add it to --only or drop the flag",
+                "{typed} is not in --only {}; add {id} to --only or drop the flag",
                 flags.only.join(",")
             ));
         }
@@ -218,7 +244,10 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         telemetry: has("telemetry"),
         collector_service: has("collector-service"),
         short_name: has("short-name"),
-        attribution_off: has("attribution-off"),
+        attribution: match has(attribution::PART) {
+            true => attribution_from_flags(flags).unwrap_or(attribution::Choice::Default),
+            false => attribution::Choice::Skip,
+        },
     }))
 }
 
@@ -229,21 +258,14 @@ pub fn replace_off_ok(flags: &Flags, telemetry: bool, only_run: bool) -> bool {
     telemetry && (flags.telemetry || only_run || !flags.yes)
 }
 
-/// What the attribution part does. `on` is the resolved choice and `asked`
-/// whether the user answered the question. A yes or `--attribution-off` may
-/// replace a value the user set; `--yes` and `--only` only add missing keys.
-/// A no or `--no-attribution-off` is recorded, a run that asked nothing is not.
-pub fn attribution_choice(flags: &Flags, on: bool, asked: bool) -> attribution::Choice {
-    match (
-        on,
-        flags.attribution_off || asked,
-        flags.no_attribution_off || asked,
-    ) {
-        (true, true, _) => attribution::Choice::Replace,
-        (true, false, _) => attribution::Choice::AddMissing,
-        (false, _, true) => attribution::Choice::Declined,
-        (false, _, false) => attribution::Choice::Skip,
-    }
+/// The attribution state a flag picks: `--attribution` is ON, and
+/// `--no-attribution` is OFF and replaces the user's own values. `None` when
+/// neither flag is given.
+fn attribution_from_flags(flags: &Flags) -> Option<attribution::Choice> {
+    pick(flags.attribution, flags.no_attribution).map(|on| match on {
+        true => attribution::Choice::On,
+        false => attribution::Choice::Off { replace: true },
+    })
 }
 
 /// What the collector-service part does. A no or `--no-collector-service`
@@ -292,6 +314,8 @@ pub struct LeftOff {
     pub prompt_missing: bool,
     /// No `pb` command is on PATH.
     pub pb_missing: bool,
+    /// The user chose attribution ON, which `--yes` keeps.
+    pub attribution_on: bool,
 }
 
 /// The stderr lines for a run with no terminal and no `--yes`, one per
@@ -327,12 +351,11 @@ pub fn unattended_lines(flags: &Flags, choices: &Choices, left: &LeftOff) -> Vec
             undecided(choices.statusline, flags.statusline, flags.no_statusline),
         ),
         (
-            "attribution-off",
-            undecided(
-                choices.attribution_off,
-                flags.attribution_off,
-                flags.no_attribution_off,
-            ),
+            "attribution off",
+            choices.attribution == attribution::Choice::Skip
+                && !flags.attribution
+                && !flags.no_attribution
+                && !left.attribution_on,
         ),
     ]
     .into_iter()
@@ -397,7 +420,7 @@ pub fn resolve_with(
     };
     // Hooks and the status line are entries in Claude Code's settings. With
     // nobody to ask and no --yes, they stay off unless a flag turns them on.
-    Choices {
+    let choices = Choices {
         hooks: decide(
             flags.hooks,
             flags.no_hooks,
@@ -436,12 +459,25 @@ pub fn resolve_with(
             catalog::question("short-name"),
             settings_default,
         ),
-        attribution_off: decide(
-            flags.attribution_off,
-            flags.no_attribution_off,
-            catalog::question("attribution-off"),
-            settings_default,
-        ),
+        attribution: attribution::Choice::Skip,
+    };
+    // The question asks for ON, so a no, or Enter, is OFF that keeps the
+    // user's own values.
+    let attribution = attribution_from_flags(flags).unwrap_or_else(|| {
+        if interactive && !flags.yes {
+            match ask(catalog::question(attribution::PART), false) {
+                true => attribution::Choice::On,
+                false => attribution::Choice::Off { replace: false },
+            }
+        } else if settings_default {
+            attribution::Choice::Default
+        } else {
+            attribution::Choice::Skip
+        }
+    });
+    Choices {
+        attribution,
+        ..choices
     }
 }
 
@@ -462,13 +498,13 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
         (flags.telemetry, flags.no_telemetry),
         (flags.collector_service, flags.no_collector_service),
         (flags.short_name, flags.no_short_name),
-        (flags.attribution_off, flags.no_attribution_off),
+        (flags.attribution, flags.no_attribution),
     ]
     .iter()
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
         "setup: output is not a terminal, so no questions were asked; the hooks, status line, \
-         system-prompt, telemetry, collector-service, short-name and attribution-off parts stay off and the other defaults apply; pass --yes to accept all defaults or the \
+         system-prompt, telemetry, collector-service and short-name parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
 }
@@ -495,7 +531,7 @@ mod tests {
             no_telemetry: true,
             no_collector_service: true,
             no_short_name: true,
-            no_attribution_off: true,
+            no_attribution: true,
             ..Flags::default()
         };
         assert!(defaults_notice(true, false, &all_set).is_none());
@@ -546,7 +582,7 @@ mod tests {
                 telemetry: false,
                 collector_service: false,
                 short_name: false,
-                attribution_off: false
+                attribution: attribution::Choice::Skip
             }
         );
     }
@@ -618,28 +654,76 @@ mod tests {
     }
 
     #[test]
-    fn yes_turns_attribution_off_but_replaces_a_user_value_only_with_the_flag() {
+    fn attribution_is_off_under_yes_and_a_flag_or_an_answer_picks_on_or_off() {
         use attribution::Choice::*;
         let flags = |yes, on, off| Flags {
             yes,
-            attribution_off: on,
-            no_attribution_off: off,
+            attribution: on,
+            no_attribution: off,
             ..Flags::default()
         };
-        assert!(resolve(&flags(true, false, false), false, false, &mut never).attribution_off);
-        assert!(!resolve(&Flags::default(), false, false, &mut never).attribution_off);
-        // (yes, --attribution-off, --no-attribution-off, on, asked) -> choice
-        for (yes, on_flag, off_flag, on, asked, want) in [
-            (true, false, false, true, false, AddMissing),
-            (true, true, false, true, false, Replace),
-            (false, false, false, true, true, Replace),
-            (false, false, false, false, true, Declined),
-            (false, false, true, false, false, Declined),
+        let q = catalog::question(attribution::PART);
+        // (--yes, --attribution, --no-attribution, terminal, answer) -> choice
+        for (yes, on_flag, off_flag, terminal, answer, want) in [
+            (true, false, false, false, false, Default),
+            (true, false, false, true, false, Default),
+            (true, true, false, false, false, On),
+            (true, false, true, false, false, Off { replace: true }),
             (false, false, false, false, false, Skip),
+            (false, true, false, false, false, On),
+            (false, false, true, false, false, Off { replace: true }),
+            (false, false, false, true, true, On),
+            (false, false, false, true, false, Off { replace: false }),
         ] {
-            let got = attribution_choice(&flags(yes, on_flag, off_flag), on, asked);
-            assert_eq!(got, want, "{yes} {on_flag} {off_flag} {on} {asked}");
+            let got = resolve(
+                &flags(yes, on_flag, off_flag),
+                terminal,
+                false,
+                &mut |asked, d| {
+                    if asked == q {
+                        assert!(!d, "the default answer is OFF");
+                        answer
+                    } else {
+                        d
+                    }
+                },
+            )
+            .attribution;
+            assert_eq!(got, want, "{yes} {on_flag} {off_flag} {terminal} {answer}");
         }
+    }
+
+    #[test]
+    fn only_attribution_takes_either_flag_and_refuses_one_outside_only() {
+        use attribution::Choice::*;
+        let only = |on, off| Flags {
+            only: vec!["attribution".into()],
+            attribution: on,
+            no_attribution: off,
+            ..Flags::default()
+        };
+        let outside = Flags {
+            only: vec!["hooks".into()],
+            no_attribution: true,
+            ..Flags::default()
+        };
+        let run = |f: &Flags| only_choices(f).unwrap().unwrap().attribution;
+
+        assert_eq!(run(&only(false, false)), Default);
+        assert_eq!(run(&only(true, false)), On);
+        assert_eq!(run(&only(false, true)), Off { replace: true });
+        assert_eq!(
+            run(&Flags {
+                only: vec!["hooks".into()],
+                ..Flags::default()
+            }),
+            Skip
+        );
+        let err = only_choices(&outside).unwrap_err();
+        assert!(
+            err.contains("--no-attribution is not in --only hooks"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -669,7 +753,7 @@ mod tests {
                 telemetry: true,
                 collector_service: true,
                 short_name: true,
-                attribution_off: true
+                attribution: attribution::Choice::Default
             }
         );
     }
@@ -763,7 +847,7 @@ mod tests {
                 telemetry: true,
                 collector_service: false,
                 short_name: false,
-                attribution_off: false
+                attribution: attribution::Choice::Skip
             }
         );
     }
@@ -897,7 +981,7 @@ mod tests {
             telemetry: false,
             collector_service: false,
             short_name: false,
-            attribution_off: false,
+            attribution: attribution::Choice::Skip,
         }
     }
 
@@ -933,6 +1017,7 @@ mod tests {
             telemetry_skipped: false,
             prompt_missing: true,
             pb_missing: true,
+            attribution_on: false,
         };
 
         let lines = unattended_lines(&Flags::default(), &all_off(), &left);
@@ -942,7 +1027,7 @@ mod tests {
         assert!(lines[1].contains("--only system-prompt"), "{lines:?}");
         assert!(lines[2].contains("--only short-name"), "{lines:?}");
         assert!(
-            lines[3].contains("hooks, status line and attribution-off"),
+            lines[3].contains("hooks, status line and attribution off"),
             "{lines:?}"
         );
     }
@@ -953,13 +1038,13 @@ mod tests {
             no_telemetry: true,
             no_hooks: true,
             no_statusline: true,
-            no_attribution_off: true,
             ..Flags::default()
         };
         let left = LeftOff {
             telemetry_skipped: false,
             prompt_missing: false,
             pb_missing: false,
+            attribution_on: true,
         };
 
         assert!(unattended_lines(&flags, &all_off(), &left).is_empty());

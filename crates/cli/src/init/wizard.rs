@@ -62,7 +62,7 @@ fn extra_lines(id: &str) -> Vec<String> {
             "Adds the same link install.sh makes: pb -> playbook, in the playbook install folder."
                 .to_string(),
         ],
-        "attribution-off" => {
+        "attribution" => {
             vec!["Claude Code reads the key in every session it starts after this.".to_string()]
         }
         _ => Vec::new(),
@@ -80,7 +80,7 @@ pub fn decline_line(id: &str) -> &'static str {
         "telemetry" => "No variables are written. `playbook usage` reads transcripts instead.",
         "collector-service" => "No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`.",
         "short-name" => "No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing.",
-        "attribution-off" => "Claude Code keeps adding its attribution. The commit-message-sanitizer hook still strips it from commits and PRs when the hooks are on.",
+        "attribution" => "Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link.",
         _ => "Nothing changes for this part.",
     }
 }
@@ -136,15 +136,24 @@ pub fn items(flags: &Flags, security_on: bool) -> Vec<Item> {
 
 /// [`items`] without the questions of the parts in `skip`, each a part id
 /// whose question setup replaced with one line. The parts in `off` start as
-/// no, because the user said no before.
-pub fn items_for(flags: &Flags, security_on: bool, skip: &[&str], off: &[&str]) -> Vec<Item> {
+/// no, because the user said no before, and the parts in `on` start as yes,
+/// because the user chose it before.
+pub fn items_for(
+    flags: &Flags,
+    security_on: bool,
+    skip: &[&str],
+    off: &[&str],
+    on: &[&str],
+) -> Vec<Item> {
     let mut list = items(flags, security_on);
     list.retain(|i| !skip.contains(&i.choice.id.as_str()));
-    for item in list
-        .iter_mut()
-        .filter(|i| off.contains(&i.choice.id.as_str()))
-    {
-        item.default = false;
+    for item in &mut list {
+        let id = item.choice.id.as_str();
+        if off.contains(&id) {
+            item.default = false;
+        } else if on.contains(&id) {
+            item.default = true;
+        }
     }
     list
 }
@@ -160,10 +169,11 @@ pub fn guided_answer(guided: &[(&str, bool)], question: &str, default: bool) -> 
 
 /// The words after the on/off mark in the summary.
 pub fn summary_detail(item: &Item, on: bool) -> String {
-    let base = if on {
-        "will be applied"
-    } else {
-        "left as it is"
+    let base = match (item.choice.id == crate::init::attribution::PART, on) {
+        (true, true) => crate::init::attribution::ON_LABEL,
+        (true, false) => crate::init::attribution::OFF_LABEL,
+        (false, true) => "will be applied",
+        (false, false) => "left as it is",
     };
     if item.fixed.is_some() {
         format!("{base} (set by a flag)")
@@ -245,7 +255,7 @@ mod tests {
             telemetry: true,
             collector_service: true,
             short_name: true,
-            attribution_off: true,
+            attribution: true,
             ..Flags::default()
         };
         for p in catalog::PARTS.iter().filter(|p| p.asked) {
@@ -327,8 +337,13 @@ mod tests {
         assert!(!c.hooks && !c.statusline && !c.path);
         assert!(!c.system_prompt && !c.short_name);
         assert!(
-            !c.telemetry && !c.collector_service && !c.attribution_off,
-            "every asked part is on by default, so a no flips it off"
+            !c.telemetry && !c.collector_service,
+            "these parts are on by default, so a no flips them off"
+        );
+        assert_eq!(
+            c.attribution,
+            crate::init::attribution::Choice::On,
+            "attribution is OFF by default, so a yes turns it ON"
         );
     }
 
@@ -336,14 +351,31 @@ mod tests {
     fn the_telemetry_question_is_left_out_when_it_is_skipped() {
         let flags = Flags::default();
 
-        let skipped = items_for(&flags, false, &["telemetry", "collector-service"], &[]);
-        let asked = items_for(&flags, false, &[], &["system-prompt"]);
+        let skipped = items_for(&flags, false, &["telemetry", "collector-service"], &[], &[]);
+        let asked = items_for(&flags, false, &[], &["system-prompt"], &["attribution"]);
+        let default =
+            |list: &[Item], id: &str| list.iter().find(|i| i.choice.id == id).map(|i| i.default);
 
         assert!(!skipped.iter().any(|i| i.choice.id == "telemetry"));
         assert!(!skipped.iter().any(|i| i.choice.id == "collector-service"));
         assert!(asked.iter().any(|i| i.choice.id == "telemetry"));
         assert!(asked.iter().any(|i| i.choice.id == "collector-service"));
         assert_eq!(skipped.len() + 2, asked.len());
+        assert_eq!(default(&skipped, "attribution"), Some(false));
+        assert_eq!(default(&asked, "attribution"), Some(true));
+        assert_eq!(default(&asked, "system-prompt"), Some(false));
+        let a = skipped
+            .iter()
+            .find(|i| i.choice.id == "attribution")
+            .unwrap();
+        assert_eq!(
+            summary_detail(a, true),
+            "ON: Claude Code adds its attribution"
+        );
+        assert_eq!(
+            summary_detail(a, false),
+            "OFF (default): Claude Code adds no attribution"
+        );
     }
 
     #[test]
