@@ -102,7 +102,7 @@ pub(super) fn temp_roots(env: &RootEnv) -> Vec<PathBuf> {
         }
         Os::Linux => {
             push_env(&env.tmpdir);
-            roots.extend(["/tmp", "/var/tmp"].map(PathBuf::from));
+            roots.extend(["/tmp", "/private/tmp", "/var/tmp"].map(PathBuf::from));
             roots.push(home.join(".cache"));
             roots.push(PathBuf::from(format!("/run/user/{}", env.uid)));
             // Only under home: a cache home of `/` or `/usr` would hand the
@@ -123,7 +123,7 @@ pub(super) fn temp_roots(env: &RootEnv) -> Vec<PathBuf> {
         }
         Os::Other => {
             push_env(&env.tmpdir);
-            roots.push(PathBuf::from("/tmp"));
+            roots.extend(["/tmp", "/private/tmp"].map(PathBuf::from));
             roots.push(home.join(".cache"));
         }
     }
@@ -342,6 +342,7 @@ mod tests {
                     "/sys/temp",
                     "/var/folders/ab/xyz/T/",
                     "/tmp",
+                    "/private/tmp",
                     "/var/tmp",
                     "/h/me/.cache",
                     "/run/user/501",
@@ -362,6 +363,7 @@ mod tests {
                     "/sys/temp",
                     "/var/folders/ab/xyz/T/",
                     "/tmp",
+                    "/private/tmp",
                     "/h/me/.cache",
                 ],
             ),
