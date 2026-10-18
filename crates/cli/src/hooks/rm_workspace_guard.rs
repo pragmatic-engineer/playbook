@@ -91,7 +91,7 @@ pub fn run(payload: &Payload) {
 
 /// Why a target is denied. Each names the rule in the denial message.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Rule {
+enum Rule {
     /// A command substitution, a variable, xargs input or a relative path
     /// after `cd`: the guard cannot tell what it names.
     Unresolvable,
@@ -99,7 +99,8 @@ pub(crate) enum Rule {
     StrayCharacter,
     /// `~user`, or a `~` inside quotes, which the shell leaves alone.
     Tilde,
-    /// A symlink chain too deep to follow.
+    /// A symlink chain too deep to follow, a link that cannot be read, or
+    /// a working folder that is gone.
     LinkLoop,
     /// Playbook's own data, such as the memory store or a database, or a
     /// folder that holds it.
@@ -115,12 +116,12 @@ pub(crate) enum Rule {
 }
 
 impl Rule {
-    pub(crate) fn name(&self) -> &'static str {
+    fn name(&self) -> &'static str {
         match self {
             Rule::Unresolvable => "unresolvable target",
             Rule::StrayCharacter => "stray quote or shell character",
             Rule::Tilde => "another user's home or a quoted ~",
-            Rule::LinkLoop => "symlink loop",
+            Rule::LinkLoop => "path that cannot be resolved",
             Rule::Protected => "protected playbook data",
             Rule::Lock => "playbook lock folder",
             Rule::RootItself => "scratch root itself (contents only)",
@@ -131,7 +132,7 @@ impl Rule {
 }
 
 /// Every root the guard judges against, resolved through symlinks.
-pub(crate) struct Roots {
+struct Roots {
     home: String,
     claude_dir: PathBuf,
     /// The repo, or `PLAYBOOK_SAFE_ROOTS`: deleted whole if asked.
@@ -361,6 +362,36 @@ fn resolve_existing(path: &Path) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/nonexistent-unresolvable-root"))
 }
 
+/// `path` with its longest existing part spelled as the disk stores it, which
+/// fixes the letter case on a case-insensitive disk. A last component that is
+/// a symlink is kept as written, so the link is judged where it sits.
+fn stored_case(path: &Path) -> PathBuf {
+    let is_link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    let mut rest = Vec::new();
+    let mut current = path;
+    if is_link {
+        match (path.parent(), path.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                current = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+    loop {
+        if let Ok(found) = std::fs::canonicalize(current) {
+            return rest.iter().rev().fold(found, |acc, part| acc.join(part));
+        }
+        match (current.parent(), current.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                current = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
 /// `path` with its folder resolved and its own name kept, so a file that is
 /// a link is matched where it sits.
 fn resolve_parent(path: &Path) -> PathBuf {
@@ -448,16 +479,35 @@ fn judge(target: &str, tilde: bool, roots: &Roots) -> Result<(), Rule> {
         .map(|g| parts[g]);
 
     let verdict = |dir: &Path| -> Result<(), Rule> {
-        if roots
-            .protected
-            .iter()
-            .any(|p| dir.starts_with(p) || p.starts_with(dir))
-        {
+        // The deny rules compare the path as the disk stores it, so a
+        // different letter case on a case-insensitive disk cannot slip past.
+        let stored = stored_case(dir);
+        let holds_protected = |p: &PathBuf| {
+            if stored.starts_with(p) {
+                return true;
+            }
+            if !p.starts_with(&stored) {
+                return false;
+            }
+            // A glob with a named prefix next to a protected folder cannot
+            // match it, so `runtime/sess-*` stays allowed.
+            match last_glob {
+                Some(glob) if p.parent() == Some(stored.as_path()) => {
+                    let named = glob[..literal_prefix_len(glob)].to_lowercase();
+                    p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().to_lowercase().starts_with(&named))
+                }
+                _ => true,
+            }
+        };
+        if roots.protected.iter().any(holds_protected) {
             return Err(Rule::Protected);
         }
-        let is_lock = dir.strip_prefix(&roots.playbook_root).is_ok_and(|rest| {
+        let ends_lock = |text: &str| text.to_lowercase().ends_with(".lock");
+        let is_lock = stored.strip_prefix(&roots.playbook_root).is_ok_and(|rest| {
             rest.components()
-                .any(|c| c.as_os_str().to_string_lossy().ends_with(".lock"))
+                .any(|c| ends_lock(&c.as_os_str().to_string_lossy()))
+                || last_glob.is_some_and(ends_lock)
         });
         if is_lock {
             return Err(Rule::Lock);

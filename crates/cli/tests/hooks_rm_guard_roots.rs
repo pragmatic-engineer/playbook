@@ -533,9 +533,12 @@ fn the_denial_message_names_the_scratch_roots_and_the_config_key() {
         .output()
         .expect("spawn");
     let text = String::from_utf8_lossy(&out.stdout);
+    if cfg!(target_os = "macos") {
+        assert!(text.contains("/private/var/folders/*/*/T/*"), "{text}");
+    }
     for needle in [
         "/tmp/*",
-        "/private/var/folders",
+        "/**/tmp/*",
         ".worktrees/*",
         "rule: outside the allowed roots",
         "No config root can cover this path",
@@ -625,6 +628,10 @@ fn playbook_data_is_protected_and_its_scratch_folders_are_allowed() {
         (format!("{d} -rf {pb}/repos/acme/app/plans"), true),
         (format!("{d} -rf {pb}/runtime/handoff/x"), true),
         (format!("{d} -rf {pb}/runtime/s1/edits.jsonl.lock"), true),
+        (format!("{d} -rf {pb}/runtime/s1/*.lock"), true),
+        (format!("{d} -rf {pb}/runtime/sess-*"), false),
+        (format!("{d} -rf {pb}/runtime/han*"), true),
+        (format!("{d} -f {}/Cargo.lock", s(&fx.repo)), false),
         (format!("{d} -rf {pb}"), true),
         (format!("{d} -rf {pb}/*"), true),
         (format!("{d} -rf {pb}/tmp/../memory"), true),
@@ -634,6 +641,15 @@ fn playbook_data_is_protected_and_its_scratch_folders_are_allowed() {
     // A configured root over the whole folder does not open the data.
     assert!(fx.config_set(r#"["~/.config/playbook"]"#).status.success());
     check(&fx, &fx.repo, &cases);
+    // Nor does a safe root over the whole home.
+    let h = s(&fx.home);
+    let safe = [("PLAYBOOK_SAFE_ROOTS", h.as_str())];
+    for (cmd, want) in &cases {
+        if *want {
+            assert!(fx.denied(cmd, &fx.repo, &safe), "{cmd}");
+        }
+    }
+    assert!(fx.denied(&format!("{d} -rf {h}/.config"), &fx.repo, &safe));
     let why = fx
         .reason(&format!("{d} -rf {pb}/memory"), &fx.repo, &[])
         .expect("denied");
@@ -670,6 +686,10 @@ fn playbook_install_files_are_allowed_by_name() {
         (format!("{d} -f {b}/sub/playbook"), true),
     ];
     check(&fx, &fx.repo, &cases);
+    // An install name that links out of every root is judged where it points.
+    fs::write(fx.home.join("notes"), "").expect("notes");
+    symlink(fx.home.join("notes"), bin.join("pbtop")).expect("pbtop link");
+    assert!(fx.denied(&format!("{d} -f {b}/pbtop"), &fx.repo, &[]));
     // `PLAYBOOK_BIN_DIR` moves the allowance with the install.
     let other = fx.base.join("bin2");
     let env = [("PLAYBOOK_BIN_DIR", other.to_str().expect("utf8"))];
@@ -748,18 +768,38 @@ fn the_denial_names_the_rule_and_gives_the_exact_fix_command() {
     let fx = Fx::new();
     let d = rm();
     assert!(fx.config_set(r#"["~/scratch/builds"]"#).status.success());
-    let target = fx.home.join("Workspace/acme/old");
+    let target = fx.home.join("code/acme/old");
 
     let why = fx
         .reason(&format!("{d} -rf {}", s(&target)), &fx.repo, &[])
         .expect("denied");
 
     assert!(why.contains("rule: outside the allowed roots"), "{why}");
-    let want = r#"! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\",\"~/Workspace/acme\"]'"#;
+    let want = r#"! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\",\"~/code/acme\"]'"#;
     assert!(why.contains(want), "{why}");
     // A dot folder in home is never offered as a root.
     let why = fx
         .reason(&format!("{d} -f ~/.ssh/id_rsa"), &fx.repo, &[])
         .expect("denied");
     assert!(!why.contains("config set"), "{why}");
+}
+
+/// On a case-insensitive disk a different spelling of protected data is the
+/// same folder, so it stays blocked.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_different_letter_case_cannot_reach_protected_data() {
+    let fx = Fx::new();
+    let d = rm();
+    let pb = s(&fx.home.join(".config/playbook"));
+    fs::create_dir_all(fx.home.join(".config/playbook/memory")).expect("memory");
+    fs::create_dir_all(fx.home.join(".config/playbook/runtime/handoff")).expect("handoff");
+    assert!(fx.config_set(r#"["~/.config/playbook"]"#).status.success());
+    for cmd in [
+        format!("{d} -rf {pb}/MEMORY"),
+        format!("{d} -rf {pb}/Memory/x"),
+        format!("{d} -rf {pb}/runtime/HANDOFF"),
+    ] {
+        assert!(fx.denied(&cmd, &fx.repo, &[]), "{cmd}");
+    }
 }

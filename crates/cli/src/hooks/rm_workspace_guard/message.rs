@@ -24,7 +24,7 @@ pub(super) fn denial(denied: &[(String, Rule)], roots: &Roots) -> String {
     let mut text = format!(
         "rm blocked: {targets}. Allowed with no config: the repo ({}), ~/.claude/**, playbook's own install files, and the contents of {} (symlinks resolved, never the root itself, and a glob directly under a root needs a named prefix such as /tmp/pb-*).",
         list(&roots.safe, ""),
-        list(&roots.scratch, "/*"),
+        scratch_list(roots),
     );
     let home = resolve_existing(Path::new(&roots.home));
     let new_roots: Vec<String> = denied
@@ -43,7 +43,7 @@ pub(super) fn denial(denied: &[(String, Rule)], roots: &Roots) -> String {
     }
     let has = |want: fn(&Rule) -> bool| denied.iter().any(|(_, r)| want(r));
     if has(|r| *r == Rule::Protected) {
-        text.push_str(" Protected playbook data (the memory store, the databases, plans and handoffs, or a folder that holds them) stays blocked whatever the roots say. Ask the user if it really has to go.");
+        text.push_str(" Protected playbook data (the memory store, the databases and the other user data under ~/.config/playbook, or a folder that holds it) stays blocked whatever the roots say. Ask the user if it really has to go.");
     }
     if has(|r| matches!(r, Rule::RootItself | Rule::Glob)) {
         text.push_str(" Name the paths inside the root instead.");
@@ -59,6 +59,21 @@ pub(super) fn denial(denied: &[(String, Rule)], roots: &Roots) -> String {
     text.push_str(" For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`).");
     text.push_str(hint(denied, roots));
     text
+}
+
+/// The scratch roots, plus the two matched by shape: the macOS per-user temp
+/// folder and any `tmp` folder under the playbook root.
+fn scratch_list(roots: &Roots) -> String {
+    let mut items: Vec<String> = roots
+        .scratch
+        .iter()
+        .map(|p| format!("{}/*", p.display()))
+        .collect();
+    if cfg!(target_os = "macos") {
+        items.push("/private/var/folders/*/*/T/*".to_string());
+    }
+    items.push(format!("{}/**/tmp/*", roots.playbook_root.display()));
+    items.join(", ")
 }
 
 fn list(paths: &[PathBuf], suffix: &str) -> String {
@@ -80,12 +95,14 @@ fn suggested_root(dir: &Path, home: &Path, roots: &Roots) -> Option<String> {
     if roots.home.is_empty() {
         return None;
     }
-    let rest = dir.parent()?.strip_prefix(home).ok()?;
-    let first = rest.components().next()?;
-    if first.as_os_str().to_string_lossy().starts_with('.') {
+    let rest = dir.parent()?.strip_prefix(home).ok()?.to_str()?;
+    // The config refuses these characters, and the guard drops a root that
+    // holds one, so such a folder gets no suggestion.
+    let refused = ['*', '?', '[', '{', '$', '`', '\'', '"', '\\'];
+    if rest.is_empty() || rest.starts_with('.') || rest.contains(refused) {
         return None;
     }
-    Some(format!("~/{}", rest.display()))
+    Some(format!("~/{rest}"))
 }
 
 /// The config command that keeps `current` and adds `new`, or `None` when
@@ -110,15 +127,16 @@ fn fix_command(current: &[String], new: &[String]) -> Option<String> {
 
 fn hint(denied: &[(String, Rule)], roots: &Roots) -> &'static str {
     let any = |want: &dyn Fn(&str) -> bool| denied.iter().any(|(t, _)| want(t));
-    let state_root = roots.playbook_root.to_string_lossy();
-    let home_state = format!("{}/.config/playbook", roots.home);
-    if any(&|t| t.ends_with(".lock")) {
+    let home_state = Path::new(&roots.home).join(".config/playbook");
+    let in_state = |t: &str| {
+        let path = Path::new(t);
+        path.starts_with(&roots.playbook_root)
+            || path.starts_with(&home_state)
+            || path.starts_with("~/.config/playbook")
+    };
+    if denied.iter().any(|(_, r)| *r == Rule::Lock) || any(&|t| t.ends_with(".lock")) {
         " A leftover `.lock` directory clears itself on the next write once it is 10 seconds old, so do not rm it."
-    } else if any(&|t| {
-        t.starts_with(state_root.as_ref())
-            || t.starts_with(&home_state)
-            || t.starts_with("~/.config/playbook")
-    }) {
+    } else if any(&in_state) {
         " This path is playbook's own state: to clear plan scratch files use `playbook plan cleanup <slug>` (or `playbook plan cleanup --stale` for old leftovers), do not rm them."
     } else if any(&|t| t.contains("/.worktrees/")) {
         " This path looks like a worktree leftover: use `git worktree remove --force <path>` for a registered one, `git worktree prune` for a deleted one, and an empty leftover folder is cleared by the next worktree create."
@@ -143,6 +161,19 @@ mod tests {
                 r#"! playbook config set --global hooks.rmGuard.allowedRoots '["~/scratch/builds","/opt/data"]'"#
             )
         );
+    }
+
+    #[test]
+    fn nothing_new_gives_no_fix_command() {
+        let current = vec!["~/scratch/builds".to_string()];
+
         assert_eq!(fix_command(&current, &current), None);
+    }
+
+    #[test]
+    fn a_root_with_a_quote_gives_no_fix_command() {
+        let current = vec!["~/it's".to_string()];
+
+        assert_eq!(fix_command(&current, &["~/x/y".to_string()]), None);
     }
 }
