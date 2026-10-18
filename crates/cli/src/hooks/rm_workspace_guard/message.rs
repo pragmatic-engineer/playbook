@@ -5,7 +5,7 @@
 //! matched, the roots that are allowed, and the exact config command that
 //! would allow a path outside them.
 
-use super::{resolve_existing, Roots, Rule};
+use super::{resolve_existing, Kept, Roots, Rule};
 use std::path::{Path, PathBuf};
 
 pub(super) fn denial(denied: &[(String, Rule)], roots: &Roots) -> String {
@@ -22,8 +22,9 @@ pub(super) fn denial(denied: &[(String, Rule)], roots: &Roots) -> String {
         .collect::<Vec<_>>()
         .join("; ");
     let mut text = format!(
-        "rm blocked: {targets}. Allowed with no config: the repo ({}), ~/.claude/**, playbook's own install files, and the contents of {} (symlinks resolved, never the root itself, and a glob directly under a root needs a named prefix such as /tmp/pb-*).",
+        "rm blocked: {targets}. Allowed with no config: the repo ({}), ~/.claude/**, playbook's own folders ({}) and install files, and the contents of {} (symlinks resolved, never the root itself, and a glob directly under a root needs a named prefix such as /tmp/pb-*).",
         list(&roots.safe, ""),
+        list(&roots.footprint, ""),
         scratch_list(roots),
     );
     let home = resolve_existing(Path::new(&roots.home));
@@ -42,8 +43,21 @@ pub(super) fn denial(denied: &[(String, Rule)], roots: &Roots) -> String {
         text.push_str(" No config root can cover this path, so ask the user to delete it.");
     }
     let has = |want: fn(&Rule) -> bool| denied.iter().any(|(_, r)| want(r));
-    if has(|r| *r == Rule::Protected) {
-        text.push_str(" Protected playbook data (the memory store, the databases and the other user data under ~/.config/playbook, or a folder that holds it) stays blocked whatever the roots say. Ask the user if it really has to go.");
+    let mut kept: Vec<Kept> = denied
+        .iter()
+        .flat_map(|(_, r)| match r {
+            Rule::Protected(k) => k.clone(),
+            _ => Vec::new(),
+        })
+        .collect();
+    kept.sort();
+    kept.dedup();
+    for k in kept {
+        text.push_str(&format!(
+            " Protected because it cannot be made again: {}; {}.",
+            k.label(),
+            k.instead()
+        ));
     }
     if has(|r| matches!(r, Rule::Denied(_))) {
         let groups: Vec<&str> = denied
@@ -76,7 +90,7 @@ pub(super) fn denial(denied: &[(String, Rule)], roots: &Roots) -> String {
         text.push_str(" A command substitution, `<xargs input>`, a variable the guard cannot follow, a relative path in a folder only the shell knows or a stray quote cannot be resolved: run the rm as its own call with a literal absolute path.");
     }
     text.push_str(" For scratch cleanup, create and delete a repo-local temp dir (for example `mktemp -d ./.tmp-XXXX`).");
-    text.push_str(hint(denied, roots));
+    text.push_str(hint(denied));
     text
 }
 
@@ -91,7 +105,6 @@ fn scratch_list(roots: &Roots) -> String {
     if cfg!(target_os = "macos") {
         items.push("/private/var/folders/*/*/T/*".to_string());
     }
-    items.push(format!("{}/**/tmp/*", roots.playbook_root.display()));
     items.join(", ")
 }
 
@@ -144,20 +157,11 @@ fn fix_command(current: &[String], new: &[String]) -> Option<String> {
     ))
 }
 
-fn hint(denied: &[(String, Rule)], roots: &Roots) -> &'static str {
+fn hint(denied: &[(String, Rule)]) -> &'static str {
     let any = |want: &dyn Fn(&str) -> bool| denied.iter().any(|(t, _)| want(t));
-    let home_state = Path::new(&roots.home).join(".config/playbook");
-    let in_state = |t: &str| {
-        let path = Path::new(t);
-        path.starts_with(&roots.playbook_root)
-            || path.starts_with(&home_state)
-            || path.starts_with("~/.config/playbook")
-    };
-    if denied.iter().any(|(_, r)| *r == Rule::Lock) || any(&|t| t.ends_with(".lock")) {
-        " A leftover `.lock` directory clears itself on the next write once it is 10 seconds old, so do not rm it."
-    } else if any(&in_state) {
-        " This path is playbook's own state: to clear plan scratch files use `playbook plan cleanup <slug>` (or `playbook plan cleanup --stale` for old leftovers), do not rm them."
-    } else if any(&|t| t.contains("/.worktrees/")) {
+    if any(&|t| t.contains("/.worktrees/"))
+        && !denied.iter().any(|(_, r)| matches!(r, Rule::Protected(_)))
+    {
         " This path looks like a worktree leftover: use `git worktree remove --force <path>` for a registered one, `git worktree prune` for a deleted one, and an empty leftover folder is cleared by the next worktree create."
     } else {
         ""

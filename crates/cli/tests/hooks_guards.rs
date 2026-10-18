@@ -180,12 +180,12 @@ mod rm_workspace_guard {
     }
 
     #[test]
-    fn denial_for_a_stale_lock_says_it_clears_itself() {
+    fn denial_for_protected_data_names_the_playbook_command() {
         let home = std::env::var("HOME").unwrap_or_default();
-        let cmd = format!("rm -rf {home}/.config/playbook/runtime/s1/edits.jsonl.lock");
+        let cmd = format!("rm -rf {home}/.config/playbook/repos/acme/app/plans");
         let out = run_guard_in(&cmd, Some("/nonexistent-root"), None);
         assert!(is_deny(&out), "{out}");
-        assert!(out.contains("clears itself"), "{out}");
+        assert!(out.contains("playbook plan cleanup"), "{out}");
     }
 
     fn is_deny(stdout: &str) -> bool {

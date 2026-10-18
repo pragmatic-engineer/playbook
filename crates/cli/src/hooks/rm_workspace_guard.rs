@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Ports the retired shell original: denies an `rm` whose target sits outside
-//! the safe roots, `~/.claude/**`, playbook's own install files, and the
-//! scratch trees (contents only, never the tree root itself or a parent of
-//! it): the OS temp and cache folders and playbook's scratch folders listed in
-//! `roots`, the shared `.worktrees` folder next to the repo (or next to the
+//! the safe roots, `~/.claude/**`, playbook's own folders (`roots::footprint`,
+//! whole) and install files, and the scratch trees (contents only, never the
+//! tree root itself or a parent of it): the OS temp and cache folders listed
+//! in `roots`, the shared `.worktrees` folder next to the repo (or next to the
 //! main checkout when run inside a linked worktree), `WORKTREE_BASE_DIR` when
-//! set, and the `hooks.rmGuard.allowedRoots` config list. Playbook's data (the
-//! memory store, the databases, plans and handoffs) and its lock folders stay
-//! blocked whatever root covers them, and so do the built-in deny set in
+//! set, and the `hooks.rmGuard.allowedRoots` config list. Playbook data that
+//! cannot be made again (`roots::protected`) stays blocked whatever root
+//! covers it, and so do the built-in deny set in
 //! `roots::DENY` (system folders, credentials, personal folders, shell
 //! config, Claude Code's settings and transcripts) and, outside the OS temp
-//! folders, a repo or worktree root and its `.git`. A denial names the rule that matched
+//! folders and the folders playbook makes worktrees in, a repo or worktree
+//! root and its `.git`. A denial names the rule that matched
 //! and, for a plain folder in home, the exact config command that allows it.
 //!
 //! Targets are judged after resolving symlinks and `..` against the real
@@ -76,7 +77,7 @@ mod roots;
 use crate::common::emit_pre_deny;
 use crate::common::payload::Payload;
 use parse::Target;
-use roots::{InstallFile, RootEnv, Scope};
+use roots::{InstallFile, Kept, RootEnv, Scope};
 use std::path::{Path, PathBuf};
 
 pub fn run(payload: &Payload) {
@@ -151,11 +152,9 @@ enum Rule {
     /// A symlink chain too deep to follow, a link that cannot be read, or
     /// a working folder that is gone.
     LinkLoop,
-    /// Playbook's own data, such as the memory store or a database, or a
-    /// folder that holds it.
-    Protected,
-    /// A playbook lock folder, which clears itself and guards a live write.
-    Lock,
+    /// Playbook data that cannot be made again, or a folder that holds it.
+    /// Every protected item the target is or holds.
+    Protected(Vec<Kept>),
     /// A scratch root itself: only its contents may go.
     RootItself,
     /// A glob the guard cannot judge, such as `/tmp/*`.
@@ -178,8 +177,7 @@ impl Rule {
             Rule::StrayCharacter => "stray quote or shell character",
             Rule::Tilde => "another user's home or a quoted ~",
             Rule::LinkLoop => "path that cannot be resolved",
-            Rule::Protected => "protected playbook data",
-            Rule::Lock => "playbook lock folder",
+            Rule::Protected(_) => "protected playbook data",
             Rule::RootItself => "scratch root itself (contents only)",
             Rule::Glob => "bare glob",
             Rule::Outside(_) => "outside the allowed roots",
@@ -200,8 +198,11 @@ struct Roots {
     safe: Vec<PathBuf>,
     /// Contents only.
     scratch: Vec<PathBuf>,
-    playbook_root: PathBuf,
-    protected: Vec<PathBuf>,
+    protected: Vec<(PathBuf, Kept)>,
+    /// Playbook's own folders, each deletable whole.
+    footprint: Vec<PathBuf>,
+    /// Where playbook makes worktrees: a linked worktree root there may go.
+    worktrees: Vec<PathBuf>,
     /// The built-in deny set, resolved, with each row's scope and group.
     deny: Vec<(PathBuf, Scope, &'static str)>,
     /// The OS temp and cache folders, where a scratch clone's root and
@@ -222,18 +223,17 @@ impl Roots {
             claude_dir: PathBuf::new(),
             safe: Vec::new(),
             scratch: Vec::new(),
-            playbook_root: resolve_existing(&crate::common::paths::playbook_root_from(Path::new(
-                home,
-            ))),
             protected: roots::protected(env)
-                .iter()
-                .map(|p| resolve_existing(p))
+                .into_iter()
+                .map(|(p, kept)| (resolve_existing(&p), kept))
                 .collect(),
             deny: roots::deny_set(env)
                 .into_iter()
                 .map(|(path, scope, group)| (resolve_existing(&path), scope, group))
                 .collect(),
             temp: Vec::new(),
+            footprint: Vec::new(),
+            worktrees: Vec::new(),
             install: Vec::new(),
             configured: Vec::new(),
             home: home.to_string(),
@@ -243,6 +243,7 @@ impl Roots {
 
     fn new(home: &str, cwd: &Path, dirs: &[PathBuf], env: &RootEnv) -> Roots {
         let configured = configured_values(home);
+        let safe = safe_roots(home, cwd, dirs);
         let install = roots::install_files(env)
             .into_iter()
             .map(|file| match file {
@@ -260,14 +261,11 @@ impl Roots {
             .collect();
         Roots {
             claude_dir: resolve_existing(&PathBuf::from(home).join(".claude")),
-            safe: safe_roots(home, cwd, dirs),
+            safe: safe.clone(),
             scratch: scratch_roots(home, cwd, env, &configured),
-            playbook_root: resolve_existing(&crate::common::paths::playbook_root_from(Path::new(
-                home,
-            ))),
             protected: roots::protected(env)
-                .iter()
-                .map(|p| resolve_existing(p))
+                .into_iter()
+                .map(|(p, kept)| (resolve_existing(&p), kept))
                 .collect(),
             deny: roots::deny_set(env)
                 .into_iter()
@@ -277,6 +275,18 @@ impl Roots {
                 .iter()
                 .map(|p| resolve_existing(p))
                 .collect(),
+            // A footprint folder that links elsewhere would widen the
+            // allowance to wherever it points, so only a target that is still
+            // named for playbook is kept.
+            footprint: roots::footprint(env)
+                .iter()
+                .map(|p| resolve_existing(p))
+                .filter(|p| {
+                    p.file_name()
+                        .is_some_and(|n| n == "playbook" || n == "pragmatic-engineer")
+                })
+                .collect(),
+            worktrees: worktree_roots(home, cwd, &safe),
             install,
             configured,
             home: home.to_string(),
@@ -318,14 +328,12 @@ fn safe_roots(home: &str, cwd: &Path, dirs: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 /// The directories whose CONTENTS may be deleted, resolved through symlinks:
-/// the OS temp and cache folders, playbook's scratch folders, the shared
-/// `.worktrees` folder, `WORKTREE_BASE_DIR` and the configured roots. The
-/// macOS per-user temp folder and `tmp` folders under the playbook root are
-/// matched by shape in `strict_base`.
+/// the OS temp and cache folders, the shared `.worktrees` folder,
+/// `WORKTREE_BASE_DIR` and the configured roots. The macOS per-user temp
+/// folder is matched by shape in `strict_base`.
 fn scratch_roots(home: &str, cwd: &Path, env: &RootEnv, configured: &[String]) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = roots::temp_roots(env)
         .into_iter()
-        .chain(roots::playbook_scratch_roots(env))
         .map(|r| resolve_existing(&r))
         .collect();
     let repo = git_repo_root(cwd);
@@ -354,6 +362,36 @@ fn scratch_roots(home: &str, cwd: &Path, env: &RootEnv, configured: &[String]) -
             && (home.is_empty() || !keep_out.iter().any(|k| k.starts_with(r)))
     });
     roots
+}
+
+/// The folders playbook makes worktrees in: `.worktrees` next to the main
+/// checkout, `WORKTREE_BASE_DIR`, and `.claude/worktrees` in each safe root.
+/// One that is `/`, home or a folder above home is dropped.
+fn worktree_roots(home: &str, cwd: &Path, safe: &[PathBuf]) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = safe.iter().map(|r| r.join(".claude/worktrees")).collect();
+    if let Some(parent) =
+        main_checkout(git_repo_root(cwd).as_deref()).and_then(|m| m.parent().map(Path::to_path_buf))
+    {
+        roots.push(resolve_existing(&parent.join(".worktrees")));
+    }
+    if let Ok(base) = std::env::var("WORKTREE_BASE_DIR") {
+        if base.starts_with('/') {
+            roots.push(resolve_existing(Path::new(&base)));
+        }
+    }
+    let home = resolve_existing(Path::new(home));
+    roots.retain(|r| r.components().count() >= 2 && !home.starts_with(r));
+    roots
+}
+
+/// Whether `dir` is the root of a linked worktree: its `.git` is a file that
+/// points into a `worktrees` folder of the main repo. A main checkout and a
+/// submodule are not.
+fn is_linked_worktree(dir: &Path) -> bool {
+    std::fs::read_to_string(dir.join(".git")).is_ok_and(|text| {
+        text.strip_prefix("gitdir:")
+            .is_some_and(|to| to.contains("/worktrees/") || to.contains("\\worktrees\\"))
+    })
 }
 
 /// The main checkout of the repo, which is the repo itself outside a linked
@@ -514,13 +552,13 @@ fn resolve_parent(path: &Path) -> PathBuf {
     }
 }
 
-/// The scratch root `path` is at or below, or `None`: a listed root, the
-/// macOS per-user temp folder, or a `tmp` folder under the playbook root.
+/// The scratch root `path` is at or below, or `None`: a listed root or the
+/// macOS per-user temp folder.
 fn strict_base(path: &Path, roots: &Roots) -> Option<PathBuf> {
     if let Some(root) = roots.scratch.iter().find(|r| path.starts_with(r)) {
         return Some(root.clone());
     }
-    roots::macos_temp_base(path).or_else(|| roots::playbook_tmp_base(path, &roots.playbook_root))
+    roots::macos_temp_base(path)
 }
 
 fn is_glob_char(c: char) -> bool {
@@ -602,7 +640,7 @@ fn judge(target: &str, tilde: bool, below: bool, roots: &Roots) -> Result<(), Ru
         if let Some(group) = denied_by(&stored, glob_at.is_some(), last_glob, roots) {
             return Err(Rule::Denied(group));
         }
-        let holds_protected = |p: &PathBuf| {
+        let holds_protected = |(p, _): &&(PathBuf, Kept)| {
             if stored.starts_with(p) {
                 return true;
             }
@@ -620,20 +658,27 @@ fn judge(target: &str, tilde: bool, below: bool, roots: &Roots) -> Result<(), Ru
                 _ => true,
             }
         };
-        if roots.protected.iter().any(holds_protected) {
-            return Err(Rule::Protected);
-        }
-        let ends_lock = |text: &str| text.to_lowercase().ends_with(".lock");
-        let is_lock = stored.strip_prefix(&roots.playbook_root).is_ok_and(|rest| {
-            rest.components()
-                .any(|c| ends_lock(&c.as_os_str().to_string_lossy()))
-                || last_glob.is_some_and(ends_lock)
-        });
-        if is_lock {
-            return Err(Rule::Lock);
+        let held: Vec<&(PathBuf, Kept)> = roots.protected.iter().filter(holds_protected).collect();
+        // The denial names what is really there, or every item when none is.
+        let present: Vec<&&(PathBuf, Kept)> = held
+            .iter()
+            .filter(|(p, _)| stored.starts_with(p) || p.symlink_metadata().is_ok())
+            .collect();
+        let mut kept: Vec<Kept> = if present.is_empty() {
+            held.iter().map(|(_, k)| *k).collect()
+        } else {
+            present.iter().map(|(_, k)| *k).collect()
+        };
+        kept.dedup();
+        if !kept.is_empty() {
+            return Err(Rule::Protected(kept));
         }
         if repo_data(&stored, first_glob, last_glob, below, roots) {
             return Err(Rule::RepoRoot);
+        }
+        // Playbook's own folders go whole, the folder itself included.
+        if roots.footprint.iter().any(|f| dir.starts_with(f)) {
+            return Ok(());
         }
         if dir.starts_with(&roots.claude_dir) || roots.safe.iter().any(|r| dir.starts_with(r)) {
             return Ok(());
@@ -771,6 +816,7 @@ fn glob_matches(pattern: &str, name: &str) -> bool {
 
 /// Whether deleting `stored` would take a repo or worktree root or a `.git`
 /// with it, outside the OS temp folders, where a scratch clone may go whole.
+/// A linked worktree root in a folder playbook makes worktrees in may go.
 /// A glob at a root counts when it is bare (`*`, `.*`) or can match `.git`.
 /// `below` says the deletion stays under `stored`, as a `find` with a name
 /// test does, so a root itself is not taken.
@@ -783,7 +829,15 @@ fn repo_data(
 ) -> bool {
     let in_temp = roots.temp.iter().any(|t| stored.starts_with(t))
         || roots::macos_temp_base(stored).is_some();
-    if in_temp {
+    // A linked worktree root playbook made may go; its `.git` file and a main
+    // checkout in the same folder may not.
+    let made_worktree = first_glob.is_none()
+        && roots
+            .worktrees
+            .iter()
+            .any(|w| stored.starts_with(w) && stored != w)
+        && is_linked_worktree(stored);
+    if in_temp || made_worktree {
         return false;
     }
     if stored.components().any(|c| c.as_os_str() == ".git") {
@@ -819,7 +873,7 @@ fn denied_targets(targets: Vec<Target>, roots: &Roots) -> Vec<(String, Rule)> {
             // data block it.
             Target::Overwrite { text, tilde } => judge(&text, tilde, false, roots)
                 .err()
-                .filter(|r| matches!(r, Rule::Denied(_) | Rule::Protected | Rule::Lock))
+                .filter(|r| matches!(r, Rule::Denied(_) | Rule::Protected(_)))
                 .map(|r| (text, r)),
         })
         .collect()

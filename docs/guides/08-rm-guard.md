@@ -15,7 +15,7 @@ The guard reads the command the way the shell does, with the shared shell lexer,
 - `xargs rm` fed by `printf` or `echo` of literal words, judged by those words.
 - Python, Node, Perl and Ruby one-liners (`-c`, `-e`, a here-string, or a heredoc read from standard input) that call `shutil.rmtree`, `os.remove`, `fs.rmSync`, `unlink`, `FileUtils.rm_rf` and the like. A plain string path is judged; any other argument is blocked. A script file is not read.
 
-Two kinds of command change a file without deleting it: the target of a `>`, `2>` or `&>` redirect, and the operands of `chmod -R`, `chown -R` and `chgrp -R`. For these only the deny set and playbook's own data block, so `> ~/.zshrc` and `chmod -R 777 ~/.ssh` stay blocked while `cargo test > /tmp/log` is fine. `>>` appends and is never judged.
+Two kinds of command change a file without deleting it: the target of a `>`, `2>` or `&>` redirect, and the operands of `chmod -R`, `chown -R` and `chgrp -R`. For these only the deny set and protected playbook data block, so `> ~/.zshrc` and `chmod -R 777 ~/.ssh` stay blocked while `cargo test > /tmp/log` is fine. `>>` appends and is never judged.
 
 The guard follows the folder the shell is in. A relative target is judged against the `cwd` Claude Code sends with the command, and after `cd`, `pushd` or `popd` against the folder the shell changed into. A `cd` inside `( ... )` or `$( ... )` ends with the group. When a `cd` could fail and the next command still runs (after `;`, `||` or a line break rather than `&&`), the target is judged in both the new and the old folder. A folder the guard cannot name, such as `cd "$X"`, `popd` with nothing pushed, or `cd name` while `CDPATH` is set, makes a relative target unresolvable.
 
@@ -32,10 +32,22 @@ Paths are judged after `~`, `$HOME`, `..`, trailing slashes and every symlink ar
 | Allowed | How |
 | :- | :- |
 | The repo (or `PLAYBOOK_SAFE_ROOTS`) and `~/.claude` | Anything inside. A repo root, its `.git`, `~/.claude` itself and the Claude Code files in the deny set stay blocked. The repo is the one the command starts in, plus the repo of each folder it changes into with `cd`. A repo that is your home or holds it never counts, and a start folder outside any repo counts only when it is not home or above it. |
-| The `.worktrees` folder next to the main checkout, and `WORKTREE_BASE_DIR` | Contents only. `.worktrees/cargo-*` build folders are covered. |
+| The `.worktrees` folder next to the main checkout, and `WORKTREE_BASE_DIR` | Contents only. `.worktrees/cargo-*` build folders are covered. A linked worktree root there, or in `.claude/worktrees`, may go too, but never a main checkout or a `.git`. |
 | Temp and cache folders for your OS (table below) | Contents only. |
-| Playbook's scratch folders: `~/.config/playbook/tmp`, `staging`, `embedded`, `cc-state`, and any `tmp` folder deeper under `~/.config/playbook` | Contents only. |
-| Playbook's install leftovers: `playbook.<version>.bak` backups and `.playbook.*` staging files in the install folder (`$PLAYBOOK_BIN_DIR` or `~/.local/bin`), and the collector's launchd or systemd file. The binary and its `pb` and `pbtop` links stay blocked, because every hook runs the binary | By exact name or prefix. A Homebrew install is left to Homebrew. |
+| Playbook's own folders for your OS (table below) | Whole, the folder itself included, except the protected data below. |
+| Playbook's install files: the binary and its `pb` and `pbtop` links, `playbook.<version>.bak` backups and `.playbook.*` staging files in the install folder (`$PLAYBOOK_BIN_DIR` or `~/.local/bin`), and the collector's launchd or systemd file | By exact name or prefix. A Homebrew install is left to Homebrew. |
+
+Playbook's own folders per OS are built into the binary, with no config and no setup step. They come from `roots::footprint`, the one function the guard reads:
+
+| OS | Folders |
+| :- | :- |
+| macOS | `~/.config/playbook`, `~/.cache/playbook`, `~/.local/share/playbook`, `~/.local/state/playbook`, `~/Library/Caches/playbook`, `~/Library/Application Support/playbook`, `~/Library/Logs/playbook` |
+| Linux | `~/.config/playbook`, `~/.cache/playbook`, `~/.local/share/playbook`, `~/.local/state/playbook` |
+| macOS and Linux | `playbook` in `$XDG_CONFIG_HOME`, `$XDG_CACHE_HOME`, `$XDG_DATA_HOME` and `$XDG_STATE_HOME`, when the value is absolute |
+| Windows | `~/.config/playbook`, `%APPDATA%\playbook`, `%LOCALAPPDATA%\playbook` |
+| All | `~/.claude/plugins/cache/pragmatic-engineer` and `~/.claude/plugins/marketplaces/pragmatic-engineer` |
+
+Only a folder named `playbook` (or the plugin's `pragmatic-engineer`) counts, also after its symlinks are resolved, so the bare `~/.config`, `~/.cache` and `~/.local/share` stay blocked.
 
 Temp and cache folders per OS:
 
@@ -56,17 +68,17 @@ A temp folder from the environment (`$TMPDIR`, `%TEMP%` and the like) counts onl
 
 ## What stays blocked
 
-Playbook's own data is never deleted by `rm`, whatever root covers it, a configured root included:
+Playbook data that cannot be made again is never deleted by `rm`, whatever root covers it, a configured root included. The denial names each item and what to do instead:
 
-- the memory store `~/.config/playbook/memory`
-- `~/.config/playbook/data`, which holds `config.db`, `memory.db` and the usage database
-- plans, handoffs and per-repo config under `~/.config/playbook/repos`, and legacy org config under `orgs`
-- session state under `~/.config/playbook/runtime`: the spend ledger the auto mode cap reads, the auto-learn queue and old handoffs
-- the playbook binary and its `pb` and `pbtop` links
-- the effort ledger and its backups under `~/.config/playbook/effort`
-- the system prompt under `~/.config/playbook/prompts`, the legacy `playbook.db` and `config.json`
-- `~/.config/playbook` itself and every folder above it
-- any `.lock` folder under `~/.config/playbook`, which clears itself
+| Protected | Instead |
+| :- | :- |
+| the memory store `~/.config/playbook/memory` | `playbook memory export`, then ask the user |
+| `~/.config/playbook/data/config.db` with its `-wal` and `-shm` files | `playbook config export`, then ask the user |
+| plans, handoffs and per-repo config under `~/.config/playbook/repos` | `playbook plan cleanup <slug>` or `playbook plan cleanup --stale` for plan files; ask the user for the rest |
+| org config under `~/.config/playbook/orgs` | ask the user |
+| session state under `~/.config/playbook/runtime`, with the spend ledger the auto mode cap reads | ask the user |
+
+A folder that holds one of these, such as `~/.config/playbook` itself or `data`, is blocked too. Everything else playbook writes, such as `memory.db`, the usage database, `effort`, `prompts`, `config.json` and `tmp`, can be made again and may go.
 
 The built-in deny set beats every allowance, the repo and configured roots included. A folder that holds one of these paths is blocked too, so `rm -rf ~` and `rm -rf /private` stay blocked. The table is generated from `roots::DENY` in the guard, and a test keeps it in step.
 
@@ -136,7 +148,7 @@ The built-in deny set beats every allowance, the repo and configured roots inclu
 | `~/.claude/skills` | it and everything in it | Claude Code settings or transcripts | all |
 <!-- deny-table:end -->
 
-A repo or worktree root and anything in a `.git` folder stay blocked too, outside the OS temp folders, where a scratch clone may go whole. A glob at a repo root is blocked when it is bare (`*`, `.*`) or can match `.git`. Remove a linked worktree with `git worktree remove`. A `find` with a name, type or depth test is judged as deleting only below its start folder, so `find . -name '*.orig' -delete` at the repo root still works. `--no-preserve-root` is always blocked.
+A repo or worktree root and anything in a `.git` folder stay blocked too, outside the OS temp folders, where a scratch clone may go whole. A linked worktree root (its `.git` is a file pointing into the main repo's `worktrees` folder) in a folder playbook makes worktrees in may go. A glob at a repo root is blocked when it is bare (`*`, `.*`) or can match `.git`. `git worktree remove` is still the cleaner way to remove a linked worktree. A `find` with a name, type or depth test is judged as deleting only below its start folder, so `find . -name '*.orig' -delete` at the repo root still works. `--no-preserve-root` is always blocked.
 
 ## Reading a denial
 
@@ -147,8 +159,7 @@ Each denied target is listed with the rule that matched:
 | outside the allowed roots | The resolved path is in none of the folders above. The message shows where it resolved to. |
 | scratch root itself (contents only) | The target is a root folder, such as `/tmp`. Name a path inside it. |
 | bare glob | A glob the guard cannot judge, such as `/tmp/*`. |
-| protected playbook data | One of the paths in the list above. |
-| playbook lock folder | A `.lock` folder that clears itself. |
+| protected playbook data | One of the protected paths above, or a folder that holds one. |
 | unresolvable target | A command substitution, `<xargs input>`, a variable the guard cannot follow, or a relative path in a folder the guard cannot name. Run the `rm` as its own call with a literal absolute path. |
 | stray quote or shell character | A quote, backslash or shell syntax left inside the path. |
 | another user's home or a quoted ~ | `~user`, or a `~` inside quotes, which the shell does not expand. |
