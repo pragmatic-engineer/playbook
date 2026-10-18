@@ -157,7 +157,7 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
 /// or `/*` is accepted and means the same as the plain path, since a root
 /// always covers everything under it.
 fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
-    const CONSTRAINT: &str = "directories given as absolute or ~/ paths, at least two levels deep (one under ~/), with no .., quote or glob characters. A root covers everything under it, so a trailing /** is optional. Example: playbook config set --global hooks.rmGuard.allowedRoots '[\"~/Workspace/acme/.worktrees\",\"/opt/scratch\"]'";
+    const CONSTRAINT: &str = "directories given as absolute or ~/ paths, at least two levels deep (one under ~/), with no .., quote or glob characters. A root covers everything under it, so a trailing /** is optional. Example: playbook config set --global hooks.rmGuard.allowedRoots '[\"~/code/acme/.worktrees\",\"/opt/scratch\"]'";
     let bad = || ConfigError::OutOfRange {
         key: key.to_string(),
         value: value.to_string(),

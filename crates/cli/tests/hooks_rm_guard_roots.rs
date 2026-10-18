@@ -451,12 +451,12 @@ fn a_root_with_a_trailing_double_star_is_accepted_and_honoured() {
     let fx = Fx::new();
     let d = rm();
     let w = s(&fx.base.join("data/scratch"));
-    let value = format!(r#"["~/Workspace/acme/.worktrees/**","{w}/**"]"#);
+    let value = format!(r#"["~/code/acme/.worktrees/**","{w}/**"]"#);
 
     let out = fx.config_set(&value);
 
     assert!(out.status.success(), "{out:?}");
-    let plain = format!(r#"["~/Workspace/acme/.worktrees","{w}"]"#);
+    let plain = format!(r#"["~/code/acme/.worktrees","{w}"]"#);
     let printed = String::from_utf8_lossy(&out.stdout);
     assert!(
         printed.contains(&plain),
@@ -468,7 +468,7 @@ fn a_root_with_a_trailing_double_star_is_accepted_and_honoured() {
         .output()
         .expect("config get");
     let stored = String::from_utf8_lossy(&stored.stdout);
-    assert!(stored.contains("~/Workspace/acme/.worktrees"), "{stored}");
+    assert!(stored.contains("~/code/acme/.worktrees"), "{stored}");
     assert!(!stored.contains('*'), "stored without the glob: {stored}");
     assert!(!fx.denied(&format!("{d} -rf {w}/x"), &fx.repo, &[]));
     assert!(fx.denied(&format!("{d} -rf {w}"), &fx.repo, &[]));
