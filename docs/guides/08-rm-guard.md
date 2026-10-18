@@ -32,7 +32,7 @@ Temp and cache folders per OS:
 | OS | Folders |
 | :- | :- |
 | macOS | `/tmp`, `/private/tmp`, the per-user temp folder `/private/var/folders/*/*/T` (also reached as `/var/folders/...`), `$TMPDIR` and the path it resolves to, `~/Library/Caches`, `~/.cache` |
-| Linux | `/tmp`, `/var/tmp`, `$TMPDIR`, `$XDG_CACHE_HOME` when it is inside home, `~/.cache`, `/run/user/<uid>` |
+| Linux | `/tmp`, `/private/tmp`, `/var/tmp`, `$TMPDIR`, `$XDG_CACHE_HOME` when it is inside home, `~/.cache`, `/run/user/<uid>` |
 | Windows | `%TEMP%`, `%TMP%`, `%LOCALAPPDATA%\Temp` |
 | All | the folder `std::env::temp_dir()` returns, which covers the session scratchpad |
 

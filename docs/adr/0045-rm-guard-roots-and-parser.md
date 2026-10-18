@@ -40,7 +40,7 @@ All are contents only: the folder itself and every parent stay blocked, and a gl
 | macOS | `$TMPDIR` and the path it resolves to | The per-user temp folder as the hook sees it. Only an absolute value counts. |
 | macOS | `~/Library/Caches` | App caches, rebuilt on demand. |
 | macOS, Linux | `~/.cache` | Caches by definition. Covers `~/.cache/playbook`. |
-| Linux | `/tmp`, `/var/tmp`, `$TMPDIR` | System and per-user temp. |
+| Linux | `/tmp`, `/var/tmp`, `$TMPDIR` | System and per-user temp. `/private/tmp` stays listed on every OS, as the old guard had it. |
 | Linux | `$XDG_CACHE_HOME` | The user cache, only when it is inside home, so a value of `/` cannot widen the allowance. |
 | Linux | `/run/user/<uid>` | Per-session runtime files of this user, cleared at logout. The request named this root. Deleting a live socket here, such as an agent socket, can break a running service until the next login, so only a named path goes and a bare glob stays blocked. |
 | Windows | `%TEMP%`, `%TMP%`, `%LOCALAPPDATA%\Temp` | The user temp folders. |
