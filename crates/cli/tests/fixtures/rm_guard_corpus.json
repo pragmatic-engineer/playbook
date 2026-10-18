@@ -1,0 +1,1020 @@
+[
+  {
+    "id": "cd-repo-rel",
+    "cwd": "/Users/<user>",
+    "command": "cd /Users/<user>/code/acme/coda && rm -rf target/fake-claude",
+    "expect": "deny",
+    "want": "allow",
+    "class": "false positive",
+    "note": "relative path after cd into a repo"
+  },
+  {
+    "id": "cd-repo-rel-semi",
+    "cwd": "/Users/<user>",
+    "command": "cd /Users/<user>/code/acme/coda; rm bun.lock",
+    "expect": "deny",
+    "want": "allow",
+    "class": "false positive",
+    "note": "cd then ; then rm: both the old and new folder are judged"
+  },
+  {
+    "id": "cd-sub-rel",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "cd crates/coda-index/src && rm -f symbols.rs.bak",
+    "expect": "deny",
+    "want": "allow",
+    "class": "false positive",
+    "note": "relative cd inside the repo"
+  },
+  {
+    "id": "cwd-rel",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "rm crates/coda-providers/fake-claude-report.json",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "relative to the payload cwd"
+  },
+  {
+    "id": "cwd-rel-dist",
+    "cwd": "/Users/<user>/code/acme/factory/worker",
+    "command": "rm -rf dist",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "build output inside a repo"
+  },
+  {
+    "id": "cd-wt-rel",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cd /Users/<user>/code/pragmatic-engineer/.worktrees/playbook/usage-limits && rm -f ../pb-limits-bin.x",
+    "expect": "deny",
+    "want": "allow",
+    "class": "false positive",
+    "note": "../ from a worktree into the .worktrees folder"
+  },
+  {
+    "id": "cd-wt-tmp-trash",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cd /Users/<user>/code/pragmatic-engineer/.worktrees/ward-s4 && rm -rf .tmp-trash",
+    "expect": "deny",
+    "want": "allow",
+    "class": "false positive",
+    "note": "repo-local temp folder in a worktree"
+  },
+  {
+    "id": "cd-scratch-rel",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cd /private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad && rm -rf repo-config",
+    "expect": "deny",
+    "want": "allow",
+    "class": "false positive",
+    "note": "scratchpad clone, relative after cd"
+  },
+  {
+    "id": "cd-tmp-rel",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cd /tmp && rm -rf permuta-relay-check && mkdir -p permuta-relay-check/data",
+    "expect": "deny",
+    "want": "allow",
+    "class": "false positive",
+    "note": "relative after cd /tmp"
+  },
+  {
+    "id": "subshell-cd",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "(cd /Users/<user>/code/acme/coda && rm -f crates/coda-index/src/update_impl.tmp); git status",
+    "expect": "deny",
+    "want": "allow",
+    "class": "false positive",
+    "note": "cd inside a subshell"
+  },
+  {
+    "id": "subshell-restores",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "(cd /tmp && true); rm -f crates/x.tmp",
+    "expect": "deny",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "the subshell's cd ends with it"
+  },
+  {
+    "id": "pushd-rel",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "pushd /Users/<user>/code/acme/coda >/dev/null && rm -f probe.tmp.ts && popd",
+    "expect": "deny",
+    "want": "allow",
+    "class": "false positive",
+    "note": "pushd then relative"
+  },
+  {
+    "id": "cd-home-rel",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "cd ~ && rm -rf .ssh",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "cd ~ then a credential folder"
+  },
+  {
+    "id": "cd-unknown",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cd \"$SOMEWHERE\" && rm -rf build",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "cd to an unknown folder"
+  },
+  {
+    "id": "cd-escape-workspace",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cd /Users/<user>/code/pragmatic-engineer/.worktrees/playbook/usage-tui && rm -rf ../../../scratch-adv",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "resolves above the workspace, outside every root"
+  },
+  {
+    "id": "cd-dotdot-parent-repo",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "rm -rf ..",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "the parent of the repo"
+  },
+  {
+    "id": "cd-dot-root",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "rm -rf .",
+    "expect": "allow",
+    "want": "deny",
+    "class": "correct block",
+    "note": "the repo root itself"
+  },
+  {
+    "id": "rel-godot",
+    "cwd": "/Users/<user>/code/solo/lockstep/hosts/godot-capsule",
+    "command": "rm -rf ../godot-cache-backup .godot",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "../ stays inside the repo"
+  },
+  {
+    "id": "var-literal",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "S=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad; rm -rf $S/homebrew-tap",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "variable assigned a literal path"
+  },
+  {
+    "id": "var-literal-quoted",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "S=\"/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad/chunks\" ; rm -rf \"$S\" && mkdir -p \"$S\"",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "quoted variable"
+  },
+  {
+    "id": "var-braced",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "SP=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad; rm -rf \"${SP}/m4b-full\"",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "braced variable"
+  },
+  {
+    "id": "var-export",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "export OUT=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad/out; rm -f $OUT/report.txt",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "exported variable"
+  },
+  {
+    "id": "var-chain",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "S=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad; N=$S/negtest; rm -rf $N",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "a variable built from another"
+  },
+  {
+    "id": "var-for-literal",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "d=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad/fx; for f in a.json b.json; do rm -f \"$d/$f\"; done",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "for loop over literal words"
+  },
+  {
+    "id": "var-for-dynamic",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "d=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad; for f in $(ls $d); do rm -f \"$d/$f\"; done",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "for loop over a substitution"
+  },
+  {
+    "id": "var-unset",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf \"$WORK/build\"",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a variable the command never sets"
+  },
+  {
+    "id": "var-protected",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "P=/Users/<user>/.config/playbook/repos/pragmatic-engineer/playbook/plans; rm -f \"$P/gh-468.checkpoint.md\"",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a variable naming protected data"
+  },
+  {
+    "id": "var-sub-plans",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "PLANS_DIR=$(playbook path plans)\nrm -f \"$PLANS_DIR/gh-298.checkpoint.md\"",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a substitution the guard cannot run"
+  },
+  {
+    "id": "var-reassigned-unknown",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "S=/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad; S=$(cat where); rm -rf $S/x",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "reassigned from a substitution"
+  },
+  {
+    "id": "var-home",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf $HOME/.cache/pb-probe-home",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "$HOME"
+  },
+  {
+    "id": "var-tilde",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf ~/.cache/pb-probe-home",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "~"
+  },
+  {
+    "id": "var-pid",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "for t in shell/*.test.sh; do bash \"$t\" >/tmp/st.$$ 2>&1; done; rm -f /tmp/st.$$",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "$$ is digits only"
+  },
+  {
+    "id": "var-tmpdir",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "git checkout crates/coda-store/src/lib.rs && rm $TMPDIR/lib.rs.bak",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "$TMPDIR"
+  },
+  {
+    "id": "var-tmpdir-default",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -f \"${TMPDIR:-/tmp}/pm.$$.json\"",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "${TMPDIR:-/tmp}"
+  },
+  {
+    "id": "var-pwd",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "B=$PWD/.mut.bak; cp src/lib.rs $B; rm -f $B",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "$PWD"
+  },
+  {
+    "id": "var-pwd-sub",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "rm -rf \"$(pwd)/target/tmp\"",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "$(pwd)"
+  },
+  {
+    "id": "var-oldpwd",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cd /Users/<user>/code/acme/coda && cd /tmp && rm -rf \"$OLDPWD/target/x\"",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "$OLDPWD after two cds"
+  },
+  {
+    "id": "mktemp-d",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "d=$(mktemp -d); printf 'x' > $d/a.sh; rm -r $d",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "mktemp -d made by the same command"
+  },
+  {
+    "id": "mktemp-d-sub",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cd /tmp; d=$(mktemp -d); echo x>$d/f; rm $d/f; rm -rf $d",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "mktemp -d and a file in it"
+  },
+  {
+    "id": "mktemp-file",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "MSG_FILE=$(mktemp)\ncat > \"$MSG_FILE\" <<'EOF'\nfix: x\nEOF\ngit commit -F \"$MSG_FILE\"; rm -f \"$MSG_FILE\"",
+    "expect": "deny",
+    "want": "allow",
+    "class": "safe form that cannot be resolved",
+    "note": "mktemp file made by the same command"
+  },
+  {
+    "id": "mktemp-template",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "d=$(mktemp -d ./.tmp-XXXX); rm -rf $d",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a mktemp template the guard does not model"
+  },
+  {
+    "id": "wt-target",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf /Users/<user>/code/pragmatic-engineer/.worktrees/playbook/fresh-briefs/target",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "build output in a worktree"
+  },
+  {
+    "id": "wt-node-modules",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "rm -rf node_modules dist",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "build output in the repo"
+  },
+  {
+    "id": "wt-untracked",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook/.claude/worktrees/agent-a81c",
+    "command": "rm src/common/cli_opts.rs",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "a file in a worktree under .claude/worktrees"
+  },
+  {
+    "id": "wt-root-itself",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf /Users/<user>/code/pragmatic-engineer/playbook",
+    "expect": "allow",
+    "want": "deny",
+    "class": "correct block",
+    "note": "the repo root itself"
+  },
+  {
+    "id": "wt-dotgit",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "rm -f .git/refs/remotes/origin-live/main",
+    "expect": "allow",
+    "want": "deny",
+    "class": "correct block",
+    "note": "inside .git"
+  },
+  {
+    "id": "wt-dotgit-dir",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "rm -rf .git",
+    "expect": "allow",
+    "want": "deny",
+    "class": "correct block",
+    "note": ".git itself"
+  },
+  {
+    "id": "wt-escape-link",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "rm -rf linkout/x",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a link inside the repo that points outside"
+  },
+  {
+    "id": "wt-linked-root",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf /Users/<user>/code/pragmatic-engineer/.worktrees/rm-guard",
+    "expect": "allow",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a linked worktree root: use git worktree remove"
+  },
+  {
+    "id": "wt-cargo-dir",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf /Users/<user>/code/pragmatic-engineer/.worktrees/cargo-auto-budget; echo done",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "a cargo folder in .worktrees"
+  },
+  {
+    "id": "wt-glob-root",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "rm -rf *",
+    "expect": "allow",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a bare glob at the repo root"
+  },
+  {
+    "id": "wt-glob-sub",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "cd crates/coda-index/src && rm -f *-E",
+    "expect": "deny",
+    "want": "allow",
+    "class": "false positive",
+    "note": "a glob below the repo root"
+  },
+  {
+    "id": "wt-glob-dotstar",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "rm -rf .*",
+    "expect": "allow",
+    "want": "deny",
+    "class": "correct block",
+    "note": ".* can reach .."
+  },
+  {
+    "id": "other-repo-cd",
+    "cwd": "/Users/<user>/code/solo/dealwatch",
+    "command": "cd /Users/<user>/code/solo/dealwatch-backup && rm -rf /Users/<user>/code/solo/dealwatch-backup/verify",
+    "expect": "deny",
+    "want": "allow",
+    "class": "false positive",
+    "note": "a folder in the repo the command cd'd into"
+  },
+  {
+    "id": "flag-no-preserve",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf --no-preserve-root /tmp/pb-x",
+    "expect": "allow",
+    "want": "deny",
+    "class": "correct block",
+    "note": "--no-preserve-root is always blocked"
+  },
+  {
+    "id": "flag-long",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm --recursive --force -- /tmp/pb-long",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "long flags and --"
+  },
+  {
+    "id": "flag-fr",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -fr -v /tmp/pb-fr",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "-fr -v"
+  },
+  {
+    "id": "flag-dash-target",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -f -- -weird",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "a file named -weird in the repo"
+  },
+  {
+    "id": "glob-tmp-named",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -f /tmp/pb-*.log",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "named prefix"
+  },
+  {
+    "id": "glob-tmp-bare",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf /tmp/*",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "bare glob at a temp root"
+  },
+  {
+    "id": "glob-scratch",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -f /private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad/old-*",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "glob below a temp root"
+  },
+  {
+    "id": "glob-root",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf /*",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "everything at /"
+  },
+  {
+    "id": "glob-home",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf ~/*",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "everything in home"
+  },
+  {
+    "id": "glob-home-dot",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf $HOME/.*",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "every dot file in home"
+  },
+  {
+    "id": "prot-plans",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -f /Users/<user>/.config/playbook/repos/pragmatic-engineer/playbook/plans/gh-408.checkpoint.md",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "plans are protected"
+  },
+  {
+    "id": "prot-memory",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf ~/.config/playbook/memory",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "memory store"
+  },
+  {
+    "id": "prot-config",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -f ~/.config/playbook/config.json",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "config file"
+  },
+  {
+    "id": "deny-devnull",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf /dev/null 2>/dev/null; git fetch -q origin",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "/dev"
+  },
+  {
+    "id": "deny-homebrew",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm /opt/homebrew/Library/Taps/pragmatic-engineer-test/homebrew-tap",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "Homebrew owns /opt/homebrew"
+  },
+  {
+    "id": "deny-etc",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -f /etc/hosts",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "/etc"
+  },
+  {
+    "id": "deny-ssh",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -f ~/.ssh/known_hosts",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "credential folder"
+  },
+  {
+    "id": "deny-documents",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf ~/Documents/old",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a personal folder"
+  },
+  {
+    "id": "deny-zshrc",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm ~/.zshrc",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a shell rc file"
+  },
+  {
+    "id": "deny-claude-settings",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm ~/.claude/settings.json",
+    "expect": "allow",
+    "want": "deny",
+    "class": "correct block",
+    "note": "Claude Code settings"
+  },
+  {
+    "id": "deny-claude-projects",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf ~/.claude/projects",
+    "expect": "allow",
+    "want": "deny",
+    "class": "correct block",
+    "note": "Claude Code transcripts"
+  },
+  {
+    "id": "deny-home",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf ~",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "home itself"
+  },
+  {
+    "id": "deny-users",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf /Users/Shared/x",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "/Users/Shared"
+  },
+  {
+    "id": "allow-claude-plans",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -f ~/.claude/plans/old-plan.md",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "a plain file under ~/.claude"
+  },
+  {
+    "id": "allow-caches",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -rf ~/Library/Caches/pb-probe",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "~/Library/Caches is a temp root",
+    "os": "macos"
+  },
+  {
+    "id": "find-delete",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "find target/debug -name '*.d' -delete",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "find -delete under the repo"
+  },
+  {
+    "id": "find-delete-home",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "find ~ -name '.DS_Store' -delete",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "find -delete from home"
+  },
+  {
+    "id": "find-exec-rm",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "find /private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad/fx -name '*.tmp' -exec rm -f {} +",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "find -exec rm in the scratchpad"
+  },
+  {
+    "id": "xargs-literal",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "printf '%s\\n' a.tmp b.tmp | xargs rm -f",
+    "expect": "deny",
+    "want": "allow",
+    "class": "bypass, now classified",
+    "note": "xargs fed a literal list"
+  },
+  {
+    "id": "xargs-unknown",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "git ls-files -o | xargs rm -f",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "xargs input the guard cannot see"
+  },
+  {
+    "id": "git-clean-path",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "git clean -fd crates/coda-tui",
+    "expect": "allow",
+    "want": "allow",
+    "class": "bypass, now classified",
+    "note": "git clean with a path in the repo"
+  },
+  {
+    "id": "git-clean-home",
+    "cwd": "/Users/<user>",
+    "command": "git clean -fdx",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "git clean in the home folder"
+  },
+  {
+    "id": "git-worktree-remove",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "git worktree remove --force /Users/<user>/code/pragmatic-engineer/.worktrees/playbook/ci-quick-wins",
+    "expect": "allow",
+    "want": "allow",
+    "class": "bypass, now classified",
+    "note": "a worktree under .worktrees"
+  },
+  {
+    "id": "git-worktree-remove-home",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "git worktree remove --force ~/Documents/wt",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "a worktree in a denied folder"
+  },
+  {
+    "id": "cargo-clean",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "cargo clean",
+    "expect": "allow",
+    "want": "allow",
+    "class": "bypass, now classified",
+    "note": "cargo clean in the repo"
+  },
+  {
+    "id": "unlink",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "unlink crates/x.tmp",
+    "expect": "allow",
+    "want": "allow",
+    "class": "bypass, now classified",
+    "note": "unlink in the repo"
+  },
+  {
+    "id": "unlink-ssh",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "unlink ~/.ssh/id_ed25519",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "unlink of a credential file"
+  },
+  {
+    "id": "rmdir",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "rmdir crates/empty",
+    "expect": "allow",
+    "want": "allow",
+    "class": "bypass, now classified",
+    "note": "rmdir in the repo"
+  },
+  {
+    "id": "rmdir-etc",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rmdir /etc/x",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "rmdir in /etc"
+  },
+  {
+    "id": "shred",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "shred -u ~/.aws/credentials",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "shred of a credential file"
+  },
+  {
+    "id": "trash",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "trash dist",
+    "expect": "allow",
+    "want": "allow",
+    "class": "bypass, now classified",
+    "note": "trash in the repo"
+  },
+  {
+    "id": "py-rmtree",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "python3 -c 'import shutil; shutil.rmtree(\"/private/tmp/claude-501/-Users-me-code-pragmatic-engineer-playbook/0f1e2d3c/scratchpad/venv\")'",
+    "expect": "allow",
+    "want": "allow",
+    "class": "bypass, now classified",
+    "note": "python rmtree of a literal scratch path"
+  },
+  {
+    "id": "py-rmtree-home",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "python3 -c 'import shutil,os; shutil.rmtree(os.path.expanduser(\"~\"))'",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "python rmtree of a computed path"
+  },
+  {
+    "id": "py-remove-memory",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "python3 -c \"import os; os.remove('/Users/<user>/.config/playbook/data/config.db')\"",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "python os.remove of protected data"
+  },
+  {
+    "id": "py-heredoc-remove",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "python3 - <<'EOF'\nimport os\nos.remove('crates/x.new')\nEOF",
+    "expect": "allow",
+    "want": "allow",
+    "class": "bypass, now classified",
+    "note": "python heredoc removing a repo file"
+  },
+  {
+    "id": "py-no-delete",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "python3 - <<'EOF'\np='crates/x.rs'\ns=open(p).read()\nopen(p,'w').write(s.replace('a','b'))\nEOF",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "python edit, deletes nothing"
+  },
+  {
+    "id": "node-rmsync",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "node -e \"require('fs').rmSync('/etc/x', {recursive: true})\"",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "node rmSync in /etc"
+  },
+  {
+    "id": "perl-unlink",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "perl -e 'unlink \"crates/x.tmp\"'",
+    "expect": "allow",
+    "want": "allow",
+    "class": "bypass, now classified",
+    "note": "perl unlink in the repo"
+  },
+  {
+    "id": "truncate-memory",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "truncate -s 0 ~/.config/playbook/data/memory.db",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "truncate of protected data"
+  },
+  {
+    "id": "redirect-config",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "echo '{}' > ~/.config/playbook/config.json",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "redirect over protected data"
+  },
+  {
+    "id": "redirect-zshrc",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "echo 'x' > ~/.zshrc",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "redirect over a shell rc file"
+  },
+  {
+    "id": "redirect-append-ok",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "echo 'x' >> /tmp/pb-log.txt",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "append is not a deletion"
+  },
+  {
+    "id": "redirect-tmp",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cargo test > /tmp/pb-test.log 2>&1",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "ordinary redirect into /tmp"
+  },
+  {
+    "id": "dd-of",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "dd if=/dev/zero of=/Users/<user>/.config/playbook/data/usage.db bs=1 count=1",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "dd over protected data"
+  },
+  {
+    "id": "chmod-ssh",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "chmod -R 777 ~/.ssh",
+    "expect": "allow",
+    "want": "deny",
+    "class": "bypass, now classified",
+    "note": "recursive chmod of a credential folder"
+  },
+  {
+    "id": "chmod-repo",
+    "cwd": "/Users/<user>/code/acme/coda",
+    "command": "chmod -R u+w target",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "recursive chmod in the repo"
+  },
+  {
+    "id": "data-grep",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "grep -rn \"rm -rf\" crates/",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "a grep pattern"
+  },
+  {
+    "id": "data-commit",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "git commit -m 'fix: stop rm -rf /etc in tests'",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "a commit message"
+  },
+  {
+    "id": "data-heredoc-cat",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cat > /tmp/pb-x.sh <<'EOF'\nrm -rf \"$S\"\nEOF",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "a heredoc read by cat"
+  }
+]
