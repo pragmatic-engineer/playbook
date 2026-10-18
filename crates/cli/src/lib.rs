@@ -448,6 +448,7 @@ pub enum Command {
     /// Runs the migrations that write only playbook's own files, then records
     /// this binary as the one that ran them. The ones that run once start only
     /// after an upgrade, and the checks that repair a file run every time.
+    /// A migration waits for the release named in its `since`.
     /// Nothing runs after a downgrade. A change to Claude Code settings or a
     /// shell file prints the `playbook setup` command that applies it, and a
     /// report prints its own fix. It never writes Claude Code settings.
@@ -459,7 +460,7 @@ pub enum Command {
     ///
     /// Example: `playbook migrate --status`
     Migrate {
-        /// List each migration with its scope and state, and the recorded and running versions, writing nothing
+        /// List each migration with the release that ships it, its scope and state, and the recorded and running versions, writing nothing
         #[arg(long, conflicts_with = "dry_run")]
         status: bool,
         /// Show the migrations a run would start and what needs you, writing nothing

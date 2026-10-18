@@ -84,11 +84,15 @@ fn render_status(record: &Record, plan: &[Planned]) -> String {
         recorded_line(record)
     );
     let width = plan.iter().map(|p| p.id.len()).max().unwrap_or(0);
-    let since = plan.iter().map(|p| p.since.len()).max().unwrap_or(0);
+    let since = plan
+        .iter()
+        .map(|p| p.since.as_str().len())
+        .max()
+        .unwrap_or(0);
     for p in plan {
         text.push_str(&format!(
             "{:<since$}  {:<width$}  {:<10}  {:<7}  {}\n",
-            p.since,
+            p.since.as_str(),
             p.id,
             p.kind,
             p.scope,
@@ -154,7 +158,7 @@ fn status_json(record: &Record, plan: &[Planned]) -> Value {
             };
             json!({
                 "id": p.id,
-                "since": p.since,
+                "since": p.since.as_str(),
                 "kind": p.kind,
                 "scope": p.scope,
                 "state": p.state.code(),
@@ -225,11 +229,18 @@ mod tests {
     fn planned(id: &'static str, scope: &'static str, state: State, runs: bool) -> Planned {
         Planned {
             id,
-            since: "0.36.0",
+            since: migrate::Since::At("0.36.0"),
             kind: "idempotent",
             scope,
             state,
             runs,
+        }
+    }
+
+    fn planned_next() -> Planned {
+        Planned {
+            since: migrate::Since::Next,
+            ..planned("0021-e", "owned", State::Unreleased, false)
         }
     }
 
@@ -315,6 +326,15 @@ mod tests {
         assert_eq!(value["migrations"][0]["state"], "every_run");
         assert_eq!(value["migrations"][0]["since"], "0.36.0");
         assert_eq!(value["migrations"][0]["id"], "0001-a");
+        let next_text = render_status(&record(None, 0), &[planned_next()]);
+        let next_value = status_json(&record(None, 0), &[planned_next()]);
+        assert!(
+            next_text.contains("next  0021-e  idempotent  owned    waits for the next release"),
+            "{next_text}"
+        );
+        assert_eq!(next_value["migrations"][0]["since"], "next");
+        assert_eq!(next_value["migrations"][0]["state"], "unreleased");
+        assert_eq!(next_value["migrations"][0]["runs"], false);
         assert_eq!(value["migrations"][2]["state"], "open");
         assert_eq!(value["running"]["binary"], env!("CARGO_PKG_VERSION"));
     }

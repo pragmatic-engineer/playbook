@@ -384,3 +384,22 @@ fn prepare_refuses_a_version_that_is_not_plain() {
     assert!(!out.status.success());
     assert_eq!(r.read(MIGRATIONS), registry_with(&[r#""next""#]));
 }
+
+#[test]
+fn prepare_refuses_a_version_that_is_already_tagged() {
+    // Arrange: 1.0.0 is out, so writing it over next would be wrong.
+    let r = Repo::new("1.0.0", &["v1.0.0"]);
+    r.write(MIGRATIONS, &registry_with(&[r#""next""#]));
+
+    // Act
+    let out = r.script("release-prepare.sh", &["1.0.0"]);
+
+    // Assert
+    assert!(!out.status.success());
+    assert!(
+        text_of(&out).contains("already released"),
+        "{}",
+        text_of(&out)
+    );
+    assert_eq!(r.read(MIGRATIONS), registry_with(&[r#""next""#]));
+}

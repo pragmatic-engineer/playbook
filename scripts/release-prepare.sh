@@ -31,6 +31,11 @@ version="${1:-}"
 printf '%s' "$version" | grep -Eq "$PLAIN_VERSION" || fail "version '$version' is not MAJOR.MINOR.PATCH"
 
 MIGRATIONS="crates/cli/src/init/migrate.rs"
+# A released version would mark the next migrations as shipped in a build
+# that does not run them, so refuse a version that already has its tag.
+if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+  fail "v$version is already released; give the version of the next release"
+fi
 if [ -f "$MIGRATIONS" ]; then
   filled="$(mktemp)"
   sed -E "s/since: \"next\",/since: \"$version\",/" "$MIGRATIONS" > "$filled" \

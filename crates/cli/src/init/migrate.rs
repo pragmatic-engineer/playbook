@@ -140,8 +140,30 @@ pub enum Since {
     At(&'static str),
 }
 
+impl Since {
+    /// The value as written in the registry: `X.Y.Z` or `next`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Since::Next => NEXT,
+            Since::At(v) => v,
+        }
+    }
+}
+
 /// The `since` of a migration that waits for the next release.
 pub const NEXT: &str = "next";
+
+/// Whether `v` is a plain `MAJOR.MINOR.PATCH`, the only form a released
+/// `since` takes.
+fn plain_version(v: &str) -> bool {
+    let parts: Vec<&str> = v.split('.').collect();
+    parts.len() == 3
+        && parts.iter().all(|p| {
+            !p.is_empty()
+                && p.bytes().all(|b| b.is_ascii_digit())
+                && (p.len() == 1 || !p.starts_with('0'))
+        })
+}
 
 impl Migration {
     pub fn since(&self) -> Since {
@@ -153,13 +175,15 @@ impl Migration {
     }
 
     /// Whether a binary at `running` ships this migration: its `since` is a
-    /// version no higher than `running`. `next` is matched first, because
-    /// `update::resolve::compare` would read the word as 0.
+    /// plain version no higher than `running`. `next` and any other value
+    /// stay unreleased, because `update::resolve::compare` reads a word as 0
+    /// and would ship it everywhere.
     pub fn released_in(&self, running: &str) -> bool {
         match self.since() {
             Since::Next => false,
             Since::At(v) => {
-                crate::update::resolve::compare(v, running) != std::cmp::Ordering::Greater
+                plain_version(v)
+                    && crate::update::resolve::compare(v, running) != std::cmp::Ordering::Greater
             }
         }
     }
@@ -167,19 +191,20 @@ impl Migration {
 
 /// The registry entries this binary ships, in apply order (ADR 0046).
 pub fn active() -> Vec<Migration> {
-    active_for(env!("CARGO_PKG_VERSION"))
+    shipped(registry(), env!("CARGO_PKG_VERSION"))
 }
 
-/// The registry entries a binary at `running` ships, in apply order.
-pub fn active_for(running: &str) -> Vec<Migration> {
-    registry()
+/// The entries of `migrations` a binary at `running` ships, in order.
+pub fn shipped(migrations: Vec<Migration>, running: &str) -> Vec<Migration> {
+    migrations
         .into_iter()
         .filter(|m| m.released_in(running))
         .collect()
 }
 
 /// Every migration in apply order, the unreleased ones last. Append only;
-/// never reorder or rename an id, and give a new one the `since` of `NEXT`.
+/// never reorder or rename an id. A new one takes `next` as its `since`,
+/// written as the one line form `scripts/release-prepare.sh` replaces.
 pub fn registry() -> Vec<Migration> {
     vec![
         Migration {
@@ -986,7 +1011,12 @@ pub struct OpenItem {
 /// The open `Consent` and `Report` items, writing nothing. `only` limits the
 /// checks to those ids.
 pub fn open_items(ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
-    active()
+    open_items_in(&active(), ctx, only)
+}
+
+/// [`open_items`] over `migrations`.
+fn open_items_in(migrations: &[Migration], ctx: &Ctx, only: Option<&[String]>) -> Vec<OpenItem> {
+    migrations
         .iter()
         .filter(|m| only.is_none_or(|ids| ids.iter().any(|id| id == m.id)))
         .filter_map(|m| match m.scope {
@@ -1099,7 +1129,7 @@ impl State {
 pub struct Planned {
     pub id: &'static str,
     /// The release that ships it, or `next`.
-    pub since: &'static str,
+    pub since: Since,
     pub kind: &'static str,
     pub scope: &'static str,
     pub state: State,
@@ -1163,7 +1193,7 @@ fn planned(ctx: &Ctx, state_ready: bool, applied_ids: &[String]) -> Vec<Planned>
             Planned {
                 runs: heal_runs(m) && !matches!(state, State::Applied | State::Unreleased),
                 id: m.id,
-                since: m.since,
+                since: m.since(),
                 kind: match m.kind {
                     Kind::Auto => "auto",
                     Kind::Idempotent => "idempotent",
@@ -1883,6 +1913,10 @@ mod tests {
             (NEXT, "0.37.0", false),
             (NEXT, "999.0.0", false),
             (NEXT, "0.0.0", false),
+            // A typo stays unreleased, where `compare` would read it as 0.
+            ("Next", "0.37.0", false),
+            ("0.37", "0.37.0", false),
+            ("v0.36.0", "0.37.0", false),
         ];
 
         for (since, running, want) in cases {
@@ -1898,7 +1932,7 @@ mod tests {
     fn a_build_runs_and_lists_only_the_migrations_it_ships() {
         // Arrange
         let ids = |running: &str| -> Vec<&'static str> {
-            active_for(running).iter().map(|m| m.id).collect()
+            shipped(registry(), running).iter().map(|m| m.id).collect()
         };
 
         // Act
@@ -1917,6 +1951,47 @@ mod tests {
             .collect();
         assert!(unreleased.iter().all(|id| !now.contains(id)));
         assert_eq!(now.len() + unreleased.len(), registry().len());
+    }
+
+    fn always_open(_: &Ctx) -> Option<String> {
+        Some("open".into())
+    }
+
+    #[test]
+    fn a_next_entry_never_runs_or_opens_where_a_released_one_does() {
+        // Arrange: each kind and scope twice, once released and once next.
+        // The next ones panic if they run.
+        let consent = Scope::Consent {
+            check: always_open,
+            command: "playbook setup",
+        };
+        let entry = |id, since, kind, scope, run| Migration {
+            id,
+            since,
+            kind,
+            scope,
+            run,
+        };
+        let list = vec![
+            entry("auto", "0.1.0", Kind::Auto, Scope::Owned, order_a),
+            entry("consent", "0.1.0", Kind::Idempotent, consent, repeats),
+            entry("auto-next", NEXT, Kind::Auto, Scope::Owned, never),
+            entry("idem-next", NEXT, Kind::Idempotent, Scope::Owned, never),
+            entry("warn-next", NEXT, Kind::Manual, Scope::Report, never),
+            entry("consent-next", NEXT, Kind::Idempotent, consent, never),
+        ];
+        let h = home("next-gate");
+
+        // Act
+        let ships = shipped(list, "0.37.0");
+        let report = run_with(&ships, &ctx(&h));
+        let open = open_items_in(&ships, &ctx(&h), None);
+
+        // Assert
+        let ids: Vec<&str> = ships.iter().map(|m| m.id).collect();
+        assert_eq!(ids, ["auto", "consent"]);
+        assert!(!report.failed, "{:?}", report.warnings);
+        assert_eq!(open.iter().map(|i| i.id).collect::<Vec<_>>(), ["consent"]);
     }
 
     #[test]
@@ -1941,17 +2016,6 @@ mod tests {
         }
     }
 
-    /// Whether `v` is a plain `MAJOR.MINOR.PATCH`.
-    fn plain_version(v: &str) -> bool {
-        let parts: Vec<&str> = v.split('.').collect();
-        parts.len() == 3
-            && parts.iter().all(|p| {
-                !p.is_empty()
-                    && p.bytes().all(|b| b.is_ascii_digit())
-                    && (p.len() == 1 || !p.starts_with('0'))
-            })
-    }
-
     #[test]
     fn every_migration_names_a_release_in_order_and_a_unique_id() {
         // Arrange
@@ -1971,7 +2035,7 @@ mod tests {
             if let Since::At(v) = since {
                 assert!(plain_version(v), "{}: since {v} is not X.Y.Z", m.id);
                 assert!(
-                    crate::update::resolve::compare(v, running) != std::cmp::Ordering::Greater,
+                    m.released_in(running),
                     "{}: since {v} is above this build {running}; use next",
                     m.id
                 );
