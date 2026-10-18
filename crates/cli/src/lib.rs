@@ -340,13 +340,6 @@ pub enum Command {
         #[arg(long)]
         remove_binary: bool,
     },
-    /// Retired: prints one comment line so an old rc line still loads (ADR 0044)
-    #[command(hide = true)]
-    ShellInit {
-        /// Target shell (default: the one named by `$SHELL`)
-        #[arg(long, value_parser = ["bash", "zsh"])]
-        shell: Option<String>,
-    },
     /// Update playbook to a published release
     ///
     /// Downloads the release, checks its SHA256 sum and, when `gh` is
@@ -581,8 +574,7 @@ pub enum Command {
     /// Start a Claude Code session, or manage sessions and worktrees
     ///
     /// With no subcommand, starts a session with the playbook prompt and model
-    /// chain (this replaces the old `ccc` shell function). Any other arguments go to
-    /// claude as they are. The subcommands do the housekeeping: list sessions,
+    /// chain. Any other arguments go to claude as they are. The subcommands do the housekeeping: list sessions,
     /// prune state, clear caches, and create worktrees. `pb` is an alias for
     /// `playbook`, so `pb cc` works too.
     ///
@@ -940,17 +932,13 @@ pub enum Command {
 
 impl Command {
     /// Commands that run many times a session or inside other commands:
-    /// hooks, the status line, `shell-init` (every new shell), `version`, and
+    /// hooks, the status line, `version`, and
     /// the hidden `json` helpers that hook scripts call. Steps that run before
     /// a command (the first-run heal, the update check) skip them.
     pub fn is_hot_path(&self) -> bool {
         matches!(
             self,
-            Command::Hook { .. }
-                | Command::Statusline
-                | Command::ShellInit { .. }
-                | Command::Version
-                | Command::Json { .. }
+            Command::Hook { .. } | Command::Statusline | Command::Version | Command::Json { .. }
         )
     }
 
@@ -2475,7 +2463,7 @@ mod tests {
         // Assert
         let mut hidden = hidden;
         hidden.sort();
-        assert_eq!(hidden, ["hook", "init", "json", "shell-init"]);
+        assert_eq!(hidden, ["hook", "init", "json"]);
         assert!(Cli::command()
             .try_get_matches_from(["playbook", "json", "array-length"])
             .is_ok());

@@ -8,6 +8,11 @@
 //! 3 ms to build. These forms are recognised from the raw arguments. Anything
 //! else, including a wrong name, an extra argument or a flag, returns `None`
 //! and falls through to clap, so `--help` and every error message are unchanged.
+//!
+//! `shell-init` is the one removed command recognised here (ADR 0044). An old
+//! rc line runs `eval "$(playbook shell-init)"` on every shell start, so it
+//! gets one line on stderr, nothing on stdout and exit 0 in place of clap's
+//! error. Remove this case at the 1.0 release.
 
 use crate::HookName;
 use clap::ValueEnum;
@@ -19,7 +24,14 @@ pub enum Fast {
     Hook(HookName),
     Statusline,
     Version,
+    /// `playbook shell-init`, removed: print `SHELL_INIT_REMOVED` on stderr
+    /// and exit 0.
+    RemovedShellInit,
 }
+
+/// What `playbook shell-init` prints on stderr since the command was removed.
+pub const SHELL_INIT_REMOVED: &str = "playbook shell-init was removed (ADR 0044). \
+Delete the line that runs it from your shell rc file, or run: playbook setup";
 
 /// The fast command for `args` (the full argv, program name first), if any.
 pub fn classify(args: &[OsString]) -> Option<Fast> {
@@ -31,6 +43,8 @@ pub fn classify(args: &[OsString]) -> Option<Fast> {
         }
         ("statusline", 2) => Some(Fast::Statusline),
         ("--version" | "-V", 2) => Some(Fast::Version),
+        // Old rc lines may pass `--shell zsh` or `--shell bash`.
+        ("shell-init", _) => Some(Fast::RemovedShellInit),
         _ => None,
     }
 }
@@ -69,6 +83,19 @@ mod tests {
     }
 
     #[test]
+    fn the_removed_shell_init_is_recognised_with_or_without_its_old_flag() {
+        for parts in [
+            &["playbook", "shell-init"][..],
+            &["playbook", "shell-init", "--shell", "zsh"],
+        ] {
+            assert!(
+                matches!(classify(&argv(parts)), Some(Fast::RemovedShellInit)),
+                "{parts:?}"
+            );
+        }
+    }
+
+    #[test]
     fn anything_else_falls_through_to_clap() {
         for parts in [
             &["playbook"][..],
@@ -81,6 +108,9 @@ mod tests {
             &["playbook", "--version", "x"],
             &["playbook", "--help"],
             &["playbook", "config", "list"],
+            &["playbook", "shell-ini"],
+            &["playbook", "Shell-Init"],
+            &["playbook", "shell"],
         ] {
             assert!(classify(&argv(parts)).is_none(), "{parts:?}");
         }

@@ -10,22 +10,12 @@ use std::path::{Path, PathBuf};
 
 /// Which shell family the rc-file wiring targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShellKind {
+enum ShellKind {
     Bash,
     Zsh,
 }
 
 impl ShellKind {
-    /// Detect a shell family from a `$SHELL` value (e.g. `/bin/zsh`).
-    pub fn detect(shell_env: &str) -> Option<ShellKind> {
-        let basename = shell_env.rsplit('/').next().unwrap_or(shell_env);
-        match basename {
-            "zsh" => Some(ShellKind::Zsh),
-            "bash" => Some(ShellKind::Bash),
-            _ => None,
-        }
-    }
-
     /// The rc file this shell reads on startup, relative to `$HOME`.
     fn rc_file_name(self) -> &'static str {
         match self {
@@ -67,17 +57,17 @@ const BLOCK_COMMENTS: [&str; 2] = [
     "# playbook launchers (cc/ccd)",
 ];
 
-/// The `eval` line without the guard, as a user may write it by hand.
-const BARE_EVAL: &str = "eval \"$(playbook shell-init)\"";
-
-/// What a strip does with a hand-written `BARE_EVAL` line.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum BareEval {
-    /// Uninstall removes everything playbook-related.
-    Remove,
-    /// Migration 0018 keeps a line the user wrote, since it is a harmless no-op.
-    Keep,
-}
+/// The `eval` line without the guard, as a user may write it by hand, with
+/// and without the old `--shell` flag. The `shell-init` command is gone, so
+/// this line now prints a notice on every shell start, and migration 0018
+/// removes it too. Only a line that starts at column 0 matches: an indented
+/// one may be the only command of the user's own `if` block, and bash
+/// rejects an empty `then` body.
+const BARE_EVALS: [&str; 3] = [
+    "eval \"$(playbook shell-init)\"",
+    "eval \"$(playbook shell-init --shell zsh)\"",
+    "eval \"$(playbook shell-init --shell bash)\"",
+];
 
 /// An rc file that holds a retired launcher line, and whether setup can
 /// rewrite it.
@@ -106,7 +96,7 @@ pub struct RcStrip {
 /// changed file is first copied to `<rc>.bak-<stamp>`.
 pub fn strip_rc_files(home: &Path, stamp: u64, binary_path: bool, dry_run: bool) -> Vec<RcStrip> {
     rc_rewrites(home, |existing, kind| {
-        let content = strip_launcher(existing, kind, BareEval::Remove);
+        let content = strip_launcher(existing, kind);
         if !binary_path {
             return content;
         }
@@ -140,8 +130,8 @@ pub fn retired_rc_files(home: &Path) -> Vec<PathBuf> {
 }
 
 /// Remove the retired launcher lines from each writable rc file under
-/// `home`, after a copy to `<rc>.bak-<stamp>`. A bare hand-written `eval`
-/// stays. Files setup cannot rewrite are left out.
+/// `home`, after a copy to `<rc>.bak-<stamp>`, the bare hand-written `eval`
+/// included. Files setup cannot rewrite are left out.
 pub fn strip_retired_rc_lines(home: &Path, stamp: u64) -> Vec<RcStrip> {
     retired_rewrites(home)
         .into_iter()
@@ -151,9 +141,7 @@ pub fn strip_retired_rc_lines(home: &Path, stamp: u64) -> Vec<RcStrip> {
 }
 
 fn retired_rewrites(home: &Path) -> Vec<(PathBuf, Vec<u8>)> {
-    rc_rewrites(home, |existing, kind| {
-        strip_launcher(existing, kind, BareEval::Keep)
-    })
+    rc_rewrites(home, strip_launcher)
 }
 
 /// Each shell's rc file under `home` that `rewrite` changes, with its new content.
@@ -210,14 +198,16 @@ fn apply(rc_file: PathBuf, content: &[u8], stamp: u64, dry_run: bool) -> RcStrip
 /// `content` without the launcher lines, a lone marker comment, and a
 /// launchers marker comment right above a removed line. `None` when there
 /// was nothing to remove.
-fn strip_launcher(content: &[u8], shell_kind: ShellKind, bare_eval: BareEval) -> Option<Vec<u8>> {
+fn strip_launcher(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>> {
     strip_lines(
         content,
         |lines, i| {
             let line = lines[i];
             let trimmed = line.trim_ascii();
             let ours = trimmed == SOURCE_LINE.as_bytes()
-                || (bare_eval == BareEval::Remove && trimmed == BARE_EVAL.as_bytes())
+                || BARE_EVALS
+                    .iter()
+                    .any(|e| line.trim_ascii_end() == e.as_bytes())
                 || is_block_comment(line);
             usize::from(ours || is_legacy_source_line(line, shell_kind))
         },

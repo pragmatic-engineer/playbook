@@ -4,7 +4,6 @@
 use clap::{CommandFactory, Parser};
 use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
-use playbook::init::shim::ShellKind;
 use playbook::{
     adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor,
     effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
@@ -71,6 +70,10 @@ fn main() {
         Some(playbook::fastpath::Fast::Statusline) => std::process::exit(statusline::run()),
         Some(playbook::fastpath::Fast::Version) => {
             print!("{}", playbook::fastpath::version_text());
+            return;
+        }
+        Some(playbook::fastpath::Fast::RemovedShellInit) => {
+            eprintln!("{}", playbook::fastpath::SHELL_INIT_REMOVED);
             return;
         }
         None => {}
@@ -341,13 +344,6 @@ fn main() {
                     );
                 }
             }
-        }
-        Command::ShellInit { shell } => {
-            let kind = shell
-                .or_else(|| std::env::var("SHELL").ok())
-                .and_then(|s| ShellKind::detect(&s))
-                .unwrap_or(ShellKind::Bash);
-            print!("{}", init::shell_init::script(kind));
         }
         Command::Uninstall {
             yes,

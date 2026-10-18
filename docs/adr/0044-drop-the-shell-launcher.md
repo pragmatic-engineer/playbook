@@ -1,9 +1,9 @@
 # ADR-0044: Drop the Shell Launcher and Turn Every Setup Part On With `--yes`
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended on 2026-10-19, see [Amendment 2026-10-19: remove `shell-init`](#amendment-2026-10-19-remove-shell-init).
 - **Date created:** 2026-10-18
-- **Date modified:** 2026-10-18
-- **Amends:** [ADR 0007](0007-rust-binary-for-hooks-and-launcher.md), which kept a small shell function per shell family for the `cd` into a worktree. Decision 6 of [ADR 0034](0034-self-healing-upgrades.md), for migration `0007-shell-init-rc-line`. The `--yes` defaults in [ADR 0033](0033-telemetry-on-by-default.md), [ADR 0042](0042-attribution-off-in-setup.md) and [ADR 0043](0043-collector-service-in-setup.md), which this record extends to every part.
+- **Date modified:** 2026-10-19
+- **Amends:** [ADR 0007](0007-rust-binary-for-hooks-and-launcher.md), which kept a small shell function per shell family for the `cd` into a worktree. Decision 6 of [ADR 0034](0034-self-healing-upgrades.md), for migration `0007-shell-init-rc-line`. The `--yes` defaults in [ADR 0033](0033-telemetry-on-by-default.md), [ADR 0042](0042-attribution-off-in-setup.md) and [ADR 0043](0043-collector-service-in-setup.md), which this record extends to every part. Decision 5 of [ADR 0040](0040-rename-init-to-setup.md), which kept the `shell-init` name, through the amendment of 2026-10-19.
 
 ## Context
 
@@ -74,3 +74,15 @@ The user decided: the shell line goes. `pb cc` must work and load the playbook s
 - A user who used `claude` through the function now types `pb cc` to get the playbook prompt, effort default and agent variants. Plain `claude`, the IDE and the desktop app start with Claude Code's own system prompt, and the guides say so. The commits carry a `BREAKING CHANGE:` footer (ADR 0037).
 - A launch that enters a worktree leaves the shell where it was.
 - `plugins/playbook/commands/setup.md` drops the two parts, maps its old `--install-aliases` to nothing, and its Questions table shows yes as the default for the system prompt and short name.
+
+## Amendment 2026-10-19: remove `shell-init`
+
+The user decided that the shell line is not needed any more, since `pb cc` and `pb ccd` start sessions from the binary. This amendment replaces decision 2 and changes decisions 6 and 9. It also replaces the part of ADR 0040 decision 5 that kept the `shell-init` name. ADR 0040 rejected removing a working command before 1.0. `shell-init` already did nothing after decision 2, and the special case below keeps an old rc line from breaking shell startup until 1.0.
+
+1. **`shell-init` is removed.** The command, its handler, its module and its tests go. It is not in `playbook --help` or the CLI reference.
+2. **One special case until 1.0.** An rc file that still runs `eval "$(playbook shell-init)"` would print clap's `unrecognized subcommand` error on every new shell. So the binary checks its arguments before clap parses them. When the first argument is exactly `shell-init`, whatever arguments follow, it prints one line on stderr, `playbook shell-init was removed (ADR 0044). Delete the line that runs it from your shell rc file, or run: playbook setup`. It writes nothing to stdout, so the `eval` runs an empty string, writes nothing under the home, and exits 0. The check lives in `crates/cli/src/fastpath.rs`. It stays at least until the release line after the one that removes the command, and it is removed in the 1.0.0 release, marked as a breaking change.
+3. **Migration 0018 also removes the hand-written line.** Decision 6 kept a bare `eval "$(playbook shell-init)"` because it was a no-op. It now prints the stderr line on every new shell, so migration 0018 also finds and removes it, with and without the old `--shell zsh` or `--shell bash` flag. Only a line that starts at column 0 matches: an indented line may be the only command of the user's own `if` block, and bash rejects an empty `then` body. The migration id and its place in the registry do not change.
+4. **Doctor warns on the hand-written line.** Decision 9 let a bare hand-written line pass. Layer 3 now warns on the lines that decision 3 of this amendment adds.
+5. **Config keys.** `launcher.claudeOverride` stays a known key with no effect until 1.0, as decision 1 says, so a stored value still reads. `launcher.shortName` stays, since the `short-name` part reads and writes it.
+
+Consequences: a script that read the output of `shell-init` gets an empty string. After 1.0, an rc file that still runs the line gets clap's error, so doctor and migration 0018 keep finding the line. The commit carries a `BREAKING CHANGE:` footer.

@@ -164,7 +164,7 @@ Example: `playbook breaking --since 0.25.0`
 
 Start a Claude Code session, or manage sessions and worktrees
 
-With no subcommand, starts a session with the playbook prompt and model chain (this replaces the old `ccc` shell function). Any other arguments go to claude as they are. The subcommands do the housekeeping: list sessions, prune state, clear caches, and create worktrees. `pb` is an alias for `playbook`, so `pb cc` works too.
+With no subcommand, starts a session with the playbook prompt and model chain. Any other arguments go to claude as they are. The subcommands do the housekeeping: list sessions, prune state, clear caches, and create worktrees. `pb` is an alias for `playbook`, so `pb cc` works too.
 
 Example: `playbook cc --model sonnet`
 
