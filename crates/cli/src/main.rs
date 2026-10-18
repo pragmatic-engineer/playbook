@@ -2725,8 +2725,18 @@ fn run_disk(sub: DiskCommand) {
             }
         }
         DiskCommand::Reserve => {
+            let at = disk::ballast::file(&home);
             match disk::ballast::reserve_for(&home, &disk::policy::load(&home)) {
-                Ok(line) => println!("{line}"),
+                Ok(disk::ballast::Reserved::Wrote(bytes)) => println!(
+                    "disk reserve: wrote {} of ballast at {}. `playbook disk release` deletes it",
+                    disk::size::gb(bytes),
+                    at.display()
+                ),
+                Ok(disk::ballast::Reserved::Existing(bytes)) => println!(
+                    "disk reserve: the ballast already exists ({}) at {}",
+                    disk::size::gb(bytes),
+                    at.display()
+                ),
                 Err(err) => {
                     eprintln!("{err}");
                     std::process::exit(1);
