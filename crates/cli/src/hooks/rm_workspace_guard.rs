@@ -36,9 +36,10 @@
 //! lexer, so only a word in command position is a deletion. Quoted text, a
 //! grep pattern, a commit message, an `echo` and a heredoc read by a program
 //! other than a shell are data. `find -delete`, `find -exec rm` and
-//! `xargs rm` are judged by `find`'s start paths when the hook runs, but the
-//! hook is wired with `if: Bash(rm:*)`, so Claude Code only starts it for a
-//! command that holds an `rm` word.
+//! `xargs rm` are judged by `find`'s start paths. The hook runs for every
+//! Bash command, since a deletion need not hold an `rm` word, so a command
+//! that deletes nothing returns before any git or config read, and one that
+//! only overwrites reads neither.
 //!
 //! Relative targets are judged from the `cwd` in the payload, and after a
 //! `cd` from the folder the shell changed into (see `parse`). The repo of
@@ -108,7 +109,18 @@ pub fn run(payload: &Payload) {
     if found.targets.is_empty() {
         return;
     }
-    let roots = Roots::new(&home, &cwd, &found.dirs, &RootEnv::from_process(&home));
+    let env = RootEnv::from_process(&home);
+    // An overwrite is judged by the deny set and playbook's data alone, so a
+    // command that only redirects output skips the git and config reads.
+    let overwrites_only = found
+        .targets
+        .iter()
+        .all(|t| matches!(t, Target::Overwrite { .. }));
+    let roots = if overwrites_only {
+        Roots::for_overwrites(&home, &cwd, &env)
+    } else {
+        Roots::new(&home, &cwd, &found.dirs, &env)
+    };
     let denied = denied_targets(found.targets, &roots);
     if denied.is_empty() {
         return;
@@ -203,6 +215,32 @@ struct Roots {
 impl Roots {
     /// `dirs` are the folders the command changes into: the repo each one
     /// sits in is a safe root too.
+    /// Only what an overwrite is judged by: the deny set and playbook's data.
+    /// Every allowance is empty, which an overwrite never reads.
+    fn for_overwrites(home: &str, cwd: &Path, env: &RootEnv) -> Roots {
+        Roots {
+            claude_dir: PathBuf::new(),
+            safe: Vec::new(),
+            scratch: Vec::new(),
+            playbook_root: resolve_existing(&crate::common::paths::playbook_root_from(Path::new(
+                home,
+            ))),
+            protected: roots::protected(env)
+                .iter()
+                .map(|p| resolve_existing(p))
+                .collect(),
+            deny: roots::deny_set(env)
+                .into_iter()
+                .map(|(path, scope, group)| (resolve_existing(&path), scope, group))
+                .collect(),
+            temp: Vec::new(),
+            install: Vec::new(),
+            configured: Vec::new(),
+            home: home.to_string(),
+            cwd: cwd.to_path_buf(),
+        }
+    }
+
     fn new(home: &str, cwd: &Path, dirs: &[PathBuf], env: &RootEnv) -> Roots {
         let configured = configured_values(home);
         let install = roots::install_files(env)
