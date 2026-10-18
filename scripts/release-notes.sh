@@ -136,18 +136,24 @@ json() {
       --arg date "$date" '
       def clean: gsub("[[:cntrl:]]"; "") | gsub("^\\s+|\\s+$"; "");
       # The text of the first BREAKING CHANGE footer that has some, or null.
-      # A footer runs on over the lines below it, joined with single spaces,
-      # up to a blank line or the next trailer ("Token: " or "Token #").
+      # The footer line must start at column 0. The text runs on over the
+      # lines below it, joined with single spaces, up to a blank line or a
+      # run of trailers ("Token: " or "Token #" lines up to the next blank
+      # line or the end), so a prose line such as "Note: x" does not end it.
       def footer:
-        (split("\n")[1:] | map(clean)) as $l
-        | [range(0; $l | length) | select($l[.] | test("^BREAKING[ -]CHANGE: "))
+        split("\n")[1:] as $raw
+        | ($raw | map(clean)) as $l
+        | ($l | length) as $n
+        | def trailer: test("^(BREAKING[ -]CHANGE|[A-Za-z0-9-]+)(: | #)");
+          def para_end($j): [range($j; $n) | select($l[.] == "")] | first // $n;
+          [range(0; $n) | select($raw[.] | test("^BREAKING[ -]CHANGE: "))
            | . as $s
-           | ([range($s + 1; $l | length)
-               | select($l[.] == "" or ($l[.] | test("^(BREAKING[ -]CHANGE|[A-Za-z0-9-]+)(: | #)")))]
-              | first // ($l | length)) as $e
+           | (first(range($s + 1; $n)
+                    | select($l[.] == "" or (. as $j | all($l[$j:para_end($j)][]; trailer))))
+              // $n) as $e
            | $l[$s:$e] | .[0] |= sub("^BREAKING[ -]CHANGE: "; "") | join(" ") | clean
            | select(length > 0)]
-        | first;
+          | first;
       def item:
         . as $body
         | (split("\n")[0] | clean) as $subject
@@ -202,13 +208,15 @@ markdown() {
   jq -r --arg repo "$REPO" '
     # Markup characters show as they are, so a subject cannot add link or
     # image markup, HTML, emphasis or a mention to the release page. GitHub
-    # still links a bare URL. Paired backticks stay as code spans, which
-    # show their text as it is, so only the text outside them is escaped.
-    # An odd backtick is escaped like the rest.
+    # still links a bare URL. When every backtick stands alone and they
+    # pair up, each pair is a code span, which shows its text as it is, so
+    # only the text outside them is escaped. A run of two or more backticks
+    # or an odd one escapes the whole text, since a code span closes only on
+    # a run of the same length.
     def esc_all: gsub("(?<c>[\\\\`*_\\[\\]<>|~&#@])"; "\\\(.c)");
     def esc:
       split("`") as $parts
-      | if ($parts | length) % 2 == 1 then
+      | if ($parts | length) % 2 == 1 and (test("``") | not) then
           [range(0; $parts | length) as $i
            | if $i % 2 == 0 then $parts[$i] | esc_all else $parts[$i] end]
           | join("`")

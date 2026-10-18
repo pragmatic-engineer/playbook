@@ -6,9 +6,9 @@ Release notes for playbook: the binary and the plugin in `plugins/playbook`. Fro
 
 ### Breaking changes
 
-- **setup**: \`playbook setup --aliases\` and \`--claude-override\` do ([#1119](https://github.com/pragmatic-engineer/playbook/pull/1119))
-- **cc**: the playbook, claude and pb shell functions are gone. ([#1120](https://github.com/pragmatic-engineer/playbook/pull/1120))
-- **setup**: \`setup --yes\` now installs the system prompt and links ([#1122](https://github.com/pragmatic-engineer/playbook/pull/1122))
+- **setup**: `playbook setup --aliases` and `--claude-override` do nothing now. Start sessions with `pb cc` or `playbook cc`, which load the playbook system prompt. A plain `claude` no longer goes through the launcher. ([#1119](https://github.com/pragmatic-engineer/playbook/pull/1119))
+- **cc**: the playbook, claude and pb shell functions are gone. `playbook cc` no longer changes the shell's directory, and a plain `claude` no longer loads the system prompt. Run the printed `cd`, and start sessions with `pb cc` or `playbook cc`. ([#1120](https://github.com/pragmatic-engineer/playbook/pull/1120))
+- **setup**: `setup --yes` now installs the system prompt and links `pb`. Pass `--no-system-prompt` or `--no-short-name` to keep them off. ([#1122](https://github.com/pragmatic-engineer/playbook/pull/1122))
 
 ### Features
 

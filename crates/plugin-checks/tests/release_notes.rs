@@ -641,12 +641,66 @@ fn a_footer_over_several_lines_is_kept_whole() {
 }
 
 #[test]
+fn a_footer_stops_at_a_run_of_trailers_and_not_at_a_prose_line() {
+    // Arrange: "Note: " inside the footer is prose, since the line after it
+    // is no trailer. "Fixes #78" and the sign-off are a run of trailers. An
+    // indented footer line, as in a quoted example, is no footer.
+    let repo = Repo::new();
+    repo.change(
+        "crates/cli/src/a.rs",
+        "feat(cli)!: move it (#80)\n\nBREAKING CHANGE: the a flag is gone.\nNote: run setup\nagain after this.\nFixes #78\nSigned-off-by: t <t@example.invalid>\n",
+    );
+    repo.change(
+        "crates/cli/src/b.rs",
+        "fix(cli): quote it (#81)\n\nAn example:\n\n    BREAKING CHANGE: not this one\n",
+    );
+
+    // Act
+    let notes = repo.notes("playbook", "0.2.0");
+
+    // Assert
+    assert_eq!(
+        repo.query(&notes, "[.sections[] | [.name, [.items[] | [.pr, .text]]]]"),
+        concat!(
+            r#"[["breaking",[[80,"the a flag is gone. Note: run setup again after this."]]],"#,
+            r#"["fixes",[[81,"quote it"]]]]"#
+        )
+    );
+}
+
+#[test]
+fn markup_inside_a_code_span_stays_raw_and_a_backtick_run_escapes_all() {
+    // Arrange: a pair of single backticks is a code span. A run of three has
+    // no closing run, so GitHub would show the text after it as markup.
+    let repo = Repo::new();
+    repo.change(
+        "crates/cli/src/a.rs",
+        "fix(cli): keep `[x](y) <b>` and *s* (#82)",
+    );
+    repo.change("crates/cli/src/b.rs", "fix(cli): a ```<b>x</b> @me ` (#83)");
+
+    // Act
+    let notes = repo.notes("playbook", "0.2.0");
+    let md = repo.markdown(&notes);
+
+    // Assert
+    assert!(
+        md.contains(r"- **cli**: keep `[x](y) <b>` and \*s\* ([#82]"),
+        "{md}"
+    );
+    assert!(
+        md.contains(r"- **cli**: a \`\`\`\<b\>x\</b\> \@me \` ([#83]"),
+        "{md}"
+    );
+}
+
+#[test]
 fn a_footer_stops_at_the_next_trailer_and_an_odd_backtick_is_escaped() {
     // Arrange
     let repo = Repo::new();
     repo.change(
         "crates/cli/src/a.rs",
-        "feat(cli)!: move it (#80)\n\nBREAKING CHANGE: the `a` flag\n  is gone, use b`\nRefs: #79\nSigned-off-by: t <t@example.invalid>\n",
+        "feat(cli)!: move it (#80)\n\nBREAKING CHANGE: the `a` flag\n  is gone, use b`\nFixes #78\nRefs: #79\nSigned-off-by: t <t@example.invalid>\n",
     );
 
     // Act
