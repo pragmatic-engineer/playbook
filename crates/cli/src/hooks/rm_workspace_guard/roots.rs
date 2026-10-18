@@ -13,7 +13,9 @@
 //!   backups and staging files, the collector's service file), so playbook
 //!   can repair its own install.
 //!
-//! The protected list beats every allowance, the configured ones included.
+//! The protected list and the deny set beat every allowance, the configured
+//! ones included. The deny set is one table, `DENY`, which the guide's table
+//! is generated from.
 
 use std::path::{Path, PathBuf};
 
@@ -216,6 +218,178 @@ pub(super) fn protected(env: &RootEnv) -> Vec<PathBuf> {
     }
     paths.push(legacy_db);
     paths
+}
+
+/// How much of a deny-set path is blocked. A folder that holds a blocked
+/// path is always blocked too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Scope {
+    /// The path and everything under it.
+    Subtree,
+    /// The path itself only: its contents are judged by the other rules.
+    Itself,
+    /// The path itself and each folder directly in it, as a whole: for
+    /// `/Users` and `/home`, each user's home.
+    Children,
+}
+
+/// Which OS a deny-set row applies to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum OnOs {
+    All,
+    Mac,
+    Linux,
+    /// macOS and Linux.
+    Unix,
+}
+
+/// One row of the deny set.
+pub(super) struct Deny {
+    /// An absolute path, or one starting with `~/` for the home folder.
+    pub path: &'static str,
+    pub scope: Scope,
+    /// The group the denial names.
+    pub group: &'static str,
+    pub os: OnOs,
+}
+
+const SYSTEM: &str = "system folder";
+const CREDENTIALS: &str = "credentials";
+const PERSONAL: &str = "personal folder";
+const SHELL: &str = "shell or tool config";
+const CLAUDE: &str = "Claude Code settings or transcripts";
+
+const fn deny(path: &'static str, scope: Scope, group: &'static str, os: OnOs) -> Deny {
+    Deny {
+        path,
+        scope,
+        group,
+        os,
+    }
+}
+
+/// Paths `rm` never deletes, whatever root or config covers them.
+#[rustfmt::skip]
+pub(super) const DENY: &[Deny] = &[
+    deny("/", Scope::Itself, SYSTEM, OnOs::All),
+    deny("/etc", Scope::Subtree, SYSTEM, OnOs::Unix),
+    deny("/usr", Scope::Subtree, SYSTEM, OnOs::Unix),
+    deny("/bin", Scope::Subtree, SYSTEM, OnOs::Unix),
+    deny("/sbin", Scope::Subtree, SYSTEM, OnOs::Unix),
+    deny("/lib", Scope::Subtree, SYSTEM, OnOs::Linux),
+    deny("/boot", Scope::Subtree, SYSTEM, OnOs::Linux),
+    deny("/proc", Scope::Subtree, SYSTEM, OnOs::Linux),
+    deny("/sys", Scope::Subtree, SYSTEM, OnOs::Linux),
+    deny("/dev", Scope::Subtree, SYSTEM, OnOs::Unix),
+    deny("/var", Scope::Itself, SYSTEM, OnOs::Unix),
+    deny("/opt", Scope::Itself, SYSTEM, OnOs::Unix),
+    deny("/opt/homebrew", Scope::Subtree, SYSTEM, OnOs::Mac),
+    deny("/System", Scope::Subtree, SYSTEM, OnOs::Mac),
+    deny("/Library", Scope::Subtree, SYSTEM, OnOs::Mac),
+    deny("/Applications", Scope::Subtree, SYSTEM, OnOs::Mac),
+    deny("/Volumes", Scope::Itself, SYSTEM, OnOs::Mac),
+    deny("/private", Scope::Itself, SYSTEM, OnOs::Mac),
+    deny("/private/etc", Scope::Subtree, SYSTEM, OnOs::Mac),
+    deny("/private/var", Scope::Itself, SYSTEM, OnOs::Mac),
+    deny("/private/var/db", Scope::Subtree, SYSTEM, OnOs::Mac),
+    deny("/Users", Scope::Children, PERSONAL, OnOs::Mac),
+    deny("/home", Scope::Children, PERSONAL, OnOs::Linux),
+    deny("~/", Scope::Itself, PERSONAL, OnOs::All),
+    deny("~/Documents", Scope::Subtree, PERSONAL, OnOs::All),
+    deny("~/Desktop", Scope::Subtree, PERSONAL, OnOs::All),
+    deny("~/Downloads", Scope::Subtree, PERSONAL, OnOs::All),
+    deny("~/Pictures", Scope::Subtree, PERSONAL, OnOs::All),
+    deny("~/Movies", Scope::Subtree, PERSONAL, OnOs::Mac),
+    deny("~/Music", Scope::Subtree, PERSONAL, OnOs::All),
+    deny("~/Library", Scope::Itself, PERSONAL, OnOs::Mac),
+    deny("~/Library/Mobile Documents", Scope::Subtree, PERSONAL, OnOs::Mac),
+    deny("~/Library/Keychains", Scope::Subtree, CREDENTIALS, OnOs::Mac),
+    deny("~/.ssh", Scope::Subtree, CREDENTIALS, OnOs::All),
+    deny("~/.gnupg", Scope::Subtree, CREDENTIALS, OnOs::All),
+    deny("~/.aws", Scope::Subtree, CREDENTIALS, OnOs::All),
+    deny("~/.kube", Scope::Subtree, CREDENTIALS, OnOs::All),
+    deny("~/.docker/config.json", Scope::Subtree, CREDENTIALS, OnOs::All),
+    deny("~/.config/gh", Scope::Subtree, CREDENTIALS, OnOs::All),
+    deny("~/.netrc", Scope::Subtree, CREDENTIALS, OnOs::All),
+    deny("~/.git-credentials", Scope::Subtree, CREDENTIALS, OnOs::All),
+    deny("~/.npmrc", Scope::Subtree, CREDENTIALS, OnOs::All),
+    deny("~/.pypirc", Scope::Subtree, CREDENTIALS, OnOs::All),
+    deny("~/.cargo/credentials.toml", Scope::Subtree, CREDENTIALS, OnOs::All),
+    deny("~/.config", Scope::Itself, SHELL, OnOs::All),
+    deny("~/.zshrc", Scope::Subtree, SHELL, OnOs::All),
+    deny("~/.zshenv", Scope::Subtree, SHELL, OnOs::All),
+    deny("~/.zprofile", Scope::Subtree, SHELL, OnOs::All),
+    deny("~/.bashrc", Scope::Subtree, SHELL, OnOs::All),
+    deny("~/.bash_profile", Scope::Subtree, SHELL, OnOs::All),
+    deny("~/.profile", Scope::Subtree, SHELL, OnOs::All),
+    deny("~/.gitconfig", Scope::Subtree, SHELL, OnOs::All),
+    deny("~/.claude", Scope::Itself, CLAUDE, OnOs::All),
+    deny("~/.claude.json", Scope::Subtree, CLAUDE, OnOs::All),
+    deny("~/.claude/settings.json", Scope::Subtree, CLAUDE, OnOs::All),
+    deny("~/.claude/settings.local.json", Scope::Subtree, CLAUDE, OnOs::All),
+    deny("~/.claude/CLAUDE.md", Scope::Subtree, CLAUDE, OnOs::All),
+    deny("~/.claude/projects", Scope::Subtree, CLAUDE, OnOs::All),
+    deny("~/.claude/agents", Scope::Subtree, CLAUDE, OnOs::All),
+    deny("~/.claude/commands", Scope::Subtree, CLAUDE, OnOs::All),
+    deny("~/.claude/skills", Scope::Subtree, CLAUDE, OnOs::All),
+];
+
+impl OnOs {
+    fn covers(self, os: Os) -> bool {
+        match self {
+            OnOs::All => true,
+            OnOs::Mac => os == Os::Mac,
+            OnOs::Linux => os == Os::Linux,
+            OnOs::Unix => matches!(os, Os::Mac | Os::Linux | Os::Other),
+        }
+    }
+
+    #[cfg(test)]
+    fn label(self) -> &'static str {
+        match self {
+            OnOs::All => "all",
+            OnOs::Mac => "macOS",
+            OnOs::Linux => "Linux",
+            OnOs::Unix => "macOS, Linux",
+        }
+    }
+}
+
+/// The deny-set rows for the OS in `env`, with `~/` expanded, as
+/// `(path, scope, group)`.
+pub(super) fn deny_set(env: &RootEnv) -> Vec<(PathBuf, Scope, &'static str)> {
+    DENY.iter()
+        .filter(|d| d.os.covers(env.os))
+        .filter_map(|d| {
+            let path = match d.path.strip_prefix("~/") {
+                Some(_) if !env.home.is_absolute() => return None,
+                Some("") => env.home.clone(),
+                Some(rest) => env.home.join(rest),
+                None => PathBuf::from(d.path),
+            };
+            Some((path, d.scope, d.group))
+        })
+        .collect()
+}
+
+/// The deny set as the Markdown table the rm guard guide shows.
+#[cfg(test)]
+pub(super) fn deny_table() -> String {
+    let mut out = String::from("| Path | Blocked | Group | OS |\n| :- | :- | :- | :- |\n");
+    for d in DENY {
+        let blocked = match d.scope {
+            Scope::Subtree => "it and everything in it",
+            Scope::Itself => "the folder itself",
+            Scope::Children => "the folder itself and each home in it as a whole",
+        };
+        let path = if d.path == "~/" { "~" } else { d.path };
+        out.push_str(&format!(
+            "| `{path}` | {blocked} | {} | {} |\n",
+            d.group,
+            d.os.label()
+        ));
+    }
+    out
 }
 
 /// A file playbook installs and may remove or replace by name.
@@ -494,6 +668,57 @@ mod tests {
         .map(|n| format!("/h/me/.config/playbook/{n}"))
         .collect();
         assert_eq!(shown, want);
+    }
+
+    #[test]
+    fn the_deny_set_expands_home_and_keeps_its_os_rows() {
+        let mac: Vec<PathBuf> = deny_set(&env(Os::Mac)).into_iter().map(|d| d.0).collect();
+        let linux: Vec<PathBuf> = deny_set(&env(Os::Linux)).into_iter().map(|d| d.0).collect();
+
+        assert!(mac.contains(&PathBuf::from("/h/me/.ssh")));
+        assert!(mac.contains(&PathBuf::from("/h/me")));
+        assert!(mac.contains(&PathBuf::from("/Users")));
+        assert!(!mac.contains(&PathBuf::from("/home")));
+        assert!(linux.contains(&PathBuf::from("/home")));
+        assert!(!linux.contains(&PathBuf::from("/System")));
+    }
+
+    #[test]
+    fn the_guide_shows_the_deny_set_table() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/guides/08-rm-guard.md");
+        let guide = std::fs::read_to_string(&path).expect("read the rm guard guide");
+        let (start, end) = ("<!-- deny-table:start -->\n", "<!-- deny-table:end -->");
+        let from = guide.find(start).expect("start marker") + start.len();
+        let to = guide.find(end).expect("end marker");
+
+        assert_eq!(
+            &guide[from..to],
+            deny_table(),
+            "regenerate the table in {} from roots::DENY",
+            path.display()
+        );
+    }
+
+    #[test]
+    fn the_deny_set_never_covers_a_temp_root() {
+        for os in [Os::Mac, Os::Linux] {
+            let env = env(os);
+            let deny = deny_set(&env);
+            // `temp_dir` is a made-up `/sys/temp` in this fixture.
+            for root in temp_roots(&env).into_iter().filter(|r| *r != env.temp_dir) {
+                let probe = root.join("probe");
+                let hit = deny.iter().find(|(path, scope, _)| match scope {
+                    Scope::Subtree => probe.starts_with(path),
+                    Scope::Itself => probe == *path,
+                    Scope::Children => probe == *path || probe.parent() == Some(path.as_path()),
+                });
+                assert!(
+                    hit.is_none(),
+                    "{os:?}: {} is denied by {hit:?}",
+                    probe.display()
+                );
+            }
+        }
     }
 
     #[test]

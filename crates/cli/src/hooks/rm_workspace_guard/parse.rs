@@ -71,6 +71,11 @@ pub(crate) enum Target {
     Path { text: String, tilde: bool },
     /// Something only the running shell knows, named for the denial.
     Unresolvable(String),
+    /// A path the deletion stays strictly under, as a `find` with a name
+    /// test does with its start path.
+    Below { text: String, tilde: bool },
+    /// An option that is always blocked, such as `--no-preserve-root`.
+    Forbidden(String),
 }
 
 /// What the guard knows about the shell that runs the command. `$HOME` and
@@ -591,6 +596,10 @@ impl Scan<'_> {
                 options = false;
                 continue;
             }
+            if options && word == "--no-preserve-root" {
+                self.push(Target::Forbidden(word.clone()));
+                continue;
+            }
             if options && word.len() > 1 && word.starts_with('-') && !span.dynamic {
                 continue;
             }
@@ -921,6 +930,7 @@ impl Scan<'_> {
             self.unresolvable(FIND_LINKS_LABEL);
             return;
         }
+        let below = parts.filtered;
         let targets: Vec<Target> = if parts.starts.is_empty() {
             self.relative(".")
         } else {
@@ -931,7 +941,10 @@ impl Scan<'_> {
                 .collect()
         };
         for target in targets {
-            self.push(target);
+            self.push(match target {
+                Target::Path { text, tilde } if below => Target::Below { text, tilde },
+                other => other,
+            });
         }
     }
 
@@ -1075,12 +1088,37 @@ fn separator(source: &[char], before: &shell::Command, after: &shell::Command) -
         .collect()
 }
 
+/// `find` tests that a start path given by name rarely passes, so a `find`
+/// that uses one is taken to delete only below its start paths.
+const FIND_TESTS: &[&str] = &[
+    "-name",
+    "-iname",
+    "-path",
+    "-ipath",
+    "-wholename",
+    "-iwholename",
+    "-regex",
+    "-iregex",
+    "-type",
+    "-newer",
+    "-mtime",
+    "-mmin",
+    "-size",
+    "-empty",
+    "-user",
+    "-perm",
+    "-mindepth",
+];
+
 /// The parts of a `find` command line, by index into its arguments.
 struct FindParts {
     starts: Vec<usize>,
     /// Where the expression starts.
     expression: usize,
     follows_links: bool,
+    /// The expression tests names, types or depth, so it never takes a
+    /// start path itself.
+    filtered: bool,
 }
 
 impl FindParts {
@@ -1117,10 +1155,12 @@ impl FindParts {
             starts.push(end);
             end += 1;
         }
+        let expression = &args[end..];
         FindParts {
             starts,
             expression: end,
-            follows_links: follows_links || args[end..].iter().any(|w| w == "-follow"),
+            follows_links: follows_links || expression.iter().any(|w| w == "-follow"),
+            filtered: expression.iter().any(|w| FIND_TESTS.contains(&w.as_str())),
         }
     }
 }
@@ -1243,7 +1283,8 @@ mod tests {
         (command, got)
     }
 
-    /// `p:/a` a path, `t:~/a` a path with an unquoted `~`, `u:x` unresolvable
+    /// `p:/a` a path, `t:~/a` a path with an unquoted `~`, `b:/a` a path
+    /// the deletion stays under, `f:x` a forbidden option, `u:x` unresolvable
     /// with label `x`; `,` between targets.
     fn spec(want: &str) -> Vec<Target> {
         let one = |item: &str| {
@@ -1253,6 +1294,11 @@ mod tests {
                     text: text.to_string(),
                     tilde: kind == "t:",
                 },
+                "b:" => Target::Below {
+                    text: text.to_string(),
+                    tilde: false,
+                },
+                "f:" => Target::Forbidden(text.to_string()),
                 _ => Target::Unresolvable(text.to_string()),
             }
         };
@@ -1300,7 +1346,7 @@ mod tests {
         ("bash <<EOF\nRM /a\nEOF", "p:/a"),
         ("cat <<EOF | sh\nRM /a\nEOF", "p:/a"),
         // find and xargs.
-        ("find /a -name x -delete", "p:/a"),
+        ("find /a -name x -delete", "b:/a"),
         ("find -delete", "p:."),
         ("find /a -exec RM -f {} \\;", "p:/a"),
         ("find /a /b -exec RM {} +", "p:/a,p:/b"),
@@ -1355,7 +1401,7 @@ mod tests {
         ("find /a -exec nohup RM -rf {} +", "p:/a"),
         ("find -D tree /a -delete", "p:/a"),
         ("find -O3 -P /a -delete", "p:/a"),
-        ("find -x / -name x -delete", "p:/"),
+        ("find -x / -name x -delete", "b:/"),
         ("find -f /a -delete", "p:/a"),
         ("cd /x && find -delete", "p:/x/."),
         ("find $(pwd) -name x -delete", S),
@@ -1439,11 +1485,17 @@ mod tests {
         ("RM -rf \"$(cat x)/t\"", S),
         ("d=$(mktemp -d); RM -r $d", "p:/tmp/tmp.mktemp"),
         ("d=\"$(mktemp)\"; RM -f \"$d\"", "p:/tmp/tmp.mktemp"),
-        ("d=$(mktemp -d ./x.XXXX); RM -rf $d", "u:$d"),
+        ("d=$(mktemp -d ./x.XXXX); RM -rf $d", "p:./x.mktemp"),
+        ("d=$(mktemp -p /x); RM -rf $d", "u:$d"),
         ("d=$(mktemp -d)x; RM -rf $d", "u:$d"),
         ("RM \"${TMPDIR:-/tmp}/p.json\"", "p:/tmp/p.json"),
         ("RM ${X:-/tmp}/p", "u:${X:-/tmp}/p"),
         ("RM $1/x", "u:$1/x"),
+        // Forbidden options and find start paths.
+        ("RM -rf --no-preserve-root /tmp/x", "f:--no-preserve-root,p:/tmp/x"),
+        ("find /a -delete", "p:/a"),
+        ("find . -type f -delete", "b:."),
+        ("find /a -mindepth 1 -exec RM -rf {} +", "b:/a"),
     ];
 
     /// Commands that only read, search or mention a deletion as data.

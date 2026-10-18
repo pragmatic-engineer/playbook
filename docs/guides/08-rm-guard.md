@@ -25,7 +25,7 @@ Paths are judged after `~`, `$HOME`, `..`, trailing slashes and every symlink ar
 
 | Allowed | How |
 | :- | :- |
-| The repo (or `PLAYBOOK_SAFE_ROOTS`) and `~/.claude` | Anything inside, and the folder itself. The repo is the one the command starts in, plus the repo of each folder it changes into with `cd`. A repo that is your home or holds it never counts, and a start folder outside any repo counts only when it is not home or above it. |
+| The repo (or `PLAYBOOK_SAFE_ROOTS`) and `~/.claude` | Anything inside. A repo root, its `.git`, `~/.claude` itself and the Claude Code files in the deny set stay blocked. The repo is the one the command starts in, plus the repo of each folder it changes into with `cd`. A repo that is your home or holds it never counts, and a start folder outside any repo counts only when it is not home or above it. |
 | The `.worktrees` folder next to the main checkout, and `WORKTREE_BASE_DIR` | Contents only. `.worktrees/cargo-*` build folders are covered. |
 | Temp and cache folders for your OS (table below) | Contents only. |
 | Playbook's scratch folders: `~/.config/playbook/tmp`, `staging`, `embedded`, `cc-state`, and any `tmp` folder deeper under `~/.config/playbook` | Contents only. |
@@ -62,6 +62,76 @@ Playbook's own data is never deleted by `rm`, whatever root covers it, a configu
 - `~/.config/playbook` itself and every folder above it
 - any `.lock` folder under `~/.config/playbook`, which clears itself
 
+The built-in deny set beats every allowance, the repo and configured roots included. A folder that holds one of these paths is blocked too, so `rm -rf ~` and `rm -rf /private` stay blocked. The table is generated from `roots::DENY` in the guard, and a test keeps it in step.
+
+<!-- deny-table:start -->
+| Path | Blocked | Group | OS |
+| :- | :- | :- | :- |
+| `/` | the folder itself | system folder | all |
+| `/etc` | it and everything in it | system folder | macOS, Linux |
+| `/usr` | it and everything in it | system folder | macOS, Linux |
+| `/bin` | it and everything in it | system folder | macOS, Linux |
+| `/sbin` | it and everything in it | system folder | macOS, Linux |
+| `/lib` | it and everything in it | system folder | Linux |
+| `/boot` | it and everything in it | system folder | Linux |
+| `/proc` | it and everything in it | system folder | Linux |
+| `/sys` | it and everything in it | system folder | Linux |
+| `/dev` | it and everything in it | system folder | macOS, Linux |
+| `/var` | the folder itself | system folder | macOS, Linux |
+| `/opt` | the folder itself | system folder | macOS, Linux |
+| `/opt/homebrew` | it and everything in it | system folder | macOS |
+| `/System` | it and everything in it | system folder | macOS |
+| `/Library` | it and everything in it | system folder | macOS |
+| `/Applications` | it and everything in it | system folder | macOS |
+| `/Volumes` | the folder itself | system folder | macOS |
+| `/private` | the folder itself | system folder | macOS |
+| `/private/etc` | it and everything in it | system folder | macOS |
+| `/private/var` | the folder itself | system folder | macOS |
+| `/private/var/db` | it and everything in it | system folder | macOS |
+| `/Users` | the folder itself and each home in it as a whole | personal folder | macOS |
+| `/home` | the folder itself and each home in it as a whole | personal folder | Linux |
+| `~` | the folder itself | personal folder | all |
+| `~/Documents` | it and everything in it | personal folder | all |
+| `~/Desktop` | it and everything in it | personal folder | all |
+| `~/Downloads` | it and everything in it | personal folder | all |
+| `~/Pictures` | it and everything in it | personal folder | all |
+| `~/Movies` | it and everything in it | personal folder | macOS |
+| `~/Music` | it and everything in it | personal folder | all |
+| `~/Library` | the folder itself | personal folder | macOS |
+| `~/Library/Mobile Documents` | it and everything in it | personal folder | macOS |
+| `~/Library/Keychains` | it and everything in it | credentials | macOS |
+| `~/.ssh` | it and everything in it | credentials | all |
+| `~/.gnupg` | it and everything in it | credentials | all |
+| `~/.aws` | it and everything in it | credentials | all |
+| `~/.kube` | it and everything in it | credentials | all |
+| `~/.docker/config.json` | it and everything in it | credentials | all |
+| `~/.config/gh` | it and everything in it | credentials | all |
+| `~/.netrc` | it and everything in it | credentials | all |
+| `~/.git-credentials` | it and everything in it | credentials | all |
+| `~/.npmrc` | it and everything in it | credentials | all |
+| `~/.pypirc` | it and everything in it | credentials | all |
+| `~/.cargo/credentials.toml` | it and everything in it | credentials | all |
+| `~/.config` | the folder itself | shell or tool config | all |
+| `~/.zshrc` | it and everything in it | shell or tool config | all |
+| `~/.zshenv` | it and everything in it | shell or tool config | all |
+| `~/.zprofile` | it and everything in it | shell or tool config | all |
+| `~/.bashrc` | it and everything in it | shell or tool config | all |
+| `~/.bash_profile` | it and everything in it | shell or tool config | all |
+| `~/.profile` | it and everything in it | shell or tool config | all |
+| `~/.gitconfig` | it and everything in it | shell or tool config | all |
+| `~/.claude` | the folder itself | Claude Code settings or transcripts | all |
+| `~/.claude.json` | it and everything in it | Claude Code settings or transcripts | all |
+| `~/.claude/settings.json` | it and everything in it | Claude Code settings or transcripts | all |
+| `~/.claude/settings.local.json` | it and everything in it | Claude Code settings or transcripts | all |
+| `~/.claude/CLAUDE.md` | it and everything in it | Claude Code settings or transcripts | all |
+| `~/.claude/projects` | it and everything in it | Claude Code settings or transcripts | all |
+| `~/.claude/agents` | it and everything in it | Claude Code settings or transcripts | all |
+| `~/.claude/commands` | it and everything in it | Claude Code settings or transcripts | all |
+| `~/.claude/skills` | it and everything in it | Claude Code settings or transcripts | all |
+<!-- deny-table:end -->
+
+A repo or worktree root and anything in a `.git` folder stay blocked too, outside the OS temp folders, where a scratch clone may go whole. A glob at a repo root is blocked when it is bare (`*`, `.*`) or can match `.git`. Remove a linked worktree with `git worktree remove`. A `find` with a name, type or depth test is judged as deleting only below its start folder, so `find . -name '*.orig' -delete` at the repo root still works. `--no-preserve-root` is always blocked.
+
 ## Reading a denial
 
 Each denied target is listed with the rule that matched:
@@ -76,6 +146,9 @@ Each denied target is listed with the rule that matched:
 | unresolvable target | A command substitution, `<xargs input>`, a variable the guard cannot follow, or a relative path in a folder the guard cannot name. Run the `rm` as its own call with a literal absolute path. |
 | stray quote or shell character | A quote, backslash or shell syntax left inside the path. |
 | another user's home or a quoted ~ | `~user`, or a `~` inside quotes, which the shell does not expand. |
+| built-in deny list | One of the paths in the deny table above, or a folder that holds one. |
+| repo root or .git | A repo or worktree root, a `.git` folder, or a bare glob at a repo root, outside the temp folders. |
+| option that is always blocked | `--no-preserve-root`. |
 | path that cannot be resolved | A link chain too deep to follow, a link that cannot be read, or a working folder that is gone. |
 
 For a path outside the roots, the message gives the exact command that keeps your current roots and adds the folder that holds the target. It offers this only for a folder inside your home whose first folder under home does not start with a dot, so it never suggests `/etc` or `~/.ssh`. The model cannot change the key, so it asks you to run the command yourself.
