@@ -15,6 +15,7 @@ pub mod codex;
 pub mod collector;
 pub mod command;
 pub mod config;
+pub mod daemon;
 pub mod data;
 pub mod db;
 pub mod entry;
