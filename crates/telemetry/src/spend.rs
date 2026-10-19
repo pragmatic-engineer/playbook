@@ -45,6 +45,69 @@ const PERCENT: f64 = 100.0;
 /// Top level keys that are not usage windows.
 const NON_WINDOW_KEYS: [&str; 2] = ["extra_usage", "spend"];
 
+/// A dollar amount for a sentence: `$1,059.50`.
+pub fn dollars(n: f64) -> String {
+    let text = format!("{:.2}", n.abs());
+    let (whole, cents) = text.split_once('.').unwrap_or((&text, "00"));
+    let mut grouped = String::new();
+    for (i, digit) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i) % GROUP == 0 {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    let sign = if n < 0.0 { "-" } else { "" };
+    format!("{sign}${grouped}.{cents}")
+}
+
+/// Digits between thousands separators.
+const GROUP: usize = 3;
+
+/// Why no server figure is shown. The words are the ones the output uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reason {
+    Disabled,
+    NoConsent,
+    NoToken,
+    Unauthorized,
+    RateLimited,
+    Timeout,
+    Schema,
+    UnsupportedLogin,
+    Network,
+    Internal,
+    /// A fetch is under way and has not answered.
+    Fetching,
+}
+
+impl Reason {
+    pub fn key(self) -> &'static str {
+        match self {
+            Reason::Disabled => "disabled",
+            Reason::NoConsent => "no-consent",
+            Reason::NoToken => "no-token",
+            Reason::Unauthorized => "unauthorized",
+            Reason::RateLimited => "rate-limited",
+            Reason::Timeout => "timeout",
+            Reason::Schema => "schema",
+            Reason::UnsupportedLogin => "unsupported-login",
+            Reason::Network => "network",
+            Reason::Internal => "internal",
+            Reason::Fetching => "fetching",
+        }
+    }
+
+    /// The one line that stands where the server figure would be.
+    pub fn line(self) -> String {
+        match self {
+            Reason::NoConsent => {
+                "spend limit unavailable (run `playbook usage spend enable`)".to_string()
+            }
+            other => format!("spend limit unavailable ({})", other.key()),
+        }
+    }
+}
+
 /// Why a document gave no figure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpendError {
@@ -115,6 +178,14 @@ pub enum Scope {
 }
 
 impl Scope {
+    pub fn key(self) -> &'static str {
+        match self {
+            Scope::Member => "member",
+            Scope::Org => "org",
+            Scope::Unspecified => "unspecified",
+        }
+    }
+
     fn parse(v: Option<&Value>) -> Scope {
         match v
             .and_then(Value::as_str)
@@ -339,13 +410,15 @@ impl Comparison {
     pub fn line(&self) -> String {
         if self.disagrees {
             format!(
-                "local estimate (this machine only) ${:.2} differs from server billed ${:.2}",
-                self.local_estimate_usd, self.billed_usd
+                "local estimate (this machine only) {} differs from server billed {}",
+                dollars(self.local_estimate_usd),
+                dollars(self.billed_usd)
             )
         } else {
             format!(
-                "local estimate (this machine only) ${:.2} is close to server billed ${:.2}",
-                self.local_estimate_usd, self.billed_usd
+                "local estimate (this machine only) {} is close to server billed {}",
+                dollars(self.local_estimate_usd),
+                dollars(self.billed_usd)
             )
         }
     }
@@ -683,12 +756,61 @@ mod tests {
     }
 
     #[test]
+    fn dollars_group_thousands_and_keep_the_sign() {
+        let table = [
+            (0.0, "$0.00"),
+            (5.5, "$5.50"),
+            (999.99, "$999.99"),
+            (1000.0, "$1,000.00"),
+            (1059.5, "$1,059.50"),
+            (1_234_567.891, "$1,234,567.89"),
+            (-1234.5, "-$1,234.50"),
+        ];
+
+        for (n, want) in table {
+            assert_eq!(dollars(n), want, "{n}");
+        }
+    }
+
+    #[test]
+    fn every_reason_has_a_distinct_key_and_one_line() {
+        let all = [
+            Reason::Disabled,
+            Reason::NoConsent,
+            Reason::NoToken,
+            Reason::Unauthorized,
+            Reason::RateLimited,
+            Reason::Timeout,
+            Reason::Schema,
+            Reason::UnsupportedLogin,
+            Reason::Network,
+            Reason::Internal,
+            Reason::Fetching,
+        ];
+        let keys: std::collections::HashSet<_> = all.iter().map(|r| r.key()).collect();
+
+        assert_eq!(keys.len(), all.len());
+        for r in all {
+            assert!(r.line().starts_with("spend limit unavailable ("), "{r:?}");
+            assert!(!r.line().contains('\n'));
+        }
+        assert_eq!(
+            Reason::NoConsent.line(),
+            "spend limit unavailable (run `playbook usage spend enable`)"
+        );
+        assert_eq!(
+            Reason::Fetching.line(),
+            "spend limit unavailable (fetching)"
+        );
+    }
+
+    #[test]
     fn the_line_says_differs_with_both_numbers_and_never_wrong() {
         let far = Comparison::new(billed(Some(usd(105_950))), 900.0).unwrap();
         let near = Comparison::new(billed(Some(usd(105_950))), 1055.0).unwrap();
 
         assert!(far.line().contains("differs"));
-        assert!(far.line().contains("$900.00") && far.line().contains("$1059.50"));
+        assert!(far.line().contains("$900.00") && far.line().contains("$1,059.50"));
         assert!(!far.line().contains("wrong"));
         assert!(near.line().contains("close to"));
     }

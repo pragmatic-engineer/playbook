@@ -207,6 +207,17 @@ pub enum DisplayLine {
 /// The plan shown when nothing identifies it and no source has data.
 pub const PLAN_LIMITS_UNAVAILABLE: &str = "plan limits unavailable";
 
+impl DisplayLine {
+    /// A stable name for scripts.
+    pub fn key(&self) -> String {
+        match self {
+            DisplayLine::Window(name) => format!("window:{name}"),
+            DisplayLine::MonthlyCap => "monthly_cap".to_string(),
+            DisplayLine::LocalEstimate => "local_estimate".to_string(),
+        }
+    }
+}
+
 /// What a source actually carries. The lines a view draws follow this set and
 /// never the plan name: only one response shape has been observed, so no
 /// table of plans and limits exists.

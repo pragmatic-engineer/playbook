@@ -13,10 +13,11 @@
 //! Manual limits come from the `usage.budget.*` config keys.
 
 use super::limits::{Burn, Limit, LimitPeriod, Origin, State, Unit};
+use super::limits::{CrossState, Crossing};
 use super::period::Period;
-use super::plan::{Account, PlanChoice};
+use super::plan::{Account, Capabilities, DisplayLine, LoginKind, PlanChoice};
 use super::query::{month_first_day, WeekStart};
-use super::spend::{Comparison, NotCompared, SpendFigure};
+use super::spend::{dollars, Comparison, Money, NotCompared, Reason, Scope, SpendFigure};
 use super::UsageEvent;
 use crate::util::atomic::write_atomic_private;
 use serde_json::{json, Value};
@@ -229,6 +230,8 @@ pub struct Sources {
     pub server: Option<SpendFigure>,
     /// The `usage.plan` setting.
     pub plan_choice: PlanChoice,
+    /// Why no server figure is shown, when a fetch was meant to give one.
+    pub spend_unavailable: Option<Reason>,
 }
 
 impl Sources {
@@ -261,6 +264,7 @@ impl Sources {
             },
             server: None,
             plan_choice: PlanChoice::Auto,
+            spend_unavailable: None,
         }
     }
 
@@ -532,6 +536,71 @@ pub fn burn_pair(events: &[UsageEvent], period: Period, now: i64) -> (Burn, Burn
     )
 }
 
+/// What the best source for this moment carries, with the `usage.plan`
+/// setting applied.
+fn capabilities(s: &Sources, now: i64) -> Capabilities {
+    let base = if let Some(f) = server_in_use(s, now) {
+        Capabilities::from_figure(f)
+    } else if let Some(c) = s.account.cache.as_ref().filter(|c| c.is_fresh(now)) {
+        Capabilities::from_cache(c)
+    } else if let Some(sn) = &s.snapshot {
+        Capabilities::from_snapshot(sn)
+    } else {
+        Capabilities::from_cache(&super::plan::UsageCache::default())
+    };
+    base.for_login(LoginKind::Unknown, s.plan_choice)
+}
+
+fn capabilities_json(s: &Sources, now: i64) -> Value {
+    let c = capabilities(s, now);
+    json!({
+        "lines": c.lines().iter().map(DisplayLine::key).collect::<Vec<_>>(),
+        "scope": c.scope.key(),
+        "local_only": c.local_only,
+        "note": c.note(s.account.plan, s.plan_choice),
+    })
+}
+
+fn money_json(m: &Money) -> Value {
+    json!({"minor": m.minor, "decimals": m.decimals, "currency": m.currency})
+}
+
+/// The server figure in use and its comparison with the local estimate, or
+/// `null` when none is used.
+fn spend_json(s: &Sources, events: &[UsageEvent], now: i64) -> Value {
+    let Some(f) = server_in_use(s, now) else {
+        return Value::Null;
+    };
+    let (comparison, skipped) = match compare_server(s, events, now) {
+        Some(Ok(c)) => (
+            json!({
+                "billed_usd": c.billed_usd,
+                "local_estimate_usd": c.local_estimate_usd,
+                "delta_usd": c.delta_usd,
+                "delta_pct": c.delta_pct,
+                "disagrees": c.disagrees,
+            }),
+            Value::Null,
+        ),
+        Some(Err(why)) => (Value::Null, json!(why.to_string())),
+        None => (Value::Null, Value::Null),
+    };
+    json!({
+        "fetched_at": f.fetched_at,
+        "age_seconds": f.age(now),
+        "fresh": f.is_fresh(now),
+        "limit": f.limit.as_ref().map(money_json),
+        "used": f.used.as_ref().map(money_json),
+        "percent": f.percent,
+        "severity": f.severity,
+        "resets_at": f.resets_at,
+        "limit_reached": f.limit_reached,
+        "scope": f.scope.key(),
+        "comparison": comparison,
+        "comparison_skipped": skipped,
+    })
+}
+
 /// The limits and burn rates as JSON, for `--json`.
 pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart) -> Value {
     let snapshot = s.snapshot.as_ref();
@@ -554,6 +623,9 @@ pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart
         "plan": s.account.plan.key(),
         "plan_label": plan_label(s),
         "windows_note": windows_note(s, &limits),
+        "capabilities": capabilities_json(s, now),
+        "spend": spend_json(s, events, now),
+        "spend_unavailable": s.spend_unavailable.map(Reason::key),
         "cache": s.account.cache.as_ref().map(|c| json!({
             "fetched_at": c.fetched_at,
             "age_seconds": c.age(now),
@@ -615,6 +687,96 @@ pub fn describe(l: &Limit, now: i64) -> String {
     )
 }
 
+/// An instant as text, in the chosen zone.
+fn stamp(at: i64) -> String {
+    crate::tz::iso(at).replace('T', " ")
+}
+
+/// One threshold as a phrase.
+fn crossing_text(c: &Crossing) -> String {
+    let pct = c.pct;
+    match c.state {
+        CrossState::Crossed { at } => format!("{pct}% crossed about {}", stamp(at)),
+        CrossState::Projected { at } => format!("{pct}% projected about {}", stamp(at)),
+        CrossState::Beyond { period_end } => {
+            format!("{pct}% not before the period ends {}", stamp(period_end))
+        }
+        CrossState::Unknown => format!("{pct}% too early to say"),
+    }
+}
+
+/// How the scope of a figure is named. Nothing says "your spend": whose
+/// spend it is stays as the server reported it.
+fn scope_text(scope: Scope) -> &'static str {
+    match scope {
+        Scope::Member => "member scope",
+        Scope::Org => "organization scope",
+        Scope::Unspecified => "as reported by the server",
+    }
+}
+
+/// The server figure used for the monthly limit, if one is.
+fn server_in_use(s: &Sources, now: i64) -> Option<&SpendFigure> {
+    matches!(monthly(s, now), Monthly::Server { .. })
+        .then_some(())
+        .and(s.server.as_ref())
+}
+
+/// The lines about the server spend limit for `--summary`: what the server
+/// billed, how it compares with the local estimate, the plan, when 50, 80 and
+/// 100 percent are crossed, or the one line saying why there is no figure.
+pub fn spend_lines(s: &Sources, limits: &[Limit], events: &[UsageEvent], now: i64) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(f) = server_in_use(s, now) {
+        let mut parts = Vec::new();
+        match (f.used_usd(), f.limit_usd()) {
+            (Some(used), Some(limit)) => {
+                parts.push(format!("{} of {}", dollars(used), dollars(limit)))
+            }
+            (None, Some(limit)) => parts.push(format!(
+                "limit {}, amount used not reported",
+                dollars(limit)
+            )),
+            _ => {}
+        }
+        if let Some(p) = f.percent {
+            parts.push(format!("{p:.1}%"));
+        }
+        if let (Some(used), Some(limit)) = (f.used_usd(), f.limit_usd()) {
+            parts.push(format!("{} left", dollars((limit - used).max(0.0))));
+        }
+        if let Some(l) = limits.iter().find(|l| l.origin == Origin::Server) {
+            let at = f.resets_at.unwrap_or(l.end);
+            parts.push(format!("resets {}", stamp(at)));
+        }
+        if let Some(sev) = &f.severity {
+            parts.push(format!("severity {sev}"));
+        }
+        parts.push(scope_text(f.scope).to_string());
+        out.push(format!("server billed: {}", parts.join(", ")));
+        out.push(match compare_server(s, events, now) {
+            Some(Ok(c)) => c.line(),
+            Some(Err(why)) => format!("local estimate not compared: {why}"),
+            None => String::new(),
+        });
+        out.retain(|l| !l.is_empty());
+        out.push(format!("plan: {}", plan_label(s)));
+    }
+    for l in limits {
+        if let Some(c) = l.thresholds(now) {
+            out.push(format!(
+                "{} crossings: {}",
+                l.period.key().replace('_', " "),
+                c.iter().map(crossing_text).collect::<Vec<_>>().join(", ")
+            ));
+        }
+    }
+    if let Some(reason) = s.spend_unavailable {
+        out.push(reason.line());
+    }
+    out
+}
+
 /// The limits section of `--summary`.
 pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart) -> String {
     let limits = all_limits(s, events, now, week);
@@ -624,6 +786,9 @@ pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekS
     }
     for l in &limits {
         out.push_str(&format!("  {}\n", describe(l, now)));
+    }
+    for line in spend_lines(s, &limits, events, now) {
+        out.push_str(&format!("  {line}\n"));
     }
     if s.stale(now) {
         out.push_str("  note: the plan limits were read over 6 hours ago\n");
@@ -1042,8 +1207,10 @@ mod tests {
         );
 
         assert_eq!(v["plan_label"], "Team (set by you)");
-        v.as_object_mut().unwrap().remove("plan_label");
-        base.as_object_mut().unwrap().remove("plan_label");
+        for key in ["plan_label", "capabilities"] {
+            v.as_object_mut().unwrap().remove(key);
+            base.as_object_mut().unwrap().remove(key);
+        }
         assert_eq!(v, base);
     }
 
@@ -1516,5 +1683,195 @@ mod tests {
         };
 
         assert!(compare_server(&s, &[], NOW).is_none());
+    }
+
+    fn with_server_summary() -> String {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let s = Sources {
+            server: Some(server_at(NOW - 600, 150_000, Some(105_950))),
+            ..Sources::default()
+        };
+        let events = [cost(MONTH_START + 10, 900.0)];
+        summary_section(&s, &events, NOW, WeekStart::Monday)
+    }
+
+    #[test]
+    fn the_summary_shows_the_server_billed_line_the_comparison_and_the_plan() {
+        let text = with_server_summary();
+
+        assert!(
+            text.contains(
+                "  server billed: $1,059.50 of $1,500.00, $440.50 left, resets 2027-02-01 00:00:00Z, as reported by the server\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("  local estimate (this machine only) $900.00 differs from server billed $1,059.50\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("  plan: Enterprise or unknown plan\n"),
+            "{text}"
+        );
+        assert!(!text.contains("wrong"), "{text}");
+    }
+
+    #[test]
+    fn the_summary_dates_every_crossing_from_the_fixed_clock() {
+        let text = with_server_summary();
+
+        assert!(
+            text.contains(
+                "  monthly crossings: 50% crossed about 2027-01-11 03:30:40Z, 80% projected about 2027-01-17 05:37:04Z, 100% projected about 2027-01-21 07:01:20Z\n"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_figure_without_an_amount_used_says_so_and_is_not_compared() {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let s = Sources {
+            server: Some(server_at(NOW - 60, 150_000, None)),
+            ..Sources::default()
+        };
+
+        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
+
+        assert!(
+            text.contains("limit $1,500.00, amount used not reported"),
+            "{text}"
+        );
+        assert!(
+            text.contains("local estimate not compared: amount used not reported, not compared"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_summary_names_scope_and_severity_when_the_server_gave_them() {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let mut f = server_at(NOW - 60, 150_000, Some(105_950));
+        f.scope = Scope::Org;
+        f.severity = Some("warning".to_string());
+        f.percent = Some(70.6);
+        let s = Sources {
+            server: Some(f),
+            ..Sources::default()
+        };
+
+        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
+
+        assert!(
+            text.contains(
+                "$440.50 left, resets 2027-02-01 00:00:00Z, severity warning, organization scope"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("$1,059.50 of $1,500.00, 70.6%, "), "{text}");
+    }
+
+    #[test]
+    fn each_unavailable_reason_prints_one_line_and_nothing_else_about_the_server() {
+        for reason in [
+            Reason::Disabled,
+            Reason::NoConsent,
+            Reason::NoToken,
+            Reason::Unauthorized,
+            Reason::RateLimited,
+            Reason::Timeout,
+            Reason::Schema,
+            Reason::UnsupportedLogin,
+            Reason::Network,
+            Reason::Internal,
+            Reason::Fetching,
+        ] {
+            let s = Sources {
+                spend_unavailable: Some(reason),
+                ..Sources::default()
+            };
+
+            let text = summary_section(&s, &[], NOW, WeekStart::Monday);
+            let v = report_json(&s, &[], NOW, WeekStart::Monday);
+
+            assert_eq!(
+                text.matches("spend limit unavailable").count(),
+                1,
+                "{reason:?}"
+            );
+            assert!(text.contains(&format!("  {}\n", reason.line())), "{text}");
+            assert!(!text.contains("server billed"), "{text}");
+            assert_eq!(v["spend_unavailable"], reason.key());
+            assert!(v["spend"].is_null());
+        }
+    }
+
+    #[test]
+    fn without_a_server_figure_or_a_reason_the_summary_adds_no_spend_line() {
+        let s = Sources {
+            budgets: vec![(LimitPeriod::Monthly, 100.0)],
+            ..Sources::default()
+        };
+
+        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
+        let v = report_json(&s, &[], NOW, WeekStart::Monday);
+
+        assert!(!text.contains("server billed"), "{text}");
+        assert!(!text.contains("spend limit unavailable"), "{text}");
+        assert!(v["spend"].is_null() && v["spend_unavailable"].is_null());
+    }
+
+    #[test]
+    fn the_json_adds_spend_capabilities_and_thresholds_without_changing_old_keys() {
+        let s = Sources {
+            server: Some(server_at(NOW - 600, 150_000, Some(105_950))),
+            ..Sources::default()
+        };
+        let events = [cost(MONTH_START + 10, 900.0)];
+
+        let v = report_json(&s, &events, NOW, WeekStart::Monday);
+
+        assert_eq!(v["spend"]["comparison"]["disagrees"], true);
+        assert_eq!(v["spend"]["limit"]["minor"], 150_000);
+        assert_eq!(v["spend"]["scope"], "unspecified");
+        assert_eq!(v["spend"]["comparison_skipped"], Value::Null);
+        assert_eq!(
+            v["capabilities"]["lines"],
+            json!(["monthly_cap", "local_estimate"])
+        );
+        assert_eq!(v["capabilities"]["local_only"], false);
+        assert_eq!(v["limits"][0]["origin"], "server");
+        assert_eq!(v["limits"][0]["thresholds"].as_array().unwrap().len(), 3);
+        for key in [
+            "known",
+            "hint",
+            "plan",
+            "plan_label",
+            "windows_note",
+            "cache",
+            "limits",
+            "burn",
+        ] {
+            assert!(v.get(key).is_some(), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_skipped_comparison_is_named_in_the_json() {
+        let mut f = server_at(NOW - 60, 150_000, Some(105_950));
+        f.used.as_mut().unwrap().currency = Some("EUR".to_string());
+        let s = Sources {
+            server: Some(f),
+            ..Sources::default()
+        };
+
+        let v = report_json(&s, &[], NOW, WeekStart::Monday);
+
+        // The limit is in dollars, the amount used in euros: no comparison.
+        assert_eq!(v["spend"]["comparison"], Value::Null);
+        assert_eq!(
+            v["spend"]["comparison_skipped"],
+            "currency EUR, not compared"
+        );
     }
 }
