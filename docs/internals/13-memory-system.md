@@ -42,12 +42,13 @@ type: project
 links:
   depends_on: session-model
   relates_to: rate-limiting
+aliases: [auth, token flow]
 anchors:
   - src/auth/
 ---
 ```
 
-`type` is one of `user`, `feedback`, `project`, or `reference`. `description` is a one-line trigger hint: "use when..." For `feedback` and `project` type facts, the body follows a fixed structure: the rule first, then a `**Why:**` section and a `**How to apply:**` section. The optional `anchors:` field lists repo-relative code locations the fact describes: a directory, a file, or a `file#symbol`. It maps a fact to concrete code so the graph knows where a fact lives.
+`type` is one of `user`, `feedback`, `project`, or `reference`. `description` is a one-line trigger hint: "use when..." For `feedback` and `project` type facts, the body follows a fixed structure: the rule first, then a `**Why:**` section and a `**How to apply:**` section. The optional `anchors:` field lists repo-relative code locations the fact describes: a directory, a file, or a `file#symbol`. It maps a fact to concrete code so the graph knows where a fact lives. The optional `aliases:` field lists other names for the fact, such as `aliases: [auth, token flow]`. An alias found in your prompt as a whole word or phrase surfaces the fact as a strong match, so a prompt that uses a nickname still reaches it. Playbook reads `aliases:` from the fact file when it builds the anchor index, so a new alias applies from the next session.
 
 `memory.db` is the sole index, built automatically from every fact file's frontmatter across all three scopes. Commands query it through `playbook memory context`, and `playbook memory export --json` prints the whole graph as JSON; `session-init`'s SessionStart injection renders the same slice in process. See [memory.db](#memorydb) below for the node shape, and [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md) for the format mechanics.
 
@@ -86,7 +87,7 @@ Facts reach context three ways, described in full in [ADR 0004](../adr/0004-grap
 
 **Editing or writing a file** surfaces the facts anchored to it: the `memory-anchors` hook matches the edited path against the graph's anchor index and injects the matching facts' names, descriptions, and `depends_on`/`contradicts` neighbours.
 
-**Asking about a file or topic**, a prompt rather than an edit, surfaces matching facts: name, description and the start of the body (cut at 1,500 characters). `memory-anchors` also runs on every prompt, matching prompt words (common words ignored) and this session's already-touched files against the same index, best match first. It injects at most 3 facts per prompt and 9 per session, and a fact injects at most once per session. When the prompt has searchable words and no fact matches, or every match is weak, the hook adds one hint line (at most 400 characters, 5 per session) with the searched terms, the repo's fact folder to grep and a reminder to offer to save a fact. A match is strong when a name hit comes from a hyphenated word or from 2 or more distinct words, or when the fact is anchored to a file touched this session; every other match is weak, such as one plain word on a fact name. A strong match adds no hint.
+**Asking about a file or topic**, a prompt rather than an edit, surfaces matching facts: name, description and the start of the body (cut at 1,500 characters). `memory-anchors` also runs on every prompt, matching prompt words (common words ignored) and this session's already-touched files against the same index, best match first. It injects at most 3 facts per prompt and 9 per session, and a fact injects at most once per session. When the prompt has searchable words and no fact matches, or every match is weak, the hook adds one hint line (at most 400 characters, 5 per session) with the searched terms, the repo's fact folder to grep and a reminder to offer to save a fact. A match is strong when a name hit comes from a hyphenated word or from 2 or more distinct words, or when an alias of the fact appears in the prompt, or when the word before `crate` or `crates` in the prompt names the crate folder the fact is anchored to ("auth crate" reaches a fact anchored to `crates/auth/`), or when the fact is anchored to a file touched this session; every other match is weak, such as one plain word on a fact name. A strong match adds no hint.
 
 The anchor index above builds once per session and is not rebuilt within it, so a fact written mid-session will not surface via anchor or prompt matching until the next session starts.
 
