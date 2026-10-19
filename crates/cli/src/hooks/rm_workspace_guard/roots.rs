@@ -507,7 +507,7 @@ pub(super) fn install_files(env: &RootEnv) -> Vec<InstallFile> {
         Os::Mac => {
             files.push(InstallFile::Exact(Kind::Launchd.file(&env.home)));
             // The agent under the label 0.37.0 shipped, which the
-            // `collector-service-label` migration moves away.
+            // `collector-service-removed` migration deletes.
             files.push(InstallFile::Exact(playbook_telemetry::service::old_file(
                 &env.home,
             )));

@@ -29,10 +29,11 @@ pub const COLLECT: &str = "playbook usage collect";
 pub const START_WAIT: Duration = Duration::from_secs(2);
 
 /// The state key that records a no, so the reminder stops.
-const DECLINED_KEY: &str = "collector-service/declined";
+pub(crate) const DECLINED_KEY: &str = "collector-service/declined";
 
-/// The state key that records the one reminder of the `collector-service` migration.
-const REMINDED_KEY: &str = "collector-service/reminded";
+/// The state key the retired `collector-service` migration wrote after its
+/// one reminder. Only `forget_answers` still names it.
+pub(crate) const REMINDED_KEY: &str = "collector-service/reminded";
 
 /// What setup does with the part, decided from the flags and the answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,32 +256,6 @@ pub fn preview(home: &Path, telemetry_on: bool, program: &Path) -> String {
     }
 }
 
-/// The `Consent` check of the `collector-service` migration: one line when telemetry points at
-/// the collector and no service keeps it running. Nothing after the user
-/// said no or after the reminder was shown. It writes nothing, so a plan or
-/// a status read never uses up the reminder; see [`record_reminder`].
-pub fn pending(home: &Path) -> Option<String> {
-    if Kind::current().is_none()
-        || declined(home)
-        || has_key(home, REMINDED_KEY)
-        || service::find(home).is_some()
-        || service::find_old(home).is_some_and(|o| o.ours)
-        || !telemetry_points_here(home)
-    {
-        return None;
-    }
-    Some(
-        "telemetry is on, but nothing keeps the usage collector running, so telemetry is lost while it is down"
-            .to_string(),
-    )
-}
-
-/// Records that the reminder of the `collector-service` migration was shown, so later checks
-/// stay quiet. The heal calls it after it printed the line.
-pub fn record_reminder(home: &Path) {
-    let _ = crate::state::set(&root(home), REMINDED_KEY, "1");
-}
-
 /// The commands that remove an agent file under the old label that
 /// playbook did not write, which playbook never touches itself.
 pub fn foreign_old_agent_fix(file: &Path) -> String {
@@ -292,30 +267,59 @@ pub fn foreign_old_agent_fix(file: &Path) -> String {
     )
 }
 
-/// The step `playbook uninstall` runs: stops and deletes the service file,
-/// and the agent playbook wrote under the label 0.37.0 used. `Ok(None)` when
-/// there is neither.
-pub fn remove(home: &Path, dry_run: bool) -> Result<Option<String>, String> {
-    let found = service::find(home);
-    let old = service::find_old(home).filter(|o| o.ours);
-    let names: Vec<String> = found
+/// The service managers playbook ever wrote a file for. Removal checks each
+/// one on any system, so a file a synced home carried over goes too.
+const KINDS: [Kind; 2] = [Kind::Launchd, Kind::Systemd];
+
+/// The service files playbook wrote under `home`, in words, or `None` when
+/// there are none. It reads only the files and runs nothing.
+pub fn installed_names(home: &Path) -> Option<String> {
+    let names: Vec<String> = KINDS
         .iter()
-        .map(service::Found::describe)
-        .chain(old.iter().map(service::OldAgent::describe))
+        .filter_map(|kind| service::find_kind(*kind, home))
+        .map(|found| found.describe())
+        .chain(
+            service::find_old(home)
+                .filter(|o| o.ours)
+                .map(|o| o.describe()),
+        )
         .collect();
-    if names.is_empty() {
-        return Ok(None);
-    }
-    let names = names.join(" and the ");
+    (!names.is_empty()).then(|| names.join(" and the "))
+}
+
+/// The step `playbook uninstall` and the `collector-service-removed`
+/// migration run: stops and deletes every service file playbook wrote,
+/// including the agent under the label 0.37.0 used. `Ok(None)` when there
+/// is none.
+pub fn remove(home: &Path, dry_run: bool) -> Result<Option<String>, String> {
     if dry_run {
-        return Ok(Some(format!("would stop and remove the {names}")));
+        return Ok(installed_names(home).map(|names| format!("would stop and remove the {names}")));
     }
     let manager = manager::manager_for(home);
-    if let Some(found) = &found {
-        manager::remove(found.kind, home, manager.as_ref(), manager::uid())?;
+    remove_with(home, manager.as_ref())
+}
+
+/// [`remove`] with the service manager passed in, so tests use a fake one.
+pub fn remove_with(home: &Path, manager: &dyn Manager) -> Result<Option<String>, String> {
+    let Some(names) = installed_names(home) else {
+        return Ok(None);
+    };
+    for kind in KINDS {
+        manager::remove(kind, home, manager, manager::uid())?;
     }
-    manager::remove_old(home, manager.as_ref(), manager::uid())?;
+    manager::remove_old(home, manager, manager::uid())?;
     Ok(Some(format!("stopped and removed the {names}")))
+}
+
+/// Deletes the answers the retired setup part stored. A key that stays is
+/// read by nothing that changes behavior, so a failure is dropped and the
+/// next run of the migration tries again.
+pub fn forget_answers(home: &Path) {
+    for key in [DECLINED_KEY, REMINDED_KEY] {
+        if has_key(home, key) {
+            let _ = crate::state::delete(&root(home), key);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -566,49 +570,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_reminder_shows_once_and_never_after_a_no() {
-        if Kind::current().is_none() {
-            return;
-        }
-        let home = telemetry_home("remind");
-        let said_no = telemetry_home("remind-no");
-        step(
-            &said_no,
-            Path::new("/p"),
-            Choice::Declined,
-            Kind::current(),
-            &Stopped,
-        );
-
-        let first = pending(&home);
-        let again = pending(&home);
-        record_reminder(&home);
-        let after = pending(&home);
-
-        assert!(first.is_some_and(|l| l.contains("collector")));
-        assert!(again.is_some(), "the check alone writes nothing");
-        assert_eq!(after, None);
-        assert_eq!(pending(&said_no), None);
-    }
-
-    #[test]
-    fn an_installed_service_needs_no_reminder() {
-        if Kind::current().is_none() {
-            return;
-        }
-        let home = telemetry_home("remind-installed");
-        step(
-            &home,
-            Path::new("/p"),
-            Choice::Install,
-            Kind::current(),
-            &Stopped,
-        );
-
-        assert_eq!(pending(&home), None);
-    }
-
-    #[test]
     fn uninstall_removes_the_file_and_a_dry_run_only_names_it() {
         let home = telemetry_home("remove");
         let Some(kind) = Kind::current() else {
@@ -642,17 +603,6 @@ pub(crate) mod tests {
             service::render_old(Path::new("/p"), &service::log_path(home)),
         )
         .unwrap();
-    }
-
-    #[test]
-    fn an_old_agent_needs_no_reminder() {
-        if Kind::current().is_none() {
-            return;
-        }
-        let home = telemetry_home("remind-old");
-        put_old(&home);
-
-        assert_eq!(pending(&home), None);
     }
 
     #[test]

@@ -292,12 +292,6 @@ pub fn needs_you(message: &str, command: Option<&str>) -> String {
 
 /// Runs the heal for `trigger` at `now` (epoch seconds).
 pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
-    run_shown(ctx, trigger, now, true)
-}
-
-/// [`run`], where `shown` says whether a person sees the open items. A
-/// headless session hook passes false, so it does not use up a reminder.
-fn run_shown(ctx: &Ctx, trigger: Trigger, now: u64, shown: bool) -> Outcome {
     if crate::common::real_home::refused(&ctx.home) {
         return Outcome::skipped(Skip::RealHomeUnderTest);
     }
@@ -315,15 +309,6 @@ fn run_shown(ctx: &Ctx, trigger: Trigger, now: u64, shown: bool) -> Outcome {
     // heal returns, whether it succeeded or not.
     let pending = crate::notices::prepare(&root, record.binary.as_deref(), older);
     let out = heal_for(ctx, trigger, now, &root, &record, order);
-    // Every trigger but setup prints the open items, so the one reminder of
-    // the `collector-service` migration counts as shown here. Setup asks the question itself.
-    let reminded = out
-        .open
-        .iter()
-        .any(|i| i.id == migrate::COLLECTOR_SERVICE_MIGRATION);
-    if reminded && shown && !matches!(trigger, Trigger::Init { .. }) {
-        crate::init::collector_service::record_reminder(&ctx.home);
-    }
     Outcome {
         notices: pending.commit(&root),
         ..out
@@ -477,7 +462,7 @@ pub fn session_line(home: &Path) -> Option<String> {
     let now = crate::common::time::now_epoch_secs();
     std::panic::catch_unwind(|| {
         let shown = !crate::common::headless::is_headless();
-        let out = run_shown(&ctx, Trigger::Hook, now, shown);
+        let out = run(&ctx, Trigger::Hook, now);
         notice(home, &out, now, shown)
     })
     .ok()?
@@ -1067,50 +1052,6 @@ mod tests {
         // Assert
         assert!(soon.skipped.is_some());
         assert!(later.recorded);
-    }
-
-    #[test]
-    fn the_collector_reminder_is_used_up_only_when_shown() {
-        if crate::usage::service::Kind::current().is_none() {
-            return;
-        }
-        // Arrange
-        let home = crate::init::collector_service::tests::telemetry_home("heal-remind");
-        let shown = |out: &Outcome| {
-            out.open
-                .iter()
-                .any(|i| i.id == migrate::COLLECTOR_SERVICE_MIGRATION)
-        };
-        let init = Trigger::Init {
-            failed: false,
-            statusline: true,
-        };
-
-        // Act
-        let planned = migrate::plan(&ctx(&home)).unwrap_or_default();
-        let by_setup = run(&ctx(&home), init, 1000);
-        let headless = run_shown(&ctx(&home), Trigger::Hook, 1000, false);
-        let first = run(&ctx(&home), Trigger::Hook, 1000);
-        let second = run(&ctx(&home), Trigger::Hook, 2000);
-        let fix = run(&ctx(&home), Trigger::Fix, 3000);
-        let pending = Record::read(&root(&home)).unwrap().pending;
-
-        // Assert
-        assert!(
-            planned
-                .iter()
-                .any(|p| p.id == migrate::COLLECTOR_SERVICE_MIGRATION
-                    && matches!(p.state, migrate::State::Open { .. })),
-            "the plan lists the reminder as open"
-        );
-        assert!(shown(&by_setup), "setup does not use up the reminder");
-        assert!(shown(&headless), "a headless hook still reports it");
-        assert!(shown(&first), "a plan or a headless hook did not use it up");
-        assert!(!shown(&second), "the reminder shows once");
-        assert!(!shown(&fix));
-        assert!(!pending
-            .iter()
-            .any(|id| id == migrate::COLLECTOR_SERVICE_MIGRATION));
     }
 
     #[test]

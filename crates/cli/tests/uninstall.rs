@@ -679,14 +679,14 @@ fn an_agent_under_the_old_label_is_left_alone_in_a_scratch_home_and_uninstall_re
     let removed = sb.run(&["uninstall", "--yes"]);
 
     // Assert
-    // A scratch HOME never reaches the real launchd, so nothing moves. The
-    // label migration says so once its release ships it (ADR 0046); until
-    // then it does not run at all.
-    let label = playbook::init::migrate::COLLECTOR_LABEL_MIGRATION;
+    // A scratch HOME never reaches the real launchd, so nothing is removed.
+    // The removal migration says so once its release ships it (ADR 0046);
+    // until then it does not run at all.
+    let removal = playbook::init::migrate::COLLECTOR_REMOVAL_MIGRATION;
     let shipped = playbook::init::migrate::active()
         .iter()
-        .any(|m| m.id == label);
-    let said = text(&migrate).contains(label) && text(&migrate).contains("did not move it");
+        .any(|m| m.id == removal);
+    let said = text(&migrate).contains(removal) && text(&migrate).contains("did not remove it");
     assert_eq!(said, shipped, "{}", text(&migrate));
     assert!(kept);
     assert!(!Kind::Launchd.file(&sb.home).exists());

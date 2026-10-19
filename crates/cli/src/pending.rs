@@ -76,9 +76,6 @@ fn reason(slug: &str) -> Option<&'static str> {
         migrate::DEAD_HOOKS_MIGRATION => {
             "Claude Code runs these hooks on every event and each one fails"
         }
-        migrate::COLLECTOR_SERVICE_MIGRATION => {
-            "the usage collector runs only while a session keeps it alive, so usage data has gaps"
-        }
         migrate::PROMPT_DEFAULT_MIGRATION => {
             "pb cc sessions start without the playbook system prompt until it is installed or turned off"
         }
