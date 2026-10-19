@@ -27,6 +27,27 @@ fn the_prompt_stays_under_its_budget() {
 }
 
 #[test]
+fn the_prompt_does_not_require_task_tools_that_many_builds_lack() {
+    // Only `TaskStop` is reliably present, so the task tools stay conditional.
+    let text = prompt();
+
+    for tool in [
+        "TaskCreate",
+        "TaskList",
+        "TaskGet",
+        "TaskOutput",
+        "TaskUpdate",
+    ] {
+        assert!(!text.contains(tool), "names `{tool}`, which may be missing");
+    }
+    assert!(!text.contains("`Task*`"), "tells the model to use `Task*`");
+    assert!(
+        text.contains("only if listed"),
+        "task tools must be conditional"
+    );
+}
+
+#[test]
 fn the_prompt_uses_no_em_or_en_dash() {
     let text = prompt();
 
