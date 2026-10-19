@@ -37,7 +37,7 @@ Parse `$ARGUMENTS`:
 
 Do this first, before Phase 0.
 
-**Memory tool (MUST).** This command builds the memory store and its graph, and it reads the store through the memory tool. Intent: memory-context. Intent: memory-rebuild. If the session's tool map (printed at session start) does not list them, stop with one line and nothing else: "/playbook:learn-project needs a memory tool, and this session's tool map does not list one, so nothing was read or written." Otherwise carry on and use those commands where the phases below name them.
+**Memory tool (MUST).** This command builds the memory store and its graph, and it reads the store through the memory tool. Intent: memory-context. Intent: memory-rebuild. Intent: memory-stats. If the session's tool map (printed at session start) does not list memory-context and memory-rebuild, stop with one line and nothing else: "/playbook:learn-project needs a memory tool, and this session's tool map does not list one, so nothing was read or written." Otherwise carry on and use those commands where the phases below name them.
 
 Resolve whether this run is `ask` or `auto`. Intent: run-mode. If the session's tool map lists it, use that command with this command's name (`learn-project`) and `$ARGUMENTS`, and follow `../skills/delegating-subagents/references/run-context.md` (relative to this file) for its output: the warning, the effort ceiling, a conflicting-flags exit, and any other failure. Otherwise do this: the mode is `auto` when the arguments carry `--auto` and `ask` when they carry `--ask`. When both are given, stop with one line saying they conflict. With neither, run `printenv PLAYBOOK_MODE` and use its value when it is `ask` or `auto`; in every other case the mode is `ask`. There is no effort ceiling on this path.
 
@@ -123,11 +123,13 @@ Then write each approved fact:
 
 `~/.config/playbook/data/memory.db` holds a single graph covering every fact, global, org, and project. It rebuilds automatically: the `rebuild-memory-graph` PostToolUse hook fires whenever a fact file under `~/.config/playbook/memory/` is saved, so once Phase 4 has written the facts the graph is already current. Normally you skip this phase.
 
-`--graph-only` forces a rebuild without re-collecting, for use after hand-editing fact files: run the memory-rebuild command.
+`--graph-only` forces a rebuild without re-collecting, for use after hand-editing fact files: run the memory-rebuild command. When the tool map lists memory-stats, the rebuild also prints its summary.
 
 **Why a dedicated command rather than invoking the hook.** The hook skips unless the write it was told about is under `~/.config/playbook/memory/`, which is right for a PostToolUse hook and leaves no way to force a full rebuild. This used to run `python3 hooks/rebuild-memory-graph.py < /dev/null`, because that script treated empty stdin as "rebuild everything". The Rust port dropped that branch deliberately (see `should_skip` in `crates/cli/src/hooks/rebuild_memory_graph.rs`), judging it unexercised by the hook's test suite. It was exercised, by this command. Faking a `tool_input` payload that names a path inside the memory dir would also work and is what the port's own doc calls the more fragile option, since it breaks silently the next time the skip logic changes.
 
-It walks every fact under `~/.config/playbook/memory/`, derives each fact's scope (`global`, or `project` with its `owner/repo`), and writes `~/.config/playbook/data/memory.db` in one transaction. The fact files stay the source of truth, so the database is safe to delete: the next rebuild makes it again. Nodes are facts plus their `anchors:` code locations; edges are the `links:` between facts and the fact→code anchors. Report the node and edge counts, and flag any dangling edge.
+It walks every fact under `~/.config/playbook/memory/`, derives each fact's scope (`global`, `org` with its `owner`, or `project` with its `owner/repo`), and writes `~/.config/playbook/data/memory.db` in one transaction. The fact files stay the source of truth, so the database is safe to delete: the next rebuild makes it again. Nodes are facts plus their `anchors:` code locations; edges are the `links:` between facts and the fact→code anchors.
+
+To read the counts, run the memory-stats command (`playbook memory stats`) when the tool map lists it. If it does not, say in the report that this playbook version has no stats command. The command is read only and prints the database path, size and last rebuild time, facts per scope, nodes, edges per relation, anchors, and the dangling edges and anchors. Do not open `memory.db` with `sqlite3`: the stats command already has the answer.
 
 ## Staging mode (`--stage` and `--from-staged`)
 
@@ -155,7 +157,7 @@ One tight summary:
 
 - Facts written / updated / superseded, per cluster and per store.
 - Sources used, and **sources skipped with the reason** (e.g. "Confluence: no MCP, acli or twg").
-- The `memory.db` path, node and edge counts, and any dangling anchors or edges flagged during the build.
+- The output of the memory-stats command (`playbook memory stats`), as printed, or a note that this version has none: the `~/.config/playbook/data/memory.db` path, counts, and any dangling anchors or edges. Do not count with `sqlite3`.
 
 ## Teardown (MUST run, even on failure or abort)
 

@@ -594,6 +594,7 @@ fn table() -> Vec<Case> {
         case( "worktree review setup", &["worktree", "review", "setup", "1", "abc123"], ).code(1).err("failed to resolve repo URL"),
         case( "worktree review teardown", &["worktree", "review", "teardown", "{ROOT}/none"], ),
         case("memory rebuild", &["memory", "rebuild"]).out("rebuilt").grows(),
+        case("memory stats", &["memory", "stats"]).out("database:"),
         case("memory export", &["memory", "export"]).out("\"nodes\"").writes(),
         case("memory import-claude", &["memory", "import-claude"]).out("copied 0").writes(),
         case("memory context", &["memory", "context"]).out("Memory context").writes(),
