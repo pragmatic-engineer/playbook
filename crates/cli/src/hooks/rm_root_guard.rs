@@ -22,6 +22,9 @@ const DELETERS: [&str; 4] = ["rm", "rmdir", "unlink", "shred"];
 /// Words that run the next word as a command.
 const WRAPPERS: [&str; 6] = ["sudo", "command", "env", "exec", "nohup", "time"];
 
+/// Wrapper options whose next word is a value, not the command.
+const VALUE_OPTIONS: [&str; 3] = ["-u", "-g", "-C"];
+
 /// What the model sees when a command is denied.
 const DENIAL: &str = "Blocked by the rm guard: rm of the filesystem root or your home folder is not run by the model. If you mean it, run the command yourself in the prompt with `!`.";
 
@@ -44,18 +47,24 @@ fn deletes_root_or_home(words: &[String], home: &str) -> bool {
     let mut rest = words.iter().map(String::as_str).peekable();
     // Skip wrappers, their options and `NAME=value` words.
     while let Some(word) = rest.peek().copied() {
-        let wrapper = WRAPPERS.contains(&word);
+        let wrapper = WRAPPERS.contains(&base_name(word));
         let skipped = wrapper || word.starts_with('-') || is_assignment(word);
         if !skipped {
             break;
         }
         rest.next();
+        if VALUE_OPTIONS.contains(&word) {
+            rest.next();
+        }
     }
     let Some(name) = rest.next() else {
         return false;
     };
-    let name = name.rsplit('/').next().unwrap_or(name);
-    DELETERS.contains(&name) && rest.any(|arg| is_root_or_home(arg, home))
+    DELETERS.contains(&base_name(name)) && rest.any(|arg| is_root_or_home(arg, home))
+}
+
+fn base_name(word: &str) -> &str {
+    word.rsplit('/').next().unwrap_or(word)
 }
 
 fn is_assignment(word: &str) -> bool {
@@ -103,10 +112,13 @@ fn simple_commands(command: &str) -> Vec<Vec<String>> {
                 quote = Some(c);
                 in_word = true;
             }
-            (None, '\\') => {
-                in_word = true;
-                word.extend(chars.next());
-            }
+            (None, '\\') => match chars.next() {
+                Some('\n') => {}
+                next => {
+                    in_word = true;
+                    word.extend(next);
+                }
+            },
             (None, '#') if !in_word => {
                 for rest in chars.by_ref() {
                     if rest == '\n' {
@@ -147,7 +159,7 @@ mod tests {
     use crate::common::test_support::scratch_dir;
 
     /// Command lines the guard denies. `{h}` is the scratch home.
-    const DENIED: [&str; 28] = [
+    const DENIED: [&str; 33] = [
         "rm -rf /",
         "rm -rf /*",
         "rm -rf //",
@@ -173,6 +185,11 @@ mod tests {
         "command rm -rf /",
         "env FOO=1 rm -rf /",
         "/bin/rm -rf /",
+        "/usr/bin/sudo rm -rf /",
+        "sudo -u root rm -rf /",
+        "env -u HOME rm -rf ~",
+        "sudo \\\n rm -rf /",
+        "rm -rf \\\n/",
         "ls && rm -rf /",
         "echo done; rm -rf ~ || true",
         "cat x | rm -rf $HOME\nls",

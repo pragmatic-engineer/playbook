@@ -161,7 +161,7 @@ mod rm_workspace_guard {
     }
 
     #[test]
-    fn the_denial_is_one_fixed_sentence() {
+    fn the_denial_is_the_fixed_message() {
         let home = scratch("rm-message");
         let out = run_in_home("rm -rf ~", &home);
         assert!(out.contains("Blocked by the rm guard"), "{out}");
