@@ -362,14 +362,14 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: COLLECTOR_LABEL_MIGRATION,
-            since: "next",
+            since: "0.38.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: collector_service_label,
         },
         Migration {
             id: DISK_GUARD_MIGRATION,
-            since: "next",
+            since: "0.38.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: disk_guard_hook_pending,
