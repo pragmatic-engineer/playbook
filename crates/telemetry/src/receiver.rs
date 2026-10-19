@@ -4,20 +4,22 @@
 //! A small local OTLP/HTTP receiver for Claude Code telemetry.
 //!
 //! Hand rolled on `std::net` so no HTTP crate is added. It binds 127.0.0.1
-//! only, handles one connection at a time with hard limits (header size, body
-//! size, content type, request rate, read deadline), requires a bearer token
-//! when one is set, and answers `Connection: close` to every request. Only the
-//! JSON protocol is supported. `/v1/logs` and `/v1/metrics` are parsed by `otlp`
-//! (the attribute allowlist) and stored; `/v1/traces` is accepted and dropped.
+//! only, blocks in `accept` and gives each connection its own thread (capped),
+//! with hard limits (header size, body size, content type, request rate, read
+//! deadline), requires a bearer token when one is set, and answers
+//! `Connection: close` to every request. Only the JSON protocol is supported.
+//! `/v1/logs` and `/v1/metrics` are parsed by `otlp` (the attribute allowlist)
+//! and stored by the writer thread; `/v1/traces` is accepted and dropped.
+//! `POST /v1/playbook/shutdown` with the token stops the collector.
 
 use super::otlp;
 use super::writer::{self, Job, Kind};
 use rusqlite::Connection;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{SyncSender, TrySendError};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 /// Largest header block read.
@@ -28,6 +30,13 @@ pub const MAX_BODY_BYTES: usize = 1024 * 1024;
 pub const MAX_REQUESTS_PER_SEC: u32 = 50;
 /// Deadline for reading one whole request.
 pub const READ_DEADLINE: Duration = Duration::from_secs(5);
+/// Connection threads alive at once; one more is answered 503 and closed.
+pub const MAX_LIVE_CONNECTIONS: usize = 64;
+/// Stops the collector when posted with the bearer token. It needs no
+/// content type, only a body length (`Content-Length: 0` will do).
+pub const SHUTDOWN_PATH: &str = "/v1/playbook/shutdown";
+/// How long the wake up connect may take; the listener is on this host.
+const WAKE_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// How the receiver behaves.
 pub struct Config {
@@ -199,7 +208,7 @@ fn tokens_equal(a: &[u8], b: &[u8]) -> bool {
 
 /// Method, path, auth, content type and encoding, checked before the body.
 fn precheck(
-    cfg: &Config,
+    token: Option<&str>,
     method: &str,
     path: &str,
     headers: &[(String, String)],
@@ -211,19 +220,23 @@ fn precheck(
             .map(|(_, v)| v.as_str())
     };
     let path = path.split('?').next().unwrap_or("");
-    if !matches!(path, "/v1/logs" | "/v1/metrics" | "/v1/traces") {
+    let otlp = matches!(path, "/v1/logs" | "/v1/metrics" | "/v1/traces");
+    if !otlp && path != SHUTDOWN_PATH {
         return Err(HttpError(404, "not found"));
     }
     if method != "POST" {
         return Err(HttpError(405, "method not allowed"));
     }
-    if let Some(token) = &cfg.token {
+    if let Some(token) = token {
         let ok = get("authorization")
             .and_then(|v| v.strip_prefix("Bearer "))
             .is_some_and(|t| tokens_equal(t.as_bytes(), token.as_bytes()));
         if !ok {
             return Err(HttpError(401, "unauthorized"));
         }
+    }
+    if !otlp {
+        return Ok(());
     }
     let json = get("content-type").is_some_and(|v| {
         v.split(';')
@@ -266,10 +279,14 @@ fn dispatch(jobs: &SyncSender<Job>, stop: &AtomicBool, req: &Request, now: i64) 
             return unavailable();
         }
     }
-    // A dropped reply means the writer died with the job queued.
     match answer.recv() {
         Ok(true) => (200, r#"{"partialSuccess":{}}"#.to_string()),
-        _ => unavailable(),
+        Ok(false) => unavailable(),
+        // A dropped reply means the writer died with the job queued.
+        Err(_) => {
+            stop.store(true, Ordering::SeqCst);
+            unavailable()
+        }
     }
 }
 
@@ -322,9 +339,102 @@ pub fn bind(port: u16) -> std::io::Result<TcpListener> {
     TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))
 }
 
-/// Serves until `stop` is set or the idle limit passes. Returns why it ended.
-/// The connection moves to the writer thread, which commits what it holds
-/// before this returns.
+/// What the accept loop and every connection thread share.
+struct Shared {
+    /// Taken by `serve` on the way out, so the writer sees the channel close
+    /// while a silent client still holds its thread.
+    jobs: Mutex<Option<SyncSender<Job>>>,
+    token: Option<String>,
+    stop: Arc<AtomicBool>,
+    /// Set by the idle watchdog, so `serve` can say why it ended.
+    idled: AtomicBool,
+    limiter: Mutex<RateLimiter>,
+    live: AtomicUsize,
+    /// Milliseconds from `started` to the last real request.
+    last_request: AtomicU64,
+    started: Instant,
+    addr: SocketAddr,
+    now: fn() -> i64,
+}
+
+impl Shared {
+    fn new(
+        addr: SocketAddr,
+        jobs: SyncSender<Job>,
+        token: Option<String>,
+        stop: &Arc<AtomicBool>,
+        now: fn() -> i64,
+    ) -> Self {
+        let started = Instant::now();
+        Self {
+            jobs: Mutex::new(Some(jobs)),
+            token,
+            stop: Arc::clone(stop),
+            idled: AtomicBool::new(false),
+            limiter: Mutex::new(RateLimiter {
+                window: started,
+                count: 0,
+            }),
+            live: AtomicUsize::new(0),
+            last_request: AtomicU64::new(0),
+            started,
+            addr,
+            now,
+        }
+    }
+
+    fn jobs(&self) -> Option<SyncSender<Job>> {
+        self.jobs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn close(&self) {
+        self.jobs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+    }
+
+    fn millis(&self) -> u64 {
+        u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    fn touch(&self) {
+        self.last_request.store(self.millis(), Ordering::SeqCst);
+    }
+
+    fn quiet_for(&self) -> Duration {
+        let last = self.last_request.load(Ordering::SeqCst);
+        Duration::from_millis(self.millis().saturating_sub(last))
+    }
+
+    /// Sets the stop flag and wakes the blocking `accept`.
+    fn halt(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+        wake(self.addr);
+    }
+}
+
+/// Connects once to the listener, so a blocking `accept` returns and the loop
+/// sees the stop flag. Whoever sets the flag from outside must call this.
+pub fn wake(addr: SocketAddr) {
+    let _ = TcpStream::connect_timeout(&addr, WAKE_TIMEOUT);
+}
+
+/// Frees a connection slot when its thread ends, even on a panic.
+struct Slot<'a>(&'a AtomicUsize);
+
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Serves until `stop` is set (then call `wake`), a shutdown request comes or
+/// the idle limit passes. Returns why it ended. The connection moves to the
+/// writer thread, which commits what it holds before this returns.
 pub fn serve(
     listener: &TcpListener,
     conn: Connection,
@@ -332,63 +442,135 @@ pub fn serve(
     stop: &Arc<AtomicBool>,
     now: fn() -> i64,
 ) -> std::io::Result<&'static str> {
+    let addr = listener.local_addr()?;
     let (jobs, writer) = writer::spawn(conn, cfg.prune, now, Arc::clone(stop));
-    let why = accept_loop(listener, &jobs, cfg, stop, now);
+    let shared = Arc::new(Shared::new(addr, jobs, cfg.token.clone(), stop, now));
+    let why = run(listener, &shared, cfg.idle);
     // Closing the channel lets the writer commit its last batch and exit.
-    drop(jobs);
+    shared.close();
     let _ = writer.join();
     why
 }
 
-fn accept_loop(
+/// The accept loop plus the idle watchdog.
+fn run(
     listener: &TcpListener,
-    jobs: &SyncSender<Job>,
-    cfg: &Config,
-    stop: &Arc<AtomicBool>,
-    now: fn() -> i64,
+    shared: &Arc<Shared>,
+    idle: Option<Duration>,
 ) -> std::io::Result<&'static str> {
-    listener.set_nonblocking(true)?;
-    let mut last = Instant::now();
-    let mut limiter = RateLimiter {
-        window: Instant::now(),
-        count: 0,
-    };
+    let (done, finished) = std::sync::mpsc::channel::<()>();
+    let watchdog = idle.map(|idle| {
+        let shared = Arc::clone(shared);
+        std::thread::spawn(move || watch_idle(&shared, idle, &finished))
+    });
+    let result = accept_loop(listener, shared);
+    // Dropping the sender ends the watchdog's wait at once.
+    drop(done);
+    if let Some(w) = watchdog {
+        let _ = w.join();
+    }
+    result?;
+    Ok(if shared.idled.load(Ordering::SeqCst) {
+        "idle"
+    } else {
+        "stopped"
+    })
+}
+
+fn watch_idle(shared: &Shared, idle: Duration, finished: &Receiver<()>) {
     loop {
-        if stop.load(Ordering::SeqCst) {
-            return Ok("stopped");
+        if shared.stop.load(Ordering::SeqCst) {
+            return;
         }
-        if cfg.idle.is_some_and(|idle| last.elapsed() >= idle) {
-            return Ok("idle");
+        let quiet = shared.quiet_for();
+        if quiet >= idle {
+            shared.idled.store(true, Ordering::SeqCst);
+            shared.halt();
+            return;
         }
+        match finished.recv_timeout(idle - quiet) {
+            Err(RecvTimeoutError::Timeout) => {}
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
+        }
+    }
+}
+
+fn accept_loop(listener: &TcpListener, shared: &Arc<Shared>) -> std::io::Result<()> {
+    // Blocking, so an idle collector costs no wake ups; `wake` ends the wait.
+    listener.set_nonblocking(false)?;
+    while !shared.stop.load(Ordering::SeqCst) {
         let mut stream = match listener.accept() {
             Ok((s, _)) => s,
-            Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(25));
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::Interrupted | ErrorKind::ConnectionAborted
+                ) =>
+            {
                 continue;
             }
             Err(e) => return Err(e),
         };
-        let _ = stream.set_nonblocking(false);
+        if shared.stop.load(Ordering::SeqCst) {
+            break;
+        }
         let _ = stream.set_read_timeout(Some(READ_DEADLINE));
         let _ = stream.set_write_timeout(Some(READ_DEADLINE));
-        if !limiter.allow(Instant::now()) {
-            respond(&mut stream, 429, r#"{"error":"rate limit"}"#);
+        if shared.live.load(Ordering::SeqCst) >= MAX_LIVE_CONNECTIONS {
+            respond(&mut stream, 503, r#"{"error":"too many connections"}"#);
             continue;
         }
-        let check = |m: &str, p: &str, h: &[(String, String)]| precheck(cfg, m, p, h);
-        match read_request(&mut stream, &check) {
-            Ok(req) => {
-                // Only a real request keeps the collector alive. A bare
-                // connect (a liveness probe from `cc` or `usage status`) or a
-                // rejected request does not, so polling cannot hold it open.
-                last = Instant::now();
-                let (status, body) = dispatch(jobs, stop, &req, now());
-                respond(&mut stream, status, &body);
-            }
-            Err(HttpError(status, msg)) => {
-                respond(&mut stream, status, &format!(r#"{{"error":"{msg}"}}"#));
-            }
+        shared.live.fetch_add(1, Ordering::SeqCst);
+        let mine = Arc::clone(shared);
+        let spawned = std::thread::Builder::new().spawn(move || {
+            let _slot = Slot(&mine.live);
+            handle(&mine, stream);
+        });
+        // The closure never ran, so its slot is given back here.
+        if spawned.is_err() {
+            shared.live.fetch_sub(1, Ordering::SeqCst);
         }
+    }
+    Ok(())
+}
+
+/// Reads, routes and answers one connection on its own thread.
+fn handle(shared: &Shared, mut stream: TcpStream) {
+    let allowed = shared
+        .limiter
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .allow(Instant::now());
+    if !allowed {
+        respond(&mut stream, 429, r#"{"error":"rate limit"}"#);
+        return;
+    }
+    let token = shared.token.as_deref();
+    let check = |m: &str, p: &str, h: &[(String, String)]| precheck(token, m, p, h);
+    let req = match read_request(&mut stream, &check) {
+        Ok(req) => req,
+        Err(HttpError(status, msg)) => {
+            respond(&mut stream, status, &format!(r#"{{"error":"{msg}"}}"#));
+            return;
+        }
+    };
+    // Only a real request keeps the collector alive. A bare connect (a
+    // liveness probe from `cc` or `usage status`) or a rejected request does
+    // not, so polling cannot hold it open.
+    shared.touch();
+    if req.path == SHUTDOWN_PATH {
+        respond(&mut stream, 200, "{}");
+        shared.halt();
+        return;
+    }
+    let (status, body) = match shared.jobs() {
+        Some(jobs) => dispatch(&jobs, &shared.stop, &req, (shared.now)()),
+        None => (503, r#"{"error":"shutting down"}"#.to_string()),
+    };
+    respond(&mut stream, status, &body);
+    // `dispatch` sets the flag when the writer is gone; the loop must see it.
+    if shared.stop.load(Ordering::SeqCst) {
+        wake(shared.addr);
     }
 }
 
@@ -426,7 +608,8 @@ mod tests {
     }
 
     fn parse(bytes: Vec<u8>, c: &Config) -> Result<Request, HttpError> {
-        let check = |m: &str, p: &str, h: &[(String, String)]| precheck(c, m, p, h);
+        let check =
+            |m: &str, p: &str, h: &[(String, String)]| precheck(c.token.as_deref(), m, p, h);
         read_request(&mut Cursor::new(bytes), &check)
     }
 
@@ -770,6 +953,269 @@ mod tests {
 
         assert_eq!(status, 503);
         assert!(stop.load(Ordering::SeqCst));
+    }
+
+    /// Generous bound for a reply that should come at once.
+    const PROMPT: Duration = Duration::from_secs(1);
+    /// Slack past `READ_DEADLINE` before a silent client must be closed.
+    const GRACE: Duration = Duration::from_secs(3);
+    const POLL: Duration = Duration::from_millis(50);
+    const AUTH: &str = "Authorization: Bearer tok";
+
+    fn token_cfg(idle: Option<Duration>) -> Config {
+        Config {
+            token: Some("tok".into()),
+            idle,
+            prune: None,
+        }
+    }
+
+    /// Polls `done` every `POLL` until `bound`, checking it before the
+    /// deadline so a condition met on the last poll still passes.
+    fn within(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + bound;
+        loop {
+            if done() {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(POLL);
+        }
+    }
+
+    /// Serves on a thread and always stops it in `Drop`, so a failed
+    /// assertion cannot leave one serving.
+    struct Server {
+        port: u16,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<std::io::Result<&'static str>>>,
+    }
+
+    impl Server {
+        fn spawn(
+            body: impl FnOnce(&TcpListener, &Arc<AtomicBool>) -> std::io::Result<&'static str>
+                + Send
+                + 'static,
+        ) -> Self {
+            let listener = bind(0).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let stop = Arc::new(AtomicBool::new(false));
+            let flag = Arc::clone(&stop);
+            let thread = std::thread::spawn(move || body(&listener, &flag));
+            Self {
+                port,
+                stop,
+                thread: Some(thread),
+            }
+        }
+
+        fn serve(conn: Connection, c: Config) -> Self {
+            Self::spawn(move |listener, stop| serve(listener, conn, &c, stop, || 1))
+        }
+
+        /// Waits up to `bound` for serve to return on its own.
+        fn ended_within(&mut self, bound: Duration) -> Option<&'static str> {
+            let finished = within(bound, || {
+                self.thread.as_ref().is_some_and(|t| t.is_finished())
+            });
+            if !finished {
+                return None;
+            }
+            Some(self.thread.take()?.join().unwrap().unwrap())
+        }
+    }
+
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            wake(SocketAddr::from((Ipv4Addr::LOCALHOST, self.port)));
+            if let Some(t) = self.thread.take() {
+                let _ = t.join();
+            }
+        }
+    }
+
+    fn connect(port: u16) -> TcpStream {
+        TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap()
+    }
+
+    fn shutdown(port: u16, auth: &str) -> (u16, String) {
+        post(port, SHUTDOWN_PATH, &[auth], b"")
+    }
+
+    #[test]
+    fn a_stalled_client_does_not_delay_another() {
+        let (conn, _reader) = db("receiver-stalled");
+        let server = Server::serve(conn, token_cfg(None));
+        let mut stalled = connect(server.port);
+        stalled
+            .write_all(b"POST /v1/logs HTTP/1.1\r\nContent-Type: appl")
+            .unwrap();
+
+        let started = Instant::now();
+        let (status, _) = post(server.port, "/v1/logs", &[AUTH], &logs_body("r1"));
+
+        assert_eq!(status, 200);
+        assert!(started.elapsed() < PROMPT, "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn the_rate_limit_holds_across_threads() {
+        const THREADS: u32 = 6;
+        const EACH: u32 = 10;
+        let (conn, _reader) = db("receiver-rate");
+        let server = Server::serve(conn, token_cfg(None));
+        let port = server.port;
+        let gate = Arc::new(std::sync::Barrier::new(THREADS as usize));
+        let clients: Vec<_> = (0..THREADS)
+            .map(|_| {
+                let gate = Arc::clone(&gate);
+                std::thread::spawn(move || {
+                    gate.wait();
+                    // Traces skip the writer, so all requests land in one second.
+                    (0..EACH)
+                        .map(|_| post(port, "/v1/traces", &[AUTH], b"{}"))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let replies: Vec<_> = clients
+            .into_iter()
+            .flat_map(|c| c.join().unwrap())
+            .collect();
+
+        let limited: Vec<_> = replies.iter().filter(|(s, _)| *s == 429).collect();
+        let expected = (THREADS * EACH - MAX_REQUESTS_PER_SEC) as usize;
+        assert!(limited.len() >= expected, "{} got 429", limited.len());
+        assert!(limited
+            .iter()
+            .all(|(_, text)| text.contains("X-Playbook-Collector: 1")));
+    }
+
+    #[test]
+    fn shutdown_with_the_token_stops_serve_and_keeps_earlier_rows() {
+        let (conn, reader) = db("receiver-shutdown");
+        let mut server = Server::serve(conn, token_cfg(None));
+        assert_eq!(
+            post(server.port, "/v1/logs", &[AUTH], &logs_body("r1")).0,
+            200
+        );
+
+        assert_eq!(shutdown(server.port, AUTH).0, 200);
+
+        assert_eq!(server.ended_within(PROMPT), Some("stopped"));
+        assert_eq!(count_requests(&reader).unwrap(), 1);
+    }
+
+    #[test]
+    fn shutdown_with_a_wrong_token_is_401_and_serving_goes_on() {
+        let (conn, _reader) = db("receiver-shutdown-401");
+        let mut server = Server::serve(conn, token_cfg(None));
+
+        assert_eq!(shutdown(server.port, "Authorization: Bearer nope").0, 401);
+        assert_eq!(shutdown(server.port, "X-None: 1").0, 401);
+
+        assert_eq!(post(server.port, "/v1/traces", &[AUTH], b"{}").0, 200);
+        assert_eq!(server.ended_within(Duration::ZERO), None);
+    }
+
+    #[test]
+    fn with_no_traffic_serve_returns_idle() {
+        const IDLE: Duration = Duration::from_secs(1);
+        let (conn, _reader) = db("receiver-idle");
+        let mut server = Server::serve(conn, token_cfg(Some(IDLE)));
+
+        assert_eq!(server.ended_within(IDLE + GRACE), Some("idle"));
+    }
+
+    #[test]
+    fn every_reply_carries_the_collector_header() {
+        let (conn, _reader) = db("receiver-header");
+        let server = Server::serve(conn, token_cfg(None));
+        let port = server.port;
+        let replies = [
+            post(port, "/v1/traces", &[AUTH], b"{}"),
+            post(port, "/v1/logs", &[AUTH], b"nope"),
+            post(port, "/v1/logs", &[], b"{}"),
+            post(port, "/elsewhere", &[AUTH], b""),
+            shutdown(port, "Authorization: Bearer nope"),
+            shutdown(port, AUTH),
+        ];
+
+        let statuses: Vec<u16> = replies.iter().map(|r| r.0).collect();
+        assert_eq!(statuses, [200, 400, 401, 404, 401, 200]);
+        for (status, text) in &replies {
+            assert!(text.contains("X-Playbook-Collector: 1"), "{status}: {text}");
+        }
+    }
+
+    #[test]
+    fn a_gone_writer_answers_503_and_serve_returns() {
+        let (jobs, gone) = std::sync::mpsc::sync_channel(1);
+        drop(gone);
+        let mut server = Server::spawn(move |listener, stop| {
+            let shared = Arc::new(Shared::new(listener.local_addr()?, jobs, None, stop, || 1));
+            run(listener, &shared, None)
+        });
+
+        let (status, _) = post(server.port, "/v1/logs", &[], &logs_body("r1"));
+
+        assert_eq!(status, 503);
+        assert_eq!(server.ended_within(PROMPT), Some("stopped"));
+    }
+
+    /// Serves with a writer channel nobody reads, exposing the shared state.
+    fn serve_shared() -> (Server, Arc<Shared>) {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let server = Server::spawn(move |listener, stop| {
+            let (jobs, _unread) = std::sync::mpsc::sync_channel(1);
+            let shared = Arc::new(Shared::new(listener.local_addr()?, jobs, None, stop, || 1));
+            tx.send(Arc::clone(&shared)).unwrap();
+            run(listener, &shared, None)
+        });
+        let shared = rx.recv().unwrap();
+        (server, shared)
+    }
+
+    #[test]
+    fn a_silent_client_is_closed_after_the_read_deadline_and_frees_its_slot() {
+        let (_server, shared) = serve_shared();
+        let mut silent = connect(_server.port);
+        let started = Instant::now();
+        assert!(within(PROMPT, || shared.live.load(Ordering::SeqCst) == 1));
+
+        let mut reply = String::new();
+        let _ = silent.read_to_string(&mut reply);
+
+        let waited = started.elapsed();
+        assert!(reply.starts_with("HTTP/1.1 408"), "{reply}");
+        assert!(waited < READ_DEADLINE + GRACE, "{waited:?}");
+        assert!(within(PROMPT, || shared.live.load(Ordering::SeqCst) == 0));
+    }
+
+    #[test]
+    fn a_connection_over_the_thread_cap_gets_503() {
+        // Past the rate limit a client gets 429 and frees its slot, so the
+        // clients are opened in two halves, one rate window apart.
+        const RATE_WINDOW: Duration = Duration::from_millis(1100);
+        let half = MAX_LIVE_CONNECTIONS / 2;
+        let (server, shared) = serve_shared();
+        let live = |n: usize| within(PROMPT, || shared.live.load(Ordering::SeqCst) == n);
+        let mut held: Vec<_> = (0..half).map(|_| connect(server.port)).collect();
+        assert!(live(half));
+        std::thread::sleep(RATE_WINDOW);
+        held.extend((half..MAX_LIVE_CONNECTIONS).map(|_| connect(server.port)));
+        assert!(live(MAX_LIVE_CONNECTIONS));
+
+        let mut over = connect(server.port);
+        let mut reply = String::new();
+        let _ = over.read_to_string(&mut reply);
+
+        assert!(reply.starts_with("HTTP/1.1 503"), "{reply}");
+        assert!(reply.contains("X-Playbook-Collector: 1"), "{reply}");
+        drop(held);
     }
 
     /// A stand in writer that takes one job and hands it to `answer`.
