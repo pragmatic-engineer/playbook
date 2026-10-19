@@ -267,6 +267,229 @@ pub fn run_for_command(home: &Path, no_plugin: bool) -> Option<Outcome> {
     (!skip).then(|| run(&Probe::for_home(home)))
 }
 
+/// The state key of the once-per-binary-version marker.
+const MARKER_KEY: &str = "versions/plugin-update";
+
+/// A failed or unchanged update is tried again after this long.
+const FAILED_RETRY: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// A `running` marker older than this belongs to a run that never finished
+/// (Ctrl-C, a crash), so the update is due again.
+const RUNNING_STALE: Duration = Duration::from_secs(10 * 60);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum State {
+    Running,
+    Done,
+    Failed,
+}
+
+impl State {
+    const fn word(self) -> &'static str {
+        match self {
+            State::Running => "running",
+            State::Done => "done",
+            State::Failed => "failed",
+        }
+    }
+}
+
+/// What the last attempt did: `<binary version> <state> <epoch secs>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Marker {
+    pub version: String,
+    pub state: State,
+    pub at: u64,
+}
+
+impl Marker {
+    /// `None` for text that is not a marker; callers treat that as another
+    /// version, so the update is due.
+    pub fn parse(text: &str) -> Option<Marker> {
+        let mut parts = text.split_whitespace();
+        let version = parts.next()?.to_string();
+        let state = match parts.next()? {
+            "running" => State::Running,
+            "done" => State::Done,
+            "failed" => State::Failed,
+            _ => return None,
+        };
+        let at = parts.next()?.parse().ok()?;
+        parts
+            .next()
+            .is_none()
+            .then_some(Marker { version, state, at })
+    }
+
+    pub fn format(&self) -> String {
+        format!("{} {} {}", self.version, self.state.word(), self.at)
+    }
+}
+
+/// Everything the due check reads, so the rules run without a process
+/// environment.
+#[derive(Debug, Clone)]
+pub struct DueInputs<'a> {
+    /// `None` when there is no marker or it cannot be parsed.
+    pub marker: Option<Marker>,
+    pub running: &'a str,
+    pub installed: Option<&'a str>,
+    pub mode: Mode,
+    pub skip_env: Option<&'a str>,
+    pub headless: bool,
+    pub ci_vendor: bool,
+    pub disabled_in_claude: bool,
+    pub plugin_id: Option<&'a str>,
+}
+
+/// Whether the plugin update should run now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Due {
+    Run(Mode),
+    /// The plugin is already at the running version and the marker does not
+    /// say so yet: record `done`, run nothing.
+    Current,
+    NotDue(&'static str),
+}
+
+/// The rules of the due check, in order. Skips come first so a skipped run
+/// never writes the marker.
+pub fn due_from(i: DueInputs<'_>, now: u64) -> Due {
+    if i.mode == Mode::Off {
+        return Due::NotDue("update.plugin is off");
+    }
+    if i.skip_env == Some(SKIP_VALUE) {
+        return Due::NotDue("the skip variable is set");
+    }
+    if i.headless {
+        return Due::NotDue("headless run");
+    }
+    if i.ci_vendor {
+        return Due::NotDue("CI run");
+    }
+    if i.plugin_id.is_none() {
+        return Due::NotDue("the plugin is not installed");
+    }
+    if i.disabled_in_claude {
+        return Due::NotDue("the plugin is turned off in Claude Code");
+    }
+    let Some(installed) = i.installed else {
+        return Due::NotDue("the installed plugin version is unknown");
+    };
+    let this_version = i.marker.as_ref().filter(|m| m.version == i.running);
+    if crate::update::resolve::compare(installed, i.running).is_ge() {
+        return match this_version {
+            Some(m) if m.state == State::Done => Due::NotDue("already recorded as current"),
+            _ => Due::Current,
+        };
+    }
+    let age = |m: &Marker| Duration::from_secs(now.saturating_sub(m.at));
+    match this_version {
+        None => Due::Run(i.mode),
+        Some(m) => match m.state {
+            State::Done => Due::NotDue("already done for this version"),
+            State::Failed if age(m) > FAILED_RETRY => Due::Run(i.mode),
+            State::Failed => Due::NotDue("failed recently"),
+            State::Running if age(m) > RUNNING_STALE => Due::Run(i.mode),
+            State::Running => Due::NotDue("another process is running it"),
+        },
+    }
+}
+
+/// The raw marker text, the `seen` value [`claim`] compares against.
+pub fn seen(root: &Path) -> Option<String> {
+    crate::state::list_read_only(root, MARKER_KEY)
+        .ok()?
+        .into_iter()
+        .find_map(|(k, v)| (k == MARKER_KEY && !v.is_empty()).then_some(v))
+}
+
+fn now() -> u64 {
+    u64::try_from(crate::common::time::now_secs()).unwrap_or(0)
+}
+
+/// [`due_from`] with the inputs read from `home` and the process
+/// environment. Reads only.
+pub fn due(home: &Path) -> Due {
+    let root = crate::common::paths::playbook_root_from(home);
+    let claude_home = home.join(".claude");
+    let id = plugin_id(&claude_home);
+    let installed = id
+        .as_deref()
+        .and_then(|id| installed_version(&claude_home, id));
+    let skip_env = std::env::var(SKIP_ENV).ok();
+    due_from(
+        DueInputs {
+            marker: seen(&root).and_then(|t| Marker::parse(&t)),
+            running: env!("CARGO_PKG_VERSION"),
+            installed: installed.as_deref(),
+            mode: mode(home),
+            skip_env: skip_env.as_deref(),
+            headless: crate::common::headless::is_headless(),
+            ci_vendor: crate::update::check::ci_vendor_env(|k| std::env::var(k).ok()),
+            disabled_in_claude: id
+                .as_deref()
+                .is_some_and(|id| is_off_in_claude_code(&claude_home, id)),
+            plugin_id: id.as_deref(),
+        },
+        now(),
+    )
+}
+
+/// Moves the marker from `seen` to `running` in one transaction. Only the
+/// caller that moved it runs the update, so two sessions that start
+/// together run it once.
+pub fn claim(root: &Path, seen: Option<&str>, running: &str, now: u64) -> bool {
+    let marker = Marker {
+        version: running.to_string(),
+        state: State::Running,
+        at: now,
+    };
+    crate::state::transaction(root, |tx| {
+        if tx.get(MARKER_KEY)?.filter(|v| !v.is_empty()).as_deref() == seen {
+            tx.set(MARKER_KEY, &marker.format())?;
+            return Ok(true);
+        }
+        Ok(false)
+    })
+    .unwrap_or(false)
+}
+
+/// Records how the attempt ended. An update that changed nothing while the
+/// plugin is still older than the binary counts as failed, so it retries
+/// after [`FAILED_RETRY`]. Best effort: a store that cannot be written
+/// leaves the `running` marker, which goes stale on its own.
+pub fn finish(
+    root: &Path,
+    outcome: &Outcome,
+    running: &str,
+    installed_after: Option<&str>,
+    now: u64,
+) {
+    let still_older =
+        installed_after.is_none_or(|v| crate::update::resolve::compare(v, running).is_lt());
+    let state = match outcome {
+        Outcome::Failed { .. } => State::Failed,
+        Outcome::Current { .. } if still_older => State::Failed,
+        _ => State::Done,
+    };
+    write(root, running, state, now);
+}
+
+/// Records `done` for a plugin that is already current ([`Due::Current`]).
+pub fn record_current(root: &Path, running: &str, now: u64) {
+    write(root, running, State::Done, now);
+}
+
+fn write(root: &Path, running: &str, state: State, now: u64) {
+    let marker = Marker {
+        version: running.to_string(),
+        state,
+        at: now,
+    };
+    let _ = crate::state::set(root, MARKER_KEY, &marker.format());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -561,5 +784,405 @@ mod tests {
             plugin_id(&home.join(".claude")).as_deref(),
             Some("playbook@pragmatic-engineer")
         );
+    }
+
+    const RUN: &str = "1.2.0";
+    const T0: u64 = 1_000_000;
+    const H24: u64 = 24 * 60 * 60;
+    const M10: u64 = 10 * 60;
+
+    fn marker(version: &str, state: State, at: u64) -> Option<Marker> {
+        Some(Marker {
+            version: version.into(),
+            state,
+            at,
+        })
+    }
+
+    fn base() -> DueInputs<'static> {
+        DueInputs {
+            marker: marker("1.1.0", State::Done, T0),
+            running: RUN,
+            installed: Some("1.1.0"),
+            mode: Mode::Auto,
+            skip_env: None,
+            headless: false,
+            ci_vendor: false,
+            disabled_in_claude: false,
+            plugin_id: Some("playbook@pragmatic-engineer"),
+        }
+    }
+
+    #[test]
+    fn due_from_applies_every_rule() {
+        let not_due = |why| Due::NotDue(why);
+        let cases: Vec<(&str, DueInputs, u64, Due)> = vec![
+            ("older marker version", base(), T0, Due::Run(Mode::Auto)),
+            (
+                "ask is passed through",
+                DueInputs {
+                    mode: Mode::Ask,
+                    ..base()
+                },
+                T0,
+                Due::Run(Mode::Ask),
+            ),
+            (
+                "no marker",
+                DueInputs {
+                    marker: None,
+                    ..base()
+                },
+                T0,
+                Due::Run(Mode::Auto),
+            ),
+            (
+                "failed at 24h plus 1s",
+                DueInputs {
+                    marker: marker(RUN, State::Failed, T0),
+                    ..base()
+                },
+                T0 + H24 + 1,
+                Due::Run(Mode::Auto),
+            ),
+            (
+                "failed at 24h minus 1s",
+                DueInputs {
+                    marker: marker(RUN, State::Failed, T0),
+                    ..base()
+                },
+                T0 + H24 - 1,
+                not_due("failed recently"),
+            ),
+            (
+                "failed at exactly 24h",
+                DueInputs {
+                    marker: marker(RUN, State::Failed, T0),
+                    ..base()
+                },
+                T0 + H24,
+                not_due("failed recently"),
+            ),
+            (
+                "running at 10min plus 1s",
+                DueInputs {
+                    marker: marker(RUN, State::Running, T0),
+                    ..base()
+                },
+                T0 + M10 + 1,
+                Due::Run(Mode::Auto),
+            ),
+            (
+                "running at 10min minus 1s",
+                DueInputs {
+                    marker: marker(RUN, State::Running, T0),
+                    ..base()
+                },
+                T0 + M10 - 1,
+                not_due("another process is running it"),
+            ),
+            (
+                "a clock set back",
+                DueInputs {
+                    marker: marker(RUN, State::Running, T0),
+                    ..base()
+                },
+                T0 - 5,
+                not_due("another process is running it"),
+            ),
+            (
+                "done for this version",
+                DueInputs {
+                    marker: marker(RUN, State::Done, T0),
+                    ..base()
+                },
+                T0 + 9 * H24,
+                not_due("already done for this version"),
+            ),
+            (
+                "plugin equal, marker done",
+                DueInputs {
+                    marker: marker(RUN, State::Done, T0),
+                    installed: Some(RUN),
+                    ..base()
+                },
+                T0,
+                not_due("already recorded as current"),
+            ),
+            (
+                "plugin equal, no record",
+                DueInputs {
+                    installed: Some(RUN),
+                    ..base()
+                },
+                T0,
+                Due::Current,
+            ),
+            (
+                "plugin newer",
+                DueInputs {
+                    installed: Some("1.3.0"),
+                    ..base()
+                },
+                T0,
+                Due::Current,
+            ),
+            (
+                "plugin newer prerelease order",
+                DueInputs {
+                    installed: Some("1.2.0-rc.1"),
+                    ..base()
+                },
+                T0,
+                Due::Run(Mode::Auto),
+            ),
+            (
+                "plugin version unknown",
+                DueInputs {
+                    installed: None,
+                    ..base()
+                },
+                T0,
+                not_due("the installed plugin version is unknown"),
+            ),
+            (
+                "mode off",
+                DueInputs {
+                    mode: Mode::Off,
+                    ..base()
+                },
+                T0,
+                not_due("update.plugin is off"),
+            ),
+            (
+                "skip env 1",
+                DueInputs {
+                    skip_env: Some("1"),
+                    ..base()
+                },
+                T0,
+                not_due("the skip variable is set"),
+            ),
+            (
+                "skip env 0 does not skip",
+                DueInputs {
+                    skip_env: Some("0"),
+                    ..base()
+                },
+                T0,
+                Due::Run(Mode::Auto),
+            ),
+            (
+                "headless",
+                DueInputs {
+                    headless: true,
+                    ..base()
+                },
+                T0,
+                not_due("headless run"),
+            ),
+            (
+                "CI vendor",
+                DueInputs {
+                    ci_vendor: true,
+                    ..base()
+                },
+                T0,
+                not_due("CI run"),
+            ),
+            (
+                "disabled in Claude Code",
+                DueInputs {
+                    disabled_in_claude: true,
+                    ..base()
+                },
+                T0,
+                not_due("the plugin is turned off in Claude Code"),
+            ),
+            (
+                "no id",
+                DueInputs {
+                    plugin_id: None,
+                    ..base()
+                },
+                T0,
+                not_due("the plugin is not installed"),
+            ),
+            (
+                "off wins over current",
+                DueInputs {
+                    mode: Mode::Off,
+                    installed: Some(RUN),
+                    ..base()
+                },
+                T0,
+                not_due("update.plugin is off"),
+            ),
+        ];
+        for (name, inputs, now, expected) in cases {
+            // Act
+            let got = due_from(inputs, now);
+
+            // Assert
+            assert_eq!(got, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_marker_round_trips_and_unparsable_text_is_not_a_marker() {
+        // Arrange
+        let m = Marker {
+            version: "1.2.0-rc.1".into(),
+            state: State::Failed,
+            at: 42,
+        };
+
+        // Act
+        let parsed = Marker::parse(&m.format());
+
+        // Assert
+        assert_eq!(parsed, Some(m));
+        for bad in [
+            "",
+            "1.2.0",
+            "1.2.0 done",
+            "1.2.0 stuck 5",
+            "1.2.0 done x",
+            "1.2.0 done 5 6",
+        ] {
+            assert_eq!(Marker::parse(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn an_unparsable_marker_counts_as_another_version() {
+        // Arrange
+        let inputs = DueInputs {
+            marker: Marker::parse("garbage"),
+            ..base()
+        };
+
+        // Act
+        let got = due_from(inputs, T0);
+
+        // Assert
+        assert_eq!(got, Due::Run(Mode::Auto));
+    }
+
+    fn store(tag: &str) -> PathBuf {
+        let root = crate::common::paths::playbook_root_from(&scratch_dir(tag));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn a_claim_succeeds_once_for_callers_that_read_the_same_value() {
+        // Arrange
+        let root = store("pu-claim");
+        let seen = seen(&root);
+
+        // Act
+        let first = claim(&root, seen.as_deref(), RUN, T0);
+        let second = claim(&root, seen.as_deref(), RUN, T0);
+
+        // Assert
+        assert!(first);
+        assert!(!second);
+        assert_eq!(super::seen(&root), Some(format!("{RUN} running {T0}")));
+    }
+
+    #[test]
+    fn a_claim_moves_from_the_value_it_read() {
+        // Arrange
+        let root = store("pu-claim-from");
+        crate::state::set(&root, MARKER_KEY, "1.1.0 done 5").unwrap();
+
+        // Act
+        let stale = claim(&root, None, RUN, T0);
+        let fresh = claim(&root, Some("1.1.0 done 5"), RUN, T0);
+
+        // Assert
+        assert!(!stale);
+        assert!(fresh);
+    }
+
+    fn failed() -> Outcome {
+        Outcome::Failed {
+            id: "p@x".into(),
+            why: "timeout".into(),
+        }
+    }
+
+    fn current() -> Outcome {
+        Outcome::Current {
+            id: "p@x".into(),
+            version: None,
+        }
+    }
+
+    fn updated() -> Outcome {
+        Outcome::Updated {
+            id: "p@x".into(),
+            from: None,
+            to: None,
+        }
+    }
+
+    #[test]
+    fn finish_writes_failed_or_done_by_outcome() {
+        let cases: Vec<(&str, Outcome, Option<&str>, State)> = vec![
+            ("failed", failed(), Some(RUN), State::Failed),
+            (
+                "current but still older",
+                current(),
+                Some("1.1.0"),
+                State::Failed,
+            ),
+            (
+                "current, version unreadable",
+                current(),
+                None,
+                State::Failed,
+            ),
+            (
+                "current and at the running version",
+                current(),
+                Some(RUN),
+                State::Done,
+            ),
+            ("updated", updated(), Some(RUN), State::Done),
+            ("not installed", Outcome::NotInstalled, None, State::Done),
+        ];
+        for (name, outcome, after, expected) in cases {
+            // Arrange
+            let root = store("pu-finish");
+
+            // Act
+            finish(&root, &outcome, RUN, after, T0);
+
+            // Assert
+            let written = Marker::parse(&seen(&root).unwrap()).unwrap();
+            assert_eq!(
+                written,
+                Marker {
+                    version: RUN.into(),
+                    state: expected,
+                    at: T0
+                },
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_current_plugin_is_recorded_done() {
+        // Arrange
+        let root = store("pu-record");
+
+        // Act
+        record_current(&root, RUN, T0);
+
+        // Assert
+        assert_eq!(seen(&root), Some(format!("{RUN} done {T0}")));
     }
 }
