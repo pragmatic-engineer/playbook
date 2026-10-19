@@ -398,7 +398,7 @@ jobs:
             release=draft) echo "Reusing the draft $TAG." ;;
             *) echo "::error::$TAG is already published. Nothing is uploaded." >&2; exit 1 ;;
           esac
-          gh release upload "$TAG" release-notes.json breaking-changes.json --clobber
+          gh release upload "$TAG" release-notes.json --clobber
 
   build:
     needs: [plan, macos, draft]
@@ -630,8 +630,7 @@ jobs:
             fi
           done
           gh release download "$TAG" --pattern release-notes.json --clobber
-          gh release download "$TAG" --pattern breaking-changes.json --clobber
-          shasum -a 256 playbook-* pbtop-* release-notes.json breaking-changes.json > SHA256SUMS
+          shasum -a 256 playbook-* pbtop-* release-notes.json > SHA256SUMS
           shasum -a 256 -c SHA256SUMS
           gh release upload "$TAG" SHA256SUMS --clobber
 
@@ -640,7 +639,6 @@ jobs:
         with:
           subject-path: |
             dist/release-notes.json
-            dist/breaking-changes.json
             dist/SHA256SUMS
 
       - name: Publish the release as the latest
@@ -691,7 +689,7 @@ jobs:
           mkdir -p check && cd check
           gh release download "$TAG"
           sha256sum -c SHA256SUMS
-          for f in playbook-* pbtop-* release-notes.json breaking-changes.json SHA256SUMS; do
+          for f in playbook-* pbtop-* release-notes.json SHA256SUMS; do
             gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
               --signer-workflow "$GH_REPO/.github/workflows/release.yml" >/dev/null
           done

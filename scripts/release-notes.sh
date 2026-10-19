@@ -13,8 +13,8 @@
 #     Prints the markdown for a release-notes.json file.
 #
 #   release-notes.sh body <component> <version> <json-out>
-#     Writes release-notes.json to <json-out> and prints the release body:
-#     the upgrade note, then the markdown.
+#     Writes release-notes.json to <json-out> and prints the release body,
+#     the markdown.
 #
 # The sections come in this order, and an empty one is left out:
 #   breaking     `!` after the type or scope, or a BREAKING CHANGE footer
@@ -245,9 +245,6 @@ body() {
   local out
   out="$(from_caller "${3:?usage: release-notes.sh body <component> <version> <json-out>}")"
   json "$component" "$version" > "$out"
-  case "$component" in
-    playbook) cat .github/release-notes-upgrade.md; echo ;;
-  esac
   markdown "$out"
 }
 

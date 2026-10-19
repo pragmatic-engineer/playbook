@@ -17,10 +17,9 @@
 use std::path::{Path, PathBuf};
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 15] = [
+const ALLOW_FILES: [&str; 14] = [
     ".gitignore",
     "CHANGELOG.md",
-    "breaking-changes.json",
     "README.md",
     "LICENSE",
     "NOTICE",
@@ -151,9 +150,9 @@ mod tests {
     }
 
     #[test]
-    fn breaking_changes_json_is_allowlisted() {
+    fn the_retired_breaking_changes_json_is_an_offender() {
         let tracked = vec!["breaking-changes.json".to_string()];
-        assert!(violations(&tracked).is_empty());
+        assert_eq!(violations(&tracked), tracked);
     }
 
     #[test]

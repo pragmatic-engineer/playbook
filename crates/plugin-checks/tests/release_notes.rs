@@ -28,15 +28,10 @@ impl Repo {
         let dir = std::env::temp_dir().join(format!("release-notes-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("scripts")).expect("scratch repo");
-        fs::create_dir_all(dir.join(".github")).expect("scratch repo");
         let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/release-notes.sh");
         fs::copy(script, dir.join("scripts/release-notes.sh")).expect("copy the script");
         let repo = Repo { dir };
         repo.git(&["init", "-q", "-b", "main"]);
-        repo.write(
-            ".github/release-notes-upgrade.md",
-            "## Upgrade note\n\nRun it.\n",
-        );
         repo.change("crates/cli/src/lib.rs", "feat(cli): before the tag (#1)");
         repo.git(&["tag", "v0.1.0"]);
         repo
@@ -474,7 +469,7 @@ fn markup_in_a_subject_is_escaped_in_the_markdown_and_kept_in_the_json() {
 }
 
 #[test]
-fn the_body_puts_the_upgrade_note_above_the_notes() {
+fn the_body_starts_with_the_notes() {
     // Arrange
     let repo = mixed_history();
     let out_json = repo.dir.join("out.json");
@@ -487,10 +482,7 @@ fn the_body_puts_the_upgrade_note_above_the_notes() {
     // Assert
     assert!(playbook.status.success(), "{}", text_of(&playbook));
     let playbook = String::from_utf8_lossy(&playbook.stdout);
-    assert!(
-        playbook.starts_with("## Upgrade note\n\nRun it.\n\n## Breaking changes\n"),
-        "{playbook}"
-    );
+    assert!(playbook.starts_with("## Breaking changes\n"), "{playbook}");
     assert!(written.contains(r#""component": "playbook""#), "{written}");
 }
 

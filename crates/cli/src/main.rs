@@ -2470,15 +2470,6 @@ fn main() {
                 }
             }
         }
-        Command::Breaking { since, json } => {
-            match playbook::breaking::command(since.as_deref(), json) {
-                Ok(text) => print!("{text}"),
-                Err(err) => {
-                    eprintln!("breaking: {err}");
-                    std::process::exit(1);
-                }
-            }
-        }
         Command::Mode { sub } => {
             let to_mode = |arg: ModeArg| match arg {
                 ModeArg::Ask => common::mode::Mode::Ask,

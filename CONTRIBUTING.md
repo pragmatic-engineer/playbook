@@ -62,7 +62,6 @@ Playbook is before 1.0, so a breaking change can ship in any release. A change i
 - Mark it with `!` after the type or scope in the pull request title, as in `feat(cli)!: drop the old flag`, or with a `BREAKING CHANGE:` footer at the end of the body. The title and body become the squash commit.
 - Give the footer one line that says what breaks and what to do, as in `BREAKING CHANGE: the config moved; run playbook setup`. The `breaking-changes` check warns when the title is marked and the body has no footer.
 - The release notes list breaking changes first ([ADR-0037](docs/adr/0037-release-notes-from-conventional-commits.md)). `scripts/release-notes.sh` builds them from the commits.
-- Until 0.36.0, a breaking change to playbook also gets an entry in `breaking-changes.json`. A 0.34 binary that updates itself to 0.35.0 reads that file and asks the new binary for `playbook breaking`, so the 0.35 line keeps both, and 0.36.0 removes them.
 - A change to playbook's own config, its data files, the entries it writes into Claude Code settings, or the contract between the binary and the plugin keeps working after an upgrade or ships a migration that runs on first use ([ADR-0034](docs/adr/0034-self-healing-upgrades.md)).
 
 ### Adding a migration

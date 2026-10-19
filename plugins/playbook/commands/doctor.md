@@ -83,9 +83,8 @@ and stop.
    step. `--status` and `--dry-run` show what is pending and write nothing.
    `playbook update` runs it and prints the breaking changes since your
    previous version. The install script does the same with a terminal or
-   `--yes`, unless `--no-init` is set. After `brew upgrade`, the caveats list
-   that release's breaking changes, and `playbook breaking --since <version>`
-   lists earlier ones.
+   `--yes`, unless `--no-init` is set. After `brew upgrade`, the release page
+   on GitHub lists that release's breaking changes.
 7. **No hook command points at a missing file.** A hook that names a path
    which does not exist fails open: it never runs and nothing says so. Bare
    binary hook commands are skipped, as is any path with an

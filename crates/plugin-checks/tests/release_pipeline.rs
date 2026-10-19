@@ -54,7 +54,6 @@ impl Repo {
             "docs/guides/00-install.md",
             &format!("PLAYBOOK_REF=v{version} bash\n"),
         );
-        repo.write(".github/release-notes-upgrade.md", "## Upgrade note\n");
         repo.write(
             "CHANGELOG.md",
             "# Changelog\n\nThe header.\n\n## playbook 0.9.0\n\n- Old notes.\n",
