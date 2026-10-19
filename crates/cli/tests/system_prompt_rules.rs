@@ -76,8 +76,14 @@ fn the_prompt_requires_a_memory_search_before_claiming_no_knowledge() {
     let text = prompt();
 
     // Act
-    let has_rule = text.contains("name the sources you checked");
+    let missing: Vec<&str> = ["search memory and the repo", "name the sources you checked"]
+        .into_iter()
+        .filter(|needle| !text.contains(needle))
+        .collect();
 
     // Assert
-    assert!(has_rule, "missing the search-before-no-knowledge rule");
+    assert!(
+        missing.is_empty(),
+        "missing the search-before-no-knowledge rule: {missing:?}"
+    );
 }
