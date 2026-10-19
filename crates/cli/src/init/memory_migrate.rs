@@ -232,8 +232,11 @@ fn finish_when_source_absent(new_root: &Path, sentinel: &Path) -> StepReport {
     if !new_root.exists() {
         return StepReport::skipped(STEP_NAME, "no legacy ~/.claude/memory to migrate");
     }
+    // Only the marker is new, and no file moved, so this is not reported
+    // as a change: on a fresh install the session hook creates the folder
+    // first, and "updated 1 of its own files" read like an upgrade.
     match write_sentinel(sentinel) {
-        Ok(()) => StepReport::wired(
+        Ok(()) => StepReport::already_correct(
             STEP_NAME,
             format!(
                 "{} already complete from a prior run; marked so",

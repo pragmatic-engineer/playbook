@@ -481,17 +481,18 @@ fn heal_row(env: &Env, bin_ver: &str) -> Row {
         )
         .hint(fix);
     }
-    if !record.pending.is_empty() {
-        return Row::new(
-            "6",
-            Level::Warn,
-            format!(
-                "{} upgrade item(s) need you: {}",
-                record.pending.len(),
-                record.pending.join(", ")
-            ),
-        )
-        .hint(fix);
+    // The same list `playbook migrate` prints, under this one row.
+    let items = crate::pending::collect_read_only(&env.home).unwrap_or_default();
+    if !items.is_empty() {
+        let list = crate::pending::render(&items);
+        let (body, last) = list
+            .trim_end()
+            .rsplit_once('\n')
+            .unwrap_or((list.trim_end(), ""));
+        return Row::new("6", Level::Warn, format!("upgrade check: {body}")).hint(
+            last.rsplit_once("run: ")
+                .map_or_else(|| last.to_string(), |(_, cmd)| format!("run: {cmd}")),
+        );
     }
     let Some(b) = record.binary else {
         return Row::new(

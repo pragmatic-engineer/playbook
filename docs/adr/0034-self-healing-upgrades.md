@@ -1,8 +1,8 @@
 # ADR-0034: One Plugin Root Resolver and Migrations Between Versions
 
-- **Status:** Accepted. Decisions 13 and 14 are amended by [ADR 0037](0037-release-notes-from-conventional-commits.md), which replaces the ADR 0035 record. Decisions 9, 10 and 11 are amended by [ADR 0038](0038-one-release-line.md): the supported plugin range is the minor line of the binary, and `minBinaryVersion` is the `X.Y.0` of the release. Decisions 8 and 12 are amended by [ADR 0042](0042-attribution-off-in-setup.md): `doctor --fix` asks about the missing `attribution` keys before the shared heal step and may add them after a yes at a terminal. Decision 6 is amended by [ADR 0044](0044-drop-the-shell-launcher.md): migration 0007 is retired, migration 0018 removes the shell rc lines playbook wrote, and `Consent` also covers a question only setup asks. Decisions 5, 7 and 12 are amended by [ADR 0046](0046-migrations-by-release-version.md): each migration names the release that introduced it, the record is compared by version alone, and `versions/schema` stays at 20. The amendment of [ADR 0044](0044-drop-the-shell-launcher.md) on 2026-10-19 removes `shell-init`, so it is no longer in the `Command::is_hot_path` list of decision 13.
+- **Status:** Accepted. Decisions 13 and 14 are amended by [ADR 0037](0037-release-notes-from-conventional-commits.md), which replaces the ADR 0035 record. Decisions 9, 10 and 11 are amended by [ADR 0038](0038-one-release-line.md): the supported plugin range is the minor line of the binary, and `minBinaryVersion` is the `X.Y.0` of the release. Decisions 8 and 12 are amended by [ADR 0042](0042-attribution-off-in-setup.md): `doctor --fix` asks about the missing `attribution` keys before the shared heal step and may add them after a yes at a terminal. Decision 6 is amended by [ADR 0044](0044-drop-the-shell-launcher.md): migration 0007 is retired, migration 0018 removes the shell rc lines playbook wrote, and `Consent` also covers a question only setup asks. Decisions 5, 7 and 12 are amended by [ADR 0046](0046-migrations-by-release-version.md): each migration names the release that introduced it, the record is compared by version alone, and `versions/schema` stays at 20. The amendment of [ADR 0044](0044-drop-the-shell-launcher.md) on 2026-10-19 removes `shell-init`, so it is no longer in the `Command::is_hot_path` list of decision 13. Decisions 7, 10 and 12 are amended on 2026-10-19, see [Amendment 2026-10-19: one list of what needs you](#amendment-2026-10-19-one-list-of-what-needs-you).
 - **Date created:** 2026-10-15
-- **Date modified:** 2026-10-18
+- **Date modified:** 2026-10-19
 - **Amends:** decision 7 of [ADR 0016](0016-migration-framework.md), which ran the registry only from `playbook init` and rejected running it from `SessionStart`. Decision 3 of [ADR 0031](0031-hooks-in-settings-json.md), which kept every hook entry that is not a bare `playbook hook <name>` command.
 
 ## Context
@@ -94,3 +94,35 @@ A user's skill failed with "could not find the plugin root folder". The binary p
 - The embedded rule files follow the binary's release, so they can lag the plugin. `pr rules` uses them only when the plugin files are missing, and says so. This replaces the error ADR 0030 describes.
 - A new breaking change adds a registry entry with a `Kind` and a `Scope`. A wrong scope is the main risk, and the registry wide test catches an `Owned` migration that writes outside playbook's files.
 - The doctor row stops warning about versions that differ by design. The wording in the plugin's `doctor` command changes in the plugin, tracked in issue #1024.
+
+## Amendment 2026-10-19: one list of what needs you
+
+A user reported that after a first install the session start said there was a new version of playbook and that one item needed them, and named `playbook migrate`. After `playbook migrate`, and again after `claude plugin update`, the next session showed the same message. The user asked for a bullet list of what needs them, and for the message to stop once it was handled or seen.
+
+### Root causes
+
+Each one was reproduced in a scratch home with a fixture plugin, `installed_plugins.json` and a version record, by running the session hook, `playbook migrate`, and the hook again.
+
+1. **`1 item(s) need you: run playbook migrate` is a `Report` item.** The two `Report` migrations are `plugin-version-range` and `other-playbook-plugins`. `migrate` runs only `Owned` migrations and prints a `Report` item without fixing it. The hook reran the open checks on every session and printed the same line while the check held. The real command, `claude plugin update ...`, `claude plugin uninstall ...` or `playbook update`, sat inside the message that only `migrate` printed.
+2. **A plugin newer than the binary.** With plugin 0.38.0 (`minBinaryVersion` 0.38.0) and binary 0.37.0 the session showed `playbook binary 0.37.0 is older than this plugin needs (0.38.0). Run: playbook update` on every start, with no limit (decision 10), and the `plugin-version-range` item for the same cause. Neither `migrate` nor `claude plugin update` changes either one: only a newer binary does. This matches the report word for word.
+3. **A plugin older than the binary.** With plugin 0.36.0 and binary 0.37.0 the item clears as soon as `installed_plugins.json` names 0.37.0. It stays when an entry scoped to the current project still names 0.36.0, because that entry wins over the user entry that `claude plugin update` changes.
+4. **`Consent` items.** A change to `settings.json` or a shell file, such as the `attribution` keys, needs `playbook setup --only <part>`. `migrate` never applies it, so the hook repeated it every session until the user answered.
+5. **A fresh install read like an upgrade.** The session hook creates `~/.config/playbook/memory` before the heal runs. `memory-store-move` then wrote its completion marker and reported it as a change, so the first session said `updated 1 of its own files after the upgrade`. It showed once.
+
+Checked and not a cause: the release check notice of ADR 0036 already compares the newest release with the running binary and shows at most once a day for each version, on a command's stderr and never in the session. A record written by a newer or dev binary makes the hook skip as a downgrade, so it prints nothing.
+
+### Decisions
+
+1. **One list, one renderer.** `crate::pending` builds the list of what needs the user: the open `Consent` and `Report` items, and the plugin checks. Each item is one bullet with what it is, why it matters (`Why:`), and the exact command that fixes it (`Fix:`). A `Consent` item names its `playbook setup` command. A `Report` item names the command from its own check. The list ends with one line: `playbook migrate` when it fixes an item on its own, else `playbook setup` when a setup change is open, else `playbook migrate --status`. The session hook, the first-run step, `playbook migrate`, `migrate --status`, `migrate --dry-run`, `doctor --fix` and the doctor's upgrade row print the same list. `--json` adds an `items` array with the same fields.
+2. **The plugin checks join the list.** The plugin that needs a newer binary (decision 10) and the plugin outside the minor line (`plugin-version-range`) are items of the list, checked in every session, and shown as one item, since both have the same fix. A version problem counts only when the installed plugin in `installed_plugins.json` and the folder this session runs from (`CLAUDE_PLUGIN_ROOT`, when set) both have it, so it goes away as soon as either is current. A session that runs from an older cache folder than the installed plugin gets the item `plugin-stale-session`, whose fix is to start Claude Code again.
+3. **Each item shows until it is fixed or seen.** The `state` table keeps one row per item, `notices/items/<slug>`, with a hash of the item text, when it last showed, and whether `migrate` printed it.
+   - A new item, or one whose text changed, shows in full in the next session.
+   - An item already shown comes back at most once a day, in one line with the count, the slugs and `playbook migrate --status`.
+   - A `Report` item that `playbook migrate` or `doctor --fix` printed does not come back in the session. `migrate --status` and `doctor` still list it.
+   - A `Consent` item the user answered is closed by its check, as before, and a no is remembered.
+   - An item whose check clears disappears at once, and its row is removed, so it shows in full if it comes back.
+   - A headless session marks nothing.
+4. **`playbook migrate` ends with what is left.** It prints what it changed, what failed, the notes, then `Still left for you` and the list, or `nothing else needs you`.
+5. **A fresh store is not a change.** `memory-store-move` reports a marker it writes on a store with nothing to move as already correct.
+
+This changes decision 7, trigger 3 (the hook adds the list, not one line), decision 10 (the plugin line is an item of the list) and decision 12 (`Consent` and `Report` items print as the list). The consequence "the hook repeats the command each session until the item is fixed" no longer holds: it shows once, then once a day at most.

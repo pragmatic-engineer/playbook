@@ -65,6 +65,7 @@ pub mod migrate_cli;
 pub mod mode;
 pub mod models;
 pub mod notices;
+pub mod pending;
 pub mod plan_cleanup;
 pub mod planning;
 pub mod plans;
@@ -427,7 +428,7 @@ pub enum Command {
     /// Example: `playbook doctor pending-migrations`
     ///
     /// `playbook doctor --fix` repairs playbook's own files after an upgrade
-    /// and prints the command for each change that needs you, the same as
+    /// and prints the list of what still needs you, the same as
     /// `playbook migrate`. At a terminal it first asks whether to turn
     /// attribution OFF, the default, by adding the missing `attribution`
     /// keys; that yes is the only Claude Code setting it writes. A no stores
@@ -446,9 +447,12 @@ pub enum Command {
     /// this binary as the one that ran them. The ones that run once start only
     /// after an upgrade, and the checks that repair a file run every time.
     /// A migration waits for the release named in its `since`.
-    /// Nothing runs after a downgrade. A change to Claude Code settings or a
-    /// shell file prints the `playbook setup` command that applies it, and a
-    /// report prints its own fix. It never writes Claude Code settings.
+    /// Nothing runs after a downgrade. It never writes Claude Code settings.
+    /// It ends with the list of what still needs you, one bullet per item
+    /// with why it matters and the command that fixes it: `playbook setup`
+    /// for a change to Claude Code settings or a shell file, and its own fix
+    /// for a report. The session start then stops repeating a report it
+    /// printed.
     /// `update`, the install script and `doctor --fix` run the same step.
     ///
     /// Exit codes: 0 when it finished or had nothing to do, 1 when the record
@@ -457,7 +461,7 @@ pub enum Command {
     ///
     /// Example: `playbook migrate --status`
     Migrate {
-        /// List each migration with the release that ships it, its scope and state, and the recorded and running versions, writing nothing
+        /// List each migration with the release that ships it, its scope and state, the recorded and running versions, and what needs you, writing nothing
         #[arg(long, conflicts_with = "dry_run")]
         status: bool,
         /// Show the migrations a run would start and what needs you, writing nothing

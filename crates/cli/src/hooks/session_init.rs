@@ -109,11 +109,7 @@ pub fn run(payload: &Payload) {
     if let Some(line) = &disk_line {
         push_context(&mut extra_context, line);
     }
-    for line in binary_too_old_line()
-        .into_iter()
-        .chain(heal_line(&home))
-        .chain(disk_line)
-    {
+    for line in heal_line(&home).into_iter().chain(disk_line) {
         if !system_message.is_empty() {
             system_message.push('\n');
         }
@@ -146,23 +142,10 @@ pub fn run(payload: &Payload) {
 }
 
 /// Runs the safe migrations when this binary is newer than the version
-/// record, and repeats any item that needs the user (ADR 0034).
+/// record, and lists what needs the user, the plugin checks included, as
+/// `crate::pending` shows them in a session (ADR 0034).
 fn heal_line(home: &str) -> Option<String> {
     crate::heal::session_line(Path::new(home))
-}
-
-/// The upgrade line when the installed plugin needs a newer binary than this
-/// one (ADR 0034). Fails open: any error says nothing.
-fn binary_too_old_line() -> Option<String> {
-    let root = crate::plugin_root::resolve_here().ok()?.root;
-    let exe = std::env::current_exe().unwrap_or_default();
-    // A Homebrew binary is often reached through a symlink in /usr/local/bin.
-    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
-    crate::plugin_root::binary_too_old(
-        &root,
-        env!("CARGO_PKG_VERSION"),
-        crate::update::is_homebrew(&exe),
-    )
 }
 
 /// Starts the telemetry collector when Claude Code's settings point at it and

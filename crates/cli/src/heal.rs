@@ -207,7 +207,8 @@ impl Outcome {
         i32::from(blocked || unrecorded || !self.failed.is_empty())
     }
 
-    /// One line for the session message, or `None` when there is nothing to say.
+    /// One line for what the heal did, or `None` when it did nothing to
+    /// report. The items that need the user go through `crate::pending`.
     pub fn line(&self) -> Option<String> {
         let mut parts = Vec::new();
         if !self.changed.is_empty() {
@@ -222,26 +223,6 @@ impl Outcome {
                 self.failed.len()
             ));
         }
-        let mut commands: Vec<&str> = self.open.iter().filter_map(|i| i.command).collect();
-        let consent = commands.len();
-        commands.sort_unstable();
-        commands.dedup();
-        if consent > 0 {
-            let run = commands
-                .iter()
-                .map(|c| format!("`{c}`"))
-                .collect::<Vec<_>>()
-                .join(" and ");
-            parts.push(format!(
-                "{consent} change(s) to your settings or shell files need {run}"
-            ));
-        }
-        let reports = self.open.len() - consent;
-        if reports > 0 {
-            parts.push(format!(
-                "{reports} item(s) need you: run `playbook migrate`"
-            ));
-        }
         (!parts.is_empty()).then(|| {
             format!(
                 "playbook {}: {}.",
@@ -250,11 +231,20 @@ impl Outcome {
             )
         })
     }
+
+    /// The open items of this run with the plugin items, as one list.
+    pub fn items(&self, home: &Path) -> Vec<crate::pending::Item> {
+        crate::pending::merge(
+            &self.open,
+            crate::pending::plugin_items(&crate::pending::PluginProbe::for_home(home)),
+        )
+    }
 }
 
-/// The `doctor --fix` report: what changed, what failed, then one line per
-/// open item with the command that fixes it.
-pub fn render_fix(out: &Outcome) -> String {
+/// The `playbook migrate` and `doctor --fix` report: what it did, what
+/// failed, the notes, then the list of what is still left for the user with
+/// the command for each.
+pub fn render_fix(out: &Outcome, items: &[crate::pending::Item]) -> String {
     let mut text = String::new();
     if let Some(skip) = out.skipped {
         text.push_str(&format!("nothing ran: {}\n", skip.reason()));
@@ -268,11 +258,16 @@ pub fn render_fix(out: &Outcome) -> String {
     for warning in &out.warnings {
         text.push_str(&format!("note: {warning}\n"));
     }
-    for item in &out.open {
-        text.push_str(&needs_you(&item.message, item.command));
-    }
     if text.is_empty() {
-        text.push_str("nothing to fix\n");
+        text.push_str("nothing to fix in playbook's own files\n");
+    }
+    if items.is_empty() {
+        text.push_str("nothing else needs you\n");
+    } else {
+        text.push_str(&format!(
+            "Still left for you, {}",
+            crate::pending::render(items)
+        ));
     }
     text
 }
@@ -460,7 +455,7 @@ fn ids(open: &[OpenItem]) -> Vec<String> {
     open.iter().map(|i| i.id.to_string()).collect()
 }
 
-/// The `session-init` entry point: fails open and returns the one line to
+/// The `session-init` entry point: fails open and returns the text to
 /// show, if any.
 pub fn session_line(home: &Path) -> Option<String> {
     let ctx = Ctx::for_home(home);
@@ -468,19 +463,20 @@ pub fn session_line(home: &Path) -> Option<String> {
     std::panic::catch_unwind(|| {
         let shown = !crate::common::headless::is_headless();
         let out = run_shown(&ctx, Trigger::Hook, now, shown);
-        notice(out.line(), &out.notices)
+        notice(home, &out)
     })
     .ok()?
 }
 
-/// `line` and the release notes line, in that order, or `None` when both
-/// are empty.
-fn notice(line: Option<String>, notices: &crate::notices::Notices) -> Option<String> {
-    let block = notices.render();
-    let parts: Vec<&str> = line
-        .as_deref()
+/// What the heal did, the list of items that need the user, and the
+/// release notes line, in that order, or `None` when all are empty.
+fn notice(home: &Path, out: &Outcome) -> Option<String> {
+    let block = out.notices.render();
+    let parts: Vec<String> = out
+        .line()
         .into_iter()
-        .chain((!block.is_empty()).then_some(block.trim_end()))
+        .chain(crate::pending::session_text(&out.items(home)))
+        .chain((!block.is_empty()).then(|| block.trim_end().to_string()))
         .collect();
     (!parts.is_empty()).then(|| parts.join("\n"))
 }
@@ -550,17 +546,14 @@ fn start(home: &Path, deadline: Instant) -> Option<String> {
     if out.skipped == Some(Skip::RealHomeUnderTest) {
         return Some(format!("playbook: {}", crate::common::real_home::NOTE));
     }
-    if out.skipped.is_some() {
-        return notice(None, &out.notices);
+    let text = notice(home, &out);
+    if !out.timed_out {
+        return text;
     }
-    let mut line = out.line();
-    if out.timed_out {
-        line = Some(match line {
-            Some(l) => format!("{l}\nplaybook: {TIME_LIMIT_NOTE}"),
-            None => format!("playbook: {TIME_LIMIT_NOTE}"),
-        });
-    }
-    notice(line, &out.notices)
+    Some(match text {
+        Some(t) => format!("{t}\nplaybook: {TIME_LIMIT_NOTE}"),
+        None => format!("playbook: {TIME_LIMIT_NOTE}"),
+    })
 }
 
 #[cfg(test)]
@@ -939,7 +932,7 @@ mod tests {
         // Assert
         assert_eq!(out.skipped, Some(Skip::Downgrade));
         assert_eq!(fix.exit_code(), 0);
-        assert!(render_fix(&fix).starts_with("nothing ran: a newer playbook ran here"));
+        assert!(render_fix(&fix, &[]).starts_with("nothing ran: a newer playbook ran here"));
         assert_eq!(Record::read(&root(&home)).unwrap(), newer);
     }
 
@@ -956,13 +949,9 @@ mod tests {
 
         // Assert
         for out in [&first, &second] {
-            assert!(
-                out.line()
-                    .unwrap()
-                    .contains("need `playbook setup --statusline`"),
-                "{:?}",
-                out.line()
-            );
+            let items = crate::pending::from_open(&out.open);
+            assert_eq!(items.len(), 1, "{:?}", out.open);
+            assert_eq!(items[0].fix, "playbook setup --statusline");
         }
         assert_eq!(
             Record::read(&root(&home)).unwrap().pending,
@@ -990,7 +979,7 @@ mod tests {
         let out = run(&ctx(&home), Trigger::Hook, 2000);
 
         // Assert
-        assert!(out.line().is_none());
+        assert!(out.open.is_empty());
         assert!(Record::read(&root(&home)).unwrap().pending.is_empty());
     }
 
@@ -1128,7 +1117,7 @@ mod tests {
             .line()
             .unwrap()
             .contains("1 migration(s) failed: run `playbook migrate`"));
-        assert!(render_fix(&out).contains("failed: config-hash: "));
+        assert!(render_fix(&out, &[]).contains("failed: config-hash: "));
         let rec = Record::read(&root(&home)).unwrap();
         assert_eq!(rec.binary.as_deref(), Some("0.25.0"));
         assert_eq!(rec.failed_at, Some(5000));
@@ -1149,7 +1138,15 @@ mod tests {
         assert!(out.recorded);
         assert_eq!(out.exit_code(), 0);
         assert_eq!(Record::read(&root(&home)).unwrap().failed_at, None);
-        assert!(render_fix(&out).contains("(run `playbook setup --statusline`)"));
+        let text = render_fix(&out, &crate::pending::from_open(&out.open));
+        assert!(
+            text.contains("Still left for you, 1 item needs you:\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("    Fix: playbook setup --statusline\n"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -1161,8 +1158,8 @@ mod tests {
             ..Outcome::default()
         };
         assert_eq!(
-            render_fix(&out),
-            "fixed: config-hash: removed\nnote: system-prompt-edited: edited\n"
+            render_fix(&out, &[]),
+            "fixed: config-hash: removed\nnote: system-prompt-edited: edited\nnothing else needs you\n"
         );
         assert_eq!(out.exit_code(), 0);
     }

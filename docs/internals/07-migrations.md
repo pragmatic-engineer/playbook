@@ -6,12 +6,29 @@ The migration registry carries an existing install across breaking changes. It l
 
 Each migration also has a scope: `Owned` writes only playbook's own files, `Consent` writes a file you own, and `Report` writes nothing and reports on files Claude Code owns. Only `Owned` migrations run on their own:
 
-- `playbook migrate` runs them and prints the command for each item that needs you. `playbook doctor --fix` is the same step. `--status` and `--dry-run` show what stands and what would run, and write nothing.
+- `playbook migrate` runs them, then prints what it did and the list of what is still left for you. `playbook doctor --fix` is the same step. `--status` and `--dry-run` show what stands and what would run, and the same list, and write nothing.
 - The first command after an upgrade runs them once, before the command, and prints one notice on stderr. Hot paths skip this so they stay fast: hooks, the status line, `version` and the hidden `json` helpers. So do `usage`, which the session hooks start in the background, the commands that run their own heal (`migrate`, `doctor --fix`, `setup` or its old name `init`), `update`, `uninstall`, and `doctor` and `state`, which show the home as it is.
-- The `session-init` hook runs them once per session when the binary is newer than the record, and adds one line to the session message.
+- The `session-init` hook runs them once per session when the binary is newer than the record, and adds the list of what needs you to the session message.
 - `playbook update` runs the new binary's `migrate` after the swap. The install script runs it after an install when it has a terminal or `--yes`, and not with `--no-init`.
 
 `playbook setup` runs every migration, `Consent` ones included, because it asks first. Nothing else writes Claude Code settings or your shell files, with one exception: `playbook doctor --fix` adds the missing `attribution` keys (attribution OFF, the default) after a yes at a terminal ([ADR 0042](../adr/0042-attribution-off-in-setup.md)). The version record in the `state` table says which playbook version last ran the `Owned` migrations cleanly, so the first-run step and the session hook run once per version. The record is compared with the running build by version alone, and a record newer than the build means a downgrade, where nothing runs. `migrate` and `doctor --fix` run every time you call them.
+
+## What needs you
+
+Every command shows the same list ([ADR 0034, 2026-10-19 amendment](../adr/0034-self-healing-upgrades.md#amendment-2026-10-19-one-list-of-what-needs-you)): one bullet per open `Consent` or `Report` item and per plugin problem, each with what it is, why it matters and the command that fixes it, then one line with the command that handles the most. For example:
+
+```text
+playbook 0.37.0: 2 items need you:
+  - statusLine.command in settings.json still runs the old script.
+    Why: the status line still runs a script that newer playbook no longer ships.
+    Fix: playbook setup --statusline
+  - The playbook plugin 0.36.0 is older than the 0.37 line of this binary (0.37.0).
+    Why: skills and commands may call binary features that work differently in this version.
+    Fix: claude plugin update playbook@pragmatic-engineer
+To go through every setup change at once, run: playbook setup
+```
+
+An item disappears as soon as it is fixed. The plugin items read the installed plugin in `installed_plugins.json` and the folder the session runs from, so a plugin update clears them, and a session that still runs an old plugin folder says to start Claude Code again.
 
 ## The three kinds
 
