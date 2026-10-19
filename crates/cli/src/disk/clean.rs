@@ -725,8 +725,26 @@ mod tests {
                 .unwrap();
             path
         };
-        let old = aged("playbook.db.migrated", week * 2);
-        let newest = aged("playbook.db.migrated.1", week);
+        let sqlite = |name: &str, age: Duration| {
+            let path = root.join(name);
+            rusqlite::Connection::open(&path)
+                .unwrap()
+                .execute_batch("CREATE TABLE t (k INTEGER PRIMARY KEY);")
+                .unwrap();
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(SystemTime::now() - age)
+                .unwrap();
+            path
+        };
+        let old = sqlite("playbook.db.migrated", week * 2);
+        let recent = sqlite(
+            "playbook.db.migrated.1",
+            Duration::from_secs(3 * 24 * 60 * 60),
+        );
+        let newest = sqlite("playbook.db.migrated.2", Duration::from_secs(24 * 60 * 60));
         let fresh_graph = aged("memory/memory.graph.json.migrated", Duration::from_secs(60));
         let old_graph = aged("memory/memory.graph.json.migrated.1", week * 3);
         let fact = aged("memory/old-fact.md", week * 3);
@@ -736,13 +754,22 @@ mod tests {
         assert!(got.contains(&old), "{got:?}");
         assert!(got.contains(&old_graph), "{got:?}");
         assert!(got.contains(&junk), "{got:?}");
-        for kept in [&newest, &fresh_graph, &fact, &live, &data.join("config.db")] {
+        for kept in [
+            &recent,
+            &newest,
+            &fresh_graph,
+            &fact,
+            &live,
+            &data.join("config.db"),
+        ] {
             assert!(!got.contains(kept), "{} was picked", kept.display());
         }
         assert_eq!(
             reason(&f.env, &newest).as_deref(),
             Some("the newest backup")
         );
+        let young = reason(&f.env, &recent).unwrap_or_default();
+        assert!(young.starts_with("changed"), "{young}");
         fs::remove_dir_all(&f.root).unwrap();
     }
 

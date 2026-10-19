@@ -220,11 +220,17 @@ fn table_counts(conn: &Connection) -> Result<Vec<(String, i64)>, String> {
 }
 
 /// Rename the old file and its sidecars to `*.migrated` after its data is
-/// verified in the new file. An earlier `*.migrated` copy (an older binary
-/// recreated the old path and it was merged again) holds data the new file
-/// already has, so it is removed first and only the newest copy stays.
+/// verified in the new file. An earlier `*.migrated` copy that reads as a
+/// sound database came from such a move too (an older binary recreated the
+/// old path and it was merged again), so its data is in the new file: it is
+/// removed first and only the newest copy stays. An earlier copy that does
+/// not read was parked as corrupt and may hold data found nowhere else, so
+/// it stays and the new copy takes a numbered name.
 pub fn set_aside_verified(old: &Path) -> Result<(), String> {
     let kept = with_suffix(old, ".migrated");
+    if kept.exists() && open_old(&kept).is_err() {
+        return set_aside(old);
+    }
     for side in SIDE_SUFFIXES {
         let earlier = with_suffix(&kept, side);
         if earlier.is_file() {
@@ -758,13 +764,32 @@ mod tests {
         );
         assert_eq!(migrate(&m).unwrap(), Outcome::Nothing);
         // An older binary writes the old path again: merged once, quietly.
+        fs::write(with_suffix(&m.old, ".migrated-wal"), b"stale").unwrap();
         make(&m.old, &[(3, "c"), (4, "d")]);
         assert_eq!(migrate(&m).unwrap(), Outcome::Merged { inserted: 1 });
         assert_eq!(rows(&m.new).len(), 4);
-        // The earlier copy's rows are in the new file, so one copy stays.
+        // The earlier copy's rows are in the new file, so one copy stays,
+        // and a log left next to the earlier copy goes with it.
         assert!(with_suffix(&m.old, ".migrated").exists());
         assert!(!with_suffix(&m.old, ".migrated.1").exists());
+        let wal = fs::read(with_suffix(&m.old, ".migrated-wal")).unwrap_or_default();
+        assert_ne!(wal, b"stale".to_vec(), "the earlier copy's log stayed");
         assert_eq!(rows(&with_suffix(&m.old, ".migrated")).len(), 2);
+    }
+
+    #[test]
+    fn a_corrupt_earlier_copy_is_kept_and_the_new_one_is_numbered() {
+        let (m, _d) = step("dm-keep-corrupt", Policy::MergeTables(T));
+        fs::create_dir_all(m.new.parent().unwrap()).unwrap();
+        make(&m.new, &[(1, "a")]);
+        let parked = with_suffix(&m.old, ".migrated");
+        // A page or more, so SQLite reads it as a bad header, not an empty file.
+        let garbage = b"not a database, parked as corrupt by an earlier run. ".repeat(100);
+        fs::write(&parked, &garbage).unwrap();
+        make(&m.old, &[(2, "b")]);
+        assert_eq!(migrate(&m).unwrap(), Outcome::Merged { inserted: 1 });
+        assert_eq!(fs::read(&parked).unwrap(), garbage);
+        assert!(with_suffix(&m.old, ".migrated.1").exists());
     }
 
     #[test]

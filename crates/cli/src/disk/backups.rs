@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Copies a finished migration left behind (ADR 0047 decision 5): old
+//! Files a finished migration left behind (ADR 0047 decision 5): old
 //! databases renamed to `playbook.db.migrated`, `.migrated.1` and so on with
 //! their `-wal` and `-shm` files, the old `memory.graph.json.migrated`
-//! files, worktree sweep markers renamed to `.migrated`, and a `.DS_Store`
-//! in the playbook folder. `disk clean` removes them once they are 7 days
-//! old, and only while the database that took their data is in place. The
-//! newest database backup and the newest graph backup always stay.
+//! files and worktree sweep markers renamed to `.migrated`. `disk clean`
+//! removes them once they are 7 days old, and only while the database that
+//! took their data is in place. The newest database backup, the newest
+//! graph backup and any copy that does not read as a database stay. A
+//! `.DS_Store` in the playbook folder is listed too and goes at any age.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -54,11 +55,14 @@ pub fn leftovers(home: &Path) -> Vec<Leftover> {
                 Some("data/config.db is missing or not current".to_string())
             } else if db_newest.as_deref() == Some(family.as_str()) {
                 Some("the newest backup".to_string())
+            } else if !sound(&root.join(&family)) {
+                // A copy parked as corrupt was never imported.
+                Some("unreadable, may hold data found nowhere else".to_string())
             } else {
                 None
             };
             found.push(leftover(path, keep, false, false));
-        } else if name.starts_with(SWEEP_MARKER) && name.contains(".migrated") {
+        } else if name.starts_with(SWEEP_MARKER) && name.ends_with(".migrated") {
             let keep =
                 (!config_ok()).then(|| "data/config.db is missing or not current".to_string());
             found.push(leftover(path, keep, false, false));
@@ -151,6 +155,19 @@ fn newest_family(paths: &[PathBuf], family: fn(&str) -> Option<String>) -> Optio
         })
         .max_by_key(|(main, at, _)| (*main, *at))
         .map(|(_, _, fam)| fam)
+}
+
+/// Whether the family's main file reads as a sound database. One with no
+/// main file left counts as sound: a log without its database holds nothing
+/// that can be read.
+fn sound(main: &Path) -> bool {
+    if !main.exists() {
+        return true;
+    }
+    open(main).is_some_and(|conn| {
+        conn.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))
+            .is_ok_and(|v| v == "ok")
+    })
 }
 
 /// `config.db` exists and has every table of the current schema, so the
@@ -256,11 +273,15 @@ mod tests {
     fn the_newest_backups_stay_and_nothing_goes_without_its_database() {
         let home = scratch("families");
         let root = home.join(".config/playbook");
+        for name in ["playbook.db.migrated", "playbook.db.migrated.1"] {
+            db(&root.join(name), "CREATE TABLE t (k INTEGER PRIMARY KEY);");
+        }
         for (name, ago) in [
             ("playbook.db.migrated", 900_000),
             ("playbook.db.migrated-wal", 900_000),
             ("playbook.db.migrated.1", 800_000),
             ("playbook.db.migrated.1-shm", 100),
+            ("playbook.db.migrated.2", 950_000),
             ("playbook.db", 10),
             (".DS_Store", 10),
             ("worktree-sweep-marker-x.migrated", 900_000),
@@ -268,7 +289,10 @@ mod tests {
             ("memory/memory.graph.json.migrated.1", 950_000),
             ("memory/fact.md", 900_000),
         ] {
-            fs::write(root.join(name), b"x").unwrap();
+            if !root.join(name).exists() {
+                // A page or more, so a non-database reads as corrupt.
+                fs::write(root.join(name), b"x".repeat(4096)).unwrap();
+            }
             set_mtime(&root.join(name), ago);
         }
         let without = reasons(&leftovers(&home));
@@ -307,6 +331,10 @@ mod tests {
         assert_eq!(
             keep("playbook.db.migrated.1-shm").as_deref(),
             Some("the newest backup")
+        );
+        assert_eq!(
+            keep("playbook.db.migrated.2").as_deref(),
+            Some("unreadable, may hold data found nowhere else")
         );
         assert_eq!(keep("worktree-sweep-marker-x.migrated"), None);
         assert_eq!(

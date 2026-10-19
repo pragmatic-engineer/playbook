@@ -183,7 +183,7 @@ fn legacy_files(root: &Path) -> Vec<PathBuf> {
                         // Importing it again would rename it once more on
                         // every run and store a key with the suffix.
                         .is_some_and(|n| {
-                            n.starts_with(LEGACY_SWEEP_PREFIX) && !n.contains(".migrated")
+                            n.starts_with(LEGACY_SWEEP_PREFIX) && !n.ends_with(".migrated")
                         })
             })
             .collect();

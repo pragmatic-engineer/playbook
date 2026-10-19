@@ -98,6 +98,7 @@ pub fn candidates(
     found.extend(
         super::backups::leftovers(home)
             .into_iter()
+            .filter(|l| !l.junk)
             .map(|l| (Kind::Backup, l.path)),
     );
     found
@@ -445,6 +446,24 @@ mod tests {
         assert_eq!(found[0].path, dir.join("big"));
         assert!(found[0].bytes > found[1].bytes);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn candidates_list_old_migration_copies_as_backups() {
+        let home =
+            std::env::temp_dir().join(format!("pb-disk-status-bk-{}", crate::testing::run_id()));
+        let root = home.join(".config/playbook");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("playbook.db.migrated.3"), b"x").unwrap();
+        std::fs::write(root.join(".DS_Store"), b"x").unwrap();
+        let found = candidates(&home, &home.join(".claude"), None);
+        let backup = (Kind::Backup, root.join("playbook.db.migrated.3"));
+        assert!(found.contains(&backup), "{found:?}");
+        assert!(
+            found.iter().all(|(_, p)| !p.ends_with(".DS_Store")),
+            "{found:?}"
+        );
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]
