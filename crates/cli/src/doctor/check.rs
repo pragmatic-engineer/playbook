@@ -481,17 +481,21 @@ fn heal_row(env: &Env, bin_ver: &str) -> Row {
         )
         .hint(fix);
     }
-    if !record.pending.is_empty() {
+    // The list `playbook migrate` prints, under this one row. The plugin
+    // items are left to the version row above, which checks the binary on
+    // PATH.
+    let items = crate::pending::migration_items_read_only(&env.home).unwrap_or_default();
+    if !items.is_empty() {
         return Row::new(
             "6",
             Level::Warn,
             format!(
-                "{} upgrade item(s) need you: {}",
-                record.pending.len(),
-                record.pending.join(", ")
+                "upgrade check: {}:\n{}",
+                crate::pending::count(items.len()),
+                crate::pending::bullets(&items).trim_end()
             ),
         )
-        .hint(fix);
+        .hint(format!("run: {}", crate::pending::closing_command(&items)));
     }
     let Some(b) = record.binary else {
         return Row::new(
@@ -1410,11 +1414,18 @@ pub fn closing(rows: &[Row]) -> Vec<&'static str> {
 pub fn render(rows: &[Row]) -> String {
     let mut out = String::new();
     for r in rows {
-        out.push_str(&format!("{}  {}", r.level.label(), r.message));
+        // A row with a list keeps its hint on its first line, so the hint
+        // never runs into the last line of the list.
+        let (first, rest) = r.message.split_once('\n').unwrap_or((&r.message, ""));
+        out.push_str(&format!("{}  {first}", r.level.label()));
         if let Some(h) = &r.hint {
             out.push_str(&format!(" -- {h}"));
         }
         out.push('\n');
+        if !rest.is_empty() {
+            out.push_str(rest);
+            out.push('\n');
+        }
     }
     for line in closing(rows) {
         out.push_str(line);

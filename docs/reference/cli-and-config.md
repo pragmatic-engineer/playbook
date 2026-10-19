@@ -549,7 +549,7 @@ The full health check is the `/playbook:doctor` command inside Claude Code. Thes
 
 Example: `playbook doctor pending-migrations`
 
-`playbook doctor --fix` repairs playbook's own files after an upgrade and prints the command for each change that needs you, the same as `playbook migrate`. At a terminal it first asks whether to turn attribution OFF, the default, by adding the missing `attribution` keys; that yes is the only Claude Code setting it writes. A no stores attribution ON.
+`playbook doctor --fix` repairs playbook's own files after an upgrade and prints the list of what still needs you, the same as `playbook migrate`. At a terminal it first asks whether to turn attribution OFF, the default, by adding the missing `attribution` keys; that yes is the only Claude Code setting it writes. A no stores attribution ON.
 
 - `--fix`: Run the safe migrations for playbook's own files, then list what needs you
 
@@ -971,13 +971,13 @@ Example: `playbook memory stats --json`
 
 Bring playbook's own files up to date with this binary
 
-Runs the migrations that write only playbook's own files, then records this binary as the one that ran them. The ones that run once start only after an upgrade, and the checks that repair a file run every time. A migration waits for the release named in its `since`. Nothing runs after a downgrade. A change to Claude Code settings or a shell file prints the `playbook setup` command that applies it, and a report prints its own fix. It never writes Claude Code settings. `update`, the install script and `doctor --fix` run the same step.
+Runs the migrations that write only playbook's own files, then records this binary as the one that ran them. The ones that run once start only after an upgrade, and the checks that repair a file run every time. A migration waits for the release named in its `since`. Nothing runs after a downgrade. It never writes Claude Code settings. It ends with the list of what still needs you, one bullet per item with why it matters and the command that fixes it: `playbook setup` for a change to Claude Code settings or a shell file, and its own fix for a report. `update`, the install script and `doctor --fix` run the same step.
 
 Exit codes: 0 when it finished or had nothing to do, 1 when the record could not be read or written, a migration failed, or another playbook process held the lock.
 
 Example: `playbook migrate --status`
 
-- `--status`: List each migration with the release that ships it, its scope and state, and the recorded and running versions, writing nothing
+- `--status`: List each migration with the release that ships it, its scope and state, the recorded and running versions, and what needs you, writing nothing
 - `--dry-run`: Show the migrations a run would start and what needs you, writing nothing
 - `--json`: Print JSON for tools
 

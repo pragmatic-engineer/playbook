@@ -28,10 +28,11 @@ pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
         Mode::Run => {
             let out = heal::run(&ctx, Trigger::Fix, crate::common::time::now_epoch_secs());
             eprint!("{}", out.notices.render());
+            let items = out.items(home);
             if json {
-                println!("{}", run_json(&out));
+                println!("{}", run_json(&out, &items));
             } else {
-                print!("{}", heal::render_fix(&out));
+                print!("{}", heal::render_fix(&out, &items));
             }
             out.exit_code()
         }
@@ -41,15 +42,30 @@ pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
                 eprintln!("playbook migrate: the upgrade record could not be read");
                 return 1;
             };
+            let items = items_of(home, &plan);
             let text = match (mode, json) {
-                (Mode::Status, true) => format!("{}\n", status_json(&record, &plan)),
-                (Mode::Status, false) => render_status(&record, &plan),
-                (_, true) => format!("{}\n", dry_run_json(&record, &plan)),
-                (_, false) => render_dry_run(&record, &plan),
+                (Mode::Status, true) => format!("{}\n", status_json(&record, &plan, &items)),
+                (Mode::Status, false) => render_status(&record, &plan, &items),
+                (_, true) => format!("{}\n", dry_run_json(&record, &plan, &items)),
+                (_, false) => render_dry_run(&record, &plan, &items),
             };
             print!("{text}");
             0
         }
+    }
+}
+
+/// The open items of `plan` with the plugin items, as `pending` lists them.
+fn items_of(home: &Path, plan: &[Planned]) -> Vec<crate::pending::Item> {
+    crate::pending::from_plan(home, plan)
+}
+
+/// The item list, or the line that says nothing needs the user.
+fn render_items(items: &[crate::pending::Item]) -> String {
+    if items.is_empty() {
+        "nothing needs you\n".to_string()
+    } else {
+        crate::pending::render(items)
     }
 }
 
@@ -77,7 +93,7 @@ fn state_text(state: &State) -> String {
     }
 }
 
-fn render_status(record: &Record, plan: &[Planned]) -> String {
+fn render_status(record: &Record, plan: &[Planned], items: &[crate::pending::Item]) -> String {
     let mut text = format!(
         "running: playbook {}\n{}\n",
         env!("CARGO_PKG_VERSION"),
@@ -99,6 +115,8 @@ fn render_status(record: &Record, plan: &[Planned]) -> String {
             state_text(&p.state)
         ));
     }
+    text.push('\n');
+    text.push_str(&render_items(items));
     text
 }
 
@@ -118,7 +136,7 @@ fn open_items(plan: &[Planned]) -> impl Iterator<Item = (&Planned, &String, Opti
     })
 }
 
-fn render_dry_run(record: &Record, plan: &[Planned]) -> String {
+fn render_dry_run(record: &Record, plan: &[Planned], items: &[crate::pending::Item]) -> String {
     let run = would_run(record, plan);
     let mut text = if downgraded(record) {
         format!("nothing would run: {}\n", heal::Skip::Downgrade.reason())
@@ -127,13 +145,12 @@ fn render_dry_run(record: &Record, plan: &[Planned]) -> String {
     } else {
         format!("would run: {}\n", run.join(", "))
     };
-    for (p, message, command) in open_items(plan) {
+    for (p, message, _) in open_items(plan) {
         if p.scope == "owned" {
             text.push_str(&format!("note: {}: {message}\n", p.id));
-        } else {
-            text.push_str(&heal::needs_you(message, command));
         }
     }
+    text.push_str(&render_items(items));
     text.push_str("dry run: nothing was written\n");
     text
 }
@@ -148,7 +165,24 @@ fn record_json(record: &Record) -> Value {
     })
 }
 
-fn status_json(record: &Record, plan: &[Planned]) -> Value {
+/// The items as JSON, one object per bullet.
+fn items_json(items: &[crate::pending::Item]) -> Value {
+    json!(items
+        .iter()
+        .map(|i| json!({
+            "slug": i.slug,
+            "kind": match i.kind {
+                crate::pending::Kind::Consent => "consent",
+                crate::pending::Kind::Report => "report",
+            },
+            "what": i.what,
+            "why": i.why,
+            "fix": i.fix,
+        }))
+        .collect::<Vec<_>>())
+}
+
+fn status_json(record: &Record, plan: &[Planned], items: &[crate::pending::Item]) -> Value {
     let migrations: Vec<Value> = plan
         .iter()
         .map(|p| {
@@ -172,10 +206,11 @@ fn status_json(record: &Record, plan: &[Planned]) -> Value {
         "running": {"binary": env!("CARGO_PKG_VERSION"), "schema": heal::LEGACY_SCHEMA},
         "recorded": record_json(record),
         "migrations": migrations,
+        "items": items_json(items),
     })
 }
 
-fn dry_run_json(record: &Record, plan: &[Planned]) -> Value {
+fn dry_run_json(record: &Record, plan: &[Planned], items: &[crate::pending::Item]) -> Value {
     let (notes, open): (Vec<_>, Vec<_>) =
         open_items(plan).partition(|(p, _, _)| p.scope == "owned");
     json!({
@@ -189,11 +224,12 @@ fn dry_run_json(record: &Record, plan: &[Planned]) -> Value {
             .iter()
             .map(|(p, message, command)| json!({"id": p.id, "message": message, "command": command}))
             .collect::<Vec<_>>(),
+        "items": items_json(items),
         "written": false,
     })
 }
 
-fn run_json(out: &Outcome) -> Value {
+fn run_json(out: &Outcome, items: &[crate::pending::Item]) -> Value {
     let steps = |list: &[crate::init::run::StepReport]| {
         list.iter()
             .map(|s| json!({"name": s.name, "detail": s.detail}))
@@ -210,6 +246,7 @@ fn run_json(out: &Outcome) -> Value {
             .iter()
             .map(|i| json!({"id": i.id, "message": i.message, "command": i.command}))
             .collect::<Vec<_>>(),
+        "items": items_json(items),
         "recorded": out.recorded,
     })
 }
@@ -275,16 +312,25 @@ mod tests {
         let plan = sample();
 
         // Act
-        let old = render_dry_run(&record(Some("0.25.0"), 1), &plan);
+        let items = items_of(
+            &crate::common::test_support::scratch_dir("migrate-dry"),
+            &plan,
+        );
+        let old = render_dry_run(&record(Some("0.25.0"), 1), &plan, &items);
         let same = render_dry_run(
             &record(Some(env!("CARGO_PKG_VERSION")), heal::LEGACY_SCHEMA),
             &plan,
+            &items,
         );
-        let newer = render_dry_run(&record(Some("999.0.0"), 999), &plan);
+        let newer = render_dry_run(&record(Some("999.0.0"), 999), &plan, &items);
 
         // Assert
         assert!(old.starts_with("would run: move-a\n"), "{old}");
-        assert!(old.contains("needs you: old command (run `playbook setup --statusline`)"));
+        assert!(
+            old.contains("  - Old command.\n    Why: ")
+                && old.contains("    Fix: playbook setup --statusline\n"),
+            "{old}"
+        );
         assert!(old.contains("note: caches-d: old folders\n"), "{old}");
         assert!(old.ends_with("dry run: nothing was written\n"));
         assert!(same.starts_with("would run: move-a\n"), "{same}");
@@ -292,11 +338,12 @@ mod tests {
             newer.starts_with("nothing would run: a newer playbook"),
             "{newer}"
         );
-        let value = dry_run_json(&record(Some("999.0.0"), 999), &plan);
+        let value = dry_run_json(&record(Some("999.0.0"), 999), &plan, &items);
         assert_eq!(value["would_run"], json!([]));
         assert_eq!(value["skipped"], "downgrade");
         assert_eq!(value["notes"], json!(["caches-d: old folders"]));
         assert_eq!(value["open"][0]["command"], "playbook setup --statusline");
+        assert_eq!(value["items"][0]["fix"], "playbook setup --statusline");
     }
 
     #[test]
@@ -305,8 +352,12 @@ mod tests {
         let plan = sample();
 
         // Act
-        let text = render_status(&record(None, 0), &plan);
-        let value = status_json(&record(None, 0), &plan);
+        let items = items_of(
+            &crate::common::test_support::scratch_dir("migrate-status"),
+            &plan,
+        );
+        let text = render_status(&record(None, 0), &plan, &items);
+        let value = status_json(&record(None, 0), &plan, &items);
 
         // Assert
         assert!(text.contains("recorded: nothing yet"), "{text}");
@@ -326,8 +377,8 @@ mod tests {
         assert_eq!(value["migrations"][0]["state"], "every_run");
         assert_eq!(value["migrations"][0]["since"], "0.36.0");
         assert_eq!(value["migrations"][0]["id"], "move-a");
-        let next_text = render_status(&record(None, 0), &[planned_next()]);
-        let next_value = status_json(&record(None, 0), &[planned_next()]);
+        let next_text = render_status(&record(None, 0), &[planned_next()], &[]);
+        let next_value = status_json(&record(None, 0), &[planned_next()], &[]);
         assert!(
             next_text.contains("next  label-e  idempotent  owned    waits for the next release"),
             "{next_text}"
@@ -337,5 +388,11 @@ mod tests {
         assert_eq!(next_value["migrations"][0]["runs"], false);
         assert_eq!(value["migrations"][2]["state"], "open");
         assert_eq!(value["running"]["binary"], env!("CARGO_PKG_VERSION"));
+        assert!(
+            text.ends_with("To go through every setup change at once, run: playbook setup\n"),
+            "{text}"
+        );
+        assert_eq!(value["items"][0]["fix"], "playbook setup --statusline");
+        assert!(next_text.ends_with("nothing needs you\n"), "{next_text}");
     }
 }

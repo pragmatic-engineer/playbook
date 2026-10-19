@@ -211,7 +211,7 @@ fn migrate_lists_the_old_rc_block_and_setup_removes_it_after_a_backup() {
         listed.contains(".zshrc still loads the retired"),
         "{listed}"
     );
-    assert!(listed.contains("(run `playbook setup`)"), "{listed}");
+    assert!(listed.contains("    Fix: playbook setup\n"), "{listed}");
     assert_eq!(untouched, before);
     assert_eq!(sb.read(".zshrc"), "export EDITOR=vim\n");
     assert_eq!(sb.count("", ".zshrc.bak-"), 1);

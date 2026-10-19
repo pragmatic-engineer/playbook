@@ -685,12 +685,19 @@ fn l6_the_upgrade_record_row_follows_the_record_of_the_binary_on_path() {
         t.starts_with("INFO") && t.contains("nothing runs after a downgrade"),
         "{t}"
     );
-    set(&[("versions/pending", "dead-hook-scripts")]);
+    // A hook entry whose script is gone: the row lists it as one bullet
+    // with its command, the same list `playbook migrate` prints.
+    b.settings(
+        r#"{"attribution":{"commit":"","pr":"","sessionUrl":false},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"bash ~/.claude/hooks/gone.sh"}]}]}}"#,
+    );
     let t = row();
     assert!(
-        t.starts_with("WARN") && t.contains("1 upgrade item(s) need you: dead-hook-scripts"),
+        t.starts_with("WARN") && t.contains("upgrade check: 1 item needs you:\n  - "),
         "{t}"
     );
+    assert!(t.contains("    Fix: playbook setup --hooks"), "{t}");
+    let hint = hints(&layer(&b.run(&[&bin], "/bin/zsh", None), "6")[1..2]);
+    assert_eq!(hint, "run: playbook setup");
     set(&[("versions/failed-at", "1000")]);
     let t = row();
     assert!(

@@ -232,8 +232,11 @@ fn finish_when_source_absent(new_root: &Path, sentinel: &Path) -> StepReport {
     if !new_root.exists() {
         return StepReport::skipped(STEP_NAME, "no legacy ~/.claude/memory to migrate");
     }
+    // Only the marker is new, and no file moved, so this is not reported
+    // as a change: on a fresh install the session hook creates the folder
+    // first, and "updated 1 of its own files" read like an upgrade.
     match write_sentinel(sentinel) {
-        Ok(()) => StepReport::wired(
+        Ok(()) => StepReport::already_correct(
             STEP_NAME,
             format!(
                 "{} already complete from a prior run; marked so",
@@ -513,6 +516,28 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn a_fresh_store_with_nothing_to_move_is_marked_and_not_reported_as_a_change() {
+        // Arrange: the session hook created the new store, nothing is at
+        // the old place, and no marker exists yet.
+        let home = scratch_dir("memory-migrate-fresh-store");
+        let claude_home = home.join(".claude");
+        let new_root = playbook_root_from(&home).join("memory");
+        fs::create_dir_all(&new_root).unwrap();
+
+        // Act
+        let report = migrate_memory(&home, &claude_home);
+
+        // Assert
+        assert_eq!(
+            report.status,
+            StepStatus::AlreadyCorrect,
+            "{}",
+            report.detail
+        );
+        assert!(new_root.join(SENTINEL_NAME).is_file());
+    }
 
     fn write_file(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {

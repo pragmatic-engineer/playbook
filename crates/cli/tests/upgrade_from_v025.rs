@@ -197,21 +197,27 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
         first.contains("of its own files after the upgrade"),
         "{first}"
     );
-    for message in [&first, &second] {
-        for part in [
-            "3 change(s) to your settings or shell files need `playbook setup` and `playbook setup --hooks` and `playbook setup --statusline`",
-            "2 item(s) need you: run `playbook migrate`",
-        ] {
-            assert!(message.contains(part), "{message}");
-        }
+    // One bullet per item, each with its own command (ADR 0034, 2026-10-19
+    // amendment).
+    assert!(first.contains("5 items need you:\n"), "{first}");
+    for fix in [
+        "Fix: playbook setup --statusline\n",
+        "Fix: playbook setup --hooks\n",
+        "Fix: playbook setup\n",
+        "Fix: claude plugin uninstall playbook-hooks@pragmatic-engineer\n",
+        "Fix: claude plugin update playbook@pragmatic-engineer\n",
+    ] {
+        assert!(first.contains(fix), "{fix}: {first}");
     }
+    assert!(!first.contains("item(s) need you"), "{first}");
+    assert!(second.contains("5 items need you:\n"), "{second}");
     assert!(!second.contains("updated"), "{second}");
     let report = String::from_utf8_lossy(&fix.stdout);
     for line in [
-        "claude plugin uninstall playbook-hooks@pragmatic-engineer",
-        "claude plugin update playbook@pragmatic-engineer",
+        "Fix: claude plugin uninstall playbook-hooks@pragmatic-engineer",
+        "Fix: claude plugin update playbook@pragmatic-engineer",
         "orphaned-plugin-caches: 1 old plugin folder(s)",
-        "(run `playbook setup --hooks`)",
+        "Fix: playbook setup --hooks",
     ] {
         assert!(report.contains(line), "{report}");
     }
@@ -261,12 +267,11 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     assert_eq!(fs::read(h.settings()).unwrap(), after_init);
     assert_eq!(h.user_files()[2..], user_files[2..]);
     let settled = h.session_message();
-    assert!(!settled.contains("`playbook setup`"), "{settled}");
+    assert!(!settled.contains("Fix: playbook setup\n"), "{settled}");
     assert!(
-        settled.contains("need `playbook setup --only system-prompt`"),
+        settled.contains("Fix: playbook setup --only system-prompt"),
         "an earlier install keeps the prompt question open: {settled}"
     );
-    assert!(settled.contains("2 item(s) need you"), "{settled}");
 }
 
 /// Every file under `dir` with its bytes, sorted by path.
@@ -319,7 +324,7 @@ fn migrate_on_a_v025_home_previews_runs_once_and_leaves_user_files_alone() {
     let dry = stdout(&dry);
     assert!(dry.starts_with("would run: "), "{dry}");
     for line in [
-        "(run `playbook setup --hooks`)",
+        "Fix: playbook setup --hooks",
         "note: orphaned-plugin-caches: 1 old plugin folder(s)",
         "claude plugin uninstall playbook-hooks@pragmatic-engineer",
     ] {
@@ -481,7 +486,7 @@ fn the_first_run_step_heals_once_before_any_command_and_keeps_stdout_clean() {
             "{class}: {notice}"
         );
         assert_eq!(
-            notice.contains("`playbook setup --hooks`"),
+            notice.contains("Fix: playbook setup --hooks"),
             heals,
             "{class}: {notice}"
         );

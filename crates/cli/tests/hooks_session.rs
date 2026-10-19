@@ -2422,11 +2422,12 @@ fn session_init_names_the_upgrade_when_the_plugin_needs_a_newer_binary() {
     let message = value["systemMessage"].as_str().unwrap_or_default();
     assert!(
         message.contains(&format!(
-            "playbook binary {} is older than this plugin needs (999.0.0). Run: playbook update",
+            "  - Playbook binary {} is older than this plugin needs (999.0.0).\n",
             env!("CARGO_PKG_VERSION")
         )),
         "{message}"
     );
+    assert!(message.contains("    Fix: playbook update\n"), "{message}");
 }
 
 #[test]
@@ -2454,7 +2455,7 @@ fn session_init_names_the_setup_command_for_a_pending_settings_change() {
     let value: serde_json::Value = serde_json::from_str(&out.stdout).expect("json payload");
     let message = value["systemMessage"].as_str().unwrap_or_default();
     assert!(
-        message.contains("need `playbook setup --statusline`"),
+        message.contains("    Fix: playbook setup --statusline\n"),
         "{message}"
     );
     assert_eq!(fs::read(&settings).unwrap(), before);
