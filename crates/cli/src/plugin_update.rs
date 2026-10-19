@@ -456,25 +456,56 @@ pub fn claim(root: &Path, seen: Option<&str>, running: &str, now: u64) -> bool {
     .unwrap_or(false)
 }
 
-/// Records how the attempt ended. An update that left the plugin older than
-/// the binary, changed or not, counts as failed, so it retries
-/// after [`FAILED_RETRY`]. Best effort: a store that cannot be written
-/// leaves the `running` marker, which goes stale on its own.
+/// The state an attempt ends in. An update that left the plugin older than
+/// the binary, changed or not, counts as failed, so it retries after
+/// [`FAILED_RETRY`].
+fn end_state(outcome: &Outcome, running: &str, installed_after: Option<&str>) -> State {
+    let still_older =
+        installed_after.is_none_or(|v| crate::update::resolve::compare(v, running).is_lt());
+    match outcome {
+        Outcome::Failed { .. } | Outcome::NoCli { .. } => State::Failed,
+        Outcome::Current { .. } | Outcome::Updated { .. } if still_older => State::Failed,
+        _ => State::Done,
+    }
+}
+
+/// Records how the attempt ended and returns the state it wrote. Best
+/// effort: a store that cannot be written leaves the `running` marker, which
+/// goes stale on its own.
 pub fn finish(
     root: &Path,
     outcome: &Outcome,
     running: &str,
     installed_after: Option<&str>,
     now: u64,
-) {
-    let still_older =
-        installed_after.is_none_or(|v| crate::update::resolve::compare(v, running).is_lt());
-    let state = match outcome {
-        Outcome::Failed { .. } | Outcome::NoCli { .. } => State::Failed,
-        Outcome::Current { .. } | Outcome::Updated { .. } if still_older => State::Failed,
-        _ => State::Done,
-    };
+) -> State {
+    let state = end_state(outcome, running, installed_after);
     write(root, running, state, now);
+    state
+}
+
+/// The line to keep for the next session. A run that ended `failed` with the
+/// plugin changed or unchanged but still older must not say "up to date".
+fn notice_line(outcome: &Outcome, state: State) -> Option<String> {
+    match outcome {
+        Outcome::Current { id, .. } | Outcome::Updated { id, .. } if state == State::Failed => {
+            Some(format!(
+                "plugin: the playbook plugin is still older than this playbook binary; run: {}",
+                command(id)
+            ))
+        }
+        _ => outcome.line(),
+    }
+}
+
+/// Whether an update for `running` is in progress: its marker is `running`
+/// and not yet stale.
+pub fn in_flight(root: &Path, running: &str, now: u64) -> bool {
+    seen(root).and_then(|t| Marker::parse(&t)).is_some_and(|m| {
+        m.version == running
+            && m.state == State::Running
+            && Duration::from_secs(now.saturating_sub(m.at)) <= RUNNING_STALE
+    })
 }
 
 /// Records `done` for the running version: the plugin is already current
@@ -501,14 +532,14 @@ pub fn refresh_plugin(home: &Path) {
     let claude_home = home.join(".claude");
     let outcome = run(&Probe::for_home(home));
     let after = plugin_id(&claude_home).and_then(|id| installed_version(&claude_home, id.as_str()));
-    finish(
+    let state = finish(
         &root,
         &outcome,
         env!("CARGO_PKG_VERSION"),
         after.as_deref(),
         now(),
     );
-    if let Some(line) = outcome.line() {
+    if let Some(line) = notice_line(&outcome, state) {
         crate::notices::store_notice(&root, &line);
     }
 }
@@ -523,14 +554,15 @@ const NO_SPAWN_VALUE: &str = "1";
 
 /// Starts `<exe> update --refresh-plugin` detached, like the release check
 /// refresh: own process group, no stdio, and the skip variable removed so
-/// the child is not mistaken for a nested run.
-pub(crate) fn spawn_refresh_plugin() {
+/// the child is not mistaken for a nested run. Returns whether the child
+/// started; the no-spawn seam counts as started, since nothing failed.
+pub(crate) fn spawn_refresh_plugin() -> bool {
     #[cfg(debug_assertions)]
     if std::env::var_os(NO_SPAWN_ENV).is_some_and(|v| v == NO_SPAWN_VALUE) {
-        return;
+        return true;
     }
     let Ok(exe) = std::env::current_exe() else {
-        return;
+        return false;
     };
     let mut cmd = std::process::Command::new(exe);
     cmd.args(["update", "--refresh-plugin"])
@@ -543,7 +575,17 @@ pub(crate) fn spawn_refresh_plugin() {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    let _ = cmd.spawn();
+    cmd.spawn().is_ok()
+}
+
+/// Settles a claim after the spawn attempt. A child that never started
+/// leaves no one to end the `running` marker, so it is set to `failed` and
+/// retries after [`FAILED_RETRY`] instead of blocking for [`RUNNING_STALE`].
+pub(crate) fn settle_spawn(root: &Path, running: &str, spawned: bool, now: u64) -> bool {
+    if !spawned {
+        write(root, running, State::Failed, now);
+    }
+    spawned
 }
 
 /// The test seam that stands in for a terminal. Read only in debug builds,
@@ -736,6 +778,93 @@ mod tests {
 
     fn calls(home: &Path) -> String {
         fs::read_to_string(home.join("claude-calls.log")).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_failed_spawn_marks_the_claim_failed() {
+        // Arrange
+        let root = scratch_dir("plugin-update-spawn-failed");
+        assert!(claim(&root, None, "1.2.3", 100));
+
+        // Act
+        let spawned = settle_spawn(&root, "1.2.3", false, 101);
+
+        // Assert
+        assert!(!spawned);
+        assert_eq!(seen(&root).as_deref(), Some("1.2.3 failed 101"));
+    }
+
+    #[test]
+    fn a_started_spawn_leaves_the_running_marker() {
+        // Arrange
+        let root = scratch_dir("plugin-update-spawn-ok");
+        assert!(claim(&root, None, "1.2.3", 100));
+
+        // Act
+        let spawned = settle_spawn(&root, "1.2.3", true, 101);
+
+        // Assert
+        assert!(spawned);
+        assert_eq!(seen(&root).as_deref(), Some("1.2.3 running 100"));
+    }
+
+    #[test]
+    fn a_still_older_plugin_never_reads_as_up_to_date() {
+        // Arrange
+        let id = "playbook@pragmatic-engineer".to_string();
+        let current = Outcome::Current {
+            id: id.clone(),
+            version: Some("0.36.0".to_string()),
+        };
+        let updated = Outcome::Updated {
+            id: id.clone(),
+            from: Some("0.35.0".to_string()),
+            to: Some("0.36.0".to_string()),
+        };
+
+        // Act
+        let lines = [
+            notice_line(&current, State::Failed),
+            notice_line(&updated, State::Failed),
+        ];
+
+        // Assert
+        for line in lines {
+            let line = line.unwrap();
+            assert!(
+                line.contains("still older than this playbook binary"),
+                "{line}"
+            );
+            assert!(line.ends_with("claude plugin update playbook@pragmatic-engineer"));
+        }
+    }
+
+    #[test]
+    fn a_current_plugin_that_reached_done_keeps_its_own_line() {
+        // Arrange
+        let current = Outcome::Current {
+            id: "playbook@x".to_string(),
+            version: Some("1.0.0".to_string()),
+        };
+
+        // Act
+        let line = notice_line(&current, State::Done);
+
+        // Assert
+        assert_eq!(line, current.line());
+    }
+
+    #[test]
+    fn in_flight_is_true_only_for_a_fresh_running_marker_of_this_version() {
+        // Arrange
+        let root = scratch_dir("plugin-update-in-flight");
+        assert!(claim(&root, None, "1.2.3", 1000));
+        let stale = 1000 + RUNNING_STALE.as_secs() + 1;
+
+        // Act and Assert
+        assert!(in_flight(&root, "1.2.3", 1001));
+        assert!(!in_flight(&root, "1.2.4", 1001));
+        assert!(!in_flight(&root, "1.2.3", stale));
     }
 
     #[test]
