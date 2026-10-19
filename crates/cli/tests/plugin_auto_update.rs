@@ -47,6 +47,8 @@ const BACKGROUND_LINE: &str = concat!(
 );
 const UPDATED_LINE: &str = "plugin: updated playbook@pragmatic-engineer from";
 const HEADLESS_ENV: &str = "PLAYBOOK_HEADLESS";
+const NO_SPAWN_ENV: &str = "PLAYBOOK_TEST_NO_SPAWN";
+const STILL_OLDER_NOTICE: &str = "plugin: the playbook plugin is still older than this playbook";
 
 struct Fixture {
     home: PathBuf,
@@ -538,6 +540,87 @@ fn a_failed_detached_refresh_stores_the_failure_line_and_marks_failed() {
         .marker()
         .unwrap()
         .starts_with(&format!("{VERSION} failed ")));
+
+    // Act: a session right after the failed refresh
+    let session = f.session(&[]);
+
+    // Assert: it neither announces an update nor retries before the wait
+    assert!(
+        !stdout(&session).contains(BACKGROUND_LINE),
+        "{}",
+        stdout(&session)
+    );
+    assert!(f
+        .marker()
+        .unwrap()
+        .starts_with(&format!("{VERSION} failed ")));
+}
+
+#[test]
+fn a_refresh_that_leaves_the_plugin_older_stores_the_still_older_notice() {
+    // Arrange: claude exits 0 and leaves the old plugin in place
+    let f = Fixture::new(false, 0);
+
+    // Act
+    f.run(&["update", "--refresh-plugin"], false, "", &[]);
+
+    // Assert
+    let notice = playbook::state::get(&f.root(), NOTICE_KEY)
+        .unwrap()
+        .unwrap();
+    assert!(notice.starts_with(STILL_OLDER_NOTICE), "{notice}");
+    assert!(notice.ends_with(MANUAL_COMMAND), "{notice}");
+    assert!(!notice.contains("up to date"), "{notice}");
+}
+
+#[test]
+fn a_hook_with_the_plugin_already_current_records_done_and_adds_no_line() {
+    // Arrange
+    let f = Fixture::new(false, 0);
+    f.write_installed(&f.plugin_dir(VERSION));
+
+    // Act
+    let out = f.session(&[]);
+
+    // Assert
+    assert!(!stdout(&out).contains(BACKGROUND_LINE), "{}", stdout(&out));
+    assert_eq!(f.calls(), "");
+    assert!(f.marker().unwrap().starts_with(&format!("{VERSION} done ")));
+}
+
+#[test]
+fn the_no_spawn_seam_keeps_the_hook_from_starting_a_child_but_it_still_claims() {
+    // Arrange
+    let f = Fixture::new(true, 0);
+
+    // Act
+    let out = f.session(&[(NO_SPAWN_ENV, "1")]);
+    std::thread::sleep(POLL_EVERY * 10);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(f.calls(), "", "no child ran");
+    assert!(f
+        .marker()
+        .unwrap()
+        .starts_with(&format!("{VERSION} running ")));
+}
+
+#[test]
+fn a_stale_plugin_session_gives_one_coherent_message_set() {
+    // Arrange: stale plugin, no skip variable, so the hook claims and spawns
+    let f = Fixture::new(true, 0);
+
+    // Act
+    let out = f.session(&[]);
+    f.wait_for_child();
+
+    // Assert: the manual Fix line and the background line must not both show
+    let text = stdout(&out);
+    let says_updating = text.contains(BACKGROUND_LINE);
+    let says_run_by_hand = text.contains(MANUAL_COMMAND);
+    assert!(says_updating, "{text}");
+    assert!(!says_run_by_hand, "contradicts the background line: {text}");
 }
 
 #[test]
