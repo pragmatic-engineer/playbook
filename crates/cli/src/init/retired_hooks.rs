@@ -7,9 +7,9 @@
 use serde_json::Value;
 use std::path::Path;
 
-/// Hooks removed from the binary's wiring. Each keeps a hidden no-op
-/// subcommand for one release so an old entry does not print an error.
-pub const RETIRED: [&str; 1] = ["no-slop-guard"];
+/// Hook names setup no longer writes. `no-slop-guard` keeps a hidden no-op
+/// subcommand for one release; `no-dash-guard` (its old name) has none.
+pub const RETIRED: [&str; 2] = ["no-slop-guard", "no-dash-guard"];
 
 fn is_retired_entry(entry: &Value) -> bool {
     entry
@@ -71,7 +71,8 @@ mod tests {
                 {"type": "command", "command": "playbook hook no-slop-guard"},
                 {"type": "command", "command": "playbook hook policy-guard"}]},
             {"matcher": "Edit|Write", "hooks": [
-                {"type": "command", "command": "playbook hook no-slop-guard"}]},
+                {"type": "command", "command": "playbook hook no-slop-guard"},
+                {"type": "command", "command": "playbook hook no-dash-guard"}]},
             {"matcher": "Write", "hooks": [
                 {"type": "command", "command": "my-wrapper playbook hook no-slop-guard"}]}
         ]}});
@@ -82,7 +83,7 @@ mod tests {
         let second = remove(&path, 101).unwrap();
 
         // Assert
-        assert_eq!((first, second), (2, 0));
+        assert_eq!((first, second), (3, 0));
         let after: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         let text = after.to_string();
         assert!(text.contains("policy-guard"));
