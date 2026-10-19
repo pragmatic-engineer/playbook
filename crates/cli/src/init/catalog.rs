@@ -129,6 +129,16 @@ pub const PARTS: &[Part] = &[
         undo: "Run `playbook disk release`.",
     },
     Part {
+        id: "policy-guard",
+        asked: true,
+        default_on: false,
+        flags: "--policy-guard, --no-policy-guard",
+        question: "Turn on the policy guard? It denies skipped git hooks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, Edit or Write on settings.json and settings.local.json, writes to Claude Code's own memory folders, and model-run changes to protected config keys.",
+        does: "Stores `hooks.policyGuard.enabled` true. The hook entry `playbook hook policy-guard` is always in settings.json, and it allows every call while the key is false. It is off by default, and `--yes` leaves it off. See docs/guides/08-policy-guard.md for every rule.",
+        changes: "~/.config/playbook (the key `hooks.policyGuard.enabled`)",
+        undo: "Run `playbook config set --global hooks.policyGuard.enabled false`. `POLICY_GUARD=0` in the environment switches it off for one session.",
+    },
+    Part {
         id: "attribution",
         asked: true,
         default_on: false,

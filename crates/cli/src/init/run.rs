@@ -58,6 +58,8 @@ pub struct InitPaths {
     pub short_name: crate::init::pb_link::Choice,
     /// Whether to write the 1 GB disk ballast (`playbook disk reserve`).
     pub disk_ballast: bool,
+    /// Whether to turn the policy guard on (`hooks.policyGuard.enabled`).
+    pub policy_guard: bool,
     /// Where the `pb` link may go. `None` when the binary's location is unknown.
     pub pb_target: Option<crate::init::pb_link::Target>,
     /// What the attribution part does: skip, OFF (add the missing
@@ -209,6 +211,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let service_step = collector_service_step(paths);
     let short_name_step = short_name_step(paths);
     let ballast_step = disk_ballast_step(paths);
+    let policy_guard_step = policy_guard_step(paths);
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
 
     let trust_step = trust_config_dir_step(&paths.home);
@@ -222,6 +225,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         attribution_step,
         short_name_step,
         ballast_step,
+        policy_guard_step,
         path_step,
     ];
     steps.extend(migrated.steps);
@@ -267,6 +271,9 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     }
     if paths.disk_ballast {
         steps.push(disk_ballast_step(paths));
+    }
+    if paths.policy_guard {
+        steps.push(policy_guard_step(paths));
     }
     if paths.path_setup.is_some() {
         steps.push(path_step(&paths.home, paths.path_setup.as_ref()));
@@ -369,6 +376,32 @@ pub(crate) fn disk_ballast_step(paths: &InitPaths) -> StepReport {
         // Expected on a nearly full disk or a busy lock: setup goes on.
         Err(err) if ballast::is_expected_refusal(&err) => StepReport::skipped(PART, err),
         Err(err) => StepReport::failed(PART, err),
+    }
+}
+
+/// The policy-guard part: stores `hooks.policyGuard.enabled` true on a yes.
+/// Without one it changes nothing, so a stored choice survives a rerun.
+pub(crate) fn policy_guard_step(paths: &InitPaths) -> StepReport {
+    use crate::hooks::policy_guard::{stored_enabled, ENABLED_KEY};
+    const PART: &str = "policy-guard";
+    if !paths.policy_guard {
+        return StepReport::skipped(PART, "not requested; pass --policy-guard to turn it on");
+    }
+    if stored_enabled(&paths.home) {
+        return StepReport::already_correct(PART, format!("{ENABLED_KEY} is already true"));
+    }
+    match crate::config::write::set(
+        crate::config::write::Tier::Global,
+        ENABLED_KEY,
+        serde_json::Value::Bool(true),
+        &paths.home,
+        None,
+    ) {
+        Ok(_) => StepReport::wired(
+            PART,
+            format!("stored {ENABLED_KEY} true; `playbook config set --global {ENABLED_KEY} false` turns it off"),
+        ),
+        Err(err) => StepReport::failed(PART, format!("could not store {ENABLED_KEY}: {err}")),
     }
 }
 

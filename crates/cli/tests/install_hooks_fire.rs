@@ -434,7 +434,7 @@ fn fires(f: &Fire, name: &str) -> bool {
                 r#"{"tool_input":{"command":"git commit --no-verify -m x"}}"#,
                 &home,
                 &home,
-                &[],
+                &[("POLICY_GUARD", "1")],
                 &[],
             )
             .1

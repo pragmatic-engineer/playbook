@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 19] = [
+const PROBES: [Probe; 20] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -120,6 +120,7 @@ const PROBES: [Probe; 19] = [
     |env| vec![attribution_row(env)],
     update_rows,
     |env| vec![disk_row(env)],
+    |env| vec![policy_guard_row(env)],
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -794,6 +795,30 @@ const TELEMETRY_SETUP_FIX: &str = "run: playbook setup --only telemetry";
 /// warning with the fix when a key is missing. With ON chosen
 /// (`attribution.enabled` true): ok when no key holds the off value. A key
 /// with the user's own value is info.
+/// The policy guard is optional and off by default, so off is an Info row.
+fn policy_guard_row(env: &Env) -> Row {
+    use crate::hooks::policy_guard::{stored_enabled, ENABLED_KEY};
+    if stored_enabled(&env.home) {
+        Row::new(
+            "-",
+            Level::Pass,
+            "policy guard is on: it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes, settings.json edits and protected config changes",
+        )
+        .hint(format!(
+            "to turn it off, run: playbook config set --global {ENABLED_KEY} false"
+        ))
+    } else {
+        Row::new(
+            "-",
+            Level::Info,
+            "policy guard is off (optional, off by default)",
+        )
+        .hint(format!(
+            "to turn it on, run: playbook config set --global {ENABLED_KEY} true"
+        ))
+    }
+}
+
 fn attribution_row(env: &Env) -> Row {
     use crate::init::attribution::{self, State};
     let settings = env.settings();
