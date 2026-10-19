@@ -72,6 +72,45 @@ pub fn too_many_warning(count: usize, max: u64) -> Option<String> {
     })
 }
 
+/// The warning for cargo target folders that hold more than `max_gb` GB
+/// together, or `None`.
+pub fn too_big_warning(bytes: u64, max_gb: u64) -> Option<String> {
+    (bytes > max_gb.saturating_mul(super::probe::GIB)).then(|| {
+        format!(
+            "cargo target folders hold {}, more than disk.maxTargetGb ({max_gb}). `playbook disk clean` removes idle ones.",
+            super::size::gb(bytes)
+        )
+    })
+}
+
+/// Build settings that keep an agent's target folder small. Measured on this
+/// workspace with `cargo test --workspace --no-run`: 3.0 GB with the cargo
+/// defaults, 1.1 GB with these. Debug info is the biggest part, incremental
+/// data the next. A panic keeps its file and line.
+pub const LEAN_BUILD_ENV: &[(&str, &str)] = &[
+    ("CARGO_INCREMENTAL", "0"),
+    ("CARGO_PROFILE_DEV_DEBUG", "0"),
+    ("CARGO_PROFILE_TEST_DEBUG", "0"),
+];
+
+/// The `export` line an agent evaluates before a cargo command: the private
+/// target folder, then [`LEAN_BUILD_ENV`].
+pub fn export_line(target: &Path) -> String {
+    let mut line = format!(
+        "export CARGO_TARGET_DIR={}",
+        shell_quote(&target.to_string_lossy())
+    );
+    for (name, value) in LEAN_BUILD_ENV {
+        line.push_str(&format!(" {name}={value}"));
+    }
+    line
+}
+
+/// `text` in single quotes, safe in any POSIX shell.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
 /// How deep below a scan root [`find_cargo_targets`] looks.
 pub const SCAN_DEPTH: usize = 5;
 /// The most folders one scan reads, so a huge home folder stays fast.
@@ -182,6 +221,23 @@ mod tests {
         assert_eq!(too_many_warning(4, 4), None);
         assert!(too_many_warning(5, 4).is_some_and(|w| w.contains("playbook disk clean")));
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_size_cap_warns_only_above_it() {
+        let gb = super::super::probe::GIB;
+        assert_eq!(too_big_warning(20 * gb, 20), None);
+        assert!(too_big_warning(20 * gb + 1, 20)
+            .is_some_and(|w| w.contains("disk.maxTargetGb (20)") && w.contains("disk clean")));
+    }
+
+    #[test]
+    fn the_export_line_quotes_the_folder_and_sets_the_lean_build() {
+        assert_eq!(
+            export_line(Path::new("/w/it's here/cargo-x-1")),
+            "export CARGO_TARGET_DIR='/w/it'\\''s here/cargo-x-1' CARGO_INCREMENTAL=0 \
+             CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0"
+        );
     }
 
     #[test]

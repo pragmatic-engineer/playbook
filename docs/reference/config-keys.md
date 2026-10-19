@@ -99,6 +99,7 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `disk.autoCleanup` | `true` | `true`, `false` | Whether the disk guard removes files playbook can prove are disposable when space is low. A per-user setting. |
 | `disk.paths` | empty list | list of absolute or `~/` paths with no `..` part, at most 16 | Extra paths whose volume the disk guard measures. The home folder's volume and the current repo's volume are always measured. A per-user setting. Example: `playbook config set disk.paths '["/Volumes/Work"]'`. |
 | `disk.maxTargetDirs` | `4` | a whole number, 1 to 1000 | How many cargo target folders (`cargo-*` under a worktrees root) can exist before the disk guard warns. Each one holds 0.5 to 2 GB. A per-user setting. |
+| `disk.maxTargetGb` | `20` | a whole number of GB, 1 to 10000 | How many GB all cargo target folders can hold together before `playbook disk status` warns. A per-user setting. |
 
 The key `launcher.systemPromptMode` was removed. The launcher replaces Claude Code's system prompt with the playbook one and never appends to it. A plain `claude` keeps Claude Code's built-in prompt.
 

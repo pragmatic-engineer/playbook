@@ -589,6 +589,7 @@ fn table() -> Vec<Case> {
         case("disk release", &["disk", "release"]).out("no ballast"),
         case("disk clean", &["disk", "clean", "--dry-run"]).out("disk clean: would remove"),
         case("disk target-dir", &["disk", "target-dir"]).out("cargo-"),
+        case("disk target-env", &["disk", "target-env"]).out("export CARGO_TARGET_DIR="),
         case("worktree sweep", &["worktree", "sweep"]),
         case("worktree remove", &["worktree", "remove", "{ROOT}/none"]).code(1).err("not a registered git worktree"),
         case( "worktree review setup", &["worktree", "review", "setup", "1", "abc123"], ).code(1).err("failed to resolve repo URL"),

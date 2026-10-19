@@ -21,13 +21,17 @@ pub const SCRATCH_IDLE: Duration = Duration::from_secs(60 * 60);
 /// A plugin cache orphaned more recently may still serve a running session.
 pub const ORPHAN_IDLE: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// The name of the target folder cargo makes inside a worktree.
+const IN_TREE_TARGET: &str = "target";
+
 /// Debug builds scan this folder in place of `/tmp`, for tests.
 pub const TEST_TMP_VAR: &str = "PLAYBOOK_TEST_DISK_TMP";
 
 /// Why a folder is a candidate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// A per-agent cargo target folder under a worktrees root.
+    /// A per-agent cargo target folder under a worktrees root, or the
+    /// `target` folder inside a linked worktree.
     Target,
     /// A `pb-*` entry in `/tmp`.
     Scratch,
@@ -85,6 +89,9 @@ pub struct Env {
     pub claude_home: PathBuf,
     /// The worktrees root of the current repo, where `cargo-*` folders live.
     pub worktrees_root: Option<PathBuf>,
+    /// The linked worktrees of the current repo, whose `target` folder is
+    /// a candidate too. The main worktree is left out.
+    pub linked_worktrees: Vec<PathBuf>,
     /// The system temp folders that hold `pb-*` scratch.
     pub tmp_dirs: Vec<PathBuf>,
     pub now: SystemTime,
@@ -101,6 +108,10 @@ impl Env {
             home: home.to_path_buf(),
             claude_home: super::status::claude_home(home),
             worktrees_root: repo_root.and_then(targets::worktrees_root),
+            linked_worktrees: repo_root
+                .and_then(|repo| crate::worktree::list_worktrees(repo).ok())
+                .map(|list| list.into_iter().skip(1).map(|w| w.path).collect())
+                .unwrap_or_default(),
             tmp_dirs: system_tmp_dirs(),
             now: SystemTime::now(),
             process_args: process_args(),
@@ -247,6 +258,18 @@ fn sources(env: &Env) -> Vec<Source> {
                 in_memory_store: false,
             }
         }));
+    }
+    for worktree in &env.linked_worktrees {
+        let path = worktree.join(IN_TREE_TARGET);
+        if std::fs::symlink_metadata(&path).is_ok() {
+            found.push(Source {
+                kind: Kind::Target,
+                base: worktree.clone(),
+                keep: (!is_cargo_target(&path)).then(|| "not a cargo target folder".to_string()),
+                path,
+                in_memory_store: false,
+            });
+        }
     }
     for tmp in unique_dirs(&env.tmp_dirs) {
         for path in children(&tmp).into_iter().filter(|p| name_starts(p, "pb-")) {
@@ -682,6 +705,7 @@ mod tests {
             home: root.join("home"),
             claude_home: root.join("home/.claude"),
             worktrees_root: Some(root.join("worktrees")),
+            linked_worktrees: Vec::new(),
             tmp_dirs: vec![root.join("tmp")],
             now: SystemTime::now() + Duration::from_secs(2 * 60 * 60),
             process_args: String::new(),
@@ -902,6 +926,46 @@ mod tests {
         let line = remove_target_with(&inner_home, &root, &root.join("holder"), "").unwrap();
         assert!(line.contains("protected playbook data"), "{line}");
         assert!(holder.exists());
+        fs::remove_dir_all(&f.root).unwrap();
+    }
+
+    #[test]
+    fn picks_the_idle_target_inside_a_linked_worktree() {
+        use std::os::unix::io::AsRawFd;
+        let mut f = fixture("in-tree");
+        let wt = |name: &str| f.root.join("worktrees/repo").join(name);
+        let (idle, building, plain, linked) = (wt("idle"), wt("building"), wt("plain"), wt("link"));
+        for dir in [&idle, &building] {
+            target(&dir.join("target"));
+        }
+        write(&plain.join("target/notes.txt"));
+        fs::create_dir_all(&linked).unwrap();
+        std::os::unix::fs::symlink(f.root.join("tmp"), linked.join("target")).unwrap();
+        let lock = building.join("target/debug/.cargo-lock");
+        write(&lock);
+        f.env.linked_worktrees = vec![
+            idle.clone(),
+            building.clone(),
+            plain.clone(),
+            linked.clone(),
+        ];
+        let held = fs::File::open(&lock).unwrap();
+        // SAFETY: `held` stays open until it is dropped below.
+        assert_eq!(unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX) }, 0);
+        assert_eq!(picked(&f.env), vec![idle.join("target")]);
+        let why = |dir: &Path| reason(&f.env, &dir.join("target"));
+        assert_eq!(
+            why(&building).as_deref(),
+            Some("a cargo build holds its lock")
+        );
+        assert_eq!(why(&plain).as_deref(), Some("not a cargo target folder"));
+        assert_eq!(why(&linked).as_deref(), Some("not a cargo target folder"));
+        drop(held);
+        let (chosen, _) = select(&f.env);
+        let (removed, _) = remove(chosen);
+        assert_eq!(removed.len(), 2);
+        assert!(!idle.join("target").exists() && idle.exists());
+        assert!(plain.join("target/notes.txt").exists());
         fs::remove_dir_all(&f.root).unwrap();
     }
 

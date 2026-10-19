@@ -238,3 +238,51 @@ fn target_dir_names_the_private_folder_next_to_the_worktrees() {
     let err = String::from_utf8_lossy(&many.stderr);
     assert!(err.contains("more than disk.maxTargetDirs (4)"), "{err}");
 }
+
+#[test]
+fn target_env_sets_a_private_small_build_and_warns_when_space_is_low() {
+    let home = isolated::fresh_home();
+    let repo = home.join("code/app");
+    std::fs::create_dir_all(&repo).unwrap();
+    let init = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&repo)
+        .env("HOME", &home)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .status()
+        .unwrap();
+    assert!(init.success());
+    let run_env = |free_gb: &str| {
+        isolated::playbook_in(&home)
+            .args(["disk", "target-env"])
+            .current_dir(&repo)
+            .env_remove("WORKTREE_BASE_DIR")
+            .env(FREE_VAR, free_gb)
+            .output()
+            .unwrap()
+    };
+    let roomy = run_env("500");
+    assert!(roomy.status.success());
+    let line = stdout(&roomy);
+    assert!(line.starts_with("export CARGO_TARGET_DIR='"), "{line}");
+    assert!(line.contains("/code/.worktrees/cargo-app-"), "{line}");
+    for setting in [
+        "CARGO_INCREMENTAL=0",
+        "CARGO_PROFILE_DEV_DEBUG=0",
+        "CARGO_PROFILE_TEST_DEBUG=0",
+    ] {
+        assert!(line.contains(setting), "{line}");
+    }
+    assert!(!String::from_utf8_lossy(&roomy.stderr).contains("Disk guard"));
+    let tight = run_env("10");
+    assert!(
+        tight.status.success(),
+        "low space warns and does not refuse"
+    );
+    assert_eq!(stdout(&tight), line);
+    let err = String::from_utf8_lossy(&tight.stderr);
+    assert!(
+        err.contains("Disk guard") && err.contains("disk.warnFreeGb"),
+        "{err}"
+    );
+}

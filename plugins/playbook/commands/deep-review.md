@@ -154,7 +154,7 @@ Run the project's own check suite once in the worktree, picking the toolchain by
 | `go.mod` | none | `go vet ./...`, `go test ./...` |
 | `Cargo.toml` | none | `cargo check`, `cargo test` |
 
-In a Rust checkout, prefix each cargo command with the variable on the same command line, for example `cd "$WT" && CARGO_TARGET_DIR="$(playbook disk target-dir)" cargo test`, so the review build gets its own target folder and does not grow the main one. `playbook disk clean` removes it once idle.
+In a Rust checkout, prefix each cargo command with `eval "$(playbook disk target-env)" &&` in the same Bash call, for example `cd "$WT" && eval "$(playbook disk target-env)" && cargo test`, so the review build gets its own small target folder and does not grow the main one. `playbook disk clean` removes it once idle.
 
 With none of these files, the output is `[no recognised toolchain; checks skipped]`.
 

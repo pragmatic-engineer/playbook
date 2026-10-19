@@ -89,6 +89,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `disk.autoCleanup` | `true` | `true`, `false` |
 | `disk.paths` | `[]` | see the config keys page |
 | `disk.maxTargetDirs` | `4` | a number, see the config keys page for the range |
+| `disk.maxTargetGb` | `20` | a number, see the config keys page for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
@@ -481,7 +482,7 @@ Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb` and the folder
 
 Example: `playbook disk status`
 
-Subcommands: `clean`, `release`, `reserve`, `status`, `target-dir`
+Subcommands: `clean`, `release`, `reserve`, `status`, `target-dir`, `target-env`
 
 ### `playbook disk clean`
 
@@ -515,6 +516,14 @@ Print the private cargo target folder for this worktree
 Prints `<worktrees root>/cargo-<worktree name>-<hash>`, the folder an agent sets as `CARGO_TARGET_DIR` so each worktree builds into its own target folder. `playbook worktree remove`, the sweep and the worktree-remove hook delete it with the worktree. Warns on stderr when more than `disk.maxTargetDirs` target folders exist.
 
 Example: `CARGO_TARGET_DIR="$(playbook disk target-dir)" cargo test`
+
+### `playbook disk target-env`
+
+Print the `export` line that gives this worktree a small private build
+
+Sets `CARGO_TARGET_DIR` to the folder `target-dir` prints, and turns off incremental data and debug info in the dev and test profiles, which cut a full test build of this workspace from 3.0 GB to 1.1 GB. Warns on stderr when free space is below `disk.warnFreeGb`, or when target folders pass `disk.maxTargetDirs`.
+
+Example: `eval "$(playbook disk target-env)" && cargo test`
 
 ### `playbook doc`
 
