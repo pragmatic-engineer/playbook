@@ -45,6 +45,17 @@ pub enum Reserved {
     Existing(u64),
 }
 
+/// Start of the error for a reserve that was declined on purpose.
+const REFUSED_MARK: &str = "disk reserve: refused";
+/// Part of the error for a reserve that found the folder's lock held.
+const BUSY_MARK: &str = "another reserve or release is running";
+
+/// Whether `error` from `reserve` is an expected refusal (too little free
+/// space, or the lock is busy) and not an I/O failure.
+pub fn is_expected_refusal(error: &str) -> bool {
+    error.starts_with(REFUSED_MARK) || error.contains(BUSY_MARK)
+}
+
 /// Writes the 1 GB ballast, keeping at least `disk.warnFreeGb` free.
 pub fn reserve_for(home: &Path, policy: &super::Policy) -> Result<Reserved, String> {
     reserve(home, BALLAST_BYTES, policy.warn_free_gb.saturating_mul(GIB))
@@ -62,9 +73,7 @@ pub fn reserve(home: &Path, bytes: u64, keep_free: u64) -> Result<Reserved, Stri
     let folder = dir(home);
     fs::create_dir_all(&folder).map_err(|e| format!("disk reserve: {e}"))?;
     let Some(_lock) = lock(home) else {
-        return Err(
-            "disk reserve: another reserve or release is running, try again when it ends".into(),
-        );
+        return Err(format!("disk reserve: {BUSY_MARK}, try again when it ends"));
     };
     remove_partial(home);
     if let Some(done) = existing_or_refused(home, bytes, keep_free)? {
@@ -98,7 +107,7 @@ fn existing_or_refused(
         .free;
     if free < bytes.saturating_add(keep_free) {
         return Err(format!(
-            "disk reserve: refused, {} free would leave less than {} after the ballast. Free some space first, for example with `playbook disk clean`",
+            "{REFUSED_MARK}, {} free would leave less than {} after the ballast. Free some space first, for example with `playbook disk clean`",
             super::size::gb(free),
             super::size::gb(keep_free)
         ));

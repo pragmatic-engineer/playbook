@@ -366,6 +366,8 @@ pub(crate) fn disk_ballast_step(paths: &InitPaths) -> StepReport {
             PART,
             format!("a {} ballast is already in place", size::gb(bytes)),
         ),
+        // Expected on a nearly full disk or a busy lock: setup goes on.
+        Err(err) if ballast::is_expected_refusal(&err) => StepReport::skipped(PART, err),
         Err(err) => StepReport::failed(PART, err),
     }
 }

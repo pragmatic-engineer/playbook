@@ -330,6 +330,60 @@ fn the_disk_ballast_part_writes_nothing_unless_chosen_and_keeps_an_existing_ball
     assert_eq!(fs::read_to_string(&ballast).unwrap(), "already here");
 }
 
+/// More free space than any disk has, so the ballast reserve refuses.
+const UNREACHABLE_WARN_FREE_GB: u64 = 10_000;
+
+#[test]
+fn a_yes_on_a_disk_short_of_space_is_skipped_and_writes_nothing() {
+    use playbook::config::write::{self, Tier};
+    let home = scratch_home("ballast-short");
+    write::set(
+        Tier::Global,
+        "disk.warnFreeGb",
+        json!(UNREACHABLE_WARN_FREE_GB),
+        &home,
+        None,
+    )
+    .expect("the warn threshold should be settable");
+
+    let outcome = run(&InitPaths {
+        disk_ballast: true,
+        ..base_paths(&home)
+    });
+
+    let step = find_step(&outcome, "disk-ballast");
+    assert_eq!(step.status, StepStatus::Skipped, "{}", step.detail);
+    assert!(step.detail.contains("refused"), "{}", step.detail);
+    assert!(!home.join(".cache/playbook/ballast/ballast.bin").exists());
+}
+
+#[test]
+fn only_disk_ballast_runs_that_step_and_not_the_hooks() {
+    let home = scratch_home("ballast-only");
+    write_text(&home.join(".cache/playbook/ballast/ballast.bin"), "x");
+
+    let only = run(&InitPaths {
+        only: true,
+        hooks: false,
+        statusline: false,
+        disk_ballast: true,
+        ..base_paths(&home)
+    });
+    let names: Vec<_> = only.steps.iter().map(|s| s.name).collect();
+    assert!(names.contains(&"disk-ballast"), "{names:?}");
+    assert!(!names.contains(&"hooks"), "{names:?}");
+
+    let hooks_only = run(&InitPaths {
+        only: true,
+        ..base_paths(&home)
+    });
+    let names: Vec<_> = hooks_only.steps.iter().map(|s| s.name).collect();
+    assert!(
+        names.contains(&"hooks") && !names.contains(&"disk-ballast"),
+        "{names:?}"
+    );
+}
+
 fn status_line_command(claude_home: &Path) -> Value {
     read_json(&claude_home.join("settings.json"))["statusLine"]["command"].clone()
 }
