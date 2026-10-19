@@ -15,6 +15,7 @@ pub mod codex;
 pub mod collector;
 pub mod command;
 pub mod config;
+pub mod daemon;
 pub mod data;
 pub mod db;
 pub mod entry;
@@ -44,6 +45,7 @@ pub mod tui;
 pub mod tz;
 pub mod util;
 pub mod warm;
+pub mod writer;
 
 /// One assistant message's token usage and derived cost. `event_id` is the
 /// source's own unique message id, the dedup key (a message can span several
