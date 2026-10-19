@@ -1127,7 +1127,31 @@ fn data_rows(env: &Env) -> Vec<Row> {
     }
     let mut rows = vec![Row::new("-", Level::Info, msg)];
     rows.extend(orphan_rows(env, &dir));
+    rows.extend(backup_row(env));
     rows
+}
+
+/// One row when old migration backups sit in the playbook folder.
+fn backup_row(env: &Env) -> Option<Row> {
+    let found: Vec<_> = crate::disk::backups::leftovers(&env.home)
+        .into_iter()
+        .filter(|l| !l.junk)
+        .collect();
+    if found.is_empty() {
+        return None;
+    }
+    Some(
+        Row::new(
+            "-",
+            Level::Info,
+            format!(
+                "disk: {} old migration backup file(s), {} KB",
+                found.len(),
+                crate::disk::backups::total_bytes(&found) / 1024
+            ),
+        )
+        .hint("`playbook disk clean` removes those older than 7 days once data/config.db and data/memory.db hold their data, and keeps the newest"),
+    )
 }
 
 /// Databases in the data folder with no worktree of this clone. They belong
@@ -1420,6 +1444,35 @@ pub fn failed(rows: &[Row]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_backup_row_counts_old_migration_copies_and_not_junk() {
+        let home =
+            std::env::temp_dir().join(format!("pb-doctor-backups-{}", crate::testing::run_id()));
+        let root = home.join(".config/playbook");
+        std::fs::create_dir_all(&root).unwrap();
+        let env = Env {
+            home: home.clone(),
+            claude_home: home.join(".claude"),
+            plugin_root: None,
+            shell: String::new(),
+            path_var: OsString::new(),
+            repo_root: None,
+            repo_slug: None,
+        };
+        std::fs::write(root.join(".DS_Store"), b"x").unwrap();
+        assert!(backup_row(&env).is_none(), "junk alone is not a backup");
+        std::fs::write(root.join("playbook.db.migrated"), vec![0u8; 2048]).unwrap();
+        std::fs::write(root.join("playbook.db.migrated-wal"), b"").unwrap();
+        let row = backup_row(&env).expect("row");
+        assert!(
+            row.message
+                .starts_with("disk: 2 old migration backup file(s), 2 KB"),
+            "{}",
+            row.message
+        );
+        std::fs::remove_dir_all(&home).unwrap();
+    }
 
     #[test]
     fn a_paused_plugin_downgrades_only_the_hook_and_status_line_passes() {
