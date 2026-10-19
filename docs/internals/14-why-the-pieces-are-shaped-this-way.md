@@ -89,10 +89,10 @@ Hooks are the safety layer, so they must be fast, must not depend on a script on
 | Layer | Answers |
 |---|---|
 | README | What is this, and how do I install and start? |
-| Concepts | Why is it built this way? (this page, the system prompt, memory) |
 | Guides | How do I do a task end to end? |
+| Reference | Where do I look up a key, a flag or a hook? |
 | Authoring | How do I add or change a piece? |
-| Internals | How does it work underneath? |
+| Internals | How does it work underneath, and why is it built this way? (this page, the system prompt, memory) |
 | ADRs | Why did we choose this over the alternatives, and when? |
 
 When you want to know why something is the way it is, start with this page, then follow its links, then check the ADR in `docs/adr/` that names the decision.

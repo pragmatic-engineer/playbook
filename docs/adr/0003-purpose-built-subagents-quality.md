@@ -20,7 +20,7 @@ Mechanism note: the fact-check ran deterministically through the shell (path exi
 | 10 command files under `commands/` | Yes (test -f) | System Snapshot, re-point WUs |
 | `shell/check-shared-settings.sh`, `check-manifest.sh` + tests | Yes (test -f) | WU-1 pattern |
 | `.github/workflows/shell-ci.yml`, `hooks/no-dash-guard.test.sh` | Yes (test -f) | WU-1 CI + precedent |
-| `docs/authoring/01-*.md`, `docs/README.md`, `docs/internals/02-*.md` | Yes (test -f) | WU-12, model policy |
+| `docs/authoring/01-*.md`, `docs/index.md`, `docs/internals/02-*.md` | Yes (test -f) | WU-12, model policy |
 | 5 `general-purpose` sites (brainstorm:108, scope:277, adr:215, implement:128, implement:306) | Yes (grep, content match) | WU-7..10 |
 | 6 `Explore` sites (scope:251,289; adr:199,219; implement:127,129) | Yes (grep) | WU-8..10 |
 | `/playbook:learn-project` untyped dispatch | Yes (grep, no subagent_type) | WU-11 |

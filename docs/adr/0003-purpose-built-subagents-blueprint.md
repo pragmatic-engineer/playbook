@@ -11,7 +11,7 @@ Real paths, confirmed in Stage 1 (repo root is `~/.claude`).
 - Spawn sites to re-point: `commands/brainstorm.md:108`; `commands/scope.md:251,277,289`; `commands/adr.md:199,215,219`; `commands/implement.md:127,128,129,306`; `commands/learn-project.md:65,75`.
 - Check-script convention: `shell/check-shared-settings.sh`, `shell/check-manifest.sh`, each with a paired `*.test.sh`.
 - CI: `.github/workflows/shell-ci.yml` auto-discovers `*.test.sh` and runs explicit steps for the check scripts. Guardrail-check precedent: `hooks/no-dash-guard.test.sh`.
-- Docs: `docs/authoring/01-commands-skills-hooks.md` (no agents section), index at `docs/README.md`.
+- Docs: `docs/authoring/01-commands-skills-hooks.md` (no agents section), index at `docs/index.md`.
 - Model policy: `docs/internals/02-model-routing-and-memory.md:9-13`.
 
 ## Work Units
@@ -148,11 +148,11 @@ Real paths, confirmed in Stage 1 (repo root is `~/.claude`).
 - Goal: a documented pattern for authoring agents.
 - Files:
   - `docs/authoring/02-authoring-agents.md` | new | frontmatter schema, both binding mechanisms (`context: fork` + `agent:` versus inline `subagent_type`), model and tool policy, the guardrail template, and the parametrize-versus-split rule.
-  - `docs/README.md` | edit | link the new page.
-- Verification: `test -f docs/authoring/02-authoring-agents.md && grep -q 'authoring-agents' docs/README.md`
+  - `docs/index.md` | edit | link the new page.
+- Verification: `test -f docs/authoring/02-authoring-agents.md && grep -q 'authoring-agents' docs/index.md`
 - Done When:
   - [x] The page covers the schema, both bindings, the policy, and the split rule.
-  - [x] `docs/README.md` links it.
+  - [x] `docs/index.md` links it.
 
 ## Ordering
 
@@ -176,7 +176,7 @@ Real paths, confirmed in Stage 1 (repo root is `~/.claude`).
 
 - Sequential first: WU-0, then WU-1.
 - P1 (after WU-1): WU-2, WU-3, WU-4, WU-5, WU-6. Each writes a distinct new `agents/*.md`, no shared state, safe to run concurrently.
-- P2 (after P1): WU-7, WU-8, WU-9, WU-10, WU-11, WU-12. Each edits a distinct command file or a distinct docs file (only WU-12 touches `docs/README.md`), disjoint, safe to run concurrently.
+- P2 (after P1): WU-7, WU-8, WU-9, WU-10, WU-11, WU-12. Each edits a distinct command file or a distinct docs file (only WU-12 touches `docs/index.md`), disjoint, safe to run concurrently.
 
 ## Dependency Graph
 

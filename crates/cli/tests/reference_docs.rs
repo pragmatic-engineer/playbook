@@ -20,6 +20,7 @@ use std::path::PathBuf;
 
 const PAGE: &str = "docs/reference/cli-and-config.md";
 const REGEN: &str = "UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs";
+const CONFIG_KEYS: &str = "docs/reference/config-keys.md";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
@@ -187,12 +188,12 @@ fn the_generated_output_is_deterministic() {
 }
 
 #[test]
-fn every_known_key_is_explained_in_the_config_keys_guide() {
-    let guide = fs::read_to_string(root().join("docs/reference/config-keys.md")).unwrap();
+fn every_known_key_is_explained_in_the_config_keys_page() {
+    let guide = fs::read_to_string(root().join(CONFIG_KEYS)).unwrap();
     for key in KNOWN_KEYS {
         assert!(
             guide.contains(&format!("`{key}`")),
-            "docs/reference/config-keys.md does not explain the config key `{key}`"
+            "{CONFIG_KEYS} does not explain the config key `{key}`"
         );
     }
     assert!(

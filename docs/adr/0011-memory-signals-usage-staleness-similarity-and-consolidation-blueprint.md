@@ -15,7 +15,7 @@
 - Tests: `tests/hooks_graph_writer.rs`, `tests/hooks_graph_reader.rs`, `tests/hooks_session.rs` exist today (confirmed via `ls tests/`). `memory_capture.rs`'s own test file was not grepped this session; confirm its name before WU-5.
 - `src/init/run.rs:145-173`: `run(paths: &InitPaths) -> InitOutcome` composes 5 idempotent, independent steps (`settings`, `hooks`, `shim`, `statusline`, `system-prompt`), each a function returning a `StepReport { name, status: Wired|AlreadyCorrect|Skipped|Failed, detail }`. Backs `Command::Init` (`playbook init`, invoked by `/playbook:setup`). This is the repo's existing mechanism for "bring an already-installed machine up to date with what this version ships," used for settings, hooks, the shell shim, statusline, and the system prompt today. WU-6 adds a sixth step here rather than inventing a new mechanism.
 - Shell: `shell/memory-context.sh`, `shell/memory-context.test.sh`, `shell/install-hooks-fire.test.sh` all reference `graph.json` by name today (confirmed via repo-wide grep).
-- Docs referencing `graph.json` by name: `commands/learn-project.md`, `docs/internals/13-memory-system.md`, `docs/guides/03-decisions-and-memory.md`, `docs/internals/01-launcher-and-hooks.md`, `docs/internals/02-model-routing-and-memory.md`, `prompts/SYSTEM_PROMPT.md`.
+- Docs referencing `graph.json` by name: `commands/learn-project.md`, `docs/concepts/02-memory-system.md`, `docs/guides/03-decisions-and-memory.md`, `docs/internals/01-launcher-and-hooks.md`, `docs/internals/02-model-routing-and-memory.md`, `prompts/SYSTEM_PROMPT.md`.
 
 ## Work Units
 
@@ -27,7 +27,7 @@
   - `tests/hooks_graph_writer.rs`, `tests/hooks_graph_reader.rs`: edit, expected filename and `version` assertion
   - `src/hooks/memory_anchors.rs`, `src/hooks/session_init.rs`: edit, filename read
   - `shell/memory-context.sh`, `shell/memory-context.test.sh`, `shell/install-hooks-fire.test.sh`: edit, filename references
-  - `commands/learn-project.md`, `docs/internals/13-memory-system.md`, `docs/guides/03-decisions-and-memory.md`, `docs/internals/01-launcher-and-hooks.md`, `docs/internals/02-model-routing-and-memory.md`, `prompts/SYSTEM_PROMPT.md`: edit, filename references
+  - `commands/learn-project.md`, `docs/concepts/02-memory-system.md`, `docs/guides/03-decisions-and-memory.md`, `docs/internals/01-launcher-and-hooks.md`, `docs/internals/02-model-routing-and-memory.md`, `prompts/SYSTEM_PROMPT.md`: edit, filename references
 - Verification: `cargo build && cargo test --test hooks_graph_writer && cargo test --test hooks_graph_reader && bash shell/memory-context.test.sh`
 - Tests: extend the existing round-trip test in `hooks_graph_writer.rs` to assert the output file is `memory.graph.json` and contains `"version":1`; add a fixture fact with `pinned: true` in frontmatter, assert its `Node` carries `"pinned":true`; a fact without the key asserts the field is omitted (`skip_serializing_if`), not written as `false`
 - Done When:

@@ -140,7 +140,7 @@ fn the_new_pages_are_linked_from_the_readme_the_index_and_the_install_guide() {
     for file in ["README.md", "docs/README.md", "docs/guides/00-install.md"] {
         let text = read(file);
         assert!(
-            text.contains("05-what-setup-installs.md"),
+            text.contains(GUIDE.trim_start_matches("docs/guides/")),
             "{file} does not link to the guide"
         );
         assert!(

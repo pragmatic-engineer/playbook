@@ -6,7 +6,7 @@
 
 ## Context
 
-Issue #573 asks for a maximum effort per skill, command and agent, on top of the global ceiling that already exists (`maxEffortLevel`, shipped in #590, #592 and #598). Two limits of Claude Code shape the answer. The `Agent` tool has no per-call effort override, and a hook cannot change a subagent's effort. An agent's effort is fixed by its file, so enforcement for agents can only mean choosing which file to dispatch. Commands and skills set effort in their own frontmatter, and a skill sets none on purpose (`docs/internals/14-why-the-pieces-are-shaped-this-way.md`).
+Issue #573 asks for a maximum effort per skill, command and agent, on top of the global ceiling that already exists (`maxEffortLevel`, shipped in #590, #592 and #598). Two limits of Claude Code shape the answer. The `Agent` tool has no per-call effort override, and a hook cannot change a subagent's effort. An agent's effort is fixed by its file, so enforcement for agents can only mean choosing which file to dispatch. Commands and skills set effort in their own frontmatter, and a skill sets none on purpose (`docs/concepts/03-why-the-pieces-are-shaped-this-way.md`).
 
 ## Decision
 

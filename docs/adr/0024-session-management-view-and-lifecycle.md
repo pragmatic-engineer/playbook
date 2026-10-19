@@ -132,7 +132,7 @@ The view columns: repo, branch, worktree (short path), issue or PR (`#536`, `PR 
 - Branch names, repo names and paths are shown on the local terminal and in `--json` on stdout. Nothing is sent anywhere. The hook file in stage 3 holds the session id, pane id, timestamps and notification type, never the message text.
 - `gh` is called only for the branches in the view and only reads PR number and state.
 
-### 8. Config keys (new, documented in `docs/reference/config-keys.md` when each lands)
+### 8. Config keys (new, documented in `docs/guides/04-config-keys.md` when each lands)
 
 | Key | Default | Values | Stage |
 | --- | --- | --- | --- |

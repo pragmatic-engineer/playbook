@@ -25,7 +25,7 @@ Mechanism note, stated plainly: the fact-check ran deterministically through the
 | `hooks/hooks.json` | Yes, 7 events registered | WU-3, WU-5 |
 | `statusline.sh` | Yes, line 297 accurate | WU-4 |
 | `shell/statusline.test.sh` | Yes | WU-4 |
-| `commands/implement.md`, `prompts/SYSTEM_PROMPT.md`, `docs/internals/13-memory-system.md` | Yes | WU-6, WU-7 |
+| `commands/implement.md`, `prompts/SYSTEM_PROMPT.md`, `docs/concepts/02-memory-system.md` | Yes | WU-6, WU-7 |
 | `memory/graph.json`, `shell/worktree.sh` | Yes | Context |
 | 7 new files (context reader, 2 hooks, 4 suites) | Absent, as expected | WU-1, WU-2, WU-3, WU-5 |
 
