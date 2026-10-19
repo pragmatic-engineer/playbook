@@ -83,6 +83,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `hooks.proseLint.mode` | `warn` | `warn`, `block`, `off` |
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
 | `update.checkIntervalHours` | `24` | a number, see the config keys page for the range |
+| `update.plugin` | `true` | `true`, `false` |
 | `disk.warnFreeGb` | `15` | a number, see the config keys page for the range |
 | `disk.blockFreeGb` | `6` | a number, see the config keys page for the range |
 | `disk.autoCleanup` | `true` | `true`, `false` |
@@ -968,7 +969,7 @@ Example: `playbook memory stats --json`
 
 Bring playbook's own files up to date with this binary
 
-Runs the migrations that write only playbook's own files, then records this binary as the one that ran them. The ones that run once start only after an upgrade, and the checks that repair a file run every time. A migration waits for the release named in its `since`. Nothing runs after a downgrade. It never writes Claude Code settings. It ends with the list of what still needs you, one bullet per item with why it matters and the command that fixes it: `playbook setup` for a change to Claude Code settings or a shell file, and its own fix for a report. The session start then stops repeating a report it printed. `update`, the install script and `doctor --fix` run the same step.
+Runs the migrations that write only playbook's own files, then records this binary as the one that ran them. The ones that run once start only after an upgrade, and the checks that repair a file run every time. A migration waits for the release named in its `since`. Nothing runs after a downgrade. It never writes Claude Code settings. It ends with the list of what still needs you, one bullet per item with why it matters and the command that fixes it: `playbook setup` for a change to Claude Code settings or a shell file, and its own fix for a report. The session start then stops repeating a report it printed. A run also updates the playbook plugin through `claude plugin update`, then says to restart Claude Code. A missing `claude` command or a failed update prints the command to run and does not change the exit code. `--no-plugin` or `playbook config set update.plugin false` turns this off. `update`, the install script and `doctor --fix` run the same step.
 
 Exit codes: 0 when it finished or had nothing to do, 1 when the record could not be read or written, a migration failed, or another playbook process held the lock.
 
@@ -977,6 +978,7 @@ Example: `playbook migrate --status`
 - `--status`: List each migration with the release that ships it, its scope and state, the recorded and running versions, and what needs you, writing nothing
 - `--dry-run`: Show the migrations a run would start and what needs you, writing nothing
 - `--json`: Print JSON for tools
+- `--no-plugin`: Leave the playbook plugin in Claude Code as it is. By default a run updates it with `claude plugin update`, unless the config key `update.plugin` is false
 
 ### `playbook mode`
 
@@ -1496,7 +1498,7 @@ Example: `playbook uninstall --dry-run`
 
 Update playbook to a published release
 
-Downloads the release, checks its SHA256 sum and, when `gh` is installed, its build attestation, then swaps the binary and keeps the old one as a backup. In auto mode it refuses unless you pass `--yes`. `--check` and `--list` change nothing. `--check` exits 0 whether or not an update exists, and 1 on an error such as an unreachable release list or an unknown version.
+Downloads the release, checks its SHA256 sum and, when `gh` is installed, its build attestation, then swaps the binary and keeps the old one as a backup. In auto mode it refuses unless you pass `--yes`. Then it updates the playbook plugin through `claude plugin update`, unless you pass `--no-plugin` or `update.plugin` is false. `--check` and `--list` change nothing. `--check` exits 0 whether or not an update exists, and 1 on an error such as an unreachable release list or an unknown version.
 
 Example: `playbook update --check`
 
@@ -1504,6 +1506,7 @@ Example: `playbook update --check`
 - `--list`: List published releases
 - `--pre`: Consider pre-releases when picking the latest
 - `--yes`: Confirm the update when auto mode is on
+- `--no-plugin`: Leave the playbook plugin in Claude Code as it is. By default `update` runs `claude plugin update` for it, unless the config key `update.plugin` is false
 
 ### `playbook usage`
 

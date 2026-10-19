@@ -97,6 +97,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "hooks.proseLint.mode",
     "update.mode",
     "update.checkIntervalHours",
+    "update.plugin",
     "disk.warnFreeGb",
     "disk.blockFreeGb",
     "disk.autoCleanup",
@@ -108,6 +109,7 @@ pub const KNOWN_KEYS: &[&str] = &[
 pub const USER_KEYS: &[&str] = &[
     "update.mode",
     "update.checkIntervalHours",
+    "update.plugin",
     "systemPrompt.enabled",
     "attribution.enabled",
     "disk.warnFreeGb",
@@ -217,6 +219,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "hooks.proseLint.mode" => Some(Value::String("warn".to_string())),
         "update.mode" => Some(Value::String("notify".to_string())),
         "update.checkIntervalHours" => Some(Value::Number(24.into())),
+        "update.plugin" => Some(Value::Bool(true)),
         "disk.warnFreeGb" => Some(Value::Number(
             crate::disk::policy::DEFAULT_WARN_FREE_GB.into(),
         )),

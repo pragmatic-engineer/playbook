@@ -69,6 +69,7 @@ pub mod plan_cleanup;
 pub mod planning;
 pub mod plans;
 pub mod plugin_root;
+pub mod plugin_update;
 pub mod pr;
 pub mod prose;
 pub mod release_notes;
@@ -347,6 +348,8 @@ pub enum Command {
     /// Downloads the release, checks its SHA256 sum and, when `gh` is
     /// installed, its build attestation, then swaps the binary and keeps the
     /// old one as a backup. In auto mode it refuses unless you pass `--yes`.
+    /// Then it updates the playbook plugin through `claude plugin update`,
+    /// unless you pass `--no-plugin` or `update.plugin` is false.
     /// `--check` and `--list` change nothing. `--check` exits 0 whether or not
     /// an update exists, and 1 on an error such as an unreachable release list
     /// or an unknown version.
@@ -378,6 +381,11 @@ pub enum Command {
         /// The version the install script replaced, for --print-notes
         #[arg(long, hide = true, value_name = "VERSION", requires = "print_notes")]
         from: Option<String>,
+        /// Leave the playbook plugin in Claude Code as it is. By default
+        /// `update` runs `claude plugin update` for it, unless the config key
+        /// `update.plugin` is false
+        #[arg(long)]
+        no_plugin: bool,
     },
     /// Print the installed version, same as `--version`
     Version,
@@ -434,6 +442,11 @@ pub enum Command {
     /// for a change to Claude Code settings or a shell file, and its own fix
     /// for a report. The session start then stops repeating a report it
     /// printed.
+    /// A run also updates the playbook plugin through
+    /// `claude plugin update`, then says to restart Claude Code. A missing
+    /// `claude` command or a failed update prints the command to run and
+    /// does not change the exit code. `--no-plugin` or
+    /// `playbook config set update.plugin false` turns this off.
     /// `update`, the install script and `doctor --fix` run the same step.
     ///
     /// Exit codes: 0 when it finished or had nothing to do, 1 when the record
@@ -451,6 +464,11 @@ pub enum Command {
         /// Print JSON for tools
         #[arg(long)]
         json: bool,
+        /// Leave the playbook plugin in Claude Code as it is. By default a
+        /// run updates it with `claude plugin update`, unless the config key
+        /// `update.plugin` is false
+        #[arg(long)]
+        no_plugin: bool,
     },
     /// Read the run mode and effort ceiling a command's Step 0 needs, in one call
     ///

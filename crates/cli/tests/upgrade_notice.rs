@@ -65,13 +65,42 @@ impl Home {
         .unwrap();
     }
 
+    /// A fake `claude` on this home's PATH. It logs its arguments to
+    /// `claude-calls.log`, points installed_plugins.json at `to` when
+    /// given, and exits with `exit`.
+    fn fake_claude(&self, to: Option<(&Path, &str)>, exit: i32) {
+        let bin = self.home.join("bin/claude");
+        fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        let swap = to.map_or(String::new(), |(dir, version)| {
+            format!(
+                "printf '%s' '{{\"version\":2,\"plugins\":{{\"playbook@pragmatic-engineer\":[{{\"scope\":\"user\",\"installPath\":\"{}\",\"version\":\"{version}\"}}]}}}}' > \"$HOME/.claude/plugins/installed_plugins.json\"\n",
+                dir.display()
+            )
+        });
+        fs::write(
+            &bin,
+            format!("#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\n{swap}exit {exit}\n"),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn claude_calls(&self) -> String {
+        fs::read_to_string(self.home.join("claude-calls.log")).unwrap_or_default()
+    }
+
     fn playbook(&self, args: &[&str], stdin: &str, plugin_root: Option<&Path>) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_playbook"));
         command
             .args(args)
             .current_dir(&self.home)
             .env("HOME", &self.home)
-            .env("PATH", "/usr/bin:/bin")
+            .env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", self.home.join("bin").display()),
+            )
+            .env_remove("PLAYBOOK_SKIP_PLUGIN_UPDATE")
             .env_remove("CLAUDE_PLUGIN_ROOT")
             .env_remove("PLAYBOOK_PLUGIN_DIR")
             .env_remove("HOOK_INPUT")
@@ -122,26 +151,26 @@ fn older_line() -> Option<String> {
 }
 
 #[test]
-fn the_reported_notice_lists_the_item_with_its_command_and_does_not_repeat() {
+fn the_reported_notice_lists_the_item_and_migrate_updates_the_plugin_once() {
     let Some(old) = older_line() else {
         return;
     };
-    // Arrange: a fresh install whose plugin is one line behind.
+    // Arrange: a fresh install whose plugin is one line behind, and a
+    // `claude` that installs the current plugin when asked.
     let h = Home::new("report");
     let stale = h.plugin(&old, &old);
     h.install(&stale, &old);
+    let current = h.plugin(VERSION, VERSION);
+    h.fake_claude(Some((&current, VERSION)), 0);
 
-    // Act: the session from the report, `playbook migrate`, two more
-    // sessions, then a plugin update and one more session.
+    // Act: the session from the report, `playbook migrate`, then two more
+    // sessions.
     let first = h.session(None);
-    let migrate = h.stdout(&["migrate"]);
     let status = h.stdout(&["migrate", "--status"]);
+    let calls_before = h.claude_calls();
+    let migrate = h.playbook(&["migrate"], "", None);
     let second = h.session(None);
     let third = h.session(None);
-    let current = h.plugin(VERSION, VERSION);
-    h.install(&current, VERSION);
-    let after_update = h.stdout(&["migrate", "--status"]);
-    let fourth = h.session(None);
 
     // Assert
     assert!(first.contains("1 item needs you:\n  - "), "{first}");
@@ -150,7 +179,7 @@ fn the_reported_notice_lists_the_item_with_its_command_and_does_not_repeat() {
         "{first}"
     );
     assert!(
-        !first.contains("item(s) need you: run `playbook migrate`"),
+        first.ends_with("To update the plugin and see what is left, run: playbook migrate"),
         "{first}"
     );
     let bullet = |text: &str| {
@@ -160,21 +189,118 @@ fn the_reported_notice_lists_the_item_with_its_command_and_does_not_repeat() {
             .collect::<Vec<_>>()
             .join("\n")
     };
-    assert_eq!(bullet(&migrate), bullet(&first), "one renderer: {migrate}");
     assert_eq!(bullet(&status), bullet(&first), "one renderer: {status}");
-    assert!(
-        migrate.starts_with(
-            "nothing to fix in playbook's own files\nStill left for you, 1 item needs you:"
-        ),
-        "{migrate}"
+    assert_eq!(calls_before, "", "--status changes nothing");
+    assert_eq!(migrate.status.code(), Some(0));
+    assert_eq!(
+        h.claude_calls(),
+        "plugin update playbook@pragmatic-engineer\n"
     );
-    assert_eq!(second, "", "shown less than a day ago");
+    let text = String::from_utf8_lossy(&migrate.stdout);
+    assert!(
+        text.contains(&format!(
+            "plugin: updated playbook@pragmatic-engineer from {old} to {VERSION}. Restart Claude Code to load it\n"
+        )),
+        "{text}"
+    );
+    assert!(text.ends_with("nothing else needs you\n"), "{text}");
+    assert_eq!(second, "", "the plugin is current");
     assert_eq!(third, "");
-    assert!(
-        after_update.ends_with("nothing needs you\n"),
-        "{after_update}"
+}
+
+#[test]
+fn migrate_lists_a_report_it_could_not_fix_once_and_the_session_stays_quiet() {
+    let Some(old) = older_line() else {
+        return;
+    };
+    // Arrange: no `claude` on PATH, so the plugin stays old.
+    let h = Home::new("report-no-cli");
+    let stale = h.plugin(&old, &old);
+    h.install(&stale, &old);
+
+    // Act
+    let first = h.session(None);
+    let migrate = h.playbook(&["migrate"], "", None);
+    let second = h.session(None);
+
+    // Assert
+    assert_eq!(
+        migrate.status.code(),
+        Some(0),
+        "a missing CLI does not fail"
     );
-    assert_eq!(fourth, "");
+    let text = String::from_utf8_lossy(&migrate.stdout);
+    assert!(
+        text.starts_with(
+            "plugin: the claude command is not on PATH, so the plugin was not updated; \
+             run: claude plugin update playbook@pragmatic-engineer\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("Still left for you, 1 item needs you:"),
+        "{text}"
+    );
+    assert!(first.contains("1 item needs you:"), "{first}");
+    assert_eq!(second, "", "shown less than a day ago");
+}
+
+#[test]
+fn no_plugin_a_false_config_key_or_a_failed_update_leave_the_exit_code_alone() {
+    let Some(old) = older_line() else {
+        return;
+    };
+    // Arrange
+    let h = Home::new("plugin-opt-out");
+    let stale = h.plugin(&old, &old);
+    h.install(&stale, &old);
+    h.fake_claude(None, 1);
+
+    // Act
+    let skipped = h.playbook(&["migrate", "--no-plugin"], "", None);
+    let dry_run = h.playbook(&["migrate", "--dry-run"], "", None);
+    let calls_after_opt_out = h.claude_calls();
+    let failed = h.playbook(&["migrate"], "", None);
+    let set = h.playbook(&["config", "set", "update.plugin", "false"], "", None);
+    let off = h.playbook(&["migrate"], "", None);
+    let bad = h.playbook(&["config", "set", "update.plugin", "sometimes"], "", None);
+
+    // Assert
+    assert_eq!(
+        calls_after_opt_out, "",
+        "--no-plugin and --dry-run run nothing"
+    );
+    assert!(!String::from_utf8_lossy(&skipped.stdout).contains("plugin:"));
+    assert_eq!(failed.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&failed.stdout).contains(
+            "plugin: the update failed (exit 1); run: claude plugin update playbook@pragmatic-engineer"
+        ),
+        "{}",
+        String::from_utf8_lossy(&failed.stdout)
+    );
+    assert_eq!(
+        set.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&off.stdout)
+            .contains("plugin: not updated, update.plugin is false"),
+        "{}",
+        String::from_utf8_lossy(&off.stdout)
+    );
+    assert_eq!(
+        h.claude_calls(),
+        "plugin update playbook@pragmatic-engineer\n"
+    );
+    assert_ne!(
+        bad.status.code(),
+        Some(0),
+        "update.plugin takes true or false"
+    );
+    assert_eq!(dry_run.status.code(), Some(0));
 }
 
 #[test]

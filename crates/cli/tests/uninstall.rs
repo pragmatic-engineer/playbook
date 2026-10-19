@@ -38,6 +38,8 @@ impl Sandbox {
             .env("SHELL", "/bin/zsh")
             .env("PLAYBOOK_BIN_DIR", &self.bin_dir)
             .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
+            // No real `claude plugin update` from a test.
+            .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
             .current_dir(&self.home)
             .output()
             .expect("playbook should spawn")

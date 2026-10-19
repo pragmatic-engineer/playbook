@@ -162,7 +162,10 @@ fn run_fresh(
     for _ in 0..3 {
         let started = std::time::Instant::now();
         let mut cmd = std::process::Command::new(exe);
-        cmd.args(args).stdin(std::process::Stdio::null());
+        // `update` updates the plugin itself, once, after this heal.
+        cmd.args(args)
+            .env(crate::plugin_update::SKIP_ENV, "1")
+            .stdin(std::process::Stdio::null());
         if let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, timeout) {
             return Some(out);
         }

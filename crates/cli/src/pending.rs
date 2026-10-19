@@ -313,11 +313,17 @@ pub fn bullets(items: &[Item]) -> String {
 }
 
 /// The one command for the last line: `playbook setup` when a setup change
-/// is open, since it asks about every one, else the command that shows the
-/// list again.
+/// is open, since it asks about every one; `playbook migrate` when the
+/// plugin needs `claude plugin update`, which a run does for you; else the
+/// command that shows the list again.
 pub fn closing_command(items: &[Item]) -> &'static str {
     if items.iter().any(|i| i.kind == Kind::Consent) {
         "playbook setup"
+    } else if items
+        .iter()
+        .any(|i| i.fix.starts_with("claude plugin update "))
+    {
+        "playbook migrate"
     } else {
         "playbook migrate --status"
     }
@@ -328,6 +334,9 @@ pub fn final_line(items: &[Item]) -> String {
     match closing_command(items) {
         "playbook setup" => {
             "To go through every setup change at once, run: playbook setup".to_string()
+        }
+        "playbook migrate" => {
+            "To update the plugin and see what is left, run: playbook migrate".to_string()
         }
         command => format!("To see this list again, run: {command}"),
     }
@@ -696,13 +705,16 @@ mod tests {
     }
 
     #[test]
-    fn the_final_line_names_setup_only_when_a_setup_change_is_open() {
+    fn the_final_line_names_setup_then_migrate_then_the_status() {
         let report = item("x", Kind::Report, "a");
         let consent = item("y", Kind::Consent, "b");
         assert!(
             final_line(std::slice::from_ref(&report)).ends_with("run: playbook migrate --status")
         );
-        assert!(final_line(&[report, consent]).ends_with("run: playbook setup"));
+        assert!(final_line(&[report.clone(), consent]).ends_with("run: playbook setup"));
+        let mut plugin = report;
+        plugin.fix = "claude plugin update playbook@pragmatic-engineer".into();
+        assert!(final_line(&[plugin]).ends_with("run: playbook migrate"));
     }
 
     #[test]

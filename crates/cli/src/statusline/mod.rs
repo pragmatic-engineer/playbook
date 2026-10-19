@@ -6,7 +6,7 @@
 //! wired into any settings file yet; the shell script is still what runs.
 
 mod fmt;
-mod gh;
+pub(crate) mod gh;
 mod git;
 mod lines;
 mod telemetry;
