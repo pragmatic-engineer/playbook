@@ -103,6 +103,38 @@ pub fn pending(settings_path: &Path, home: &Path, claude_home: &Path) -> Option<
     })
 }
 
+/// Removes every hook entry `is_target` accepts, then any matcher group or
+/// event that leaves empty. A group or event empty before stays.
+pub(super) fn drop_entries(settings: &mut Value, is_target: impl Fn(&Value) -> bool) {
+    if let Some(events) = settings.get_mut("hooks").and_then(Value::as_object_mut) {
+        let mut emptied_events = Vec::new();
+        for (event, groups) in events.iter_mut() {
+            let Some(groups) = groups.as_array_mut() else {
+                continue;
+            };
+            let before = groups.len();
+            groups.retain_mut(|group| {
+                let Some(entries) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
+                    return true;
+                };
+                let had = entries.len();
+                entries.retain(|e| !is_target(e));
+                entries.len() == had || !entries.is_empty()
+            });
+            if groups.is_empty() && before > 0 {
+                emptied_events.push(event.clone());
+            }
+        }
+        let emptied = !emptied_events.is_empty();
+        for event in emptied_events {
+            events.remove(&event);
+        }
+        if emptied && events.is_empty() {
+            settings.as_object_mut().map(|root| root.remove("hooks"));
+        }
+    }
+}
+
 /// Removes the dead entries from `settings_path` after a backup under
 /// `epoch`, and drops a matcher group or event that this leaves empty. A
 /// group or event that was empty before stays. Returns the removed commands.
@@ -120,38 +152,11 @@ pub fn remove(
     if dead.is_empty() {
         return Ok(dead);
     }
-    let is_dead_entry = |e: &Value| {
+    drop_entries(&mut settings, |e| {
         e.get("command")
             .and_then(Value::as_str)
             .is_some_and(|c| dead.iter().any(|d| d == c))
-    };
-    if let Some(events) = settings.get_mut("hooks").and_then(Value::as_object_mut) {
-        let mut emptied_events = Vec::new();
-        for (event, groups) in events.iter_mut() {
-            let Some(groups) = groups.as_array_mut() else {
-                continue;
-            };
-            let before = groups.len();
-            groups.retain_mut(|group| {
-                let Some(entries) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
-                    return true;
-                };
-                let had = entries.len();
-                entries.retain(|e| !is_dead_entry(e));
-                entries.len() == had || !entries.is_empty()
-            });
-            if groups.is_empty() && before > 0 {
-                emptied_events.push(event.clone());
-            }
-        }
-        let emptied = !emptied_events.is_empty();
-        for event in emptied_events {
-            events.remove(&event);
-        }
-        if emptied && events.is_empty() {
-            settings.as_object_mut().map(|root| root.remove("hooks"));
-        }
-    }
+    });
     let rendered = format!("{settings:#}\n");
     crate::init::run::backup_then_write(settings_path, &rendered, &[], epoch)?;
     Ok(dead)

@@ -77,10 +77,9 @@ impl Env {
     }
 }
 
-const PRE_GUARDS: [&str; 6] = [
+const PRE_GUARDS: [&str; 5] = [
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
     "policy-guard",

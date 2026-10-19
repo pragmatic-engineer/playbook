@@ -64,7 +64,6 @@ fn the_prompt_points_at_the_files_that_own_routing_and_the_hooks_that_enforce_ru
         "playbook:delegating-subagents",
         "policy-guard",
         "commit-message-sanitizer",
-        "no-slop-guard",
     ] {
         assert!(text.contains(needle), "missing `{needle}`");
     }

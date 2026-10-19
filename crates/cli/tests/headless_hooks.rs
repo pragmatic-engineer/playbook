@@ -247,7 +247,6 @@ fn safety_guards_behave_identically_headless_and_not() {
         ("rm-workspace-guard", "rm -rf /etc/passwd"),
         ("rm-workspace-guard", "ls"),
         ("bg-await-guard", "sleep 30 &"),
-        ("no-slop-guard", "echo hello"),
     ];
     for (guard, command) in cases {
         let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();

@@ -369,16 +369,6 @@ const GUARD_SPECS: &[HookSpec] = &[
     HookSpec {
         event: "PreToolUse",
         matcher: Some("Bash"),
-        name: "no-slop-guard",
-        group: Group::Safety,
-        purpose: "Denies a posting command (commit, PR text) that contains an em or en dash.",
-        if_cond: None,
-        timeout: Some(10),
-        also_replaces: Some("no-dash-guard"),
-    },
-    HookSpec {
-        event: "PreToolUse",
-        matcher: Some("Bash"),
         name: "precommit-check",
         group: Group::Safety,
         purpose: "Warns about debug leftovers, secret-shaped file names and oversized commits in the staged diff. Runs only for `git commit`.",
@@ -436,16 +426,6 @@ const GUARD_SPECS: &[HookSpec] = &[
         purpose: "Backstop for what the PreToolUse rewrite did not see. It can amend a signed commit and edit a PR.",
         if_cond: None,
         timeout: Some(60),
-        also_replaces: None,
-    },
-    HookSpec {
-        event: "PreToolUse",
-        matcher: Some("Edit|Write"),
-        name: "no-slop-guard",
-        group: Group::Safety,
-        purpose: "Denies new code that carries a slop comment.",
-        if_cond: None,
-        timeout: Some(10),
         also_replaces: None,
     },
     HookSpec {

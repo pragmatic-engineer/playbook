@@ -87,7 +87,7 @@ Events wired in this config: `SessionStart`, `PreToolUse`, `PostToolUse`, `UserP
 
 Every hook is a Rust function compiled into the single `playbook` binary, one module per hook under `crates/cli/src/hooks/<name>.rs`. `crates/cli/src/hooks/mod.rs` declares every module and an exhaustive `dispatch` match over the `HookName` enum in `crates/cli/src/lib.rs`, so adding a hook the CLI cannot invoke fails the build instead of silently doing nothing at runtime.
 
-There is no language split left to choose between. The data-shaping hooks (memory graph rebuild, anchor lookup, frontmatter parsing) and the fast safety guards (`rm-workspace-guard`, `no-slop-guard`, `bg-await-guard`, `precommit-check`) are all plain functions sharing the same `crates/cli/src/common/` helpers (payload field extraction, session dir, atomic append, the `emit_*` JSON shapes) and the same compiled binary, so there is no per-hook cold start to weigh a language choice against.
+There is no language split left to choose between. The data-shaping hooks (memory graph rebuild, anchor lookup, frontmatter parsing) and the fast safety guards (`rm-workspace-guard`, `bg-await-guard`, `precommit-check`) are all plain functions sharing the same `crates/cli/src/common/` helpers (payload field extraction, session dir, atomic append, the `emit_*` JSON shapes) and the same compiled binary, so there is no per-hook cold start to weigh a language choice against.
 
 **Registering a hook in `settings.json`:**
 

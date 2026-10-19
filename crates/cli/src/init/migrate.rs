@@ -43,6 +43,8 @@ pub const PROMPT_DEFAULT_MIGRATION: &str = "system-prompt-default-on";
 pub const COLLECTOR_LABEL_MIGRATION: &str = "collector-service-label";
 /// The `Consent` item that adds the disk guard hook (ADR 0047 decision 8).
 pub const DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
+/// The `Owned` removal of the `no-slop-guard` hook entry setup used to write.
+pub const NO_SLOP_GUARD_MIGRATION: &str = "no-slop-guard-entry";
 /// How long `collector-service-label` waits for the moved collector to run.
 const COLLECTOR_LABEL_WAIT: Duration = Duration::from_secs(3);
 
@@ -377,6 +379,13 @@ pub fn registry() -> Vec<Migration> {
             },
             run: disk_guard_hook_by_setup,
         },
+        Migration {
+            id: NO_SLOP_GUARD_MIGRATION,
+            since: "next",
+            kind: Kind::Idempotent,
+            scope: Scope::Owned,
+            run: no_slop_guard_entry,
+        },
     ]
 }
 
@@ -397,6 +406,21 @@ fn disk_guard_hook_pending(ctx: &Ctx) -> Option<String> {
 /// Setup's hooks part wires the disk guard with the other guards.
 fn disk_guard_hook_by_setup(_: &Ctx) -> Outcome {
     Outcome::Quiet
+}
+
+/// Removes the `playbook hook no-slop-guard` entry older setups wrote. The
+/// hook is gone; the subcommand stays a no-op for one release.
+fn no_slop_guard_entry(ctx: &Ctx) -> Outcome {
+    let settings = ctx.claude_home.join("settings.json");
+    match crate::init::retired_hooks::remove(&settings, ctx.epoch) {
+        Ok(0) => Outcome::Quiet,
+        Ok(_) => Outcome::Repeat(StepReport::wired(
+            "retired-hooks",
+            "removed the retired no-slop-guard hook entry; its rules live in the prompt and skills"
+                .to_string(),
+        )),
+        Err(err) => Outcome::Failed(StepReport::failed("retired-hooks", err.to_string())),
+    }
 }
 
 /// Moves the collector agent playbook 0.37.0 installed under the old label
@@ -2240,6 +2264,30 @@ mod tests {
             disk_guard_hook_pending(&ctx).is_some(),
             "wired for agents only leaves builds unguarded"
         );
+    }
+
+    #[test]
+    fn the_no_slop_guard_entry_is_removed_once_and_other_entries_stay() {
+        // Arrange
+        let h = home("no-slop-entry");
+        let ctx = ctx(&h);
+        let settings = ctx.claude_home.join("settings.json");
+        std::fs::create_dir_all(&ctx.claude_home).unwrap();
+        let doc = serde_json::json!({"hooks": {"PreToolUse": [
+            {"matcher": "Edit|Write", "hooks": [
+                {"type": "command", "command": "playbook hook no-slop-guard"},
+                {"type": "command", "command": "playbook hook policy-guard"}]}]}});
+        std::fs::write(&settings, doc.to_string()).unwrap();
+
+        // Act
+        let first = no_slop_guard_entry(&ctx);
+        let second = no_slop_guard_entry(&ctx);
+
+        // Assert
+        assert!(matches!(first, Outcome::Repeat(_)));
+        assert!(matches!(second, Outcome::Quiet));
+        let text = std::fs::read_to_string(&settings).unwrap();
+        assert!(!text.contains("no-slop-guard") && text.contains("policy-guard"));
     }
 
     #[test]
