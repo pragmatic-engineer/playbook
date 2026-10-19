@@ -77,6 +77,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `launcher.claudeOverride` | `false` | `true`, `false` |
 | `launcher.shortName` | `false` | `true`, `false` |
 | `systemPrompt.enabled` | `true` | `true`, `false` |
+| `attribution.enabled` | `false` | `true`, `false` |
 | `hooks.rmGuard.allowedRoots` | `[]` | see the config keys guide |
 | `hooks.proseLint.mode` | `warn` | `warn`, `block`, `off` |
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
@@ -536,7 +537,7 @@ The full health check is the `/playbook:doctor` command inside Claude Code. Thes
 
 Example: `playbook doctor pending-migrations`
 
-`playbook doctor --fix` repairs playbook's own files after an upgrade and prints the command for each change that needs you, the same as `playbook migrate`. At a terminal it first asks whether to add the missing `attribution` keys; that yes is the only Claude Code setting it writes.
+`playbook doctor --fix` repairs playbook's own files after an upgrade and prints the command for each change that needs you, the same as `playbook migrate`. At a terminal it first asks whether to turn attribution OFF, the default, by adding the missing `attribution` keys; that yes is the only Claude Code setting it writes. A no stores attribution ON.
 
 - `--fix`: Run the safe migrations for playbook's own files, then list what needs you
 
@@ -1409,9 +1410,9 @@ Example: `playbook setup --no-hooks --system-prompt`
 - `--no-collector-service`: Do not install the background service for the usage collector
 - `--short-name`: Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
 - `--no-short-name`: Do not add the `pb` short name
-- `--attribution-off`: Turn off the commit, PR and session link attribution Claude Code adds (sets `attribution` in settings.json)
-- `--no-attribution-off`: Do not set or change attribution in settings.json
-- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, attribution-off), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on
+- `--attribution`: Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true
+- `--no-attribution`: Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values
+- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing

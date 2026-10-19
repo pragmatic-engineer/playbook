@@ -1461,13 +1461,13 @@ fn doctor_reports_the_attribution_key_ok_missing_or_your_own() {
     assert!(row["hint"]
         .as_str()
         .unwrap()
-        .contains("playbook setup --only attribution-off"));
+        .contains("playbook setup --only attribution "));
     let row = attribution_row(&custom);
     assert_eq!(row["level"], "INFO");
     assert!(row["hint"]
         .as_str()
         .unwrap()
-        .contains("--only attribution-off --attribution-off"));
+        .contains("--only attribution --no-attribution"));
     let row = attribution_row(&mixed);
     assert_eq!(row["level"], "WARN");
     assert!(
@@ -1547,7 +1547,7 @@ fn a_no_to_the_collector_service_shows_in_doctor() {
             "--no-statusline",
             "--no-path",
             "--no-telemetry",
-            "--no-attribution-off",
+            "--attribution",
         ])
         .env("HOME", b.home())
         .current_dir(b.home())

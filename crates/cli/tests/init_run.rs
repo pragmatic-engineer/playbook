@@ -195,7 +195,7 @@ fn base_paths(home: &Path) -> InitPaths {
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
         pb_target: None,
-        attribution: playbook::init::attribution::Choice::AddMissing,
+        attribution: playbook::init::attribution::Choice::Off { replace: false },
         path_setup: None,
         repo: None,
     }
