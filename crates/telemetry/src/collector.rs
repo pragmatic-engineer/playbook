@@ -366,7 +366,7 @@ impl Status {
             }
             _ => {
                 lines.push("collector: not running".to_string());
-                lines.push(format!("fix: {}", super::daemon::START_HINT));
+                lines.push(format!("fix: {}", super::host::start_hint()));
                 if let Some(port) = self.port {
                     lines.push(format!("last port: {port}"));
                 }

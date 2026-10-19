@@ -1034,18 +1034,14 @@ mod tests {
             },
         ];
 
+        assert!(!catalog::ids().contains(&COLLECTOR_SERVICE_PART));
         for flags in &runs {
             assert_eq!(retired_notes(flags), vec![notice.clone()], "{flags:?}");
-            assert!(!catalog::ids().contains(&"collector-service"));
-            assert_eq!(part_pair(flags, "collector-service"), None);
+            assert_eq!(part_pair(flags, COLLECTOR_SERVICE_PART), None);
         }
         let only = only_choices(&runs[2]).unwrap().unwrap();
         assert_eq!(only, all_off());
         assert!(only_retired(&runs[2]));
-        assert_eq!(
-            COLLECTOR_SERVICE_RETIRED,
-            "the collector service is no longer needed; playbook starts the collector itself"
-        );
     }
 
     #[test]

@@ -44,6 +44,11 @@ impl Host for Standalone {
         }
     }
 
+    /// `pbtop` does not start a collector, so name the command that does.
+    fn start_hint(&self) -> String {
+        self.command("usage collect")
+    }
+
     fn launch_args(&self) -> Vec<String> {
         Vec::new()
     }
@@ -83,6 +88,20 @@ mod tests {
         assert_eq!(h.command("usage --summary"), "pbtop --summary");
         assert_eq!(h.command("usage"), "pbtop");
         assert_eq!(h.command("usage collect"), "pbtop collect");
+    }
+
+    #[test]
+    fn a_down_collector_names_the_collect_command() {
+        use crate::telemetry_status::{empty_panel_lines_for, Mode};
+
+        let down = empty_panel_lines_for(Some(Mode::OnCollectorDown), &Standalone);
+
+        assert_eq!(Standalone.start_hint(), "pbtop collect");
+        assert!(down.contains(&"pbtop collect".to_string()), "{down:?}");
+        assert!(
+            !down.iter().any(|l| l == crate::daemon::START_HINT),
+            "{down:?}"
+        );
     }
 
     #[test]

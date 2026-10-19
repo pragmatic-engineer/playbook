@@ -43,7 +43,9 @@ Take `$ARGUMENTS` word by word:
 - Drop `--auto` and `--ask`. Step 0 read them, and the binary does not take them.
 - Replace the old name `--use-system-prompt` with `--yes --system-prompt`. Say so in one line.
 - Replace the old names from 0.36 and 0.37: `--attribution-off` with `--no-attribution` (attribution OFF), `--no-attribution-off` with `--attribution` (attribution ON), and `attribution-off` inside an `--only` or `--explain` value with `attribution`. When an `--only` value names neither `attribution` nor `attribution-off`, drop `--no-attribution-off` instead, as the binary does. Say so in one line.
-- Drop the retired words `--install-aliases`, `--aliases`, `--no-aliases`, `--claude-override` and `--no-claude-override`, and the names `aliases` and `claude-override` inside an `--only` value. Say in one line that they are retired and that `playbook cc` and `pb cc` need no shell line (ADR 0044). When an `--only` value had only retired names, stop there and run nothing.
+- Drop the retired words `--install-aliases`, `--aliases`, `--no-aliases`, `--claude-override` and `--no-claude-override`, and the names `aliases` and `claude-override` inside an `--only` value. Say in one line that they are retired and that `playbook cc` and `pb cc` need no shell line (ADR 0044).
+- Drop the retired words `--collector-service` and `--no-collector-service`, and the name `collector-service` inside an `--only` value. Say in one line that the collector service is no longer needed, as playbook starts the collector itself.
+- When an `--only` value had only retired names, stop there and run nothing.
 - Every other word must be a flag from the Flags table below, or the value after `--only` or `--explain`. A value is part names from the Questions table or `security`, joined by commas. When a word is neither, stop with one line that names it and points to `/playbook:setup --help`. Ask nothing and run nothing.
 
 The rest of this file calls the kept words the arguments. A part flag is any flag in the Flags table from `--hooks` to `--no-attribution`. When you build a command, put each argument in single quotes.

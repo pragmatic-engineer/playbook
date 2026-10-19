@@ -32,6 +32,11 @@ pub trait Host: Send + Sync {
     /// playbook adds the old command name.
     fn setup_command(&self, part: &str) -> String;
 
+    /// What to do when telemetry points at the collector and none runs, for
+    /// messages. Only a host whose commands start the collector can say
+    /// [`daemon::START_HINT`](super::daemon::START_HINT).
+    fn start_hint(&self) -> String;
+
     /// The arguments, before any usage subcommand, that make the program run
     /// usage. Used to start a detached `warm` run of the same program.
     fn launch_args(&self) -> Vec<String>;
@@ -105,6 +110,10 @@ impl Host for TestHost {
         format!("{} setup --only {part}", self.program())
     }
 
+    fn start_hint(&self) -> String {
+        super::daemon::START_HINT.to_string()
+    }
+
     fn launch_args(&self) -> Vec<String> {
         vec!["usage".to_string()]
     }
@@ -153,6 +162,11 @@ pub fn command(args: &str) -> String {
 /// The command that runs one part of playbook's setup, for messages.
 pub fn setup_command(part: &str) -> String {
     current().setup_command(part)
+}
+
+/// What to do while the collector is down, for messages.
+pub fn start_hint() -> String {
+    current().start_hint()
 }
 
 /// The arguments that make the program run usage, for a detached child.

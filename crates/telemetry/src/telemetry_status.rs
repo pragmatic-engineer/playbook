@@ -126,7 +126,7 @@ pub fn empty_panel_lines_for(mode: Option<Mode>, host: &dyn super::host::Host) -
         Some(Mode::OnCollectorDown) => vec![
             "No rows: the collector is not running.".into(),
             "To start it:".into(),
-            super::daemon::START_HINT.into(),
+            host.start_hint(),
         ],
         Some(Mode::OnRunning) => vec![
             "No rows in this range yet.".into(),
