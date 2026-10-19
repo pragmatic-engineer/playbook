@@ -4,6 +4,9 @@
 //! `playbook memory stats` and the summary `playbook memory rebuild` prints,
 //! run black-box against a scratch HOME.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,11 +26,9 @@ fn scratch(tag: &str) -> PathBuf {
 
 /// Runs `playbook <args>` with `home` as HOME and `cwd` as the directory.
 fn run(home: &Path, cwd: &Path, args: &[&str]) -> (i32, String, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let out = isolated::playbook_in(home)
         .args(args)
         .current_dir(cwd)
-        .env("HOME", home)
-        .env_remove("PLAYBOOK_MODE")
         .output()
         .expect("playbook");
     (
@@ -102,7 +103,22 @@ fn rebuild_prints_the_counts_and_stats_reads_the_same_graph() {
         "{stats}"
     );
     assert!(stats.contains("dangling anchors: not checked"), "{stats}");
+    assert!(home.join(".config/playbook/data/memory.db").is_file());
+    // The graph never lands at the playbook root, a path older docs named.
     assert!(!home.join(".config/playbook/memory.db").exists());
+}
+
+#[test]
+fn rebuild_json_prints_one_json_document() {
+    let home = scratch("rebuild-json");
+    let cwd = scratch("cwd");
+    seed_store(&home);
+
+    let (code, out, err) = run(&home, &cwd, &["memory", "rebuild", "--json"]);
+
+    assert_eq!(code, 0, "{err}");
+    let v: serde_json::Value = serde_json::from_str(&out).expect("only JSON on stdout");
+    assert_eq!(v["facts"]["by_scope"]["project"], 2);
 }
 
 #[test]
@@ -122,7 +138,8 @@ fn stats_json_checks_the_anchors_of_the_repo_it_runs_in() {
     };
     git(&["init", "-q"]);
     git(&["remote", "add", "origin", "https://github.com/acme/web.git"]);
-    run(&home, &repo, &["memory", "rebuild"]);
+    let (code, _, err) = run(&home, &repo, &["memory", "rebuild"]);
+    assert_eq!(code, 0, "{err}");
 
     let (code, out, err) = run(&home, &repo, &["memory", "stats", "--json"]);
 

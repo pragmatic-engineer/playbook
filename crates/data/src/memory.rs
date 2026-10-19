@@ -40,6 +40,13 @@ CREATE TABLE IF NOT EXISTS edges (
 CREATE INDEX IF NOT EXISTS edges_by_dst ON edges (dst);
 CREATE INDEX IF NOT EXISTS nodes_by_scope ON nodes (scope, project);";
 
+/// The `scope` of a node that stands for a code location (an `anchors:`
+/// target). Every other node is a fact.
+pub const CODE_SCOPE: &str = "code";
+
+/// The `scope` values of fact nodes, widest first.
+pub const FACT_SCOPES: [&str; 3] = ["global", "org", "project"];
+
 /// The schema version stored in `meta` under `schema_version`.
 pub const SCHEMA_VERSION: &str = "1";
 
@@ -212,6 +219,14 @@ fn now() -> (u64, u128) {
 /// The graph stored in the database at `db`, nodes by id and edges by
 /// `(from, to, relation)`. `Ok(None)` when the file does not exist.
 pub fn read_graph(db: &Path) -> Result<Option<Graph>, String> {
+    Ok(read_graph_and_time(db)?.map(|(graph, _)| graph))
+}
+
+/// [`read_graph`] plus the time the writer recorded for that graph, both
+/// from one read transaction, so the time always belongs to the graph.
+pub fn read_graph_and_time(
+    db: &Path,
+) -> Result<Option<(Graph, Option<std::time::SystemTime>)>, String> {
     if !db.is_file() {
         return Ok(None);
     }
@@ -269,7 +284,16 @@ pub fn read_graph(db: &Path) -> Result<Option<Graph>, String> {
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
-    Ok(Some((nodes, edges)))
+    let rebuilt_at = tx
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'rebuilt_at_ms'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|ms| ms.parse::<u64>().ok())
+        .map(|ms| std::time::UNIX_EPOCH + Duration::from_millis(ms));
+    Ok(Some(((nodes, edges), rebuilt_at)))
 }
 
 #[cfg(test)]

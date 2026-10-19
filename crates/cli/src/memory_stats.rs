@@ -5,16 +5,14 @@
 //! `~/.config/playbook/data/memory.db`, so nobody needs `sqlite3` to count
 //! facts, nodes and edges. `playbook memory rebuild` prints the same summary.
 
-use playbook_data::memory::{read_graph, touched_at, EdgeRow, NodeRow};
+use playbook_data::memory::{read_graph_and_time, EdgeRow, NodeRow, CODE_SCOPE, FACT_SCOPES};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-/// The fact scopes, in the order they are printed.
-const SCOPES: [&str; 3] = ["global", "org", "project"];
-
-/// The scope of a code location node. Every other node is a fact.
-const CODE_SCOPE: &str = "code";
+/// Dangling edges and anchors listed one per line in the text output; the
+/// rest are counted, and `--json` lists them all.
+const TEXT_LIST_CAP: usize = 20;
 
 /// What `playbook memory stats` reports.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -23,7 +21,7 @@ pub struct Stats {
     pub db: PathBuf,
     /// Whether the database holds a graph.
     pub present: bool,
-    /// Size of the database file in bytes.
+    /// Size of the database and its write-ahead log in bytes.
     pub size_bytes: u64,
     /// When the graph was last rebuilt, in unix seconds.
     pub rebuilt_at: Option<i64>,
@@ -35,8 +33,8 @@ pub struct Stats {
     pub anchors: usize,
     /// Edge count per relation.
     pub edges: BTreeMap<String, usize>,
-    /// Edges whose target node is missing, as `(from, to, relation)`.
-    pub dangling_edges: Vec<(String, String, String)>,
+    /// Edges whose target node is missing.
+    pub dangling_edges: Vec<EdgeRow>,
     /// The repo whose anchors were checked on disk, and its checkout.
     pub anchor_repo: Option<(String, PathBuf)>,
     /// Anchors of `anchor_repo` that were checked on disk.
@@ -50,16 +48,21 @@ pub struct Stats {
 /// cannot be checked, because only this checkout's location is known.
 pub fn collect(home: &Path, repo: Option<(String, PathBuf)>) -> Result<Stats, String> {
     let db = playbook_data::memory::db_in(&playbook_data::data_dir_from(home));
-    let graph = read_graph(&db).map_err(|e| format!("read {}: {e}", db.display()))?;
+    let graph = read_graph_and_time(&db).map_err(|e| format!("read {}: {e}", db.display()))?;
     let mut stats = match graph {
-        Some((nodes, edges)) => summarize(&nodes, &edges, repo),
+        Some(((nodes, edges), rebuilt_at)) => Stats {
+            rebuilt_at: rebuilt_at.and_then(crate::common::time::epoch_secs_of),
+            ..summarize(&nodes, &edges, repo)
+        },
         None => Stats::default(),
     };
-    stats.size_bytes = std::fs::metadata(&db).map(|m| m.len()).unwrap_or(0);
-    stats.rebuilt_at = touched_at(&db)
-        .ok()
-        .flatten()
-        .and_then(crate::common::time::epoch_secs_of);
+    let mut wal = db.clone().into_os_string();
+    wal.push("-wal");
+    stats.size_bytes = [db.as_path(), Path::new(&wal)]
+        .iter()
+        .filter_map(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len())
+        .sum();
     stats.db = db;
     Ok(stats)
 }
@@ -75,7 +78,8 @@ pub fn current_repo() -> Option<(String, PathBuf)> {
 
 /// Counts the graph. Pure apart from the anchor checks against `repo`.
 pub fn summarize(nodes: &[NodeRow], edges: &[EdgeRow], repo: Option<(String, PathBuf)>) -> Stats {
-    let mut facts: BTreeMap<String, usize> = SCOPES.iter().map(|s| (s.to_string(), 0)).collect();
+    let mut facts: BTreeMap<String, usize> =
+        FACT_SCOPES.iter().map(|s| (s.to_string(), 0)).collect();
     let mut anchors = 0;
     let mut anchors_checked = 0;
     let mut dangling_anchors = Vec::new();
@@ -100,7 +104,7 @@ pub fn summarize(nodes: &[NodeRow], edges: &[EdgeRow], repo: Option<(String, Pat
     for edge in edges {
         *by_relation.entry(edge.relation.clone()).or_default() += 1;
         if !ids.contains(edge.to.as_str()) {
-            dangling_edges.push((edge.from.clone(), edge.to.clone(), edge.relation.clone()));
+            dangling_edges.push(edge.clone());
         }
     }
     dangling_anchors.sort();
@@ -168,9 +172,13 @@ pub fn render_text(stats: &Stats) -> String {
         out.push_str(&format!("  {relation}: {n}\n"));
     }
     out.push_str(&format!("dangling edges: {}\n", stats.dangling_edges.len()));
-    for (from, to, relation) in &stats.dangling_edges {
-        out.push_str(&format!("  {from} -{relation}-> {to} (target missing)\n"));
+    for e in stats.dangling_edges.iter().take(TEXT_LIST_CAP) {
+        out.push_str(&format!(
+            "  {} -{}-> {} (target missing)\n",
+            e.from, e.relation, e.to
+        ));
     }
+    push_more(&mut out, stats.dangling_edges.len());
     match &stats.anchor_repo {
         Some((slug, _)) => {
             out.push_str(&format!(
@@ -178,15 +186,26 @@ pub fn render_text(stats: &Stats) -> String {
                 stats.dangling_anchors.len(),
                 stats.anchors_checked
             ));
-            for path in &stats.dangling_anchors {
+            for path in stats.dangling_anchors.iter().take(TEXT_LIST_CAP) {
                 out.push_str(&format!("  {path} (missing on disk)\n"));
             }
+            push_more(&mut out, stats.dangling_anchors.len());
         }
         None => out.push_str(
-            "dangling anchors: not checked (run inside a repo to check its anchors on disk)\n",
+            "dangling anchors: not checked (run inside a repo with an origin remote to check its anchors on disk)\n",
         ),
     }
     out
+}
+
+/// Adds a count of the list items past [`TEXT_LIST_CAP`], if any.
+fn push_more(out: &mut String, total: usize) {
+    if total > TEXT_LIST_CAP {
+        out.push_str(&format!(
+            "  and {} more (`--json` lists all)\n",
+            total - TEXT_LIST_CAP
+        ));
+    }
 }
 
 /// The summary as JSON.
@@ -194,11 +213,11 @@ pub fn render_json(stats: &Stats) -> Value {
     let dangling_edges: Vec<Value> = stats
         .dangling_edges
         .iter()
-        .map(|(from, to, relation)| json!({"from": from, "to": to, "relation": relation}))
+        .map(|e| json!({"from": e.from, "to": e.to, "relation": e.relation}))
         .collect();
     json!({
         "database": {
-            "path": stats.db,
+            "path": stats.db.display().to_string(),
             "present": stats.present,
             "size_bytes": stats.size_bytes,
             "rebuilt_at": stats.rebuilt_at.map(crate::common::time::iso_utc),
@@ -315,7 +334,7 @@ mod tests {
 
         assert_eq!(
             s.dangling_edges,
-            [("global/a".into(), "global/gone".into(), "supersedes".into())]
+            [edge("global/a", "global/gone", "supersedes")]
         );
     }
 
@@ -346,6 +365,22 @@ mod tests {
         assert!(!s.present);
         assert!(render_text(&s).contains("playbook memory rebuild"));
         assert!(!s.db.exists(), "stats must not create the database");
+    }
+
+    #[test]
+    fn the_text_lists_the_first_dangling_edges_and_counts_the_rest() {
+        let nodes = vec![fact("global/a", "global", None)];
+        let edges: Vec<EdgeRow> = (0..TEXT_LIST_CAP + 3)
+            .map(|i| edge("global/a", &format!("global/gone-{i:02}"), "relates_to"))
+            .collect();
+
+        let text = render_text(&summarize(&nodes, &edges, None));
+
+        assert_eq!(text.matches("(target missing)").count(), TEXT_LIST_CAP);
+        assert!(
+            text.contains("  and 3 more (`--json` lists all)\n"),
+            "{text}"
+        );
     }
 
     #[test]

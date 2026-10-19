@@ -1179,8 +1179,8 @@ pub enum MemoryCommand {
     /// per scope (global, org, project), the node count, the edge count per
     /// relation, the anchor count, and the dangling edges (target missing)
     /// and anchors (path missing on disk). Anchors are checked only for the
-    /// repo you run it in. Read only: a missing database is reported, not
-    /// built.
+    /// repo you run it in, when it has an `origin` remote. Read only: a
+    /// missing database is reported, not built.
     ///
     /// Example: `playbook memory stats --json`
     Stats {

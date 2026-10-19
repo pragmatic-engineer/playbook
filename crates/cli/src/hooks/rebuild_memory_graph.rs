@@ -428,10 +428,11 @@ enum Scope {
 
 impl Scope {
     fn as_str(self) -> &'static str {
+        let [global, org, project] = playbook_data::memory::FACT_SCOPES;
         match self {
-            Scope::Global => "global",
-            Scope::Org => "org",
-            Scope::Project => "project",
+            Scope::Global => global,
+            Scope::Org => org,
+            Scope::Project => project,
         }
     }
 }
@@ -940,7 +941,7 @@ fn rebuild_locked(mem_dir: &Path) -> Result<(), RebuildError> {
                     nodes.push(Node {
                         id: cid.clone(),
                         file: anchor.clone(),
-                        scope: "code".to_string(),
+                        scope: playbook_data::memory::CODE_SCOPE.to_string(),
                         kind: "code".to_string(),
                         name: None,
                         description: None,
