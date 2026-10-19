@@ -406,19 +406,13 @@ fn fires(f: &Fire, name: &str) -> bool {
         }
         "disk-guard" => {
             let home = f.home.clone();
-            let tmp = home.join("disk-tmp");
-            fs::create_dir_all(&tmp).unwrap();
-            let tmp = tmp.to_string_lossy().into_owned();
             run_hook(
                 &f.playbook,
                 name,
                 r#"{"tool_name":"Bash","tool_input":{"command":"cargo build"}}"#,
                 &home,
                 &home,
-                &[
-                    ("PLAYBOOK_TEST_DISK_FREE_GB", "1"),
-                    ("PLAYBOOK_TEST_DISK_TMP", &tmp),
-                ],
+                &[("PLAYBOOK_TEST_DISK_FREE_GB", "1")],
                 &[],
             )
             .1

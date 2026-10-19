@@ -375,15 +375,19 @@ fn disk_badge(home: &Path, cwd: &Path) -> Option<String> {
     let policy = policy::load(home);
     let volumes = policy::volumes(&policy::measured_paths(&policy, home, Some(cwd)));
     let free = policy::tightest(&volumes)?.space.free;
-    disk_badge_for(&policy, free)
+    // "builds blocked" holds only when the guard is wired and on.
+    let blocking = std::env::var("DISK_GUARD").as_deref() != Ok("0")
+        && crate::hooks::disk_guard::wired(&crate::disk::status::claude_home(home));
+    disk_badge_for(&policy, free, blocking)
 }
 
-fn disk_badge_for(policy: &crate::disk::Policy, free: u64) -> Option<String> {
+fn disk_badge_for(policy: &crate::disk::Policy, free: u64, blocking: bool) -> Option<String> {
     use crate::disk::Level;
     let gb = free as f64 / crate::disk::probe::GIB as f64;
     match policy.level(free) {
         Level::Ok => None,
         Level::Low => Some(format!("{RED}⚠ disk {gb:.1} GB free{RESET}")),
+        Level::Critical if !blocking => Some(format!("{RED}⚠ disk {gb:.1} GB free{RESET}")),
         Level::Critical => Some(format!(
             "{RED}⚠ disk {gb:.1} GB free, builds blocked{RESET}"
         )),
@@ -545,14 +549,16 @@ mod disk_tests {
     #[test]
     fn the_disk_badge_shows_only_under_the_warn_threshold() {
         let policy = crate::disk::Policy::default();
-        assert_eq!(disk_badge_for(&policy, 15 * GIB), None);
-        let low = disk_badge_for(&policy, 14 * GIB).unwrap();
+        assert_eq!(disk_badge_for(&policy, 15 * GIB, true), None);
+        let low = disk_badge_for(&policy, 14 * GIB, true).unwrap();
         assert_eq!(low, format!("{RED}⚠ disk 14.0 GB free{RESET}"));
-        let critical = disk_badge_for(&policy, GIB / 2).unwrap();
+        let critical = disk_badge_for(&policy, GIB / 2, true).unwrap();
         assert!(
             critical.contains("0.5 GB free, builds blocked"),
             "{critical}"
         );
         assert!(critical.starts_with(RED));
+        let unguarded = disk_badge_for(&policy, GIB / 2, false).unwrap();
+        assert!(!unguarded.contains("blocked"), "{unguarded}");
     }
 }

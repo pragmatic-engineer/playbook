@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Wires the 25 hooks Claude Code can invoke into `settings.json` as a bare
-//! `playbook hook <name>` command: 18 functional hooks plus 6 guards.
+//! `playbook hook <name>` command: 18 functional hooks plus 7 guards.
 //!
 //! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS` because the
 //! two mirror different sources: `PORTED_HOOK_SPECS` is the 18 functional
@@ -119,7 +119,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         matcher: None,
         name: "session-init",
         group: Group::Session,
-        purpose: "Prepares the session directory, warns when a resumed session's config drifted, and adds the tool map, a handoff, an auto-learn nudge and a small memory block to the context. Also sweeps stale worktrees.",
+        purpose: "Prepares the session directory, warns when a resumed session's config drifted, and adds the tool map, a handoff, an auto-learn nudge and a small memory block to the context. Also sweeps stale worktrees. When the disk guard is wired, it warns below `disk.warnFreeGb` and can start `playbook disk clean --auto` in the background.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -421,7 +421,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Agent|Task"),
         name: "disk-guard",
         group: Group::Safety,
-        purpose: "Denies starting a new agent when free disk space is below `disk.blockFreeGb`, since agents build in parallel.",
+        purpose: "Denies starting a new agent when free disk space is below `disk.blockFreeGb`, since agents build in parallel, and warns below `disk.warnFreeGb`. Like the Bash entry, it can start `playbook disk clean --auto` and delete the ballast file.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,

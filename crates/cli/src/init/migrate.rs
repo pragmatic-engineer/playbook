@@ -383,17 +383,16 @@ pub fn registry() -> Vec<Migration> {
     ]
 }
 
-/// An install with playbook's guards wired and no disk guard (ADR 0047
-/// decision 8). One without the guards declined the hooks, so it stays quiet.
+/// An install with the policy guard wired and no disk guard on Bash (ADR
+/// 0047 decision 8). One without the policy guard declined the hooks, so it
+/// stays quiet.
 fn disk_guard_hook_pending(ctx: &Ctx) -> Option<String> {
     let settings = ctx.claude_home.join("settings.json");
-    let counts = crate::doctor::field::hook_commands_for_event(
-        &settings,
-        "PreToolUse",
-        &["policy-guard", "disk-guard"],
-    );
-    let wired = |name: &str| counts.iter().any(|(guard, n)| guard == name && *n > 0);
-    (wired("policy-guard") && !wired("disk-guard")).then(|| {
+    let policy_guard =
+        crate::doctor::field::hook_commands_for_event(&settings, "PreToolUse", &["policy-guard"])
+            .iter()
+            .any(|(_, n)| *n > 0);
+    (policy_guard && !crate::hooks::disk_guard::wired(&ctx.claude_home)).then(|| {
         "the disk guard hook, which stops builds when the disk is nearly full, is not wired; setup adds it".to_string()
     })
 }
@@ -2223,6 +2222,15 @@ mod tests {
         assert_eq!(disk_guard_hook_pending(&ctx), None);
         write(&["my-own-hook"]);
         assert_eq!(disk_guard_hook_pending(&ctx), None, "hooks declined");
+        let doc = serde_json::json!({"hooks": {"PreToolUse": [
+            {"matcher": "Bash", "hooks": [{"type": "command", "command": "playbook hook policy-guard"}]},
+            {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "playbook hook disk-guard"}]},
+        ]}});
+        std::fs::write(&settings, doc.to_string()).unwrap();
+        assert!(
+            disk_guard_hook_pending(&ctx).is_some(),
+            "wired for agents only leaves builds unguarded"
+        );
     }
 
     #[test]

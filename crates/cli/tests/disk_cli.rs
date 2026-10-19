@@ -175,6 +175,12 @@ fn release_deletes_an_existing_ballast() {
 #[test]
 fn statusline_warns_in_red_under_the_warn_threshold() {
     let home = isolated::fresh_home();
+    let settings = home.join(".claude/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let wired = serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "playbook hook disk-guard"}
+    ]}]}});
+    std::fs::write(&settings, wired.to_string()).unwrap();
     let low = isolated::playbook_in(&home)
         .arg("statusline")
         .env(FREE_VAR, "3")

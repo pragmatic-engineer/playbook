@@ -261,9 +261,29 @@ fn session_start_prints_the_warning_when_space_is_low() {
         })
         .to_string()
     };
+    let unwired = hook(&home, "session-init", "5", &payload(&session()), &[]);
+    assert!(!unwired.contains("Disk guard"), "not wired yet: {unwired}");
+    wire_guard(&home);
     let low = hook(&home, "session-init", "5", &payload(&session()), &[]);
-    assert!(low.contains("Disk guard: 5.0 GB free"), "{low}");
+    let value: serde_json::Value = serde_json::from_str(low.trim()).expect("json");
+    let line = "Disk guard: 5.0 GB free";
+    let message = value["systemMessage"].as_str().unwrap_or_default();
+    assert!(message.contains(line), "systemMessage: {low}");
+    let context = value["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(context.contains(line), "additionalContext: {low}");
     let fine = hook(&home, "session-init", "50", &payload(&session()), &[]);
     assert!(!fine.contains("Disk guard"), "{fine}");
     let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Writes a `settings.json` that wires the guard for Bash, as setup does.
+fn wire_guard(home: &Path) {
+    let settings = home.join(".claude/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let doc = serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "playbook hook disk-guard"}
+    ]}]}});
+    std::fs::write(settings, doc.to_string()).unwrap();
 }
