@@ -4,12 +4,11 @@ This project follows the standard igorjs contribution rules. Start here:
 
 - **[.github/CONTRIBUTING-RULES.md](.github/CONTRIBUTING-RULES.md)**: DCO, CLA, commit conventions, PR process, and the code style baseline (SPDX headers, dependency policy, commit signing). These rules are shared across all igorjs repos.
 - **[README](README.md)**: project description and install.
-- **[justfile](justfile)**: build and test commands (`just --list`).
 - **[SECURITY.md](SECURITY.md)**: vulnerability disclosure process.
 
 ## Project-Specific Notes
 
-See the [justfile](justfile) for build and test commands (`just --list`).
+See the [justfile](justfile) for build and test commands (`just --list`). The recipes need `just`, `cargo-nextest`, `shellcheck` and `jq`: `brew install just cargo-nextest shellcheck jq`. `seed/Brewfile` lists only what playbook itself calls on a user's machine.
 
 ### Repository layout
 
