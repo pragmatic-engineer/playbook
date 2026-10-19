@@ -39,6 +39,7 @@ settings-shared write="0": build
         echo "just: DRY RUN, nothing written. Review the diff above, then:"
         echo "just: only the .hooks block should differ; any other changed key is"
         echo "just: personal drift from {{ src }} and must not be committed."
+        echo "just: a removed or emptied guard in .hooks is a regression, not drift."
         echo "just:   just settings-shared write=1"
         exit 0
     fi
@@ -61,6 +62,7 @@ check: build
     @for f in $(git ls-files '*.sh'); do bash -n "$f"; done
     {{ bin }} ci --dir . --strict
     bash scripts/check-links.sh
+    scripts/check-identifiers.sh
     scripts/check-plugin.sh payload
     scripts/check-plugin.sh version
     INTENTS_STRICT=1 scripts/check-intents.sh {{ bin }}
