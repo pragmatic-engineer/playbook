@@ -813,7 +813,7 @@ mod tests {
 
     #[test]
     fn the_guide_shows_the_deny_set_table() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/guides/08-rm-guard.md");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/guides/07-rm-guard.md");
         let guide = std::fs::read_to_string(&path).expect("read the rm guard guide");
         let (start, end) = ("<!-- deny-table:start -->\n", "<!-- deny-table:end -->");
         let from = guide.find(start).expect("start marker") + start.len();

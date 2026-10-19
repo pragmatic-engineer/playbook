@@ -20,15 +20,15 @@ Fetched directly from the official Claude Code hooks docs (`code.claude.com/docs
 
 Two mechanisms already exist that make evidence-based verification cheap. `src/hooks/rebuild_memory_graph.rs` rebuilds `~/.claude/memory/memory.graph.json` atomically on every save under `~/.claude/memory/` (a `PostToolUse` hook, file renamed from `graph.json` by ADR 0011 WU-0, `#303`), so the file's mtime is a free, already-current signal for "a memory fact was written." `session_init.rs`'s handoff read (ADR 0008, updated by `#241` to avoid cross-session collisions) glob-matches `~/.claude/runtime/handoff/<project-slug>-<epoch>-<pid>.md` at `SessionStart` and reads/deletes the freshest few (`session_init.rs:379-444`), so the freshest match's mtime is the equivalent signal for "a handoff was written."
 
-`prompts/SYSTEM_PROMPT.md:51-63`'s `## Memory` section narrates, in prose, both the save-time decisions that genuinely need model judgment (what counts as durable, which scope) and the three retrieval paths that `session_init.rs` and `memory_anchors.rs` already run mechanically. `docs/concepts/02-memory-system.md` carried a near-identical duplication before ADR 0008, and it had drifted stale and self-contradictory by the time it was caught.
+`prompts/SYSTEM_PROMPT.md:51-63`'s `## Memory` section narrates, in prose, both the save-time decisions that genuinely need model judgment (what counts as durable, which scope) and the three retrieval paths that `session_init.rs` and `memory_anchors.rs` already run mechanically. `docs/internals/13-memory-system.md` carried a near-identical duplication before ADR 0008, and it had drifted stale and self-contradictory by the time it was caught.
 
 ## Decision Drivers
 
 - `memory_capture.rs`'s block has no compliance check: deleting the marker before building the reason text means the block cannot distinguish "the model wrote facts" from "the model said ok and moved on."
 - The official docs confirm `Stop` has no documented re-block cap, so any design that blocks until compliance must supply its own bound, or a session can wedge with no way out.
 - `SessionEnd` cannot force anything. Any handoff-enforcement design has a structural ceiling: no hook event both fires exactly once at the true end of a session and can pause it.
-- `docs/concepts/02-memory-system.md`'s Design Rationale is explicit that memory writes are nudge-and-approve by design, since a bad or spurious fact compounds unattended once it is in the store. A stricter capture gate must not trade "model ignores the nudge" for "model writes junk just to satisfy the gate."
-- `SYSTEM_PROMPT.md`'s Memory section mixes judgment-only guidance with prose descriptions of mechanically-enforced behavior in one block, the same shape that let `docs/concepts/02-memory-system.md` go stale until ADR 0008 caught it.
+- `docs/internals/13-memory-system.md`'s Design Rationale is explicit that memory writes are nudge-and-approve by design, since a bad or spurious fact compounds unattended once it is in the store. A stricter capture gate must not trade "model ignores the nudge" for "model writes junk just to satisfy the gate."
+- `SYSTEM_PROMPT.md`'s Memory section mixes judgment-only guidance with prose descriptions of mechanically-enforced behavior in one block, the same shape that let `docs/internals/13-memory-system.md` go stale until ADR 0008 caught it.
 
 ## Considered Alternatives
 
@@ -62,7 +62,7 @@ Alternative C. It closes the real compliance gap in `memory_capture.rs` that alt
 ## Consequences
 
 - `memory_capture.rs`'s block becomes a real gate tied to an observable write, not a formality that always releases regardless of compliance.
-- `SYSTEM_PROMPT.md` shrinks and stops duplicating hook behavior in prose, reducing the risk of the staleness ADR 0008 already found once in `docs/concepts/02-memory-system.md`.
+- `SYSTEM_PROMPT.md` shrinks and stops duplicating hook behavior in prose, reducing the risk of the staleness ADR 0008 already found once in `docs/internals/13-memory-system.md`.
 - `memory_capture.rs` gains state it does not have today: a re-block attempt counter, scoped per marker/session.
 - Handoff enforcement stays bounded by what hooks can actually do. `SessionEnd` cannot block, so this record closes the mid-session compliance gap, not the end-of-session one. A user who exits before complying with a nudge still loses the handoff, exactly as today; the blueprint must record this limit rather than imply it away.
 - A session that writes memory facts promptly on every crossing takes the silent-release branch every time and so never reaches the re-block branch the handoff-nudge escalation rides on. Such a session gets no handoff signal at all regardless of how long it runs, a distinct gap from "user exits before complying with a nudge they did receive" above, and not currently closed by any hook event.

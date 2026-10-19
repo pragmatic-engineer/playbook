@@ -20,7 +20,7 @@
 - Five command files with a read step to repoint: `commands/plan.md:171`, `commands/adr.md:80`, `commands/implement.md:131`, `commands/deep-review.md:198`, `commands/learn-project.md:72,103`.
 - Four command files with a `MEMORY.md` write step to delete: `commands/plan.md:281-291,510`, `commands/adr.md:85-92,155`, `commands/implement.md:138-145`, `commands/learn-project.md:120-130,161,168,178`.
 - `commands/implement.md:267`: a WU-brief drafting instruction that references "any fact whose `MEMORY.md` one-line hook mentions the WU's title keywords". It needs rewording to `description` since the data now comes from the graph read, not a MEMORY.md scan.
-- `skills/playbook-usage/SKILL.md:88` and three doc files (`docs/concepts/02-memory-system.md`, `docs/guides/03-decisions-and-memory.md`, `docs/internals/02-model-routing-and-memory.md`) describe the mechanism for contributors/users.
+- `skills/playbook-usage/SKILL.md:88` and three doc files (`docs/internals/13-memory-system.md`, `docs/guides/03-decisions-and-memory.md`, `docs/internals/02-model-routing-and-memory.md`) describe the mechanism for contributors/users.
 - `prompts/SYSTEM_PROMPT.md:53,61,63`: the system prompt loaded into every session's persistent instructions, independently instructing the same `MEMORY.md` write convention. Distinct from the five commands above: this isn't read by one specific `/playbook:*` invocation, it's the standing instruction set every session already has, regardless of which command (if any) is running.
 
 ## Work Units
@@ -149,9 +149,9 @@
 
 - Requires: nothing
 - Goal: the three docs that describe the memory system's file format and retrieval no longer present `MEMORY.md` as part of the current design.
-- Files: `docs/concepts/02-memory-system.md`, `docs/guides/03-decisions-and-memory.md`, `docs/internals/02-model-routing-and-memory.md`
+- Files: `docs/internals/13-memory-system.md`, `docs/guides/03-decisions-and-memory.md`, `docs/internals/02-model-routing-and-memory.md`
 - Changes:
-  - `docs/concepts/02-memory-system.md`: `:17` and `:19` (each scope's "own `MEMORY.md` index" line) reworded to describe the graph as the index. `:42-46` ("The global root and each project subfolder have a `MEMORY.md` index...") replaced with a short paragraph describing `memory.graph.json` as the sole index, built from every fact file's frontmatter, queried via `shell/memory-context.sh` or the native Rust fallback. `:79` ("If the graph is unavailable, `session-init` falls back to the legacy `MEMORY.md` index (capped the same way)") reworded to "falls back to a native, dependency-free read of `memory.graph.json` (capped the same way)".
+  - `docs/internals/13-memory-system.md`: `:17` and `:19` (each scope's "own `MEMORY.md` index" line) reworded to describe the graph as the index. `:42-46` ("The global root and each project subfolder have a `MEMORY.md` index...") replaced with a short paragraph describing `memory.graph.json` as the sole index, built from every fact file's frontmatter, queried via `shell/memory-context.sh` or the native Rust fallback. `:79` ("If the graph is unavailable, `session-init` falls back to the legacy `MEMORY.md` index (capped the same way)") reworded to "falls back to a native, dependency-free read of `memory.graph.json` (capped the same way)".
   - `docs/guides/03-decisions-and-memory.md`: `:58` ("indexed by `~/.config/playbook/memory/MEMORY.md`") drops the `MEMORY.md` clause. `:117` ("referenced by name from `MEMORY.md` index entries") reworded to "referenced by name from the graph".
   - `docs/internals/02-model-routing-and-memory.md`: `:68` ("Each store has a `MEMORY.md` at its root. One line per fact:") and its following example block, replaced with a description of the graph node shape (`id`/`file`/`scope`/`type`/`name`/`description`) as the index format instead.
 - Test scenarios: none automated (prose docs).

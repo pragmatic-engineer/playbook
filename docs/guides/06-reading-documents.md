@@ -28,4 +28,4 @@ The output lists what the conversion does not carry. For Word files, tracked cha
 
 ## Config keys
 
-See the [config keys guide](04-config-keys.md): `docs.convert`, `docs.maxBytes`, `docs.timeoutSeconds`, `docs.maxOutputChars`, `docs.maxMemoryMb`, `docs.anydocPath`.
+See the [config keys guide](../reference/config-keys.md): `docs.convert`, `docs.maxBytes`, `docs.timeoutSeconds`, `docs.maxOutputChars`, `docs.maxMemoryMb`, `docs.anydocPath`.

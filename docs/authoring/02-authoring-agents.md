@@ -53,7 +53,7 @@ subagent_type: playbook:reviewer
 
 Name a tier alias (`haiku`, `sonnet`, `opus`) and never a model id. `playbook cc` resolves the alias to the 5.5 model and passes the previous generation as a fallback.
 
-Pick the cheapest tier that does the job. `git` runs on `haiku` for mechanical work, `implementer` on `sonnet`, and `reviewer` and `auditor` on `opus`, where a missed finding costs more than the tokens. The full policy is in [Model routing and memory](../internals/02-model-routing-and-memory.md). When you add or change an agent, update the policy table in [`docs/policy-table.md`](../policy-table.md) too, because a test compares it with the file.
+Pick the cheapest tier that does the job. `git` runs on `haiku` for mechanical work, `implementer` on `sonnet`, and `reviewer` and `auditor` on `opus`, where a missed finding costs more than the tokens. The full policy is in [Model routing and memory](../internals/02-model-routing-and-memory.md). When you add or change an agent, update the policy table in [`docs/reference/policy-table.md`](../reference/policy-table.md) too, because a test compares it with the file.
 
 Grant the smallest `tools` allowlist the role needs, and say so in the `description`. There are two read-only tiers, and the wording you pick decides which one the lint applies:
 
@@ -128,4 +128,4 @@ It also checks the variants: every agent has a `VARIANTS` entry, every tier rend
 - [Commands, skills, and hooks](01-commands-skills-hooks.md): the other three extension points, commands, skills, and hooks.
 - [ADR 0003: Purpose-built subagents over generic fallbacks](../adr/0003-purpose-built-subagents.md): the decision this page documents.
 - [Model routing and memory](../internals/02-model-routing-and-memory.md): the model tier policy in full.
-- [Docs index](../index.md)
+- [Docs index](../README.md)

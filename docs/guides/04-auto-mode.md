@@ -67,5 +67,5 @@ The cap and the hooks guard against runaway spend and honest mistakes. They are 
 
 ## See also
 
-- [Config keys](04-config-keys.md): `mode`, `auto.budgetUsd`, `auto.agentBudgetUsd`, `auto.sessionCeilingUsd`, `auto.warnPct`.
+- [Config keys](../reference/config-keys.md): `mode`, `auto.budgetUsd`, `auto.agentBudgetUsd`, `auto.sessionCeilingUsd`, `auto.warnPct`.
 - [Plan and implement](01-plan-and-implement.md): how `--auto` flows through the commands.

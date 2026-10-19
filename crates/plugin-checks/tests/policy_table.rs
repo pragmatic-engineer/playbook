@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The policy table in docs/policy-table.md lists the
+//! The policy table in docs/reference/policy-table.md lists the
 //! model and effort of every agent, command and skill. This test keeps it equal
 //! to the frontmatter of the real files.
 
@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const DOC: &str = "../../docs/policy-table.md";
+const DOC: &str = "../../docs/reference/policy-table.md";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_PLUGIN_ROOT"))

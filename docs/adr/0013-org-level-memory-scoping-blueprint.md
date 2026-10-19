@@ -9,7 +9,7 @@ One Work Unit: the change is small (three existing match sites, one path-parsing
 - `src/hooks/memory_anchors.rs` (`in_scope`)
 - `src/hooks/session_init.rs` (`in_promotion_scope`)
 - `shell/memory-context.sh` (a third, independent scope match in jq, not caught by the issue's own investigation: the SessionStart slice filters scope itself rather than going through Rust's `in_scope`)
-- `docs/concepts/02-memory-system.md`
+- `docs/internals/13-memory-system.md`
 - `prompts/SYSTEM_PROMPT.md`
 
 **Changes:**
@@ -20,7 +20,7 @@ One Work Unit: the change is small (three existing match sites, one path-parsing
 
 3. Precedence: extend the existing Pass 2 link-resolution fallback (own scope first, then global) to also cover `Org`, same pattern as `Project` already uses (implemented as one shared match arm, since the logic is identical). No render-order change: neither injection path (`append_promoted_facts`, `memory-context.sh`) sorts by scope today, both sort by fact name; org facts join that same unordered-by-scope rendering.
 
-4. `docs/concepts/02-memory-system.md`: document the third scope, its storage path (`memory/<owner>/*.md`), and the global → org → project precedence.
+4. `docs/internals/13-memory-system.md`: document the third scope, its storage path (`memory/<owner>/*.md`), and the global → org → project precedence.
 
 5. `prompts/SYSTEM_PROMPT.md`'s "Where to save" (line 61 as of this writing): change the binary question to a three-way branch: repo-specific → project; useful across every repo under one owner but not truly universal → org (`memory/<owner>/`, create the owner directory and its `MEMORY.md` on first save the same way a project subfolder is created today); otherwise → global.
 
@@ -33,6 +33,6 @@ One Work Unit: the change is small (three existing match sites, one path-parsing
 - A `links: relates_to` edge from an org-scoped fact resolves in its own org scope first, falling back to global when no org-scoped target exists (same pattern already covered for project-scoped sources).
 - `in_promotion_scope` and `in_scope` agree on the same node (same test fixture through both, since they're deliberately duplicated logic, per `feedback_code_comments_stay_short`-adjacent convention already established for this pair).
 
-**Done when:** `cargo build` and `cargo test` clean, the four scope-classification scenarios above pass, and `docs/concepts/02-memory-system.md` / `prompts/SYSTEM_PROMPT.md` describe the third tier accurately.
+**Done when:** `cargo build` and `cargo test` clean, the four scope-classification scenarios above pass, and `docs/internals/13-memory-system.md` / `prompts/SYSTEM_PROMPT.md` describe the third tier accurately.
 
 **Verify:** `cargo test --lib hooks::rebuild_memory_graph hooks::memory_anchors` plus the relevant `tests/hooks_session.rs`/`tests/hooks_graph_reader.rs` integration tests.

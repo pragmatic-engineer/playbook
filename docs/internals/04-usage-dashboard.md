@@ -132,7 +132,7 @@ While you type a filter every key is text, so `q` and `r` do not quit or change 
 
 When there is nothing to chart, the body says why instead of showing empty panels. If the range has no messages but the store has some, it names the dates the store covers and the keys that widen the range (`a` all time, `m` month, `w` week), and when a filter is set it says how to clear it (`c`). If the store is empty, it names the folder transcripts are read from, how to check it, and `CLAUDE_CONFIG_DIR`, which moves that folder when Claude Code uses it. A failed read fills the body with the error before the first data and shows a banner over the last good numbers after it.
 
-The theme comes from the `usage.theme` config key (`default`, `dark`, `light`, `mono`; see [config keys](../guides/04-config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
+The theme comes from the `usage.theme` config key (`default`, `dark`, `light`, `mono`; see [config keys](../reference/config-keys.md)) and `t` changes it for the session. `NO_COLOR` set to anything but empty forces `mono` and locks it.
 
 A small TV icon shows before the title in the top-left corner of the dashboard and the Sessions screen. It sits in a fixed three-cell block, so columns hold at emoji width 1 or 2. Set `PBTOP_ICON_WIDTH=1` if your terminal draws it one cell wide. The icon is left out, with plain text only, when the locale is not UTF-8, `NO_COLOR` is set, or `TERM` is `dumb`.
 
@@ -250,7 +250,7 @@ The usage database also holds tables for OpenTelemetry data, created next to the
 | `session_sources` | Session: which source it reads from, `telemetry` or `transcript`. |
 | `session_reconcile` | Session with telemetry: the verdict and the numbers compared. |
 
-Totals never read them, so every total is unchanged, and a session with no row in `session_sources` reads from transcripts. The rows never hold prompts, tool content, paths, emails or user ids. Dropping the tables reverts the feature and loses no transcript data (`telemetry_db::migrate_down`). Telemetry follows [issue 769](https://github.com/pragmatic-engineer/playbook/issues/769): playbook writes Claude Code settings only through `setup`, with consent (see Telemetry by default), and transcripts stay the fallback. Rows are kept for 90 days and 500000 rows per table unless you change the [retention keys](../guides/04-config-keys.md).
+Totals never read them, so every total is unchanged, and a session with no row in `session_sources` reads from transcripts. The rows never hold prompts, tool content, paths, emails or user ids. Dropping the tables reverts the feature and loses no transcript data (`telemetry_db::migrate_down`). Telemetry follows [issue 769](https://github.com/pragmatic-engineer/playbook/issues/769): playbook writes Claude Code settings only through `setup`, with consent (see Telemetry by default), and transcripts stay the fallback. Rows are kept for 90 days and 500000 rows per table unless you change the [retention keys](../reference/config-keys.md).
 
 Plain `claude` sessions (not started through `cc`) send nothing to the receiver unless the OpenTelemetry variables are set for them. `playbook setup --telemetry` writes those variables into your Claude Code settings, with your consent, see [Telemetry by default](#telemetry-by-default). Without them, such sessions are read from transcripts.
 

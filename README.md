@@ -25,7 +25,7 @@ Update later with `playbook update`. Use `playbook update --check` to see whethe
 
 The installer only installs the `playbook` binary (checksum verified) and puts it on `PATH`. It never installs or removes a plugin. `playbook setup` also sets the status line and asks before adding the launcher and system prompt. Pass `--yes` to the installer to say yes to every question.
 
-To see what `playbook setup` changes before you agree, read [What setup installs](docs/guides/06-what-init-installs.md) and the [hook reference](docs/reference/hooks.md).
+To see what `playbook setup` changes before you agree, read [What setup installs](docs/guides/05-what-setup-installs.md) and the [hook reference](docs/reference/hooks.md).
 
 Releases up to v0.34.0 have only the old name (older versions: `playbook init`). It takes the same flags, and it still works on newer releases.
 
@@ -45,7 +45,7 @@ A Homebrew install updates with `brew upgrade playbook`. On a brew-managed insta
 `playbook setup` asks whether to send Claude Code telemetry to a collector on your own machine, and the answer defaults to yes. It writes eight OpenTelemetry variables into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage`. Prompt text and tool content are never sent. Nothing leaves your machine: the collector listens on 127.0.0.1 only, and playbook's `session-init` hook (part of the hooks you install with setup) starts it when a session begins. Without those hooks, start it with `playbook usage collect`, or let `playbook cc` do it.
 
 - To turn it on later, or after you declined: `playbook setup --only telemetry`.
-- If `CLAUDE_CODE_ENABLE_TELEMETRY` is 0 in `~/.claude/settings.json` and nothing else sets telemetry, `--yes` leaves it alone; answer yes to the question or run `playbook setup --only telemetry`. If telemetry is set in project settings, your shell or next to other `OTEL_` keys, setup leaves all of it as it is (see [What setup installs](docs/guides/06-what-init-installs.md)). `DISABLE_TELEMETRY` and `DO_NOT_TRACK` only turn off Anthropic's own analytics and are left as they are.
+- If `CLAUDE_CODE_ENABLE_TELEMETRY` is 0 in `~/.claude/settings.json` and nothing else sets telemetry, `--yes` leaves it alone; answer yes to the question or run `playbook setup --only telemetry`. If telemetry is set in project settings, your shell or next to other `OTEL_` keys, setup leaves all of it as it is (see [What setup installs](docs/guides/05-what-setup-installs.md)). `DISABLE_TELEMETRY` and `DO_NOT_TRACK` only turn off Anthropic's own analytics and are left as they are.
 - Restart Claude Code after setup, because it reads settings at start.
 - `playbook doctor` checks that settings point at the collector, that it runs, and that rows arrived in the last day.
 - `playbook uninstall` removes exactly the keys setup wrote and puts back any value they replaced, unless you changed a key since.
@@ -138,13 +138,13 @@ playbook config export > playbook-config.json         # back up; load with `conf
 playbook state list                                   # inspect playbook's own bookkeeping
 ```
 
-Every key is in [Config keys](docs/guides/04-config-keys.md), and every command and flag is in the [CLI and config reference](docs/reference/cli-and-config.md).
+Every key is in [Config keys](docs/reference/config-keys.md), and every command and flag is in the [CLI and config reference](docs/reference/cli-and-config.md).
 
 ## Auto mode
 
 `playbook mode auto` lets commands take the recommended answer instead of asking, list each choice under Assumptions, and keep going. A spend cap per agent (`auto.budgetUsd` for the main session, `auto.agentBudgetUsd` for each subagent) parks a runaway agent while it can still deliver finished work. `playbook mode ask` turns it off, and `playbook mode status` shows where the mode came from. The default is `ask`.
 
-Auto never force-pushes and never approves a plan design unless you pass `--auto-design`. Auto does not skip the review post question: pass `--self` or `--no-post` for that. Details and limits are in the [auto mode guide](docs/guides/05-auto-mode.md).
+Auto never force-pushes and never approves a plan design unless you pass `--auto-design`. Auto does not skip the review post question: pass `--self` or `--no-post` for that. Details and limits are in the [auto mode guide](docs/guides/04-auto-mode.md).
 
 ## Models and effort
 
@@ -158,16 +158,16 @@ Each command and agent names its model and effort in its own frontmatter. Spend 
 
 Plugin files name only the alias, and `playbook cc` passes the fallback chain. Run `playbook doctor models` to see the table, your overrides and the chain in force.
 
-- **Effort ceiling.** `playbook effort <auto|low|medium|high|xhigh|max>` sets `maxEffortLevel`. The lower of this and Claude Code's own `maxEffortLevel` wins, and playbook never changes Claude Code's setting. The ceiling does not cap a command, skill or base agent that ships its own effort, or a level you state for the session, since only Claude Code's setting can. See the [config keys guide](docs/guides/04-config-keys.md#what-the-effort-ceiling-does-and-does-not-cap). Override one component with `effort.agents.<name>`, `effort.commands.<name>` or `effort.skills.<name>`.
+- **Effort ceiling.** `playbook effort <auto|low|medium|high|xhigh|max>` sets `maxEffortLevel`. The lower of this and Claude Code's own `maxEffortLevel` wins, and playbook never changes Claude Code's setting. The ceiling does not cap a command, skill or base agent that ships its own effort, or a level you state for the session, since only Claude Code's setting can. See the [config keys guide](docs/reference/config-keys.md#what-the-effort-ceiling-does-and-does-not-cap). Override one component with `effort.agents.<name>`, `effort.commands.<name>` or `effort.skills.<name>`.
 - **Variants.** The `Agent` tool has no per-call effort, so `playbook cc` renders effort variants of the agents for each session (`reviewer-low`, `reviewer-xhigh`). Nothing is committed. `agents.variants` is `auto`, `all` or `off`, and `playbook agents variants` shows what a session gets.
 - **Routing.** `playbook route <kind>` says which model, effort and agent a task goes to, and when you must approve first.
 - **Measure.** `playbook eval bench` compares roles across models and efforts on real cases, with a cost cap.
 
-Reasoning and the full policy table are in [Why the pieces are shaped this way](docs/concepts/03-why-the-pieces-are-shaped-this-way.md) and [Model routing](docs/internals/02-model-routing-and-memory.md).
+Reasoning and the full policy table are in [Why the pieces are shaped this way](docs/internals/14-why-the-pieces-are-shaped-this-way.md) and [Model routing](docs/internals/02-model-routing-and-memory.md).
 
 ## Memory
 
-One markdown store at `~/.config/playbook/memory/`, global and per project, local only and never committed. Playbook never writes Claude Code's own memory or settings. `memory.source` is `both` (default) or `playbook`, and `playbook memory import-claude` copies Claude Code's notes for a project into playbook memory, read-only on the Claude side. See [the memory system](docs/concepts/02-memory-system.md).
+One markdown store at `~/.config/playbook/memory/`, global and per project, local only and never committed. Playbook never writes Claude Code's own memory or settings. `memory.source` is `both` (default) or `playbook`, and `playbook memory import-claude` copies Claude Code's notes for a project into playbook memory, read-only on the Claude side. See [the memory system](docs/internals/13-memory-system.md).
 
 ## Layers
 
@@ -202,12 +202,13 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Docs
 
-Start at the [docs index](docs/index.md).
+Start at the [docs index](docs/README.md).
 
-- **Guides:** [install](docs/guides/00-install.md), [plan and implement](docs/guides/01-plan-and-implement.md), [review and PR flow](docs/guides/02-review-and-pr-flow.md), [decisions and memory](docs/guides/03-decisions-and-memory.md), [config keys](docs/guides/04-config-keys.md), [auto mode](docs/guides/05-auto-mode.md).
-- **Concepts:** [system prompt](docs/concepts/01-system-prompt.md), [memory](docs/concepts/02-memory-system.md), [design rationale](docs/concepts/03-why-the-pieces-are-shaped-this-way.md).
-- **Authoring:** [commands, skills and hooks](docs/authoring/01-commands-skills-hooks.md), [agents](docs/authoring/02-authoring-agents.md).
-- **Internals:** [launcher and hooks](docs/internals/01-launcher-and-hooks.md), [model routing](docs/internals/02-model-routing-and-memory.md), [worktrees](docs/internals/03-worktree.md), [usage dashboard](docs/internals/04-usage-dashboard.md), [headless mode](docs/internals/05-headless-mode.md), [release channels](docs/internals/06-release-channels.md), [migrations](docs/internals/07-migrations.md), [state store](docs/internals/08-state-store.md), [sessions](docs/internals/09-sessions.md), [document conversion benchmark](docs/internals/10-document-conversion-benchmark.md).
+- [Guides](docs/README.md#guides): install, plan and implement, review, auto mode, what setup installs.
+- [Reference](docs/README.md#reference): config keys, every command and flag, hooks, the policy table.
+- [Authoring](docs/README.md#authoring): add your own commands, skills, hooks and agents.
+- [Internals](docs/README.md#internals): how the machine works and why it is shaped this way.
+- [Decisions](docs/adr/): the architecture decision records.
 
 ## Repository layout
 

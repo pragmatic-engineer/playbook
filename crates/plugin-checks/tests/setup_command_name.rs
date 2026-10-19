@@ -88,13 +88,13 @@ fn user_docs() -> Vec<PathBuf> {
     let mut files = vec![
         root.join("README.md"),
         root.join("CONTRIBUTING.md"),
-        root.join("docs/index.md"),
+        root.join("docs/README.md"),
     ];
     for dir in [
         "docs/guides",
         "docs/internals",
-        "docs/concepts",
         "docs/reference",
+        "docs/authoring",
     ] {
         markdown_files(&root.join(dir), &mut files);
     }
@@ -151,7 +151,7 @@ fn the_bare_name_check_skips_other_inits() {
         "the command (then called `init`) printed a plan",
         "`setup` or its old name `init`",
         "| [0016](adr/0016-migration-framework.md) | Migrations run from `playbook init` |",
-        "[What setup installs](06-what-init-installs.md)",
+        "[What setup installs](05-what-setup-installs.md)",
     ] {
         assert!(stale_bare_name(fine).is_empty(), "{fine}");
     }

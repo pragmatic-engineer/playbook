@@ -23,8 +23,8 @@ const SKIPPED: &str = "docs/adr";
 
 /// Docs that name `memory.graph.json` only as the file older versions kept.
 const OLD_FILE_HISTORY: [&str; 4] = [
-    "docs/concepts/02-memory-system.md",
-    "docs/guides/06-what-init-installs.md",
+    "docs/internals/13-memory-system.md",
+    "docs/guides/05-what-setup-installs.md",
     "docs/internals/11-data-folder.md",
     "docs/reference/cli-and-config.md",
 ];

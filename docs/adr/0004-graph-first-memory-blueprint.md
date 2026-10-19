@@ -129,7 +129,7 @@ Real paths, confirmed in Stage 1 (repo root is `~/.claude`).
 - Goal: the written rule matches the resolver.
 - Files:
   - `prompts/SYSTEM_PROMPT.md` | edit | the Memory section states same-store resolution. Change it to scope-then-global, and note that a project fact shadows a global fact of the same name.
-  - `docs/concepts/02-memory-system.md` | edit | same correction, plus a short note that the graph is the retrieval path and what the session-start slice contains.
+  - `docs/internals/13-memory-system.md` | edit | same correction, plus a short note that the graph is the retrieval path and what the session-start slice contains.
 - Verification: `grep -q 'then global' prompts/SYSTEM_PROMPT.md`
 - Done When:
   - [ ] No doc still claims edges resolve within one store only.
@@ -150,7 +150,7 @@ Real paths, confirmed in Stage 1 (repo root is `~/.claude`).
 ## Parallel Groups
 
 - **P1:** WU-0 and WU-4. Disjoint: `hooks/rebuild-memory-graph.*` versus `statusline.sh` and `shell/statusline.test.sh`.
-- **P2:** WU-1, WU-6, WU-7. Disjoint: `shell/memory-context.*` versus `commands/implement.md` versus `prompts/SYSTEM_PROMPT.md` and `docs/concepts/02-memory-system.md`.
+- **P2:** WU-1, WU-6, WU-7. Disjoint: `shell/memory-context.*` versus `commands/implement.md` versus `prompts/SYSTEM_PROMPT.md` and `docs/internals/13-memory-system.md`.
 - **P3:** WU-2 and WU-3. Disjoint: `hooks/session-init.*` versus `hooks/memory-anchors.*` and `hooks/hooks.json`.
 - **Sequential last:** WU-5. It edits `hooks/hooks.json`, which WU-3 also edits, so it must follow P3 rather than run beside it.
 
