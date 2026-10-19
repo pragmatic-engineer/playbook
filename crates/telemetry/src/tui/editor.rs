@@ -215,8 +215,13 @@ impl Editor {
 mod tests {
     use super::*;
 
+    /// The three tabs and eight panels of the layout before the burn-up
+    /// panel, so these tests do not move with the default.
+    const THREE_TABS: &str =
+        "Charts=spend,tokens;Numbers=models,breakdown,budget,projection;Sessions=live,sessions";
+
     fn editor() -> Editor {
-        Editor::new(&Layout::default(), 0)
+        Editor::new(&Layout::parse(THREE_TABS).unwrap(), 0)
     }
 
     fn names(e: &Editor) -> Vec<&str> {

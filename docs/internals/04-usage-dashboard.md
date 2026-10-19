@@ -22,7 +22,7 @@ Every command that shows data reads new history first, so you never need to inge
 
 The view is styled after a classic terminal system monitor, and the `default` theme is that look: a black ground, rounded boxes with the key hint and title in the top border (`╭─┤¹Spend per day├──╮`), a gradient on the graphs and the meters, and a highlighted selected row. Each box has its own outline color: spend uses the cpu green, tokens the net purple, models and projects the mem olive, sessions and messages the proc red.
 
-The view needs a screen of at least 80 columns by 24 rows. Below that it says so and draws nothing else. The panels are split across tabs, three by default: Charts (spend and tokens), Numbers (models, breakdown, the Budget panel and the Projection panel, see [Spending limits and budget headroom](#spending-limits-and-budget-headroom)) and Sessions (live sessions and sessions per day). A header with the range, the cost, the tokens and the messages is on every tab, and a tab bar under it names the tabs. The tabs and their panels come from the `usage.ui.layout` config key (see the [config keys page](../reference/config-keys.md)). A layout with one tab keeps the old single screen, with the Budget panel from 36 rows. Resizing needs no handling because every redraw reads the current size.
+The view needs a screen of at least 80 columns by 24 rows. Below that it says so and draws nothing else. The panels are split across tabs, three by default: Charts (spend, tokens and the burn-up chart), Numbers (models, breakdown, the Budget panel and the Projection panel, see [Spending limits and budget headroom](#spending-limits-and-budget-headroom)) and Sessions (live sessions and sessions per day). A header with the range, the cost, the tokens and the messages is on every tab, and a tab bar under it names the tabs. The tabs and their panels come from the `usage.ui.layout` config key (see the [config keys page](../reference/config-keys.md)). A layout with one tab keeps the old single screen, with the Budget panel from 36 rows. Resizing needs no handling because every redraw reads the current size.
 
 For `today`, `week` and `month` the header is a comparison: it says which two spans are compared and that they cover the same elapsed span (see [Period comparison](#period-comparison)), then shows cost, tokens and messages for both with the change in amount and percent (`new` when the previous value was zero). Increases are yellow and decreases green, and the sign says it without color. The other ranges show their own totals and say `(no previous period to compare)`. Everything is UTC and the header says so, with the first day of the week when the range is a week.
 
@@ -231,6 +231,20 @@ The Budget panel ignores the project filter: a limit belongs to the account, not
 ### The Projection panel
 
 The Projection panel says when each limit is reached if you keep going at your current pace, in the time zone shown in the panel title (UTC or local). Each limit gets one line in plain words. A limit in dollars has two paces on that line. The first is the last 24 hours: it follows what you are doing now. When the period started less than 24 hours ago, it uses the spend of the period over the age of the period, so spend from before the period never counts (under one hour of data it says "no pace yet"). The second is the period average since the period began, which is steadier and shows the long view. A limit that is a percentage of a window (the 5 hour and weekly windows of a plan) has the window average only, because the window has no per day cost. Each pace ends with "hit" and a time, "won't hit before it resets", "no hit" (nothing was used in that span) or "limit reached". With no limit known, the panel says how to set one.
+
+### The burn-up chart
+
+The Burn-up panel, on the Charts tab by default, draws the cumulative spend of the billing period whatever range is on screen. The period is the monthly dollar limit's period (the server's reset time when it reported one), or the month that holds today when no limit is known.
+
+| Glyph | Line |
+|---|---|
+| `█` | Spend so far, one column per slice of the period, never going down. |
+| `·` | The projection from now to the period end, a straight line at the average pace. It starts after the first hour. |
+| `━` `┈` `┄` | The limit, 80 percent of it and 50 percent of it. |
+| `▲` | A crossing, drawn where the cutoff line is crossed or will be, with its date under the chart. |
+| `◆` | The amount the server billed, at the time it was fetched, next to the estimate. |
+
+Every line has its own glyph, so the chart reads the same in the `mono` theme and under `NO_COLOR`. The 5 hour and weekly windows, when known, are listed under the chart as percentages, since they are not dollars. A panel under 40 columns wide, or too short for the chart, shows the plain table of `--summary` instead. Add or move the panel with `usage.ui.layout` (the word is `burnup`); the old single screen layout leaves it out, like the Projection panel.
 
 ### What is not automatic
 

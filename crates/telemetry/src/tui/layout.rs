@@ -18,10 +18,11 @@ pub enum PanelId {
     Sessions,
     Budget,
     Projection,
+    Burnup,
 }
 
 /// Every panel, in the order the layout editor lists them.
-pub const ALL: [PanelId; 8] = [
+pub const ALL: [PanelId; 9] = [
     PanelId::Spend,
     PanelId::Tokens,
     PanelId::Models,
@@ -30,6 +31,7 @@ pub const ALL: [PanelId; 8] = [
     PanelId::Sessions,
     PanelId::Budget,
     PanelId::Projection,
+    PanelId::Burnup,
 ];
 
 impl PanelId {
@@ -44,6 +46,7 @@ impl PanelId {
             PanelId::Sessions => "sessions",
             PanelId::Budget => "budget",
             PanelId::Projection => "projection",
+            PanelId::Burnup => "burnup",
         }
     }
 
@@ -58,6 +61,7 @@ impl PanelId {
             PanelId::Sessions => "every session of the period, grouped by day",
             PanelId::Budget => "limits and how fast you are using them",
             PanelId::Projection => "when each limit is reached at the current pace",
+            PanelId::Burnup => "cumulative spend over the billing period with its limit",
         }
     }
 
@@ -71,7 +75,7 @@ impl PanelId {
             PanelId::Breakdown => Some(Panel::Projects),
             PanelId::Live => Some(Panel::Live),
             PanelId::Sessions => Some(Panel::Sessions),
-            PanelId::Budget | PanelId::Projection => None,
+            PanelId::Budget | PanelId::Projection | PanelId::Burnup => None,
         }
     }
 
@@ -106,7 +110,10 @@ impl Default for Layout {
         };
         Layout {
             tabs: vec![
-                tab("Charts", &[PanelId::Spend, PanelId::Tokens]),
+                tab(
+                    "Charts",
+                    &[PanelId::Spend, PanelId::Tokens, PanelId::Burnup],
+                ),
                 tab(
                     "Numbers",
                     &[
@@ -124,7 +131,7 @@ impl Default for Layout {
 
 impl Layout {
     /// One tab with the panels of the single screen pbtop had before tabs, which
-    /// is every panel except Projection.
+    /// is every panel except Projection and Burnup.
     pub fn classic() -> Layout {
         Layout {
             tabs: vec![Tab {
@@ -132,7 +139,7 @@ impl Layout {
                 panels: ALL
                     .iter()
                     .copied()
-                    .filter(|p| *p != PanelId::Projection)
+                    .filter(|p| !matches!(p, PanelId::Projection | PanelId::Burnup))
                     .collect(),
             }],
         }

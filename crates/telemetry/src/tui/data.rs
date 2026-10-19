@@ -7,6 +7,7 @@
 
 use super::theme::SERIES;
 use crate::aggregate::{group_usage, unpriced_models, Dimension, Group};
+use crate::burnup::{burnup_for, Burnup};
 use crate::db;
 use crate::limits::{Burn, Limit, Origin, State};
 use crate::limits_source::{self, Sources};
@@ -121,6 +122,8 @@ pub struct LimitsView {
     pub previous: Burn,
     /// Spend of the last 24 hours, all projects, for the recent pace.
     pub recent_cost_24h: f64,
+    /// Cumulative spend over the billing period, whatever range is shown.
+    pub burnup: Option<Burnup>,
 }
 
 impl Default for LimitsView {
@@ -134,6 +137,7 @@ impl Default for LimitsView {
             burn: Burn::new(0.0, 0),
             previous: Burn::new(0.0, 0),
             recent_cost_24h: 0.0,
+            burnup: None,
         }
     }
 }
@@ -168,7 +172,9 @@ impl LimitsView {
             .map(|c| c.age(now));
         let period = Period::of_range(range).unwrap_or(Period::Week(week));
         let (burn, previous) = limits_source::burn_pair(events, period, now);
+        let burnup = Some(burnup_for(sources, &limits, events, now));
         LimitsView {
+            burnup,
             limits,
             stale: sources.stale(now),
             cache_age,

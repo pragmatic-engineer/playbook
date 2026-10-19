@@ -7,6 +7,7 @@
 
 use super::app::App;
 use super::budget;
+use super::burnup;
 use super::data::Data;
 use super::fmt::{compact, fit, money, signed_compact, signed_count, signed_money, signed_percent};
 use super::keys::{self, HelpLine};
@@ -234,6 +235,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                     PanelId::Live => panels::live(frame, *rect, app, data, &pal),
                     PanelId::Sessions => panels::sessions(frame, *rect, app, data, &pal),
                     PanelId::Projection => projection::render(frame, *rect, data, &pal),
+                    PanelId::Burnup => burnup::render(frame, *rect, data, &pal),
                     PanelId::Budget => {}
                 }
             }
