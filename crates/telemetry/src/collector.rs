@@ -546,7 +546,7 @@ fn run_collect_with(
         "usage collect: listening on 127.0.0.1:{actual} (pid {})",
         state.pid
     ));
-    let result = serve(&listener, &conn, &cfg, stop, crate::util::time::now_secs);
+    let result = serve(&listener, conn, &cfg, stop, crate::util::time::now_secs);
     state.pid = 0;
     let _ = write_state(&path, &state);
     match result {
@@ -760,7 +760,7 @@ mod tests {
                 idle: None,
                 prune: None,
             };
-            let _ = serve(&listener, &db, &cfg, &server_stop, || 0);
+            let _ = serve(&listener, db, &cfg, &server_stop, || 0);
         });
         let stop = Arc::new(AtomicBool::new(false));
 
