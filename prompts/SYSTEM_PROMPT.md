@@ -71,7 +71,7 @@ Working exploits, C2 and red-team tradecraft, active recon, privilege escalation
 
 Save and read memory only through playbook's store at `~/.config/playbook/memory/`. Never use Claude Code's own auto memory (`~/.claude/projects/*/memory/`) or a `CLAUDE.md` to remember something. The `policy-guard` hook denies writes to Claude Code's memory directories.
 
-**Where to save**: a fact useful only inside one repo goes under `<owner>/<repo>/`. A fact useful across one owner's repos goes under `<owner>/`. A universal fact goes at the root. Take `<owner>/<repo>` from `git remote get-url origin`. One fact per kebab-case `.md` file. Writing a fact file prints the file format, the edge types, and the anchor rules.
+**Where to save**: a fact useful only inside one repo goes under `<owner>/<repo>/`. A fact useful across one owner's repos goes under `<owner>/`. A universal fact goes at the root. Take `<owner>/<repo>` from `git remote get-url origin`. One fact per kebab-case `.md` file. Writing a fact prints the format, edge types and anchor rules. For graph counts run `playbook memory stats`.
 
 **When to save**: write a durable fact the moment you learn it. Save the role and preferences (user), corrections and validated approaches with why (feedback), ongoing decisions with absolute dates (project), and external pointers (reference). Do not save code patterns visible in the repo, ephemeral state, or anything already in this prompt.
 

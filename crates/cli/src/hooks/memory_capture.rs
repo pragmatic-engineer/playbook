@@ -68,7 +68,7 @@ const STRONG_HANDOFF_NUDGE: &str = "\n\nThis session has crossed the capture thr
 times with no handoff saved yet; run /playbook:session-handoff now, before continuing, so the \
 next session does not have to re-read this one.";
 
-/// `memory.graph.json` node count at or above which a re-block also scans
+/// Memory graph node count at or above which a re-block also scans
 /// for consolidation candidates.
 const CONSOLIDATION_NODE_THRESHOLD: usize = 10;
 

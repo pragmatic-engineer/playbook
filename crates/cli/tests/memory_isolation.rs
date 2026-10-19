@@ -6,26 +6,12 @@
 //! sets or edits Claude Code's own memory settings or directories. Reading
 //! Claude Code's auto memory is allowed, only from `memory_import/claude_read.rs`.
 
+#[path = "support/shipped.rs"]
+mod shipped;
+
+use shipped::files_under;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-fn files_under(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            files_under(&path, exts, out);
-        } else if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| exts.contains(&e))
-        {
-            out.push(path);
-        }
-    }
-}
 
 fn shipped_files() -> Vec<PathBuf> {
     let root = Path::new(env!("PLAYBOOK_REPO_ROOT"));
@@ -36,11 +22,8 @@ fn shipped_files() -> Vec<PathBuf> {
         "crates/code/src",
         "crates/data/src",
         "crates/telemetry/src",
-        "commands",
-        "skills",
-        "agents",
+        "plugins",
         "prompts",
-        "hooks",
     ] {
         files_under(&root.join(dir), &["rs", "md", "json", "sh"], &mut out);
     }

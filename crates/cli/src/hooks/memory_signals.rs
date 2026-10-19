@@ -66,7 +66,7 @@ struct NodeSignals {
 /// `memory.signals.json` (an empty default if the file is missing, the
 /// normal first-run case), then write the mutated store back atomically. A
 /// file that exists but fails to read or parse is left untouched instead:
-/// unlike `memory.graph.json`, this store accumulates state nothing else can
+/// unlike the memory graph in `data/memory.db`, this store accumulates state nothing else can
 /// rebuild, so silently replacing a corrupt file with an empty one would be
 /// permanent, unrecoverable data loss. Serializes concurrent callers with an
 /// mkdir-based advisory lock at `memory.signals.json.lock`, mirroring
