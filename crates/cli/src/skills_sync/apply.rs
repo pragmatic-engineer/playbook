@@ -307,6 +307,71 @@ pub fn apply(
     report.finish(false)
 }
 
+/// What `playbook uninstall` did to the synced folders: report lines in the
+/// uninstall verbs, and the folders it could not handle.
+#[derive(Debug, Default)]
+pub struct Removed {
+    pub lines: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+/// Removes every synced folder whose files still match its record, then its
+/// record. An edited folder stays, and so does any record that still has a
+/// folder. A user's own folder has no record, so it is never visited.
+pub fn remove_synced(root: &Path, target_root: &Path, dry_run: bool) -> Removed {
+    let mut out = Removed::default();
+    for agent in super::ALL_AGENTS {
+        let run = Run {
+            root,
+            agent,
+            target_root,
+            version: "",
+            dry_run,
+            faults: &Faults::default(),
+        };
+        let rows = match crate::state::list_read_only(root, &run.prefix()) {
+            Ok(rows) => rows,
+            Err(e) => {
+                out.errors.push(format!(
+                    "synced skills left in place, cannot read the records: {e}"
+                ));
+                continue;
+            }
+        };
+        let mut kept = 0;
+        for (key, value) in rows {
+            let Some(name) = key.strip_prefix(&run.prefix()) else {
+                continue;
+            };
+            let Some(record) = Record::decode(&value).filter(|_| name != REFRESH_KEY) else {
+                continue;
+            };
+            let path = target_root.join(name).display().to_string();
+            match run.remove_dropped(name, &record) {
+                Ok(Some(Change::Skipped(reason))) => {
+                    kept += 1;
+                    out.lines
+                        .push(format!("kept {path}, left in place, {reason}"));
+                }
+                Ok(Some(change)) => out.lines.push(format!("{} {path}", verb(&change, dry_run))),
+                Ok(None) => {}
+                Err(why) => {
+                    kept += 1;
+                    out.errors.push(format!("could not remove {path}: {why}"));
+                }
+            }
+        }
+        // The claim only means something while the agent has synced folders.
+        if !dry_run && kept == 0 {
+            if let Err(e) = crate::state::delete(root, &super::refresh_key(agent)) {
+                out.errors
+                    .push(format!("could not delete the refresh claim: {e}"));
+            }
+        }
+    }
+    out
+}
+
 impl Run<'_> {
     fn prefix(&self) -> String {
         format!("{RECORD_PREFIX}{}/", self.agent.key())

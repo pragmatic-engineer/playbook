@@ -526,3 +526,80 @@ fn the_hook_starts_a_detached_refresh_when_a_synced_agent_is_behind() {
     assert!(skill_text(&home).contains("Fix it better."));
     assert!(state_value(&home, NOTICE_KEY).is_some());
 }
+
+const LEFT_EDITED_NOTE: &str = "left in place, edited since the last sync";
+const USER_SKILL: &str = "my-own-skill";
+
+fn uninstall(home: &Path, args: &[&str]) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+    isolated::isolate(&mut cmd, home);
+    cmd.env("PATH", "").arg("uninstall").args(args);
+    cmd.output().expect("playbook should start")
+}
+
+fn user_skill(home: &Path) -> PathBuf {
+    let dir = skills_dir(home).join(USER_SKILL);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("SKILL.md"), "mine\n").unwrap();
+    dir
+}
+
+#[test]
+fn uninstall_dry_run_lists_the_synced_folders_and_removes_nothing() {
+    // Arrange
+    let (home, plugin) = codex_home();
+    sync(&home, &plugin, &[]);
+    let mine = user_skill(&home);
+
+    // Act
+    let out = uninstall(&home, &["--dry-run"]);
+
+    // Assert
+    let text = stdout(&out);
+    assert!(out.status.success(), "{out:?}");
+    assert!(text.contains("would remove"), "{text}");
+    assert!(text.contains(SKILL_NAME), "{text}");
+    assert!(skills_dir(&home).join(SKILL_NAME).is_dir());
+    assert!(skills_dir(&home).join(COMMAND_NAME).is_dir());
+    assert!(mine.is_dir());
+}
+
+#[test]
+fn uninstall_yes_removes_unedited_folders_and_keeps_an_edited_one() {
+    // Arrange
+    let (home, plugin) = codex_home();
+    sync(&home, &plugin, &[]);
+    let mine = user_skill(&home);
+    fs::write(
+        skills_dir(&home).join(SKILL_NAME).join("SKILL.md"),
+        "edited\n",
+    )
+    .unwrap();
+
+    // Act
+    let out = uninstall(&home, &["--yes"]);
+
+    // Assert
+    let text = stdout(&out);
+    assert!(out.status.success(), "{out:?} {text}");
+    assert!(!skills_dir(&home).join(COMMAND_NAME).exists());
+    assert!(skills_dir(&home).join(SKILL_NAME).is_dir());
+    assert!(text.contains(LEFT_EDITED_NOTE), "{text}");
+    assert!(mine.is_dir());
+}
+
+#[test]
+fn uninstall_forgets_the_records_so_a_later_sync_starts_fresh() {
+    // Arrange
+    let (home, plugin) = codex_home();
+    sync(&home, &plugin, &[]);
+    uninstall(&home, &["--yes"]);
+
+    // Act
+    let out = sync(&home, &plugin, &[]);
+
+    // Assert
+    assert!(out.status.success(), "{out:?}");
+    assert!(stdout(&out).contains("added"), "{}", stdout(&out));
+    assert!(skills_dir(&home).join(SKILL_NAME).is_dir());
+}

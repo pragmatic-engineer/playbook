@@ -6,8 +6,9 @@
 //! It removes only what playbook placed: the hook entries and status line
 //! `init` wrote into `settings.json`, the managed launcher block in the rc
 //! files, the files `init` copies under `~/.config/playbook`, and the two
-//! installer scripts in `~/.claude`, and the collector's background service. The binary and its rc `PATH` block go
-//! only on request. Memory, the data folder with every database, settings the
+//! installer scripts in `~/.claude`, the collector's background service, and the
+//! unedited skill folders `skills sync` wrote. The binary and its rc `PATH`
+//! block go only on request. Memory, the data folder with every database, settings the
 //! user owns, sessions, history and earlier backups are never touched.
 
 pub mod style;
@@ -115,12 +116,23 @@ pub fn run(opts: &Options) -> Report {
         }
     }
     remove_claude_home_files(&claude_home, verb, opts.dry_run, &mut report);
+    synced_skills_step(opts, &mut report);
 
     if opts.remove_binary {
         binary_step(opts, verb, &mut report);
     }
     manual_steps(&opts.home, &mut report);
     report
+}
+
+/// The skill folders `playbook skills sync` wrote for other agents. Only the
+/// ones whose files still match their record go; the rest are listed as kept.
+fn synced_skills_step(opts: &Options, report: &mut Report) {
+    let root = crate::common::paths::playbook_root_from(&opts.home);
+    let target_root = opts.home.join(crate::skills_sync::TARGET_DIR);
+    let removed = crate::skills_sync::apply::remove_synced(&root, &target_root, opts.dry_run);
+    report.lines.extend(removed.lines);
+    report.errors.extend(removed.errors);
 }
 
 /// The steps playbook never runs for the user, because they change Claude
