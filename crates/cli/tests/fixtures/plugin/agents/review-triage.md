@@ -2,7 +2,7 @@
 name: review-triage
 description: "Structurally read-only classifier. Labels each candidate lens skip, cheap-check or full-lens for a diff. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
-model: haiku
+model: claude-haiku-5-5
 effort: low
 ---
 

@@ -2,7 +2,7 @@
 name: cheap-checker
 description: "Structurally read-only checker for ONE narrow concern on a diff, for deep-review and implement review. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
-model: haiku
+model: claude-haiku-5-5
 effort: low
 ---
 

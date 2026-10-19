@@ -21,7 +21,9 @@ use super::variants;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const ALLOWED_MODELS: [&str; 3] = ["haiku", "sonnet", "opus"];
+/// Sonnet and Opus agents name the tier alias. Haiku agents pin the 5.5 id, so
+/// a bare `haiku` is refused: it can resolve to the previous generation.
+const ALLOWED_MODELS: [&str; 3] = [crate::models::HAIKU_PIN, "sonnet", "opus"];
 const ALLOWED_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 /// Two read-only tiers, matched strictest first. "Structurally read-only"
 /// agents (agents/reviewer.md) hold no Bash at all. Plain "read-only" agents
@@ -524,7 +526,7 @@ mod tests {
         );
         assert!(bad_model
             .iter()
-            .any(|v| v.contains("model 'gpt' is not one of: haiku sonnet opus")));
+            .any(|v| v.contains("model 'gpt' is not one of: claude-haiku-5-5 sonnet opus")));
 
         let bad_effort = check_required_keys(
             "f.md",
@@ -534,6 +536,21 @@ mod tests {
         assert!(bad_effort
             .iter()
             .any(|v| v.contains("effort 'extreme' is not one of: low medium high xhigh max")));
+    }
+
+    #[test]
+    fn a_haiku_agent_must_pin_the_id_and_not_the_bare_alias() {
+        let check = |model: &str| {
+            check_required_keys(
+                "f.md",
+                "sample",
+                &format!("name: sample\ndescription: x\ntools: Read\nmodel: {model}\neffort: low"),
+            )
+        };
+        assert!(check(crate::models::HAIKU_PIN).is_empty());
+        assert!(check("haiku")
+            .iter()
+            .any(|v| v.contains("model 'haiku' is not one of")));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 name: fact-checker
 description: "Structurally read-only verifier for plan, adr and implement gates. Checks claims in a plan, ADR or blueprint against the repo; returns PASS, FAIL or WARN. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
-model: haiku
+model: claude-haiku-5-5
 effort: medium
 ---
 

@@ -2,7 +2,7 @@
 name: collector
 description: "Read-only. Gathers raw material for one learn-project Phase 1 role (git-history, code-structure, pull-requests, jira, confluence). Not for general-purpose work."
 tools: Bash, Read, Grep, Glob, WebFetch, Skill
-model: haiku
+model: claude-haiku-5-5
 effort: low
 ---
 

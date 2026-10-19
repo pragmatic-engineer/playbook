@@ -4,17 +4,22 @@
 //! The model table: one preferred model per tier (the 5.5 generation) and the
 //! previous generation to fall back to.
 //!
-//! Plugin files name a tier by alias (`haiku`, `sonnet`, `opus`) and never pin
-//! a model id. Claude Code resolves each alias to the newest model the
-//! provider offers. The fallback is Claude Code's own `--fallback-model`,
-//! which switches for one turn when the preferred model is overloaded or
-//! unavailable. `playbook cc` and `playbook ccd` pass the chain from this table.
+//! Plugin files name a tier by alias (`haiku`, `sonnet`, `opus`). The one
+//! exception is the Haiku agents, which pin [`HAIKU_PIN`] in their frontmatter
+//! so they run on 5.5 under plain `claude` too, where a bare alias can resolve
+//! to the previous generation on some providers. The fallback is Claude Code's
+//! own `--fallback-model`, which switches for one turn when the preferred model
+//! is overloaded or unavailable. `playbook cc` and `playbook ccd` pass the
+//! chain from this table.
 
 use crate::config;
 use crate::effort;
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
+
+/// The Haiku 5.5 id every Haiku agent names in its `model:` field.
+pub const HAIKU_PIN: &str = "claude-haiku-5-5";
 
 /// One tier of the table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +37,7 @@ pub const TIERS: [Tier; 3] = [
     Tier {
         name: "fast",
         alias: "haiku",
-        preferred: "claude-haiku-5-5",
+        preferred: HAIKU_PIN,
         fallback: "claude-haiku-4-5",
     },
     Tier {

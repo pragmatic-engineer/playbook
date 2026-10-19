@@ -2,7 +2,7 @@
 name: test-reviewer
 description: "Structurally read-only test reviewer for plan, adr and implement gates. Judges a test plan against engineering-standards; returns PASS, FAIL or WARN. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
-model: haiku
+model: claude-haiku-5-5
 effort: low
 ---
 

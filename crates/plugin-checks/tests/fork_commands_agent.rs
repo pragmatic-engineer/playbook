@@ -9,6 +9,9 @@
 use std::fs;
 use std::path::PathBuf;
 
+/// The Haiku 5.5 id the Haiku agents pin, so they skip the alias lookup.
+const HAIKU_PIN: &str = "claude-haiku-5-5";
+
 fn root(rel: &str) -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_PLUGIN_ROOT")).join(rel)
 }
@@ -42,10 +45,10 @@ fn commit_and_push_and_create_pull_request_fork_into_the_prefixed_git_agent() {
 }
 
 #[test]
-fn the_git_agent_runs_on_haiku() {
+fn the_git_agent_runs_on_pinned_haiku_5_5() {
     assert_eq!(
         frontmatter_value("agents/git.md", "model").as_deref(),
-        Some("haiku")
+        Some(HAIKU_PIN)
     );
 }
 

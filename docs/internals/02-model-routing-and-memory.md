@@ -107,7 +107,7 @@ The ceilings the patch works inside already exist (`maxEffortLevel` and `effort.
 
 ### Model tiers and the 5.5 rule
 
-Every model playbook picks is the 5.5 generation. Plugin files name a tier by alias (`haiku`, `sonnet`, `opus`) and never pin a model id. Claude Code resolves each alias to the newest model the provider offers (on the Anthropic API that is the 5.5 model).
+Every model playbook picks is the 5.5 generation. Plugin files name a tier by alias (`sonnet`, `opus`) and never pin a model id, with one exception: the seven Haiku agents (analyst, cheap-checker, collector, fact-checker, git, review-triage, test-reviewer) pin `claude-haiku-5-5` in their `model:` field, so they run on 5.5 under plain `claude` as well as `playbook cc`. Haiku commands (`setup`, `doctor`, `session-handoff`, `session-start`) still use the `haiku` alias. If the pinned ID is unavailable, plain `claude` fails with `model_not_found` (404); under `playbook cc`, `--fallback-model claude-haiku-4-5` runs the agent on 4.5. Claude Code resolves each alias to the newest model the provider offers (on the Anthropic API that is the 5.5 model).
 
 | Tier | Alias | Preferred (5.5) | Falls back to |
 |---|---|---|---|
@@ -121,7 +121,7 @@ Measured on Claude Code 2.1.293 (2026-10-09): all six ids answer, and the aliase
 
 **Effort and the fallback.** The previous Sonnet and Opus reject `xhigh` and `max` with HTTP 400 `Invalid effort level`. They accept `low`, `medium` and `high`. Haiku 4.5 accepts all four. A 400 also triggers the fallback, so a session at `xhigh` would walk the chain and end at Haiku anyway. When the effort in force is `xhigh` or `max` (from `--effort`, or `effortLevel` in your user settings, lowered to the effective ceiling), `playbook cc` therefore passes only `claude-haiku-4-5`. When no effort is stated, the model default applies and the full chain is passed. Playbook never changes your effort to suit a fallback.
 
-**Overrides.** `playbook config set --global models.sonnet claude-sonnet-5` (also `models.haiku` and `models.opus`) points an alias at another model of the same tier. The value is empty (no override) or `claude-<tier>-<major>[-<minor>]` for its own tier, and anything else is refused. `playbook cc` and `playbook ccd` export `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for each override, so subagents and skills that name the alias follow it. A variable you exported yourself wins. Shipped plugin files still name only aliases, so the pin check is unchanged.
+**Overrides.** `playbook config set --global models.sonnet claude-sonnet-5` (also `models.haiku` and `models.opus`) points an alias at another model of the same tier. The value is empty (no override) or `claude-<tier>-<major>[-<minor>]` for its own tier, and anything else is refused. `playbook cc` and `playbook ccd` export `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for each override, so subagents and skills that name the alias follow it. A variable you exported yourself wins. The Haiku agents pin a full ID, so `models.haiku` and `ANTHROPIC_DEFAULT_HAIKU_MODEL` no longer reach them; they still apply to the Haiku commands.
 
 `playbook doctor models` (add `--json`) prints the table, any override, the chain `playbook cc` passes, whether your own fallback replaces it, and whether the effort in force trimmed the chain.
 

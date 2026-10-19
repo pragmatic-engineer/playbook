@@ -10,17 +10,17 @@ and ADR 0021, 0022 and 0023).
 <!-- policy-table:start -->
 | Kind | Name | Model | Effort | Reason |
 | :- | :- | :- | :- | :- |
-| agent | `analyst` | `haiku` | `medium` | Distills collector findings into memory facts. Round 2 bench: Haiku 45/45 at medium against Sonnet 15/15, at about a fourteenth of the cost; the user confirms facts in learn-project Phase 3. |
+| agent | `analyst` | `claude-haiku-5-5` | `medium` | Distills collector findings into memory facts. Round 2 bench: Haiku 45/45 at medium against Sonnet 15/15, at about a fourteenth of the cost; the user confirms facts in learn-project Phase 3. |
 | agent | `auditor` | `opus` | `high` | A read-only repo audit where a missed finding is the cost. |
-| agent | `cheap-checker` | `haiku` | `low` | One narrow concern from a named reference file. A full lens covers the rest. |
-| agent | `collector` | `haiku` | `low` | Gathers and compacts raw history. The analyst does the thinking. |
+| agent | `cheap-checker` | `claude-haiku-5-5` | `low` | One narrow concern from a named reference file. A full lens covers the rest. |
+| agent | `collector` | `claude-haiku-5-5` | `low` | Gathers and compacts raw history. The analyst does the thinking. |
 | agent | `critic` | `sonnet` | `medium` | Adversarial review of plans and ADRs. Round 2 bench: medium 89/90, high 71/90 (false blocks on clean plans), so medium finds the seeded flaws at 39% lower cost. |
-| agent | `fact-checker` | `haiku` | `medium` | Three bench rounds: Haiku medium 134/138, high 137/138, at about a tenth of Sonnet's cost. The Haiku effort cap already held it at medium. |
-| agent | `git` | `haiku` | `xhigh` | Drafts commit and PR text. The commit type was right 42% of the time at low and 100% at xhigh. The one Haiku role allowed above medium (OPT_INS). |
+| agent | `fact-checker` | `claude-haiku-5-5` | `medium` | Three bench rounds: Haiku medium 134/138, high 137/138, at about a tenth of Sonnet's cost. The Haiku effort cap already held it at medium. |
+| agent | `git` | `claude-haiku-5-5` | `xhigh` | Drafts commit and PR text. The commit type was right 42% of the time at low and 100% at xhigh. The one Haiku role allowed above medium (OPT_INS). |
 | agent | `implementer` | `sonnet` | `medium` | Writes and commits production logic. Round 2 bench on 20 repo tasks: Sonnet medium 200/200, high 198/200; Haiku stays under 92%. |
-| agent | `review-triage` | `haiku` | `low` | A three-way classifier. A bad or missing answer falls back to a full lens. |
+| agent | `review-triage` | `claude-haiku-5-5` | `low` | A three-way classifier. A bad or missing answer falls back to a full lens. |
 | agent | `reviewer` | `opus` | `medium` | Opus medium 199/200 against high 200/200 on the reviewer bench, 19% cheaper. Risky diffs go to `reviewer-xhigh` and small ones to `reviewer-low` (ADR-0021). |
-| agent | `test-reviewer` | `haiku` | `low` | Pilot (18 calls per cell): Haiku low, medium and high 18/18, Sonnet high 18/18, Sonnet low 16/18. |
+| agent | `test-reviewer` | `claude-haiku-5-5` | `low` | Pilot (18 calls per cell): Haiku low, medium and high 18/18, Sonnet high 18/18, Sonnet low 16/18. |
 | command | `address-pr-comments` | `opus` | `medium` | Judgment on review threads and replies that go public. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `adr` | `opus` | `medium` | A hard-to-reverse decision record. Maintainer choice on 2026-10-11, no bench (ADR-0023). |
 | command | `commit-and-push` | - | - | Forks into the git agent, which sets the model and effort. |

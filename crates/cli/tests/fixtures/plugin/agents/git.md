@@ -2,7 +2,7 @@
 name: git
 description: "Executor for /playbook:commit-and-push and /playbook:create-pull-request. Delivers signed commits and PRs in a fork on Haiku. Not for general-purpose work."
 tools: Bash, Read, Skill
-model: haiku
+model: claude-haiku-5-5
 effort: xhigh
 ---
 

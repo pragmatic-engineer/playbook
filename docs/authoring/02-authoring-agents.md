@@ -17,7 +17,7 @@ Every agent file opens with five keys:
 | `name` | Kebab-case, must match the filename (`agents/reviewer.md` declares `name: reviewer`). |
 | `description` | When the orchestrator should spawn it, what it returns, and a closing "Not for general-purpose work." line that keeps it out of the generic picker. |
 | `tools` | Comma-separated allowlist, the smallest set the role needs. |
-| `model` | One of `haiku`, `sonnet`, `opus`. |
+| `model` | `sonnet`, `opus`, or `claude-haiku-5-5` (a bare `haiku` is refused on agents). |
 | `effort` | One of `low`, `medium`, `high`, `xhigh`, `max`. |
 
 `agents/auditor.md`, `agents/git.md`, and `agents/reviewer.md` are real, filled-in examples of this shape.
@@ -51,7 +51,7 @@ subagent_type: playbook:reviewer
 
 ## Model and tool policy
 
-Name a tier alias (`haiku`, `sonnet`, `opus`) and never a model id. `playbook cc` resolves the alias to the 5.5 model and passes the previous generation as a fallback.
+Name `sonnet` or `opus` by alias. Haiku agents pin `claude-haiku-5-5` so they run on 5.5 even where the `haiku` alias would resolve to 4.5; `models.haiku` and `ANTHROPIC_DEFAULT_HAIKU_MODEL` do not reach them. `playbook cc` resolves the alias to the 5.5 model and passes the previous generation as a fallback.
 
 Pick the cheapest tier that does the job. `git` runs on `haiku` for mechanical work, `implementer` on `sonnet`, and `reviewer` and `auditor` on `opus`, where a missed finding costs more than the tokens. The full policy is in [Model routing and memory](../internals/02-model-routing-and-memory.md). When you add or change an agent, update the policy table in [`docs/reference/policy-table.md`](../reference/policy-table.md) too, because a test compares it with the file.
 
@@ -109,7 +109,7 @@ It enforces, per file:
 - Real frontmatter: an opening and a closing `---`.
 - The five required keys: `name`, `description`, `tools`, `model`, `effort`.
 - `name` matches the filename.
-- `model` is one of `haiku`, `sonnet`, `opus`.
+- `model` is `claude-haiku-5-5`, `sonnet` or `opus`.
 - `effort` is one of `low`, `medium`, `high`, `xhigh`, `max`.
 - Every entry in `tools` is a known tool name, regardless of read-only tier.
 - If `description` says `structurally read-only`, `tools` holds none of `Edit`, `Write`, `NotebookEdit`, `Bash`. If it says plain `read-only`, `tools` holds none of `Edit`, `Write`, `NotebookEdit`, and `Bash` is allowed.

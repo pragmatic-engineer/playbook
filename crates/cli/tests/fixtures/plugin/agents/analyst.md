@@ -2,7 +2,7 @@
 name: analyst
 description: "Structurally read-only. Distills learn-project collector findings into candidate memory facts for one cluster. Not for general-purpose work."
 tools: Read, Grep, Glob, Skill
-model: haiku
+model: claude-haiku-5-5
 effort: medium
 ---
 
