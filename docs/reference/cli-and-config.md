@@ -6,6 +6,7 @@ Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs
 This page lists every `playbook` command, flag and config key. It is generated from the
 clap definitions and the config key table, and a test fails when it is out of date.
 For what each key means and when to change it, read the [config keys guide](../guides/04-config-keys.md).
+For one line per command and who may run it, run `playbook commands`.
 
 ## Config keys
 
@@ -97,7 +98,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `breaking`, `cc`, `ccd`, `ci`, `code`, `commit`, `config`, `deliver`, `deps`, `disk`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `breaking`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `disk`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -348,6 +349,17 @@ Example: `playbook code symbol PaymentService --kind class`
 - `--path <PATH>`: Only files under this path prefix, for example `lib/payment/`
 - `--limit <LIMIT>`: Most results to show, from 1 to 200
 - `--json`: Print one JSON document
+
+### `playbook commands`
+
+List every playbook command, what it does and who may run it
+
+Built from this binary's own command tree, so it lists only the commands the binary has. One line per command, with its subcommands. A name ending in `!` or a line marked `(user-only)` is for the user to run; `(read-only)` runs freely. Give a group to list its subcommands with their flags. Reads nothing and writes nothing.
+
+Example: `playbook commands pr`
+
+- `<GROUP>`: A command or group, such as `pr` or `worktree review`
+- `--json`: Print a JSON array with one object per command: command, purpose, access, args, subcommands, intents
 
 ### `playbook commit`
 

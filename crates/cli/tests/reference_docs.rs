@@ -8,6 +8,7 @@
 //! Regenerate with: `UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs`
 
 use clap::{Command, CommandFactory};
+use playbook::command_index::{visible, visible_args};
 use playbook::config::keys::{
     allowed_enum_values, default_value, EFFORT_COMPONENT_KINDS, KNOWN_KEYS,
 };
@@ -75,22 +76,13 @@ fn walk(cmd: &Command, path: &str, out: &mut String) {
         let text = about.to_string();
         let _ = writeln!(out, "{}\n", text.trim());
     }
-    let args: Vec<&clap::Arg> = cmd
-        .get_arguments()
-        .filter(|a| !a.is_hide_set() && !matches!(a.get_id().as_str(), "help" | "version"))
-        .collect();
+    let args: Vec<&clap::Arg> = visible_args(cmd).collect();
     for arg in args {
         let _ = writeln!(out, "{}", arg_line(arg));
     }
-    let mut subs: Vec<&Command> = cmd
-        .get_subcommands()
-        .filter(|s| !s.is_hide_set() && s.get_name() != "help")
-        .collect();
+    let mut subs: Vec<&Command> = visible(cmd).collect();
     subs.sort_by_key(|s| s.get_name().to_string());
-    if cmd
-        .get_arguments()
-        .any(|a| !a.is_hide_set() && !matches!(a.get_id().as_str(), "help" | "version"))
-    {
+    if visible_args(cmd).next().is_some() {
         out.push('\n');
     }
     if !subs.is_empty() {
@@ -162,7 +154,8 @@ pub fn generate() -> String {
          Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs -->\n\n\
          This page lists every `playbook` command, flag and config key. It is generated from the\n\
          clap definitions and the config key table, and a test fails when it is out of date.\n\
-         For what each key means and when to change it, read the [config keys guide](../guides/04-config-keys.md).\n\n\
+         For what each key means and when to change it, read the [config keys guide](../guides/04-config-keys.md).\n\
+         For one line per command and who may run it, run `playbook commands`.\n\n\
          ## Config keys\n\n\
          Set a key with `playbook config set <key> <value>` and read it with `playbook config get <key>`.\n\n",
     );

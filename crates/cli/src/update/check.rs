@@ -222,7 +222,7 @@ impl Cache {
 }
 
 /// Whether `command` may run the check. Hooks, the status line, `version`,
-/// `json`, `update` itself, the background `usage warm` and `usage collect`
+/// `json`, `commands`, `update` itself, the background `usage warm` and `usage collect`
 /// runs that the session hooks start, and any run with a `--json` argument
 /// never do.
 pub fn applies(command: &Command, args: &[OsString]) -> bool {

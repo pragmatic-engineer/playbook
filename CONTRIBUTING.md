@@ -74,6 +74,16 @@ A migration is named by a slug and the release that ships it ([ADR-0046](docs/ad
 - A build skips a `next` migration, so it never runs from a dev build of `main`. Test it with the unit tests next to it in that file, or build from a scratch checkout after `scripts/release-prepare.sh <next version>`.
 - [Internals: Migrations](docs/internals/07-migrations.md) explains the kinds and the scopes.
 
+### Adding a command
+
+`playbook commands` lists every visible command at run time, from the clap tree. It needs one line per command in `META` in `crates/cli/src/command_index.rs`:
+
+- `ro("path")` for a command that only reads, `free("path")` for one that changes the repo or playbook's own state, and `user("path")` for one only the user may run: it writes their home or Claude Code settings, asks for consent, runs a paid benchmark or starts a session.
+- Add `.purpose("...")` when the first sentence of the doc comment is too long or too short: 6 to 12 words for a top-level command, 3 to 14 for a subcommand.
+- Keep `META` sorted by path. A group needs its own line too.
+
+A test walks the whole tree and fails when a visible command has no line, a line names a command that is gone, or a purpose has the wrong length. Hidden commands, such as a deprecated name, need no line. Then regenerate the reference page with `UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs`.
+
 Renaming a command is a deprecation. Keep the old name as a hidden alias that runs the same code, prints one line on stderr in a terminal that names the new command, and keeps its exit codes. Since the old name keeps working, the commit is not marked breaking. Remove the alias no earlier than the next major release, and mark that removal as breaking. The rename to `playbook setup` is the example ([ADR-0040](docs/adr/0040-rename-init-to-setup.md)).
 
 ## Changing the plugin

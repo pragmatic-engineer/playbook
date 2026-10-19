@@ -79,11 +79,11 @@ fn main() {
         None => {}
     }
     let cli = Cli::parse();
-    // Hooks fail soft, and version and json write nothing under home; every other command refuses to write state relative to
+    // Hooks fail soft, and version, json and commands write nothing under home; every other command refuses to write state relative to
     // the current directory when there is no home.
     if !matches!(
         cli.command,
-        Command::Hook { .. } | Command::Version | Command::Json { .. }
+        Command::Hook { .. } | Command::Version | Command::Json { .. } | Command::Commands { .. }
     ) {
         if let Some(message) = common::home_error(&common::home_dir()) {
             eprintln!("playbook: {message}");
@@ -1617,6 +1617,21 @@ fn main() {
                 }
             } else {
                 print!("{}", tools_map::render());
+            }
+        }
+        Command::Commands { group, json } => {
+            let root = playbook::command_index::tree();
+            let out = if json {
+                playbook::command_index::render_json(&root, &group).map(|t| t + "\n")
+            } else {
+                playbook::command_index::render(&root, &group)
+            };
+            match out {
+                Ok(text) => print!("{text}"),
+                Err(err) => {
+                    eprintln!("{err}");
+                    std::process::exit(2);
+                }
             }
         }
         Command::Adr {
