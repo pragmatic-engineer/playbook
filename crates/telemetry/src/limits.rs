@@ -257,7 +257,7 @@ pub enum CrossState {
     /// steady pace since the period began.
     Crossed { at: i64 },
     /// At the current pace it is crossed at this UTC second, before the
-    /// period ends.
+    /// period ends (the period is half open, so the end itself is beyond).
     Projected { at: i64 },
     /// At the current pace it is not crossed before the period ends.
     Beyond { period_end: i64 },
@@ -320,9 +320,13 @@ pub fn thresholds(start: i64, end: i64, now: i64, used: f64, limit: f64) -> Opti
         } else if used <= 0.0 || now >= end {
             CrossState::Beyond { period_end: end }
         } else {
-            let at = now + ((amount - used) / (used / elapsed as f64)).ceil() as i64;
-            if at <= end {
-                CrossState::Projected { at }
+            let wait = ((amount - used) / (used / elapsed as f64)).ceil();
+            // Compared as seconds before the cast, so a tiny rate cannot
+            // overflow the instant.
+            if wait < (end - now) as f64 {
+                CrossState::Projected {
+                    at: now + wait as i64,
+                }
             } else {
                 CrossState::Beyond { period_end: end }
             }
@@ -663,7 +667,7 @@ mod tests {
     }
 
     const MONTH: i64 = 30 * D;
-    const NOON: i64 = 10 * D;
+    const DAY_10: i64 = 10 * D;
 
     fn states(used: f64, now: i64) -> [CrossState; 3] {
         thresholds(0, MONTH, now, used, 100.0)
@@ -673,7 +677,7 @@ mod tests {
 
     #[test]
     fn the_thresholds_are_50_80_and_100_percent() {
-        let c = thresholds(0, MONTH, NOON, 10.0, 100.0).unwrap();
+        let c = thresholds(0, MONTH, DAY_10, 10.0, 100.0).unwrap();
 
         assert_eq!(c.map(|c| c.pct), [50.0, 80.0, 100.0]);
         assert_eq!(c[1].pct, NEAR_LIMIT * 100.0);
@@ -682,14 +686,15 @@ mod tests {
     #[test]
     fn a_threshold_at_or_below_the_used_amount_is_crossed_at_a_steady_pace() {
         // 50 used after 10 days: 50 percent was reached at day 10, and the
-        // 40 percent pace puts 80 percent beyond the end of the month.
-        let c = states(50.0, NOON);
-        assert_eq!(c[0], CrossState::Crossed { at: NOON });
+        // pace of 5 a day reaches 80 at day 16.
+        let c = states(50.0, DAY_10);
+        assert_eq!(c[0], CrossState::Crossed { at: DAY_10 });
+        assert_eq!(c[1], CrossState::Projected { at: 16 * D });
 
         // 80 used after 10 days: 50 percent at day 6.25, 80 at day 10.
-        let c = states(80.0, NOON);
+        let c = states(80.0, DAY_10);
         assert_eq!(c[0], CrossState::Crossed { at: 625 * D / 100 });
-        assert_eq!(c[1], CrossState::Crossed { at: NOON });
+        assert_eq!(c[1], CrossState::Crossed { at: DAY_10 });
     }
 
     #[test]
@@ -708,7 +713,7 @@ mod tests {
         ];
 
         for (used, want) in table {
-            let got = states(used, NOON).map(CrossState::key);
+            let got = states(used, DAY_10).map(CrossState::key);
 
             assert_eq!(got, want, "used {used}");
         }
@@ -717,7 +722,7 @@ mod tests {
     #[test]
     fn a_projected_crossing_is_the_exact_second_at_the_current_pace() {
         // $20 in 10 days is $2 a day: $50 is 15 days away at day 25.
-        let c = states(20.0, NOON);
+        let c = states(20.0, DAY_10);
 
         assert_eq!(c[0], CrossState::Projected { at: 25 * D });
         // $80 would be day 40, past the end of the month.
@@ -726,14 +731,18 @@ mod tests {
     }
 
     #[test]
-    fn the_pace_that_just_makes_the_period_end_is_projected_and_one_second_over_is_beyond() {
-        // 10 used after 10 days of 30: 100 percent needs 100 days, so use a
-        // small limit instead: limit 30 at $1 a day is reached exactly at day 30.
-        let exact = thresholds(0, MONTH, NOON, 10.0, 30.0).unwrap();
-        let over = thresholds(0, MONTH, NOON + 1, 10.0, 30.0).unwrap();
+    fn a_pace_that_reaches_the_period_end_exactly_is_beyond_and_a_faster_one_is_projected() {
+        // Limit 30 at 1 a day is reached exactly at day 30, the period end,
+        // and the period is half open. One second less elapsed time at the
+        // same total means a faster pace, which lands before the end.
+        let exact = thresholds(0, MONTH, DAY_10, 10.0, 30.0).unwrap();
+        let faster = thresholds(0, MONTH, DAY_10 - 1, 10.0, 30.0).unwrap();
 
-        assert_eq!(exact[2].state, CrossState::Projected { at: MONTH });
-        assert_eq!(over[2].state, CrossState::Beyond { period_end: MONTH });
+        assert_eq!(exact[2].state, CrossState::Beyond { period_end: MONTH });
+        assert!(matches!(
+            faster[2].state,
+            CrossState::Projected { at } if (MONTH - 3..MONTH).contains(&at)
+        ));
     }
 
     #[test]
@@ -749,7 +758,8 @@ mod tests {
     fn a_crossed_threshold_is_reported_even_before_the_minimum_time() {
         let c = thresholds(0, MONTH, 60, 70.0, 100.0).unwrap();
 
-        assert!(matches!(c[0].state, CrossState::Crossed { at } if (0..=60).contains(&at)));
+        // 70 percent after 60 seconds: 50 percent was reached at 60 * 50 / 70.
+        assert_eq!(c[0].state, CrossState::Crossed { at: 43 });
         assert_eq!(c[2].state, CrossState::Unknown);
     }
 
@@ -761,15 +771,22 @@ mod tests {
     }
 
     #[test]
+    fn a_tiny_pace_cannot_overflow_the_projected_instant() {
+        let c = thresholds(0, MONTH, MIN_PROJECTION_SECONDS, f64::MIN_POSITIVE, 1e300).unwrap();
+
+        assert_eq!(c[2].state, CrossState::Beyond { period_end: MONTH });
+    }
+
+    #[test]
     fn nothing_used_is_beyond_and_a_bad_limit_has_no_thresholds() {
         assert_eq!(
-            states(0.0, NOON),
+            states(0.0, DAY_10),
             [CrossState::Beyond { period_end: MONTH }; 3]
         );
-        assert!(thresholds(0, MONTH, NOON, 1.0, 0.0).is_none());
-        assert!(thresholds(0, MONTH, NOON, 1.0, f64::NAN).is_none());
-        assert!(thresholds(MONTH, 0, NOON, 1.0, 100.0).is_none());
-        assert!(thresholds(0, MONTH, NOON, f64::INFINITY, 100.0).is_none());
+        assert!(thresholds(0, MONTH, DAY_10, 1.0, 0.0).is_none());
+        assert!(thresholds(0, MONTH, DAY_10, 1.0, f64::NAN).is_none());
+        assert!(thresholds(MONTH, 0, DAY_10, 1.0, 100.0).is_none());
+        assert!(thresholds(0, MONTH, DAY_10, f64::INFINITY, 100.0).is_none());
     }
 
     #[test]
@@ -784,7 +801,7 @@ mod tests {
             end: MONTH,
         };
 
-        let v = l.to_json(NOON);
+        let v = l.to_json(DAY_10);
 
         let t = v["thresholds"].as_array().unwrap();
         assert_eq!(t.len(), 3);

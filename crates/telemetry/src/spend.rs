@@ -28,10 +28,10 @@ const MAX_MINOR_UNITS: f64 = 1e15;
 /// The currency code of dollars.
 pub const USD: &str = "USD";
 
-/// The longest currency code that is kept. Anything longer or with other
-/// characters than letters and digits is treated as absent, so a hostile
-/// document cannot put text into a label.
-const MAX_CURRENCY_LEN: usize = 8;
+/// The longest currency code or severity word that is kept. Anything longer or
+/// with other characters than letters, digits, `_` and `-` is treated as
+/// absent, so a hostile document cannot put text into a label.
+const MAX_WORD_LEN: usize = 32;
 
 /// A difference below this many dollars is never a disagreement.
 pub const DISAGREE_MIN_USD: f64 = 1.0;
@@ -273,10 +273,16 @@ fn decimals(v: Option<&Value>) -> Result<Option<u8>, SpendError> {
     }
 }
 
-fn text(v: Option<&Value>) -> Option<String> {
+/// A short word from the document: letters, digits, `_` and `-` only.
+fn word(v: Option<&Value>) -> Option<String> {
     v.and_then(Value::as_str)
         .map(str::trim)
-        .filter(|s| !s.is_empty())
+        .filter(|s| {
+            !s.is_empty()
+                && s.len() <= MAX_WORD_LEN
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        })
         .map(str::to_string)
 }
 
@@ -302,8 +308,7 @@ pub fn parse(body: &str, fetched_at: i64) -> Result<Parsed, SpendError> {
     let spend = object(root, "spend");
 
     let places = decimals(field("decimal_places"))?;
-    let currency = text(field("currency"))
-        .filter(|c| c.len() <= MAX_CURRENCY_LEN && c.chars().all(|ch| ch.is_ascii_alphanumeric()));
+    let currency = word(field("currency"));
     let money = |key: &str| -> Result<Option<Money>, SpendError> {
         Ok(number(field(key))?
             .zip(places)
@@ -334,7 +339,7 @@ pub fn parse(body: &str, fetched_at: i64) -> Result<Parsed, SpendError> {
         limit,
         used,
         percent,
-        severity: text(spend.and_then(|s| s.get("severity"))),
+        severity: word(spend.and_then(|s| s.get("severity"))),
         resets_at: time(field("resets_at")),
         limit_reached: root.get("spend_limit_reached").and_then(Value::as_bool),
         scope: match Scope::parse(root.get("scope")) {
@@ -597,6 +602,22 @@ mod tests {
     }
 
     #[test]
+    fn a_severity_with_control_characters_or_spaces_is_absent() {
+        for severity in ["warn\\ning", "\\u001b[2Jwarning", "very bad", ""] {
+            let body = format!(
+                r#"{{"extra_usage":{{"monthly_limit":1,"decimal_places":2}},"spend":{{"severity":"{severity}"}}}}"#
+            );
+
+            let Ok(Parsed::Figure(f)) = parse(&body, NOW) else {
+                panic!("expected a figure for {severity}");
+            };
+
+            assert_eq!(f.severity, None, "{severity}");
+        }
+        assert_eq!(figure("ok").severity.as_deref(), Some("warning"));
+    }
+
+    #[test]
     fn money_never_panics_or_misplaces_a_sign_when_built_by_hand() {
         let m = |minor, decimals| Money {
             minor,
@@ -659,7 +680,8 @@ mod tests {
 
     #[test]
     fn a_currency_with_other_than_letters_and_digits_or_too_long_is_absent() {
-        for code in ["US D", "\\u001b[31mUSD", "ABCDEFGHI", ""] {
+        let too_long = "A".repeat(MAX_WORD_LEN + 1);
+        for code in ["US D", "\\u001b[31mUSD", too_long.as_str(), ""] {
             let body = format!(
                 r#"{{"extra_usage":{{"monthly_limit":1,"decimal_places":2,"currency":"{code}"}}}}"#
             );

@@ -548,6 +548,8 @@ fn capabilities(s: &Sources, now: i64) -> Capabilities {
     } else {
         Capabilities::from_cache(&super::plan::UsageCache::default())
     };
+    // The login kind is not read here: a view never reads the environment.
+    // The fetch reads it and decides before asking, so this stays `Unknown`.
     base.for_login(LoginKind::Unknown, s.plan_choice)
 }
 
@@ -717,62 +719,76 @@ fn scope_text(scope: Scope) -> &'static str {
 
 /// The server figure used for the monthly limit, if one is.
 fn server_in_use(s: &Sources, now: i64) -> Option<&SpendFigure> {
-    matches!(monthly(s, now), Monthly::Server { .. })
-        .then_some(())
-        .and(s.server.as_ref())
+    if matches!(monthly(s, now), Monthly::Server { .. }) {
+        s.server.as_ref()
+    } else {
+        None
+    }
+}
+
+/// The "server billed" sentence: the amounts, the share, what is left, the
+/// reset time, the severity and whose spend it is.
+fn billed_line(f: &SpendFigure, limits: &[Limit]) -> String {
+    let mut parts = Vec::new();
+    match (f.used_usd(), f.limit_usd()) {
+        (Some(used), Some(limit)) => {
+            parts.push(format!("{} of {}", dollars(used), dollars(limit)));
+            if let Some(p) = f.percent {
+                parts.push(format!("{p:.1}%"));
+            }
+            parts.push(format!("{} left", dollars((limit - used).max(0.0))));
+        }
+        (None, Some(limit)) => parts.push(format!(
+            "limit {}, amount used not reported",
+            dollars(limit)
+        )),
+        _ => {}
+    }
+    if let Some(l) = limits.iter().find(|l| l.origin == Origin::Server) {
+        parts.push(format!("resets {}", stamp(f.resets_at.unwrap_or(l.end))));
+    }
+    if let Some(sev) = &f.severity {
+        parts.push(format!("severity {sev}"));
+    }
+    parts.push(scope_text(f.scope).to_string());
+    format!("server billed: {}", parts.join(", "))
 }
 
 /// The lines about the server spend limit for `--summary`: what the server
 /// billed, how it compares with the local estimate, the plan, when 50, 80 and
-/// 100 percent are crossed, or the one line saying why there is no figure.
+/// 100 percent are crossed, and the one line saying why there is no figure
+/// when there is none in use.
 pub fn spend_lines(s: &Sources, limits: &[Limit], events: &[UsageEvent], now: i64) -> Vec<String> {
     let mut out = Vec::new();
-    if let Some(f) = server_in_use(s, now) {
-        let mut parts = Vec::new();
-        match (f.used_usd(), f.limit_usd()) {
-            (Some(used), Some(limit)) => {
-                parts.push(format!("{} of {}", dollars(used), dollars(limit)))
-            }
-            (None, Some(limit)) => parts.push(format!(
-                "limit {}, amount used not reported",
-                dollars(limit)
-            )),
-            _ => {}
+    let figure = server_in_use(s, now);
+    if let Some(f) = figure {
+        out.push(billed_line(f, limits));
+        match compare_server(s, events, now) {
+            Some(Ok(c)) => out.push(c.line()),
+            Some(Err(why)) => out.push(format!("local estimate not compared: {why}")),
+            None => {}
         }
-        if let Some(p) = f.percent {
-            parts.push(format!("{p:.1}%"));
-        }
-        if let (Some(used), Some(limit)) = (f.used_usd(), f.limit_usd()) {
-            parts.push(format!("{} left", dollars((limit - used).max(0.0))));
-        }
-        if let Some(l) = limits.iter().find(|l| l.origin == Origin::Server) {
-            let at = f.resets_at.unwrap_or(l.end);
-            parts.push(format!("resets {}", stamp(at)));
-        }
-        if let Some(sev) = &f.severity {
-            parts.push(format!("severity {sev}"));
-        }
-        parts.push(scope_text(f.scope).to_string());
-        out.push(format!("server billed: {}", parts.join(", ")));
-        out.push(match compare_server(s, events, now) {
-            Some(Ok(c)) => c.line(),
-            Some(Err(why)) => format!("local estimate not compared: {why}"),
-            None => String::new(),
-        });
-        out.retain(|l| !l.is_empty());
         out.push(format!("plan: {}", plan_label(s)));
     }
+    // A stale server figure leaves the amount used at this machine's estimate.
+    let local_used = figure.is_some_and(|f| !f.is_fresh(now));
     for l in limits {
         if let Some(c) = l.thresholds(now) {
+            let basis = if local_used && l.origin == Origin::Server {
+                ", from the local estimate"
+            } else {
+                ""
+            };
             out.push(format!(
-                "{} crossings: {}",
+                "{} crossings ({}{basis}): {}",
                 l.period.key().replace('_', " "),
+                l.origin.key(),
                 c.iter().map(crossing_text).collect::<Vec<_>>().join(", ")
             ));
         }
     }
-    if let Some(reason) = s.spend_unavailable {
-        out.push(reason.line());
+    if figure.is_none() {
+        out.extend(s.spend_unavailable.map(Reason::line));
     }
     out
 }
@@ -1722,7 +1738,7 @@ mod tests {
 
         assert!(
             text.contains(
-                "  monthly crossings: 50% crossed about 2027-01-11 03:30:40Z, 80% projected about 2027-01-17 05:37:04Z, 100% projected about 2027-01-21 07:01:20Z\n"
+                "  monthly crossings (server): 50% crossed about 2027-01-11 03:30:40Z, 80% projected about 2027-01-17 05:37:04Z, 100% projected about 2027-01-21 07:01:20Z\n"
             ),
             "{text}"
         );
@@ -1872,6 +1888,59 @@ mod tests {
         assert_eq!(
             v["spend"]["comparison_skipped"],
             "currency EUR, not compared"
+        );
+    }
+
+    #[test]
+    fn a_manual_budget_gets_its_own_crossings_line_and_no_server_text() {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let s = Sources {
+            budgets: vec![(LimitPeriod::Monthly, 1500.0)],
+            ..Sources::default()
+        };
+        let events = [cost(MONTH_START + 10, 1059.5)];
+
+        let text = summary_section(&s, &events, NOW, WeekStart::Monday);
+
+        assert!(
+            text.contains("  monthly crossings (manual): 50% crossed about"),
+            "{text}"
+        );
+        assert!(!text.contains("server billed"), "{text}");
+    }
+
+    #[test]
+    fn a_server_figure_that_is_not_in_use_prints_and_reports_nothing() {
+        let s = Sources {
+            server: Some(server_at(MONTH_START - 1, 150_000, Some(105_950))),
+            spend_unavailable: Some(Reason::Network),
+            ..Sources::default()
+        };
+
+        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
+        let v = report_json(&s, &[], NOW, WeekStart::Monday);
+
+        assert!(!text.contains("server billed"), "{text}");
+        assert!(text.contains("spend limit unavailable (network)"), "{text}");
+        assert!(v["spend"].is_null());
+    }
+
+    #[test]
+    fn a_stale_figure_in_use_hides_the_unavailable_line_and_labels_its_crossings() {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let s = Sources {
+            server: Some(server_at(NOW - 7 * HOUR, 150_000, Some(105_950))),
+            spend_unavailable: Some(Reason::Network),
+            ..Sources::default()
+        };
+
+        let text = summary_section(&s, &[cost(NOW - 10, 3.0)], NOW, WeekStart::Monday);
+
+        assert!(text.contains("server billed:"), "{text}");
+        assert!(!text.contains("spend limit unavailable"), "{text}");
+        assert!(
+            text.contains("monthly crossings (server, from the local estimate):"),
+            "{text}"
         );
     }
 }
