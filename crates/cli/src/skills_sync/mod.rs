@@ -29,6 +29,218 @@ impl Agent {
 
 const SKILL_FILE: &str = "SKILL.md";
 
+/// Where Codex reads skills, relative to the home folder.
+pub const TARGET_DIR: &str = ".agents/skills";
+
+const ALL_AGENTS: [Agent; 1] = [Agent::Codex];
+const RECORD_PREFIX: &str = "skills-sync/";
+const REFRESH_SUFFIX: &str = "refresh";
+const VERSION_FIELD: &str = "version ";
+
+fn refresh_key(agent: Agent) -> String {
+    format!("{RECORD_PREFIX}{}/{REFRESH_SUFFIX}", agent.key())
+}
+
+/// What a refresh did: the report lines of every agent it handled, and
+/// whether each one ended clean.
+#[derive(Debug, Default)]
+pub struct Refreshed {
+    pub lines: Vec<String>,
+    pub clean: bool,
+}
+
+/// The plugin folder and its version, or `None` when no plugin is found.
+fn resolve_plugin(home: &Path) -> Option<(PathBuf, String)> {
+    let claude_home = home.join(".claude");
+    let override_env = std::env::var(crate::plugin_root::OVERRIDE_ENV).ok();
+    let env = std::env::var("CLAUDE_PLUGIN_ROOT").ok();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let resolved = crate::plugin_root::resolve(&crate::plugin_root::Inputs {
+        claude_home: &claude_home,
+        override_env: override_env.as_deref(),
+        env: env.as_deref(),
+        cwd: &cwd,
+    })
+    .ok()?;
+    let version = crate::plugin_root::plugin_version(&resolved.root).unwrap_or_default();
+    Some((resolved.root, version))
+}
+
+/// Whether any folder record of `agent` was written for another plugin
+/// version. `false` when the agent has no records, so a first install stays
+/// an explicit `skills sync`.
+fn has_stale_records(root: &Path, agent: Agent, version: &str) -> bool {
+    let prefix = format!("{RECORD_PREFIX}{}/", agent.key());
+    let Ok(rows) = crate::state::list_read_only(root, &prefix) else {
+        return false;
+    };
+    rows.iter()
+        .filter(|(key, _)| key != &refresh_key(agent))
+        .any(|(_, text)| {
+            text.lines()
+                .find_map(|l| l.strip_prefix(VERSION_FIELD))
+                .is_some_and(|recorded| recorded != version)
+        })
+}
+
+fn read_claim(root: &Path, agent: Agent) -> Option<String> {
+    let key = refresh_key(agent);
+    crate::state::list_read_only(root, &key)
+        .ok()?
+        .into_iter()
+        .find_map(|(k, v)| (k == key && !v.is_empty()).then_some(v))
+}
+
+/// The refresh claim rules, same as the plugin update marker: nothing for a
+/// version already `done`, a retry a day after `failed`, and a `running`
+/// claim that went stale after ten minutes.
+fn claim_due(claim: Option<&str>, version: &str, now: u64) -> bool {
+    use crate::plugin_update::{Marker, State, FAILED_RETRY, RUNNING_STALE};
+    let Some(marker) = claim
+        .and_then(Marker::parse)
+        .filter(|m| m.version == version)
+    else {
+        return true;
+    };
+    let age = std::time::Duration::from_secs(now.saturating_sub(marker.at));
+    match marker.state {
+        State::Done => false,
+        State::Failed => age > FAILED_RETRY,
+        State::Running => age > RUNNING_STALE,
+    }
+}
+
+/// Moves the claim from `seen` to `running` in one transaction, so of two
+/// processes that read the same value only one refreshes.
+fn take_claim(root: &Path, agent: Agent, seen: Option<&str>, version: &str, now: u64) -> bool {
+    use crate::plugin_update::{Marker, State};
+    let key = refresh_key(agent);
+    let running = Marker {
+        version: version.to_string(),
+        state: State::Running,
+        at: now,
+    };
+    crate::state::transaction(root, |tx| {
+        if tx.get(&key)?.filter(|v| !v.is_empty()).as_deref() == seen {
+            tx.set(&key, &running.format())?;
+            return Ok(true);
+        }
+        Ok(false)
+    })
+    .unwrap_or(false)
+}
+
+fn write_claim(root: &Path, agent: Agent, version: &str, state: crate::plugin_update::State) {
+    let marker = crate::plugin_update::Marker {
+        version: version.to_string(),
+        state,
+        at: crate::plugin_update::now(),
+    };
+    let _ = crate::state::set(root, &refresh_key(agent), &marker.format());
+}
+
+/// Agents that were synced before, whose records name another plugin version
+/// and whose refresh claim is due. Reads only.
+fn due_agents(root: &Path, version: &str) -> Vec<Agent> {
+    let now = crate::plugin_update::now();
+    ALL_AGENTS
+        .into_iter()
+        .filter(|&a| has_stale_records(root, a, version))
+        .filter(|&a| claim_due(read_claim(root, a).as_deref(), version, now))
+        .collect()
+}
+
+/// Whether [`refresh`] would do work now. Reads only, for the session hook.
+pub fn refresh_needed(home: &Path) -> bool {
+    let root = crate::common::paths::playbook_root_from(home);
+    std::panic::catch_unwind(|| {
+        resolve_plugin(home).is_some_and(|(_, version)| !due_agents(&root, &version).is_empty())
+    })
+    .unwrap_or(false)
+}
+
+/// Brings the copies of already synced agents up to the plugin version.
+/// An agent with no records is never touched. A dry run plans only: no
+/// claim, no writes. A panic inside is dropped, so a touch point never fails
+/// because of it.
+pub fn refresh(home: &Path, dry_run: bool) -> Vec<String> {
+    refresh_report(home, dry_run).lines
+}
+
+/// [`refresh`] with the outcome, for the caller that stores a notice.
+pub fn refresh_report(home: &Path, dry_run: bool) -> Refreshed {
+    std::panic::catch_unwind(|| refresh_inner(home, dry_run)).unwrap_or_default()
+}
+
+fn refresh_inner(home: &Path, dry_run: bool) -> Refreshed {
+    let mut out = Refreshed {
+        lines: Vec::new(),
+        clean: true,
+    };
+    let root = crate::common::paths::playbook_root_from(home);
+    let Some((plugin, version)) = resolve_plugin(home) else {
+        return out;
+    };
+    let agents = due_agents(&root, &version);
+    if agents.is_empty() {
+        return out;
+    }
+    let rendered = plan::plan(&plugin).and_then(|targets| render_targets(&plugin, &targets));
+    for agent in agents {
+        let seen = read_claim(&root, agent);
+        if !dry_run
+            && !take_claim(
+                &root,
+                agent,
+                seen.as_deref(),
+                &version,
+                crate::plugin_update::now(),
+            )
+        {
+            continue;
+        }
+        let (lines, clean) = match &rendered {
+            Ok(folders) => {
+                let report = apply::apply(
+                    &root,
+                    agent,
+                    &home.join(TARGET_DIR),
+                    &version,
+                    folders,
+                    dry_run,
+                    &apply::Faults::default(),
+                );
+                (report.lines.clone(), report.is_clean())
+            }
+            Err(why) => (vec![format!("failed {}: {why}", agent.key())], false),
+        };
+        if !dry_run {
+            let state = if clean {
+                crate::plugin_update::State::Done
+            } else {
+                crate::plugin_update::State::Failed
+            };
+            write_claim(&root, agent, &version, state);
+        }
+        out.clean &= clean;
+        out.lines.extend(lines);
+    }
+    out
+}
+
+/// The line the next session shows for a finished background refresh.
+pub fn notice_line(refreshed: &Refreshed) -> Option<String> {
+    let summary = refreshed.lines.last()?;
+    Some(if refreshed.clean {
+        format!("playbook: refreshed the Codex skills ({summary}).")
+    } else {
+        format!(
+            "playbook: refreshing the Codex skills did not finish ({summary}). \
+            Run `playbook skills sync` to see why."
+        )
+    })
+}
+
 /// Renders every planned target from the plugin folder into the files to
 /// write: markdown gets its references rewritten, `SKILL.md` and commands
 /// are rendered and split when large, and other files are copied as they are.
@@ -148,6 +360,69 @@ mod tests {
             "{md}"
         );
         assert_eq!(files[Path::new("references/x.bin")], vec![0u8, 159, 255]);
+    }
+
+    const NOW: u64 = 1_000_000;
+    const HOUR: u64 = 3600;
+
+    #[test]
+    fn the_refresh_claim_follows_the_marker_rules() {
+        // Arrange
+        let claim = |state: &str, age: u64| format!("2.0.0 {state} {}", NOW - age);
+        let cases = [
+            (None, true),
+            (Some(claim("done", 0)), false),
+            (Some(claim("done", 99 * HOUR)), false),
+            (Some(claim("failed", 24 * HOUR)), false),
+            (Some(claim("failed", 24 * HOUR + 1)), true),
+            (Some(claim("running", 10 * 60)), false),
+            (Some(claim("running", 10 * 60 + 1)), true),
+            (Some(format!("1.0.0 done {NOW}")), true),
+            (Some("garbage".to_string()), true),
+        ];
+
+        for (text, due) in cases {
+            // Act
+            let got = claim_due(text.as_deref(), "2.0.0", NOW);
+
+            // Assert
+            assert_eq!(got, due, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_claim_moves_once_for_callers_that_read_the_same_value() {
+        // Arrange
+        let root = empty_home("refresh-claim");
+
+        // Act
+        let first = take_claim(&root, Agent::Codex, None, "2.0.0", NOW);
+        let second = take_claim(&root, Agent::Codex, None, "2.0.0", NOW);
+
+        // Assert
+        assert!(first);
+        assert!(!second);
+    }
+
+    #[test]
+    fn only_records_for_another_version_are_stale() {
+        // Arrange
+        let root = empty_home("stale-records");
+        crate::state::set(
+            &root,
+            "skills-sync/codex/playbook-fix",
+            "version 1.0.0\nstate done\n",
+        )
+        .unwrap();
+        crate::state::set(&root, &refresh_key(Agent::Codex), "9.9.9 done 1").unwrap();
+
+        // Act
+        let behind = has_stale_records(&root, Agent::Codex, "2.0.0");
+        let current = has_stale_records(&root, Agent::Codex, "1.0.0");
+
+        // Assert
+        assert!(behind);
+        assert!(!current, "the claim row is not a folder record");
     }
 
     #[test]
