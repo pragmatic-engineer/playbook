@@ -28,7 +28,8 @@ pub const COLLECT: &str = "playbook usage collect";
 /// collector up, before its next steps call the collector down.
 pub const START_WAIT: Duration = Duration::from_secs(2);
 
-/// The state key that records a no, so the reminder stops.
+/// The state key that records a no, so setup stops asking. The whole part
+/// goes in a later segment.
 pub(crate) const DECLINED_KEY: &str = "collector-service/declined";
 
 /// The state key the retired `collector-service` migration wrote after its
@@ -40,7 +41,7 @@ pub(crate) const REMINDED_KEY: &str = "collector-service/reminded";
 pub enum Choice {
     /// Not asked and no flag, as in a run with no terminal: nothing changes.
     Skip,
-    /// The user said no: nothing changes and the reminder stops.
+    /// The user said no: nothing changes and setup stops asking.
     Declined,
     /// Install the service, or bring it up to date.
     Install,
@@ -59,7 +60,7 @@ pub fn declined(home: &Path) -> bool {
     has_key(home, DECLINED_KEY)
 }
 
-/// Records or clears the no. A failure only means the reminder may show again.
+/// Records or clears the no. A failure only means setup may ask again.
 fn record_declined(home: &Path, no: bool) {
     let _ = match no {
         true => crate::state::set(&root(home), DECLINED_KEY, "1"),

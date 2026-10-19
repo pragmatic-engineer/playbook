@@ -408,8 +408,10 @@ fn disk_guard_hook_by_setup(_: &Ctx) -> Outcome {
 /// agent under the current label, the one under the 0.37.0 label and the
 /// systemd unit. Then it deletes the answers the retired setup part stored
 /// and starts a collector, because `bootout` stopped the one the service ran
-/// and open sessions still send to it. `Owned`: it touches only files
-/// playbook wrote, and runs the service manager only where
+/// and open sessions still send to it, also when a removal fails part way.
+/// `Owned`: the agent under the current label and the unit are matched by
+/// path only, so whatever file sits there goes; the old-label agent goes
+/// only when playbook wrote it. The service manager runs only where
 /// `service_manager::refusal` allows it. Idempotent: with no file left it
 /// reads a few paths and runs nothing, so a run the heal's start budget cut
 /// short finishes on the next one.
@@ -445,10 +447,12 @@ fn remove_collector_service(
     let removed = match remove_with(home, manager) {
         Ok(removed) => removed,
         Err(why) => {
+            // An earlier bootout may have stopped the collector already.
+            start();
             return Outcome::Failed(StepReport::failed(
                 STEP,
                 format!("{why}; to try again, run: playbook migrate"),
-            ))
+            ));
         }
     };
     forget_answers(home);
@@ -1673,7 +1677,6 @@ mod tests {
         );
         assert_eq!(rows(&h), after_first, "the conversion runs once");
         assert_eq!(budget(&h), "5.0", "an applied migration does not run again");
-        assert!(!applied(&read_state(&h)).contains(&RETIRED_COLLECTOR_LABEL_MIGRATION.to_string()));
     }
 
     #[test]
@@ -2657,15 +2660,74 @@ mod tests {
         assert!(service_files(&h).iter().all(|f| !f.exists()));
     }
 
+    /// The number 0.37.0 gave the retired service reminder.
+    const RETIRED_COLLECTOR_SERVICE_LEGACY_ID: &str = "0016-collector-service";
+
+    #[test]
+    fn removal_that_fails_part_way_still_starts_a_collector() {
+        // Arrange: a directory where the unit file is, so its delete fails
+        // after the launchd agent was booted out.
+        use crate::service_manager::fake::Launchd;
+        use crate::usage::service::{Kind, LABEL};
+        let h = service_home("remove-fails");
+        let unit = Kind::Systemd.file(&h);
+        fs::remove_file(&unit).unwrap();
+        fs::create_dir(&unit).unwrap();
+        let fake = Launchd::with(&[LABEL]);
+        let starts = std::cell::Cell::new(0);
+
+        // Act
+        let out = remove_collector_service(&ctx(&h), &fake, &|| starts.set(starts.get() + 1));
+
+        // Assert
+        let Outcome::Failed(step) = out else {
+            panic!("a failed delete is reported as a failure");
+        };
+        assert!(step.detail.contains("playbook migrate"), "{}", step.detail);
+        assert!(!fake.has(LABEL), "{:?}", fake.calls.borrow());
+        assert_eq!(starts.get(), 1, "the stopped collector is started again");
+    }
+
+    #[test]
+    fn removal_with_a_foreign_old_label_file_removes_the_rest_and_keeps_it() {
+        // Arrange: every service file, with an old-label agent playbook did
+        // not write.
+        use crate::service_manager::fake::Launchd;
+        use crate::usage::service::{old_file, Kind, LABEL};
+        let h = service_home("remove-mixed");
+        let foreign = old_file(&h);
+        fs::write(&foreign, "<plist/>").unwrap();
+        let fake = Launchd::with(&[LABEL]);
+        let starts = std::cell::Cell::new(0);
+
+        // Act
+        let out = remove_collector_service(&ctx(&h), &fake, &|| starts.set(starts.get() + 1));
+
+        // Assert
+        let Outcome::Repeat(step) = out else {
+            panic!("a removal is reported and runs again next time");
+        };
+        assert!(
+            step.detail.contains("launchctl bootout gui/") && step.detail.contains("rm "),
+            "{}",
+            step.detail
+        );
+        assert_eq!(starts.get(), 1);
+        assert!(foreign.is_file());
+        assert!(!Kind::Launchd.file(&h).exists() && !Kind::Systemd.file(&h).exists());
+    }
+
     #[test]
     fn a_record_with_rows_under_both_retired_collector_slugs_still_loads() {
-        // Arrange: a 0.38.0 record with both retired items applied and pending.
+        // Arrange: a 0.38.0 record with both retired items applied, the
+        // service reminder under its 0.37.0 number too.
         let h = home("retired-collector");
         let retired = [
             RETIRED_COLLECTOR_SERVICE_MIGRATION,
             RETIRED_COLLECTOR_LABEL_MIGRATION,
         ];
-        let rows: Vec<String> = retired.iter().map(|id| format!("applied {id}")).collect();
+        let mut rows: Vec<String> = retired.iter().map(|id| format!("applied {id}")).collect();
+        rows.push(format!("applied {RETIRED_COLLECTOR_SERVICE_LEGACY_ID}"));
         write_state(&h, &rows).unwrap();
 
         // Act

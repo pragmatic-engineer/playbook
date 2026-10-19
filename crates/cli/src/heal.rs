@@ -909,6 +909,27 @@ mod tests {
         assert!(Record::read(&root(&home)).unwrap().pending.is_empty());
     }
 
+    #[test]
+    fn a_pending_list_with_the_retired_collector_reminder_loads_and_drops_it() {
+        // Arrange: a 0.37.0 record with the retired reminder under both ids.
+        let home = scratch_dir("heal-retired-collector");
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        fs::write(home.join(".claude/settings.json"), r#"{"model":"x"}"#).unwrap();
+        seed_pending(&home, "0016-collector-service,collector-service");
+
+        // Act
+        let read = Record::read(&root(&home)).unwrap();
+        let out = run(&ctx(&home), Trigger::Hook, 1000);
+
+        // Assert
+        assert_eq!(
+            read.pending,
+            [migrate::RETIRED_COLLECTOR_SERVICE_MIGRATION; 2]
+        );
+        assert!(out.open.is_empty(), "{:?}", out.open);
+        assert!(Record::read(&root(&home)).unwrap().pending.is_empty());
+    }
+
     /// The record check of playbook 0.34.0 to 0.37.0: the version first,
     /// then the schema.
     fn old_compare(record: &Record, binary: &str, schema: u32) -> Ordering {
