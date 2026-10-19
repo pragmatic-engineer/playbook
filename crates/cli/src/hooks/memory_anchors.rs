@@ -87,6 +87,9 @@ const STRONG_NAME_TOKENS: usize = 2;
 /// Score of a name hit; a description hit scores one.
 const NAME_HIT_SCORE: usize = 2;
 
+/// Score of a prompt word that names the crate folder of an anchor.
+const PATH_HIT_SCORE: usize = 2;
+
 /// Score of a fact anchored to a file touched this session.
 const TOUCHED_FILE_SCORE: usize = 1;
 
@@ -261,8 +264,9 @@ fn run_prompt(payload: &Payload, dir: &str) {
     }
 
     let root = git_toplevel();
-    let tokens = prompt_tokens(&prompt);
-    let mut matches = prompt_token_matches(&contents, &tokens);
+    let query = PromptQuery::new(&prompt);
+    let tokens = query.tokens.clone();
+    let mut matches = prompt_token_matches(&contents, &query);
     let index = AnchorIndex::parse(&contents);
     for touched_abs in touched_paths(dir) {
         let relpath = repo_relative_path(&root, &touched_abs);
@@ -467,6 +471,56 @@ fn contains_at_boundary(text: &str, token: &str) -> bool {
     })
 }
 
+/// Word that names the crates folder in an anchor path and in a prompt.
+const CRATES_DIR: &str = "crates";
+
+/// The searchable parts of one prompt.
+struct PromptQuery {
+    /// Words that can match a fact name or description.
+    tokens: Vec<String>,
+    /// Words that name a crate, for matching the crate folder of an anchor.
+    path_tokens: Vec<String>,
+}
+
+impl PromptQuery {
+    fn new(prompt: &str) -> Self {
+        Self {
+            tokens: prompt_tokens(prompt),
+            path_tokens: prompt_path_tokens(prompt),
+        }
+    }
+}
+
+/// Words directly before `crate` or `crates`, stopwords included ("code" in
+/// "PB code crate"). Only these can name a crate, so a bare "src" or "docs"
+/// in a prompt never reaches an anchor path.
+fn prompt_path_tokens(prompt: &str) -> Vec<String> {
+    let lower = prompt.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(char::is_whitespace)
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '-'))
+        .collect();
+    let mut out: Vec<String> = Vec::new();
+    for pair in words.windows(2) {
+        let (before, next) = (pair[0], pair[1]);
+        if !before.is_empty()
+            && matches!(next, "crate" | "crates")
+            && !out.iter().any(|t| t == before)
+        {
+            out.push(before.to_string());
+        }
+    }
+    out
+}
+
+/// The crate folder name of an anchor: the segment right after `crates/`.
+/// Files and folders deeper in the crate (`src`, `main.rs`) do not count.
+fn anchor_crate_name(anchor: &str) -> Option<&str> {
+    let mut segments = anchor.split('/');
+    segments.find(|s| *s == CRATES_DIR)?;
+    segments.next().filter(|s| !s.is_empty())
+}
+
 /// A fact row that matched the prompt or a touched file. `strong` marks a
 /// match specific enough to trust: a hyphenated name token, two distinct name
 /// tokens, or a touched-file anchor. Anything else is weak.
@@ -479,7 +533,8 @@ struct RecallMatch {
 /// Rows whose name or description matches a prompt token, best first: each
 /// distinct token that hits counts one, two when it hits the name. Ties keep
 /// index order. Deduplicated by from_id, same as `matching_rows`.
-fn prompt_token_matches(idx_contents: &str, tokens: &[String]) -> Vec<RecallMatch> {
+fn prompt_token_matches(idx_contents: &str, query: &PromptQuery) -> Vec<RecallMatch> {
+    let tokens = &query.tokens;
     if tokens.is_empty() {
         return Vec::new();
     }
@@ -512,6 +567,13 @@ fn prompt_token_matches(idx_contents: &str, tokens: &[String]) -> Vec<RecallMatc
                 score += 1;
             }
         }
+        let path_hit = cols
+            .first()
+            .and_then(|anchor| anchor_crate_name(&anchor.to_lowercase()).map(str::to_string))
+            .is_some_and(|name| query.path_tokens.contains(&name));
+        if path_hit {
+            score += PATH_HIT_SCORE;
+        }
         if score == 0 {
             continue;
         }
@@ -522,7 +584,7 @@ fn prompt_token_matches(idx_contents: &str, tokens: &[String]) -> Vec<RecallMatc
         seen_from.insert(from_id);
         scored.push(RecallMatch {
             score,
-            strong: hyphenated_name_hit || name_hit_tokens.len() >= STRONG_NAME_TOKENS,
+            strong: path_hit || hyphenated_name_hit || name_hit_tokens.len() >= STRONG_NAME_TOKENS,
             row: cols.iter().map(|s| s.to_string()).collect(),
         });
     }
@@ -1046,7 +1108,64 @@ mod tests {
     }
 
     fn scored(index: &str, prompt: &str) -> Vec<RecallMatch> {
-        prompt_token_matches(index, &prompt_tokens(prompt))
+        prompt_token_matches(index, &PromptQuery::new(prompt))
+    }
+
+    /// Two anchored rows in the `RECALL_INDEX` shape: a crate folder and a
+    /// file inside another crate.
+    const PATH_INDEX: &str = "crates/code/\tproject/a\tcode-index\tsource index\t\ta.md\n\
+        crates/cli/src/x.rs\tproject/b\tcli-helper\tlives in crates\t\tb.md\n\
+        crates/cli/src/main.rs\tproject/c\tentry-point\tthe binary start\t\tc.md\n\
+        src/lib.rs\tproject/d\tlib-root\tthe library root\t\td.md\n";
+
+    #[test]
+    fn a_word_before_crate_matches_the_crate_folder_and_ranks_first() {
+        // Act
+        let got = scored(PATH_INDEX, "PB code crate");
+
+        // Assert
+        assert_eq!(got[0].row[1], "project/a");
+        assert!(got[0].strong, "a crate-name path hit is a strong match");
+    }
+
+    #[test]
+    fn path_tokens_are_only_the_words_before_crate_or_crates() {
+        assert_eq!(prompt_path_tokens("PB code crate"), terms(&["code"]));
+        assert_eq!(prompt_path_tokens("the Data, crates"), terms(&["data"]));
+        assert!(prompt_path_tokens("fix the test").is_empty());
+        assert!(prompt_path_tokens("crate").is_empty());
+    }
+
+    #[test]
+    fn a_prompt_with_no_crate_word_gets_no_path_hit() {
+        // "src" is a real path segment but is not named before "crate"
+        let got = scored(PATH_INDEX, "fix the bug in src");
+        assert!(got.is_empty(), "got {:?}", got.len());
+    }
+
+    #[test]
+    fn the_word_crate_alone_matches_no_path() {
+        let got = scored(PATH_INDEX, "crate");
+        assert!(got.iter().all(|m| m.row[1] == "project/b"));
+        assert!(got.iter().all(|m| !m.strong));
+    }
+
+    #[test]
+    fn a_path_token_does_not_make_a_file_or_folder_segment_a_strong_hit() {
+        // "main" is a segment of crates/cli/src/main.rs but not the crate name
+        let main = scored(PATH_INDEX, "main crate");
+        assert!(main.iter().all(|m| !m.strong));
+        let src = scored(PATH_INDEX, "src crate");
+        assert!(src.iter().all(|m| !m.strong));
+        let rs = scored(PATH_INDEX, "rs crate");
+        assert!(rs.iter().all(|m| !m.strong));
+    }
+
+    #[test]
+    fn a_crate_name_never_matches_by_prefix() {
+        // "cod" is a prefix of the crate "code"
+        let got = scored(PATH_INDEX, "cod crate");
+        assert!(got.iter().all(|m| !m.strong));
     }
 
     fn terms(words: &[&str]) -> Vec<String> {
