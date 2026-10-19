@@ -185,6 +185,9 @@ pub struct Outcome {
     pub notices: crate::notices::Notices,
     /// Why nothing ran, when nothing did.
     pub skipped: Option<Skip>,
+    /// Whether `open` is the full list of open items, so a session may drop
+    /// the mark of an item missing from it.
+    pub listed: bool,
 }
 
 impl Outcome {
@@ -230,6 +233,12 @@ impl Outcome {
                 parts.join("; ")
             )
         })
+    }
+
+    /// Whether this run computed the full list of open items: it ran, and
+    /// no migration failed or stopped at the time limit.
+    pub fn listed_open(&self) -> bool {
+        self.listed && self.skipped.is_none() && self.failed.is_empty() && !self.timed_out
     }
 
     /// The open items of this run with the plugin items, as one list.
@@ -339,6 +348,7 @@ fn heal_for(
             if waiting {
                 return Outcome {
                     open: migrate::open_items(ctx, Some(&record.pending)),
+                    listed: true,
                     ..Outcome::skipped(Skip::WaitingAfterFailure)
                 };
             }
@@ -373,7 +383,10 @@ fn heal_for(
 /// still open, and drop the ones that cleared.
 fn recheck_pending(ctx: &Ctx, root: &Path, record: &Record) -> Outcome {
     if record.pending.is_empty() {
-        return Outcome::default();
+        return Outcome {
+            listed: true,
+            ..Outcome::default()
+        };
     }
     let open = migrate::open_items(ctx, Some(&record.pending));
     let pending = ids(&open).join(",");
@@ -390,6 +403,7 @@ fn recheck_pending(ctx: &Ctx, root: &Path, record: &Record) -> Outcome {
     Outcome {
         open,
         recorded: true,
+        listed: true,
         ..Outcome::default()
     }
 }
@@ -436,6 +450,7 @@ fn heal_now(ctx: &Ctx, root: &Path, retries: u32, now: u64, deadline: Option<Ins
 }
 
 fn record_clean(ctx: &Ctx, root: &Path, mut out: Outcome) -> Outcome {
+    out.listed = true;
     let env = std::env::var("CLAUDE_PLUGIN_ROOT").ok();
     let plugin = crate::plugin_root::find(env.as_deref(), &ctx.claude_home)
         .and_then(|root| crate::plugin_root::plugin_version(&root));
@@ -463,19 +478,33 @@ pub fn session_line(home: &Path) -> Option<String> {
     std::panic::catch_unwind(|| {
         let shown = !crate::common::headless::is_headless();
         let out = run_shown(&ctx, Trigger::Hook, now, shown);
-        notice(home, &out)
+        notice(home, &out, now, shown)
     })
     .ok()?
 }
 
-/// What the heal did, the list of items that need the user, and the
-/// release notes line, in that order, or `None` when all are empty.
-fn notice(home: &Path, out: &Outcome) -> Option<String> {
+/// What the heal did, the items that need the user as the hook shows them
+/// (`pending::session_notice`), and the release notes line, in that order,
+/// or `None` when all are empty. A home under test that counts as the real
+/// one gets no item list, so nothing is written there.
+fn notice(home: &Path, out: &Outcome, now: u64, shown: bool) -> Option<String> {
+    let items = if out.skipped == Some(Skip::RealHomeUnderTest) {
+        None
+    } else {
+        let root = crate::common::paths::playbook_root_from(home);
+        // Only a run that computed the open list may drop a mark for a
+        // migration item missing from it.
+        let prune = crate::pending::Prune {
+            migrations: out.listed_open(),
+            session_plugin: std::env::var_os("CLAUDE_PLUGIN_ROOT").is_some_and(|v| !v.is_empty()),
+        };
+        crate::pending::session_notice(&root, &out.items(home), now, shown, prune)
+    };
     let block = out.notices.render();
     let parts: Vec<String> = out
         .line()
         .into_iter()
-        .chain(crate::pending::session_text(&out.items(home)))
+        .chain(items)
         .chain((!block.is_empty()).then(|| block.trim_end().to_string()))
         .collect();
     (!parts.is_empty()).then(|| parts.join("\n"))
@@ -546,7 +575,10 @@ fn start(home: &Path, deadline: Instant) -> Option<String> {
     if out.skipped == Some(Skip::RealHomeUnderTest) {
         return Some(format!("playbook: {}", crate::common::real_home::NOTE));
     }
-    let text = notice(home, &out);
+    // Nobody may read a headless run, and a run that used its time budget
+    // does not wait for the store lock as well.
+    let shown = !crate::common::headless::is_headless() && !out.timed_out;
+    let text = notice(home, &out, now, shown);
     if !out.timed_out {
         return text;
     }
@@ -981,6 +1013,30 @@ mod tests {
         // Assert
         assert!(out.open.is_empty());
         assert!(Record::read(&root(&home)).unwrap().pending.is_empty());
+    }
+
+    #[test]
+    fn only_a_run_that_listed_every_open_item_may_drop_marks() {
+        // Arrange: a record that already names this binary.
+        let home = scratch_dir("heal-listed");
+        seed(&home, env!("CARGO_PKG_VERSION"), LEGACY_SCHEMA, None);
+        let start = Trigger::Start {
+            deadline: Instant::now() + START_BUDGET,
+        };
+
+        // Act
+        let hook = run(&ctx(&home), Trigger::Hook, 1000);
+        let first_run = run(&ctx(&home), start, 1000);
+        fs::create_dir_all(root(&home).join("migrations.lock")).unwrap();
+        let busy = run(&ctx(&home), Trigger::Fix, 1000);
+
+        // Assert
+        assert!(hook.listed_open(), "nothing pending is a full list");
+        assert!(
+            !first_run.listed_open(),
+            "the first-run step checks nothing here"
+        );
+        assert!(!busy.listed_open(), "a busy lock checks nothing");
     }
 
     #[test]

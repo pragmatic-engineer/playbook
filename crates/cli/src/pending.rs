@@ -6,12 +6,23 @@
 //! `doctor` and `doctor --fix` share (ADR 0034, 2026-10-19 amendment).
 //!
 //! Each item is one bullet: what it is, why it matters, and the exact
-//! command that fixes it.
+//! command that fixes it. The session hook shows an item in full the first
+//! time, then at most once a day in one short line, and never again once
+//! `playbook migrate` printed a report item. The marks live in the `state`
+//! table under `notices/items/<slug>`.
 
 use crate::init::migrate::{self, OpenItem};
 use crate::update::resolve::compare;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+/// The `state` key prefix of the per item marks.
+const MARK_PREFIX: &str = "notices/items/";
+
+/// How long the hook waits before it shows an item it already showed.
+pub const REMIND_AFTER_SECS: u64 = 24 * 60 * 60;
 
 /// The slug of the item for a plugin that needs a newer binary.
 pub const PLUGIN_NEEDS_BINARY: &str = "plugin-needs-newer-binary";
@@ -26,7 +37,8 @@ pub enum Kind {
     /// A change to a file the user owns. It closes when setup applies it or
     /// the user says no.
     Consent,
-    /// A finding playbook cannot fix by itself.
+    /// A finding playbook cannot fix by itself. `playbook migrate` printing
+    /// it counts as seen.
     Report,
 }
 
@@ -323,10 +335,16 @@ pub fn final_line(items: &[Item]) -> String {
 
 /// How many items need the user, in words.
 pub fn count(n: usize) -> String {
+    count_still(n, false)
+}
+
+/// [`count`], with `still` for a reminder.
+fn count_still(n: usize, still: bool) -> String {
+    let still = if still { " still" } else { "" };
     if n == 1 {
-        "1 item needs you".to_string()
+        format!("1 item{still} needs you")
     } else {
-        format!("{n} items need you")
+        format!("{n} items{still} need you")
     }
 }
 
@@ -343,15 +361,185 @@ pub fn render(items: &[Item]) -> String {
     )
 }
 
-/// The list as the session message shows it, or `None` for no items.
-pub fn session_text(items: &[Item]) -> Option<String> {
-    (!items.is_empty()).then(|| {
-        format!(
+/// The one short line for items the user already saw.
+pub fn compact(items: &[&Item]) -> String {
+    let slugs: Vec<&str> = items.iter().map(|i| i.slug.as_str()).collect();
+    format!(
+        "playbook: {} ({}). To see the list, run: playbook migrate --status",
+        count_still(items.len(), true),
+        slugs.join(", ")
+    )
+}
+
+/// What the hook did with an item the last time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct Mark {
+    /// A hash of what the bullet shows, so a changed item shows in full again.
+    fp: String,
+    /// When it last showed, in unix seconds.
+    shown: u64,
+    /// Whether `playbook migrate` printed this report item.
+    #[serde(default)]
+    acked: bool,
+}
+
+/// A stable FNV-1a hash of everything the bullet shows, as hex.
+fn fingerprint(item: &Item) -> String {
+    let kind = match item.kind {
+        Kind::Consent => "consent",
+        Kind::Report => "report",
+    };
+    let mut bytes = Vec::new();
+    for field in [item.slug.as_str(), kind, &item.what, &item.fix] {
+        bytes.extend_from_slice(field.as_bytes());
+        bytes.push(0);
+    }
+    crate::gate::hash::hash_hex(&bytes)
+}
+
+/// The marks in `rows`, by slug. A row that does not parse is left out.
+fn parse_marks(rows: Vec<(String, String)>) -> BTreeMap<String, Mark> {
+    rows.into_iter()
+        .filter_map(|(key, value)| {
+            let slug = key.strip_prefix(MARK_PREFIX)?.to_string();
+            Some((slug, serde_json::from_str(&value).ok()?))
+        })
+        .collect()
+}
+
+/// Every mark, read without writing. An unreadable store reads as no marks.
+fn read_marks(root: &Path) -> BTreeMap<String, Mark> {
+    parse_marks(crate::state::list_read_only(root, MARK_PREFIX).unwrap_or_default())
+}
+
+/// How the hook shows one item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Show {
+    /// New or changed: the full bullet.
+    Full,
+    /// Seen, not settled, and last shown a day ago or more: the short line.
+    Compact,
+    /// Shown less than a day ago, or a report item `migrate` printed.
+    Hide,
+}
+
+/// How the hook shows `item` at `now`, given its mark. A mark from the
+/// future, after the clock moved back, counts as due.
+fn decide(item: &Item, mark: Option<&Mark>, now: u64) -> Show {
+    match mark {
+        Some(m) if m.fp == fingerprint(item) => {
+            if m.acked && item.kind == Kind::Report {
+                Show::Hide
+            } else if now.saturating_sub(m.shown) >= REMIND_AFTER_SECS || m.shown > now {
+                Show::Compact
+            } else {
+                Show::Hide
+            }
+        }
+        _ => Show::Full,
+    }
+}
+
+/// Which marks a write may drop because their item is not in its list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Prune {
+    /// The list holds every open migration item: the heal computed it.
+    pub migrations: bool,
+    /// The list holds the plugin items for the folder this session runs
+    /// from, so a missing stale session item has cleared.
+    pub session_plugin: bool,
+}
+
+impl Prune {
+    /// Drops nothing.
+    pub const NONE: Prune = Prune {
+        migrations: false,
+        session_plugin: false,
+    };
+
+    fn allows(self, slug: &str) -> bool {
+        match slug {
+            PLUGIN_STALE_SESSION => self.session_plugin,
+            PLUGIN_NEEDS_BINARY | PLUGIN_RANGE => true,
+            _ => self.migrations,
+        }
+    }
+}
+
+/// The session notice for `items` at `now`: the full list of new items and
+/// one short line for the ones due again. With `shown` false (a headless
+/// session) nothing is marked, so nobody misses an item. Marks of items that
+/// cleared are removed as `prune` allows, so an item that comes back shows
+/// in full.
+pub fn session_notice(
+    root: &Path,
+    items: &[Item],
+    now: u64,
+    shown: bool,
+    prune: Prune,
+) -> Option<String> {
+    let marks = read_marks(root);
+    let mut full = Vec::new();
+    let mut due = Vec::new();
+    for item in items {
+        match decide(item, marks.get(&item.slug), now) {
+            Show::Full => full.push(item),
+            Show::Compact => due.push(item),
+            Show::Hide => {}
+        }
+    }
+    if shown {
+        let showing: Vec<&Item> = full.iter().chain(due.iter()).copied().collect();
+        write_marks(root, items, &showing, now, false, prune);
+    }
+    let mut parts = Vec::new();
+    if !full.is_empty() {
+        let full: Vec<Item> = full.into_iter().cloned().collect();
+        parts.push(format!(
             "playbook {}: {}",
             env!("CARGO_PKG_VERSION"),
-            render(items).trim_end()
-        )
-    })
+            render(&full).trim_end()
+        ));
+    }
+    if !due.is_empty() {
+        parts.push(compact(&due));
+    }
+    (!parts.is_empty()).then(|| parts.join("\n"))
+}
+
+/// Records that `playbook migrate` printed `items` to a person at `now`:
+/// report items stop showing in the hook, and setup items wait a day. It
+/// drops no mark, since its list may lack items only a session can see.
+pub fn acknowledge(root: &Path, items: &[Item], now: u64) {
+    let all: Vec<&Item> = items.iter().collect();
+    write_marks(root, items, &all, now, true, Prune::NONE);
+}
+
+/// Writes the marks of `showing` and drops the marks `prune` allows for
+/// items no longer in `items`, in one transaction that reads the marks
+/// again, so a mark another process wrote meanwhile is not lost. Best
+/// effort: a failed write only means an item may show again.
+fn write_marks(root: &Path, items: &[Item], showing: &[&Item], now: u64, ack: bool, prune: Prune) {
+    let _ = crate::state::transaction(root, |tx| {
+        let marks = parse_marks(tx.list(MARK_PREFIX)?);
+        for slug in marks.keys() {
+            if prune.allows(slug) && !items.iter().any(|i| &i.slug == slug) {
+                tx.delete(&format!("{MARK_PREFIX}{slug}"))?;
+            }
+        }
+        for item in showing {
+            let fp = fingerprint(item);
+            let kept = marks.get(&item.slug).is_some_and(|m| m.fp == fp && m.acked);
+            let mark = Mark {
+                fp,
+                shown: now,
+                acked: kept || (ack && item.kind == Kind::Report),
+            };
+            let text = serde_json::to_string(&mark).unwrap_or_default();
+            tx.set(&format!("{MARK_PREFIX}{}", item.slug), &text)?;
+        }
+        Ok(())
+    });
 }
 
 #[cfg(test)]
@@ -368,6 +556,76 @@ mod tests {
             why: why(slug),
             fix: "playbook setup --only x".into(),
         }
+    }
+
+    const ALL: Prune = Prune {
+        migrations: true,
+        session_plugin: true,
+    };
+
+    fn session_notice_all(root: &Path, items: &[Item], now: u64, shown: bool) -> Option<String> {
+        session_notice(root, items, now, shown, ALL)
+    }
+
+    #[test]
+    fn a_setup_item_migrate_printed_waits_a_day_then_comes_back_short() {
+        let root = root("pending-ack-consent");
+        let items = vec![item("x", Kind::Consent, "a setup change")];
+        acknowledge(&root, &items, 1_000);
+        assert_eq!(session_notice_all(&root, &items, 1_000 + 3_600, true), None);
+        assert!(
+            session_notice_all(&root, &items, 1_000 + REMIND_AFTER_SECS, true)
+                .is_some_and(|t| t.starts_with("playbook: 1 item still needs you (x)"))
+        );
+    }
+
+    #[test]
+    fn a_mark_from_the_future_counts_as_due() {
+        let it = item("x", Kind::Consent, "a");
+        let mark = Mark {
+            fp: fingerprint(&it),
+            shown: 5_000,
+            acked: false,
+        };
+        assert_eq!(decide(&it, Some(&mark), 1_000), Show::Compact);
+    }
+
+    #[test]
+    fn a_new_fix_command_shows_a_report_in_full_again() {
+        let root = root("pending-new-fix");
+        let mut it = item("x", Kind::Report, "a");
+        acknowledge(&root, std::slice::from_ref(&it), 1_000);
+        it.fix = "another command".into();
+        assert!(
+            session_notice_all(&root, std::slice::from_ref(&it), 2_000, true)
+                .is_some_and(|t| t.contains("Fix: another command"))
+        );
+    }
+
+    #[test]
+    fn a_partial_list_keeps_the_marks_it_cannot_judge() {
+        // Arrange: a setup item and a stale session item were shown.
+        let root = root("pending-partial");
+        let setup = item("x", Kind::Consent, "a");
+        let stale = item(PLUGIN_STALE_SESSION, Kind::Report, "b");
+        session_notice_all(&root, &[setup.clone(), stale.clone()], 1_000, true);
+
+        // Act: migrate prints nothing open, and a skipped heal lists nothing.
+        acknowledge(&root, &[], 1_100);
+        session_notice(&root, &[], 1_200, true, Prune::NONE);
+
+        // Assert: both marks stay, so neither shows in full again.
+        assert_eq!(
+            session_notice_all(&root, &[setup, stale], 1_300, true),
+            None
+        );
+    }
+
+    fn root(tag: &str) -> PathBuf {
+        let home = scratch_dir(tag);
+        let root = crate::common::paths::playbook_root_from(&home);
+        fs::create_dir_all(&root).unwrap();
+        root
     }
 
     fn plugin(home: &Path, version: &str, min: &str) -> PathBuf {
@@ -516,6 +774,85 @@ mod tests {
         )
         .unwrap();
         assert!(plugin_items(&probe(&home, Some(odd), "0.37.0")).is_empty());
+    }
+
+    #[test]
+    fn a_new_item_shows_in_full_then_once_a_day_in_one_short_line() {
+        // Arrange
+        let root = root("pending-throttle");
+        let items = vec![item(
+            migrate::STATUSLINE_MIGRATION,
+            Kind::Consent,
+            "old status line",
+        )];
+
+        // Act: an injected clock, in seconds.
+        let first = session_notice_all(&root, &items, 1_000, true);
+        let soon = session_notice_all(&root, &items, 1_000 + 3_600, true);
+        let next_day = session_notice_all(&root, &items, 1_000 + REMIND_AFTER_SECS, true);
+        let same_day = session_notice_all(&root, &items, 1_000 + REMIND_AFTER_SECS + 60, true);
+
+        // Assert
+        assert!(
+            first
+                .as_deref()
+                .is_some_and(|t| t.contains("  - Old status line.")),
+            "{first:?}"
+        );
+        assert_eq!(soon, None);
+        assert_eq!(
+            next_day.as_deref(),
+            Some("playbook: 1 item still needs you (statusline-rust-command). To see the list, run: playbook migrate --status")
+        );
+        assert_eq!(same_day, None);
+    }
+
+    #[test]
+    fn a_report_item_migrate_printed_never_comes_back_until_it_changes() {
+        // Arrange
+        let root = root("pending-ack");
+        let old = vec![item(PLUGIN_RANGE, Kind::Report, "plugin 0.36.0 is old")];
+        session_notice_all(&root, &old, 1_000, true);
+
+        // Act
+        acknowledge(&root, &old, 2_000);
+        let later = session_notice_all(&root, &old, 2_000 + 10 * REMIND_AFTER_SECS, true);
+        let changed = vec![item(PLUGIN_RANGE, Kind::Report, "plugin 0.35.0 is old")];
+        let new_text = session_notice_all(&root, &changed, 2_000 + 10 * REMIND_AFTER_SECS, true);
+
+        // Assert
+        assert_eq!(later, None);
+        assert!(new_text.is_some_and(|t| t.contains("Plugin 0.35.0 is old")));
+    }
+
+    #[test]
+    fn a_cleared_item_disappears_at_once_and_shows_in_full_if_it_comes_back() {
+        // Arrange
+        let root = root("pending-clear");
+        let items = vec![item(
+            migrate::STATUSLINE_MIGRATION,
+            Kind::Consent,
+            "old status line",
+        )];
+        session_notice_all(&root, &items, 1_000, true);
+
+        // Act
+        let cleared = session_notice_all(&root, &[], 1_060, true);
+        let back = session_notice_all(&root, &items, 1_120, true);
+
+        // Assert
+        assert_eq!(cleared, None);
+        assert!(back.is_some_and(|t| t.contains("  - Old status line.")));
+    }
+
+    #[test]
+    fn a_headless_session_marks_nothing() {
+        let root = root("pending-headless");
+        let items = vec![item("x", Kind::Consent, "a")];
+        assert!(session_notice_all(&root, &items, 1_000, false).is_some());
+        assert!(
+            session_notice_all(&root, &items, 1_001, true).is_some_and(|t| t.contains("  - A."))
+        );
     }
 
     #[test]

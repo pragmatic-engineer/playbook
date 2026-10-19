@@ -960,7 +960,7 @@ Example: `playbook memory stats --json`
 
 Bring playbook's own files up to date with this binary
 
-Runs the migrations that write only playbook's own files, then records this binary as the one that ran them. The ones that run once start only after an upgrade, and the checks that repair a file run every time. A migration waits for the release named in its `since`. Nothing runs after a downgrade. It never writes Claude Code settings. It ends with the list of what still needs you, one bullet per item with why it matters and the command that fixes it: `playbook setup` for a change to Claude Code settings or a shell file, and its own fix for a report. `update`, the install script and `doctor --fix` run the same step.
+Runs the migrations that write only playbook's own files, then records this binary as the one that ran them. The ones that run once start only after an upgrade, and the checks that repair a file run every time. A migration waits for the release named in its `since`. Nothing runs after a downgrade. It never writes Claude Code settings. It ends with the list of what still needs you, one bullet per item with why it matters and the command that fixes it: `playbook setup` for a change to Claude Code settings or a shell file, and its own fix for a report. The session start then stops repeating a report it printed. `update`, the install script and `doctor --fix` run the same step.
 
 Exit codes: 0 when it finished or had nothing to do, 1 when the record could not be read or written, a migration failed, or another playbook process held the lock.
 

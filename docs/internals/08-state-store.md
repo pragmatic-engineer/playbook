@@ -9,6 +9,7 @@ Playbook keeps small bits of internal state in the `state` table of its SQLite s
 | `migrations/applied/<id>` | One row per finished Auto migration | `playbook setup` |
 | `migrations/shipped/<key>` | The hash of each file playbook placed | `playbook setup` edit detection |
 | `worktree-sweep/<repo slug>` | Epoch seconds of the last worktree sweep | The session-start hook |
+| `notices/items/<slug>` | For each item that needs you: a hash of its text, when it last showed, and whether `playbook migrate` printed it | The session-start hook and `playbook migrate` |
 
 Each row has a key, a text value and an update time. Writes that belong together (for example, rewriting all migration rows) run in one transaction. A failed write rolls back and leaves the old rows.
 

@@ -23,16 +23,34 @@ pub enum Mode {
 /// exit code: 1 when the record could not be read or written, a migration
 /// failed, or the lock was busy, else 0.
 pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
+    use std::io::IsTerminal;
+    // The list counts as seen only when a person reads it: not when a
+    // caller such as `playbook update` or the automatic update captures it.
+    let seen = std::io::stdout().is_terminal() && !crate::common::headless::is_headless();
+    run_with(home, mode, json, seen)
+}
+
+/// [`run`], where `seen` says whether a person reads the output, so the
+/// session hook counts the printed items as seen.
+pub fn run_with(home: &Path, mode: Mode, json: bool, seen: bool) -> i32 {
     let ctx = Ctx::for_home(home);
     match mode {
         Mode::Run => {
-            let out = heal::run(&ctx, Trigger::Fix, crate::common::time::now_epoch_secs());
+            let now = crate::common::time::now_epoch_secs();
+            let out = heal::run(&ctx, Trigger::Fix, now);
             eprint!("{}", out.notices.render());
             let items = out.items(home);
             if json {
                 println!("{}", run_json(&out, &items));
             } else {
                 print!("{}", heal::render_fix(&out, &items));
+                // Printed to a person, so the session hook counts them as
+                // seen (ADR 0034, 2026-10-19 amendment, decision 3). JSON
+                // goes to a script, so it does not count.
+                if seen && out.skipped != Some(heal::Skip::RealHomeUnderTest) {
+                    let root = crate::common::paths::playbook_root_from(home);
+                    crate::pending::acknowledge(&root, &items, now);
+                }
             }
             out.exit_code()
         }
@@ -304,6 +322,68 @@ mod tests {
                 false,
             ),
         ]
+    }
+
+    #[test]
+    fn a_run_a_person_reads_counts_its_report_items_as_seen() {
+        // Arrange: a plugin one line behind, so one report item is open.
+        let home = crate::common::test_support::scratch_dir("migrate-seen");
+        let dir = home.join(".claude/plugins/cache/pragmatic-engineer/playbook/0.0.1");
+        std::fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
+        std::fs::create_dir_all(dir.join("skills")).unwrap();
+        std::fs::write(
+            dir.join(".claude-plugin/plugin.json"),
+            r#"{"name":"playbook","version":"0.0.1"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            home.join(".claude/plugins/installed_plugins.json"),
+            format!(
+                r#"{{"plugins":{{"playbook@pragmatic-engineer":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
+                dir.display()
+            ),
+        )
+        .unwrap();
+        let root = crate::common::paths::playbook_root_from(&home);
+        let session = || {
+            let items = crate::pending::plugin_items(&crate::pending::PluginProbe {
+                claude_home: home.join(".claude"),
+                session_root: None,
+                binary: env!("CARGO_PKG_VERSION").into(),
+                homebrew: false,
+            });
+            crate::pending::session_notice(
+                &root,
+                &items,
+                u64::MAX / 2,
+                true,
+                crate::pending::Prune::NONE,
+            )
+        };
+
+        // Act: a captured run, then a run a person reads.
+        run_with(&home, Mode::Run, false, false);
+        let after_captured = session();
+        run_with(&home, Mode::Run, false, true);
+        let after_seen = crate::pending::session_notice(
+            &root,
+            &crate::pending::plugin_items(&crate::pending::PluginProbe {
+                claude_home: home.join(".claude"),
+                session_root: None,
+                binary: env!("CARGO_PKG_VERSION").into(),
+                homebrew: false,
+            }),
+            u64::MAX / 2 + 10 * crate::pending::REMIND_AFTER_SECS,
+            true,
+            crate::pending::Prune::NONE,
+        );
+
+        // Assert
+        assert!(after_captured.is_some_and(|t| t.contains("Fix: claude plugin update")));
+        assert_eq!(
+            after_seen, None,
+            "migrate printed it, so it does not come back"
+        );
     }
 
     #[test]

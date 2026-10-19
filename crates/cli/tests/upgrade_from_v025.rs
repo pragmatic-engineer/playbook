@@ -197,8 +197,8 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
         first.contains("of its own files after the upgrade"),
         "{first}"
     );
-    // One bullet per item, each with its own command (ADR 0034, 2026-10-19
-    // amendment).
+    // One bullet per item, each with its own command; the second session
+    // the same day stays quiet (ADR 0034, 2026-10-19 amendment).
     assert!(first.contains("5 items need you:\n"), "{first}");
     for fix in [
         "Fix: playbook setup --statusline\n",
@@ -210,8 +210,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
         assert!(first.contains(fix), "{fix}: {first}");
     }
     assert!(!first.contains("item(s) need you"), "{first}");
-    assert!(second.contains("5 items need you:\n"), "{second}");
-    assert!(!second.contains("updated"), "{second}");
+    assert_eq!(second, "", "shown less than a day ago");
     let report = String::from_utf8_lossy(&fix.stdout);
     for line in [
         "Fix: claude plugin uninstall playbook-hooks@pragmatic-engineer",
@@ -271,6 +270,10 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     assert!(
         settled.contains("Fix: playbook setup --only system-prompt"),
         "an earlier install keeps the prompt question open: {settled}"
+    );
+    assert!(
+        !settled.contains("claude plugin"),
+        "the report items showed less than a day ago: {settled}"
     );
 }
 
