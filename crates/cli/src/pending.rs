@@ -41,13 +41,20 @@ pub struct Item {
     pub why: &'static str,
     /// The exact command, or the plain action, that fixes it.
     pub fix: String,
-    /// Whether `playbook migrate` fixes it on its own.
-    pub by_migrate: bool,
 }
+
+/// The reason shown when a slug has no entry in [`reason`].
+const UNKNOWN_REASON: &str = "playbook found it while checking this machine after the upgrade";
 
 /// Why an item matters, by slug.
 fn why(slug: &str) -> &'static str {
-    match slug {
+    reason(slug).unwrap_or(UNKNOWN_REASON)
+}
+
+/// The reason for each slug that has one. A test checks that every
+/// `Consent` and `Report` migration has an entry.
+fn reason(slug: &str) -> Option<&'static str> {
+    Some(match slug {
         migrate::STATUSLINE_MIGRATION => {
             "the status line still runs a script that newer playbook no longer ships"
         }
@@ -63,12 +70,15 @@ fn why(slug: &str) -> &'static str {
         migrate::PROMPT_DEFAULT_MIGRATION => {
             "pb cc sessions start without the playbook system prompt until it is installed or turned off"
         }
+        migrate::DISK_GUARD_MIGRATION => {
+            "builds keep running when the disk is almost full, until the guard hook is added"
+        }
         "other-playbook-plugins" => "hooks and skills run twice in every session",
         PLUGIN_RANGE => "skills and commands may call binary features that work differently in this version",
         PLUGIN_NEEDS_BINARY => "skills from this plugin call binary features this version does not have",
         PLUGIN_STALE_SESSION => "this session runs the old skills and commands until Claude Code starts again",
-        _ => "playbook found it while checking this machine after the upgrade",
-    }
+        _ => return None,
+    })
 }
 
 /// `message` split at its last `Run: ` into the text and the command.
@@ -112,7 +122,6 @@ pub fn from_open(open: &[OpenItem]) -> Vec<Item> {
                 what: without_reason(what),
                 why: why(o.id),
                 fix,
-                by_migrate: false,
             }
         })
         .collect()
@@ -149,45 +158,38 @@ impl PluginProbe {
 /// the minor line of the binary, and a session that loaded an older plugin
 /// folder than the one Claude Code installed. A version problem counts only
 /// when both the installed plugin and the folder this session runs from have
-/// it, so it goes away once either one is current.
+/// it, so it goes away once either one is current. With nothing installed,
+/// the session folder alone is checked.
 pub fn plugin_items(probe: &PluginProbe) -> Vec<Item> {
     use crate::plugin_root::{
-        binary_too_old, find, is_plugin_dir, plugin_out_of_range, plugin_version,
+        binary_too_old, find, is_plain_version, is_plugin_dir, plugin_out_of_range, plugin_version,
     };
-    let Some(installed) = find(None, &probe.claude_home) else {
+    let session = probe.session_root.clone().filter(|r| is_plugin_dir(r));
+    let Some(installed) = find(None, &probe.claude_home).or_else(|| session.clone()) else {
         return Vec::new();
     };
-    let session = probe
-        .session_root
-        .clone()
-        .filter(|r| is_plugin_dir(r) && *r != installed);
+    let session = session.filter(|r| *r != installed);
     let roots: Vec<&Path> = std::iter::once(installed.as_path())
         .chain(session.as_deref())
         .collect();
-    let mut items = Vec::new();
+    // Only a plain version reaches the message, so a manifest cannot put
+    // other text in front of the user.
+    let version = |root: &Path| plugin_version(root).filter(|v| is_plain_version(v));
     let too_old: Vec<Option<String>> = roots
         .iter()
         .map(|r| binary_too_old(r, &probe.binary, probe.homebrew))
         .collect();
     let range: Vec<Option<String>> = roots
         .iter()
-        .map(|r| {
-            plugin_version(r).and_then(|v| plugin_out_of_range(&v, &probe.binary, probe.homebrew))
-        })
+        .map(|r| version(r).and_then(|v| plugin_out_of_range(&v, &probe.binary, probe.homebrew)))
         .collect();
-    if let Some(Some(first)) = too_old
-        .first()
-        .filter(|_| too_old.iter().all(Option::is_some))
-    {
-        items.push(report(PLUGIN_NEEDS_BINARY, first));
-    } else if let Some(Some(first)) = range.first().filter(|_| range.iter().all(Option::is_some)) {
-        items.push(report(PLUGIN_RANGE, first));
+    let mut items = Vec::new();
+    if let Some(message) = on_every_root(&too_old) {
+        items.push(report(PLUGIN_NEEDS_BINARY, message));
+    } else if let Some(message) = on_every_root(&range) {
+        items.push(report(PLUGIN_RANGE, message));
     }
-    let versions = (
-        plugin_version(&installed),
-        session.as_deref().and_then(plugin_version),
-    );
-    if let (Some(new), Some(old)) = versions {
+    if let (Some(new), Some(old)) = (version(&installed), session.as_deref().and_then(version)) {
         if compare(&old, &new) == Ordering::Less {
             items.push(Item {
                 slug: PLUGIN_STALE_SESSION.to_string(),
@@ -197,11 +199,19 @@ pub fn plugin_items(probe: &PluginProbe) -> Vec<Item> {
                 ),
                 why: why(PLUGIN_STALE_SESSION),
                 fix: "exit this session and start Claude Code again".to_string(),
-                by_migrate: false,
             });
         }
     }
     items
+}
+
+/// The first message when every root has one, else `None`.
+fn on_every_root(messages: &[Option<String>]) -> Option<&str> {
+    if messages.iter().all(Option::is_some) {
+        messages.first()?.as_deref()
+    } else {
+        None
+    }
 }
 
 fn report(slug: &'static str, message: &str) -> Item {
@@ -212,7 +222,6 @@ fn report(slug: &'static str, message: &str) -> Item {
         what,
         why: why(slug),
         fix: run.unwrap_or_else(|| "playbook doctor".to_string()),
-        by_migrate: false,
     }
 }
 
@@ -228,23 +237,39 @@ pub fn merge(open: &[OpenItem], plugin: Vec<Item>) -> Vec<Item> {
     items
 }
 
-/// Every open item for `home`, read without writing: the migration checks
-/// and the plugin checks. `None` when the migration record cannot be read.
-pub fn collect_read_only(home: &Path) -> Option<Vec<Item>> {
-    let ctx = migrate::Ctx::for_home(home);
-    let open: Vec<OpenItem> = migrate::plan(&ctx)?
-        .into_iter()
+/// The open items of `plan` with the plugin items for `home`.
+pub fn from_plan(home: &Path, plan: &[migrate::Planned]) -> Vec<Item> {
+    let open: Vec<OpenItem> = plan
+        .iter()
         .filter(|p| p.scope != "owned")
-        .filter_map(|p| match p.state {
+        .filter_map(|p| match &p.state {
             migrate::State::Open { message, command } => Some(OpenItem {
                 id: p.id,
-                message,
-                command,
+                message: message.clone(),
+                command: *command,
             }),
             _ => None,
         })
         .collect();
-    Some(merge(&open, plugin_items(&PluginProbe::for_home(home))))
+    merge(&open, plugin_items(&PluginProbe::for_home(home)))
+}
+
+/// The open migration items for `home`, read without writing, without the
+/// plugin items. `None` when the migration record cannot be read.
+pub fn migration_items_read_only(home: &Path) -> Option<Vec<Item>> {
+    let ctx = migrate::Ctx::for_home(home);
+    let plan = migrate::plan(&ctx)?;
+    Some(
+        from_plan(home, &plan)
+            .into_iter()
+            .filter(|i| !is_plugin_slug(&i.slug))
+            .collect(),
+    )
+}
+
+/// Whether `slug` names a plugin item, which the doctor's version row covers.
+pub fn is_plugin_slug(slug: &str) -> bool {
+    [PLUGIN_NEEDS_BINARY, PLUGIN_RANGE, PLUGIN_STALE_SESSION].contains(&slug)
 }
 
 /// `what` with its first letter in upper case, unless the first word is a
@@ -275,21 +300,29 @@ pub fn bullets(items: &[Item]) -> String {
     text
 }
 
-/// The last line: the one command that fixes what can be fixed without the
-/// user, else the one that asks about every setup change, else the one that
-/// shows the list again.
-pub fn final_line(items: &[Item]) -> String {
-    if items.iter().any(|i| i.by_migrate) {
-        "To fix what playbook can fix on its own, run: playbook migrate".to_string()
-    } else if items.iter().any(|i| i.kind == Kind::Consent) {
-        "To go through every setup change at once, run: playbook setup".to_string()
+/// The one command for the last line: `playbook setup` when a setup change
+/// is open, since it asks about every one, else the command that shows the
+/// list again.
+pub fn closing_command(items: &[Item]) -> &'static str {
+    if items.iter().any(|i| i.kind == Kind::Consent) {
+        "playbook setup"
     } else {
-        "To see this list again, run: playbook migrate --status".to_string()
+        "playbook migrate --status"
+    }
+}
+
+/// The last line, naming [`closing_command`].
+pub fn final_line(items: &[Item]) -> String {
+    match closing_command(items) {
+        "playbook setup" => {
+            "To go through every setup change at once, run: playbook setup".to_string()
+        }
+        command => format!("To see this list again, run: {command}"),
     }
 }
 
 /// How many items need the user, in words.
-fn count(n: usize) -> String {
+pub fn count(n: usize) -> String {
     if n == 1 {
         "1 item needs you".to_string()
     } else {
@@ -334,7 +367,6 @@ mod tests {
             what: what.into(),
             why: why(slug),
             fix: "playbook setup --only x".into(),
-            by_migrate: false,
         }
     }
 
@@ -406,11 +438,84 @@ mod tests {
     }
 
     #[test]
-    fn the_final_line_names_migrate_only_when_migrate_fixes_an_item() {
-        let mut report = item("x", Kind::Report, "a");
-        assert!(final_line(&[report.clone()]).ends_with("playbook migrate --status"));
-        report.by_migrate = true;
-        assert!(final_line(&[report]).ends_with("run: playbook migrate"));
+    fn the_final_line_names_setup_only_when_a_setup_change_is_open() {
+        let report = item("x", Kind::Report, "a");
+        let consent = item("y", Kind::Consent, "b");
+        assert!(
+            final_line(std::slice::from_ref(&report)).ends_with("run: playbook migrate --status")
+        );
+        assert!(final_line(&[report, consent]).ends_with("run: playbook setup"));
+    }
+
+    #[test]
+    fn every_consent_and_report_migration_says_why_it_matters() {
+        for m in migrate::registry() {
+            if matches!(m.scope, migrate::Scope::Owned) {
+                continue;
+            }
+            assert!(
+                reason(m.id).is_some(),
+                "{} is a Consent or Report migration: add why it matters to pending::reason",
+                m.id
+            );
+        }
+    }
+
+    #[test]
+    fn a_problem_only_the_installed_plugin_has_is_not_reported_when_the_session_folder_is_current()
+    {
+        // Arrange: the installed plugin needs a newer binary, or is a line
+        // behind, while this session runs from a current folder.
+        let home = scratch_dir("pending-plugin-either");
+        let current = plugin(&home, "0.37.0", "0.37.0");
+        let needs = plugin(&home, "0.38.0", "0.38.0");
+        install(&home, &needs, "0.38.0");
+        let too_old = plugin_items(&probe(&home, Some(current.clone()), "0.37.0"));
+        let behind = plugin(&home, "0.36.0", "0.36.0");
+        install(&home, &behind, "0.36.0");
+
+        // Act
+        let range = plugin_items(&probe(&home, Some(current), "0.37.0"));
+
+        // Assert
+        assert!(
+            too_old.iter().all(|i| i.slug != PLUGIN_NEEDS_BINARY),
+            "{too_old:?}"
+        );
+        assert!(range.iter().all(|i| i.slug != PLUGIN_RANGE), "{range:?}");
+    }
+
+    #[test]
+    fn a_session_folder_alone_is_checked_when_nothing_is_installed() {
+        let home = scratch_dir("pending-plugin-session-only");
+        fs::create_dir_all(home.join(".claude/plugins")).unwrap();
+        let dir = home.join("dev/plugins/playbook");
+        fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
+        fs::create_dir_all(dir.join("skills")).unwrap();
+        fs::write(
+            dir.join(".claude-plugin/plugin.json"),
+            r#"{"name":"playbook","version":"0.38.0","metadata":{"minBinaryVersion":"0.38.0"}}"#,
+        )
+        .unwrap();
+        let items = plugin_items(&probe(&home, Some(dir), "0.37.0"));
+        let slugs: Vec<&str> = items.iter().map(|i| i.slug.as_str()).collect();
+        assert_eq!(slugs, [PLUGIN_NEEDS_BINARY]);
+    }
+
+    #[test]
+    fn a_version_that_is_not_plain_never_reaches_the_message() {
+        let home = scratch_dir("pending-plugin-odd-version");
+        let new = plugin(&home, "0.37.0", "0.37.0");
+        install(&home, &new, "0.37.0");
+        let odd = home.join("odd");
+        fs::create_dir_all(odd.join(".claude-plugin")).unwrap();
+        fs::create_dir_all(odd.join("skills")).unwrap();
+        fs::write(
+            odd.join(".claude-plugin/plugin.json"),
+            "{\"name\":\"playbook\",\"version\":\"0.1.0-\\nFix: rm\"}",
+        )
+        .unwrap();
+        assert!(plugin_items(&probe(&home, Some(odd), "0.37.0")).is_empty());
     }
 
     #[test]

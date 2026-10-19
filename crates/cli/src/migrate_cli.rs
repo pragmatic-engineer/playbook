@@ -46,7 +46,7 @@ pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
             let text = match (mode, json) {
                 (Mode::Status, true) => format!("{}\n", status_json(&record, &plan, &items)),
                 (Mode::Status, false) => render_status(&record, &plan, &items),
-                (_, true) => format!("{}\n", dry_run_json(&record, &plan)),
+                (_, true) => format!("{}\n", dry_run_json(&record, &plan, &items)),
                 (_, false) => render_dry_run(&record, &plan, &items),
             };
             print!("{text}");
@@ -57,18 +57,7 @@ pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
 
 /// The open items of `plan` with the plugin items, as `pending` lists them.
 fn items_of(home: &Path, plan: &[Planned]) -> Vec<crate::pending::Item> {
-    let open: Vec<migrate::OpenItem> = open_items(plan)
-        .filter(|(p, _, _)| p.scope != "owned")
-        .map(|(p, message, command)| migrate::OpenItem {
-            id: p.id,
-            message: message.clone(),
-            command,
-        })
-        .collect();
-    crate::pending::merge(
-        &open,
-        crate::pending::plugin_items(&crate::pending::PluginProbe::for_home(home)),
-    )
+    crate::pending::from_plan(home, plan)
 }
 
 /// The item list, or the line that says nothing needs the user.
@@ -189,7 +178,6 @@ fn items_json(items: &[crate::pending::Item]) -> Value {
             "what": i.what,
             "why": i.why,
             "fix": i.fix,
-            "by_migrate": i.by_migrate,
         }))
         .collect::<Vec<_>>())
 }
@@ -222,7 +210,7 @@ fn status_json(record: &Record, plan: &[Planned], items: &[crate::pending::Item]
     })
 }
 
-fn dry_run_json(record: &Record, plan: &[Planned]) -> Value {
+fn dry_run_json(record: &Record, plan: &[Planned], items: &[crate::pending::Item]) -> Value {
     let (notes, open): (Vec<_>, Vec<_>) =
         open_items(plan).partition(|(p, _, _)| p.scope == "owned");
     json!({
@@ -236,6 +224,7 @@ fn dry_run_json(record: &Record, plan: &[Planned]) -> Value {
             .iter()
             .map(|(p, message, command)| json!({"id": p.id, "message": message, "command": command}))
             .collect::<Vec<_>>(),
+        "items": items_json(items),
         "written": false,
     })
 }
@@ -349,11 +338,12 @@ mod tests {
             newer.starts_with("nothing would run: a newer playbook"),
             "{newer}"
         );
-        let value = dry_run_json(&record(Some("999.0.0"), 999), &plan);
+        let value = dry_run_json(&record(Some("999.0.0"), 999), &plan, &items);
         assert_eq!(value["would_run"], json!([]));
         assert_eq!(value["skipped"], "downgrade");
         assert_eq!(value["notes"], json!(["caches-d: old folders"]));
         assert_eq!(value["open"][0]["command"], "playbook setup --statusline");
+        assert_eq!(value["items"][0]["fix"], "playbook setup --statusline");
     }
 
     #[test]

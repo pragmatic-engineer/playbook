@@ -64,8 +64,11 @@ and stop.
      `PLAYBOOK_PLUGIN_DIR` first.
    - **Upgrade record row.** Reads the version record in `config.db` read-only
      and compares it with the `playbook` first on PATH. It warns when the last
-     heal failed, when upgrade items are pending, or when the record cannot be
-     read, with the hint `run: playbook migrate`. No record yet, or an older
+     heal failed or the record cannot be read, with the hint
+     `run: playbook migrate`. When a setup change or a report is open, it warns
+     with the list `playbook migrate` prints, one bullet per item with its
+     `Fix:` command, and the hint `run: playbook setup` (a setup change is open)
+     or `run: playbook migrate --status`. No record yet, or an older
      one, is INFO with the same hint. The next session start or `playbook
      migrate` brings it up to date. A record newer
      than the binary (a downgrade) is INFO because nothing runs after a downgrade.

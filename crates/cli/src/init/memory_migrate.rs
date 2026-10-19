@@ -517,6 +517,28 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, SystemTime};
 
+    #[test]
+    fn a_fresh_store_with_nothing_to_move_is_marked_and_not_reported_as_a_change() {
+        // Arrange: the session hook created the new store, nothing is at
+        // the old place, and no marker exists yet.
+        let home = scratch_dir("memory-migrate-fresh-store");
+        let claude_home = home.join(".claude");
+        let new_root = playbook_root_from(&home).join("memory");
+        fs::create_dir_all(&new_root).unwrap();
+
+        // Act
+        let report = migrate_memory(&home, &claude_home);
+
+        // Assert
+        assert_eq!(
+            report.status,
+            StepStatus::AlreadyCorrect,
+            "{}",
+            report.detail
+        );
+        assert!(new_root.join(SENTINEL_NAME).is_file());
+    }
+
     fn write_file(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();

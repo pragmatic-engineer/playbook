@@ -15,7 +15,7 @@ Each migration also has a scope: `Owned` writes only playbook's own files, `Cons
 
 ## What needs you
 
-Every command shows the same list ([ADR 0034, 2026-10-19 amendment](../adr/0034-self-healing-upgrades.md#amendment-2026-10-19-one-list-of-what-needs-you)): one bullet per open `Consent` or `Report` item and per plugin problem, each with what it is, why it matters and the command that fixes it, then one line with the command that handles the most. For example:
+The session start, `playbook migrate`, `migrate --status`, `migrate --dry-run` and `doctor --fix` show the same list, and the doctor's upgrade row shows it without the plugin items ([ADR 0034, 2026-10-19 amendment](../adr/0034-self-healing-upgrades.md#amendment-2026-10-19-one-list-of-what-needs-you)): one bullet per open `Consent` or `Report` item and per plugin problem, each with what it is, why it matters and the command that fixes it, then one line with the command that handles the most. For example:
 
 ```text
 playbook 0.37.0: 2 items need you:
