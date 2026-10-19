@@ -21,6 +21,7 @@
 //! Claude Code may drop data that is sent while no receiver listens. That is
 //! by design: such sessions are read from transcripts.
 
+use super::daemon::{self, Lock};
 use super::receiver::{bind, serve, Config};
 use super::run::Paths;
 use super::telemetry_db::{migrate_up, prune, Pruned, Retention};
@@ -83,7 +84,7 @@ fn write_state(path: &Path, state: &State) -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn pid_alive(pid: u32) -> bool {
+pub(super) fn pid_alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
     };
@@ -96,7 +97,7 @@ fn pid_alive(pid: u32) -> bool {
 }
 
 #[cfg(not(unix))]
-fn pid_alive(_pid: u32) -> bool {
+pub(super) fn pid_alive(_pid: u32) -> bool {
     false
 }
 
@@ -468,6 +469,18 @@ fn run_collect_with(
     default_port: u16,
     retry: Duration,
 ) -> Result<String, String> {
+    // First local, so it drops last: after the listener closes and after the
+    // pid is cleared, which lets a successor bind the port at once.
+    let _lock = match daemon::acquire(paths) {
+        Lock::Held(file) => file,
+        Lock::Busy => return Ok("collector already running".to_string()),
+        Lock::Unavailable(e) => {
+            return Err(format!(
+                "cannot take the lock {}: {e}",
+                daemon::lock_path(paths).display()
+            ));
+        }
+    };
     let path = state_path(paths);
     let previous = read_state(&path);
     let mut foreign = false;
@@ -534,7 +547,7 @@ fn run_collect_with(
         "usage collect: listening on 127.0.0.1:{actual} (pid {})",
         state.pid
     ));
-    let result = serve(&listener, &conn, &cfg, stop, crate::util::time::now_secs);
+    let result = serve(&listener, conn, &cfg, stop, crate::util::time::now_secs);
     state.pid = 0;
     let _ = write_state(&path, &state);
     match result {
@@ -576,6 +589,139 @@ mod tests {
         assert!(runs_other_build(&live("")));
         assert!(!runs_other_build(&live(env!("CARGO_PKG_VERSION"))));
         assert!(!runs_other_build(&State::default()));
+    }
+
+    /// Runs a collector on a thread and always stops it, so a failed
+    /// assertion cannot leave one serving.
+    struct Running {
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<Result<String, String>>>,
+    }
+
+    impl Running {
+        fn start(p: &Paths) -> Self {
+            let stop = Arc::new(AtomicBool::new(false));
+            let (paths, flag) = (p.clone(), Arc::clone(&stop));
+            let thread = std::thread::spawn(move || run_collect(&paths, Some(0), 0, &flag));
+            let me = Self {
+                stop,
+                thread: Some(thread),
+            };
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while read_state(&state_path(p)).is_none_or(|s| s.pid == 0) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "collector never came up"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            me
+        }
+
+        fn finish(mut self) -> Result<String, String> {
+            self.stop.store(true, Ordering::SeqCst);
+            self.thread.take().unwrap().join().unwrap()
+        }
+    }
+
+    impl Drop for Running {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(t) = self.thread.take() {
+                let _ = t.join();
+            }
+        }
+    }
+
+    fn lock_is_free(p: &Paths) -> bool {
+        let file = std::fs::File::open(crate::daemon::lock_path(p)).unwrap();
+        file.try_lock().is_ok()
+    }
+
+    #[test]
+    fn a_second_run_while_the_lock_is_held_binds_nothing_and_leaves_the_state() {
+        let p = paths("collector-lock-busy");
+        let crate::daemon::Lock::Held(_held) = crate::daemon::acquire(&p) else {
+            panic!("the first acquire must take the lock");
+        };
+        let known = State {
+            pid: 1,
+            port: 1,
+            token: "known".into(),
+            ..State::default()
+        };
+        write_state(&state_path(&p), &known).unwrap();
+        let before = std::fs::read(state_path(&p)).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let msg = run_collect(&p, Some(0), 0, &stop).unwrap();
+
+        assert!(msg.contains("already running"), "{msg}");
+        assert_eq!(
+            std::fs::read(state_path(&p)).unwrap(),
+            before,
+            "a busy lock leaves the state as it was"
+        );
+    }
+
+    #[test]
+    fn the_lock_is_held_while_serving_and_names_this_process() {
+        let p = paths("collector-lock-held");
+        let running = Running::start(&p);
+
+        let lock = crate::daemon::lock_path(&p);
+        assert!(!lock_is_free(&p));
+        assert_eq!(
+            std::fs::read_to_string(&lock).unwrap(),
+            format!("{} {}\n", std::process::id(), env!("CARGO_PKG_VERSION"))
+        );
+        running.finish().unwrap();
+        assert!(lock_is_free(&p));
+    }
+
+    #[test]
+    fn a_successor_gets_the_lock_and_the_port_the_moment_run_collect_returns() {
+        let p = paths("collector-lock-order");
+        let running = Running::start(&p);
+        let port = read_state(&state_path(&p)).unwrap().port;
+
+        running.finish().unwrap();
+
+        assert!(lock_is_free(&p));
+        bind(port).expect("the port is free with no retry");
+        assert_eq!(read_state(&state_path(&p)).unwrap().pid, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_lock_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let p = paths("collector-lock-mode");
+        let crate::daemon::Lock::Held(_held) = crate::daemon::acquire(&p) else {
+            panic!("acquire failed");
+        };
+        let mode = std::fs::metadata(crate::daemon::lock_path(&p))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_data_folder_is_an_error_naming_the_lock_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let p = paths("collector-lock-readonly");
+        let dir = state_path(&p).parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let result = run_collect(&p, Some(0), 0, &stop);
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let err = result.unwrap_err();
+        assert!(err.contains("collector.lock"), "{err}");
     }
 
     #[test]
@@ -629,7 +775,7 @@ mod tests {
                 idle: None,
                 prune: None,
             };
-            let _ = serve(&listener, &db, &cfg, &server_stop, || 0);
+            let _ = serve(&listener, db, &cfg, &server_stop, || 0);
         });
         let stop = Arc::new(AtomicBool::new(false));
 

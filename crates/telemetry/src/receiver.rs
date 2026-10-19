@@ -11,11 +11,12 @@
 //! (the attribute allowlist) and stored; `/v1/traces` is accepted and dropped.
 
 use super::otlp;
-use super::telemetry_db::{insert_error, insert_metric, insert_request, insert_tool};
+use super::writer::{self, Job, Kind};
 use rusqlite::Connection;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{SyncSender, TrySendError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,12 +35,9 @@ pub struct Config {
     pub token: Option<String>,
     /// Stop after this long with no request, or `None` to run until stopped.
     pub idle: Option<Duration>,
-    /// Prune telemetry rows past these limits every few hours while serving.
+    /// The writer prunes telemetry rows past these limits every few hours.
     pub prune: Option<super::telemetry_db::Retention>,
 }
-
-/// How often a long running receiver prunes (it also prunes when it starts).
-const PRUNE_EVERY: Duration = Duration::from_secs(6 * 3600);
 
 /// A parsed request: the path (no query) and the body.
 #[derive(Debug)]
@@ -241,45 +239,37 @@ fn precheck(
     Ok(())
 }
 
-/// Stores a request's rows. Returns the status and body to send.
-fn dispatch(conn: &Connection, req: &Request, now: i64) -> (u16, String) {
-    if req.path == "/v1/metrics" {
-        let Ok(points) = otlp::parse_metrics(&req.body, now) else {
-            return (400, r#"{"error":"invalid OTLP JSON"}"#.to_string());
-        };
-        let stored = conn.unchecked_transaction().and_then(|tx| {
-            for p in &points {
-                insert_metric(&tx, p).map_err(|_| rusqlite::Error::InvalidQuery)?;
-            }
-            tx.commit()
-        });
-        return match stored {
-            Ok(()) => (200, r#"{"partialSuccess":{}}"#.to_string()),
-            Err(_) => (503, r#"{"error":"store unavailable"}"#.to_string()),
-        };
-    }
-    if req.path != "/v1/logs" {
-        return (200, "{}".to_string());
-    }
-    let Ok(rows) = otlp::parse_events(&req.body, now) else {
-        return (400, r#"{"error":"invalid OTLP JSON"}"#.to_string());
+/// Parses a request and hands its rows to the writer. Returns the status and
+/// body to send, after the writer has committed.
+fn dispatch(jobs: &SyncSender<Job>, stop: &AtomicBool, req: &Request, now: i64) -> (u16, String) {
+    let invalid = || (400, r#"{"error":"invalid OTLP JSON"}"#.to_string());
+    let unavailable = || (503, r#"{"error":"store unavailable"}"#.to_string());
+    let kind = match req.path.as_str() {
+        "/v1/metrics" => match otlp::parse_metrics(&req.body, now) {
+            Ok(points) => Kind::Metrics(points),
+            Err(_) => return invalid(),
+        },
+        "/v1/logs" => match otlp::parse_events(&req.body, now) {
+            Ok(rows) => Kind::Logs(rows),
+            Err(_) => return invalid(),
+        },
+        _ => return (200, "{}".to_string()),
     };
-    let stored = conn.unchecked_transaction().and_then(|tx| {
-        let bad = |_| rusqlite::Error::InvalidQuery;
-        for row in &rows.requests {
-            insert_request(&tx, row).map_err(bad)?;
+    let (reply, answer) = std::sync::mpsc::sync_channel(1);
+    match jobs.try_send(Job { kind, reply }) {
+        Ok(()) => {}
+        Err(TrySendError::Full(_)) => return unavailable(),
+        Err(TrySendError::Disconnected(_)) => {
+            // The writer is gone, so nothing can be stored: end the process
+            // and let the next starter replace this collector.
+            stop.store(true, Ordering::SeqCst);
+            return unavailable();
         }
-        for row in &rows.tools {
-            insert_tool(&tx, row).map_err(bad)?;
-        }
-        for row in &rows.errors {
-            insert_error(&tx, row).map_err(bad)?;
-        }
-        tx.commit()
-    });
-    match stored {
-        Ok(()) => (200, r#"{"partialSuccess":{}}"#.to_string()),
-        Err(_) => (503, r#"{"error":"store unavailable"}"#.to_string()),
+    }
+    // A dropped reply means the writer died with the job queued.
+    match answer.recv() {
+        Ok(true) => (200, r#"{"partialSuccess":{}}"#.to_string()),
+        _ => unavailable(),
     }
 }
 
@@ -333,16 +323,32 @@ pub fn bind(port: u16) -> std::io::Result<TcpListener> {
 }
 
 /// Serves until `stop` is set or the idle limit passes. Returns why it ended.
+/// The connection moves to the writer thread, which commits what it holds
+/// before this returns.
 pub fn serve(
     listener: &TcpListener,
-    conn: &Connection,
+    conn: Connection,
     cfg: &Config,
     stop: &Arc<AtomicBool>,
-    now: impl Fn() -> i64,
+    now: fn() -> i64,
+) -> std::io::Result<&'static str> {
+    let (jobs, writer) = writer::spawn(conn, cfg.prune, now, Arc::clone(stop));
+    let why = accept_loop(listener, &jobs, cfg, stop, now);
+    // Closing the channel lets the writer commit its last batch and exit.
+    drop(jobs);
+    let _ = writer.join();
+    why
+}
+
+fn accept_loop(
+    listener: &TcpListener,
+    jobs: &SyncSender<Job>,
+    cfg: &Config,
+    stop: &Arc<AtomicBool>,
+    now: fn() -> i64,
 ) -> std::io::Result<&'static str> {
     listener.set_nonblocking(true)?;
     let mut last = Instant::now();
-    let mut pruned_at = Instant::now();
     let mut limiter = RateLimiter {
         window: Instant::now(),
         count: 0,
@@ -353,10 +359,6 @@ pub fn serve(
         }
         if cfg.idle.is_some_and(|idle| last.elapsed() >= idle) {
             return Ok("idle");
-        }
-        if let Some(retention) = cfg.prune.filter(|_| pruned_at.elapsed() >= PRUNE_EVERY) {
-            pruned_at = Instant::now();
-            let _ = super::telemetry_db::prune(conn, now(), retention, false);
         }
         let mut stream = match listener.accept() {
             Ok((s, _)) => s,
@@ -380,7 +382,7 @@ pub fn serve(
                 // connect (a liveness probe from `cc` or `usage status`) or a
                 // rejected request does not, so polling cannot hold it open.
                 last = Instant::now();
-                let (status, body) = dispatch(conn, &req, now());
+                let (status, body) = dispatch(jobs, stop, &req, now());
                 respond(&mut stream, status, &body);
             }
             Err(HttpError(status, msg)) => {
@@ -395,6 +397,15 @@ mod tests {
     use super::*;
     use crate::telemetry_db::{count_requests, migrate_up};
     use std::io::Cursor;
+
+    /// A file database (the writer owns one connection) and a second
+    /// connection to read what it stored.
+    fn db(name: &str) -> (Connection, Connection) {
+        let path = crate::util::scratch_dir(name).join("usage.db");
+        let writer = crate::db::open_db(&path).unwrap();
+        migrate_up(&writer).unwrap();
+        (writer, crate::db::open_db(&path).unwrap())
+    }
 
     fn raw(method_path: &str, headers: &[&str], body: &[u8]) -> Vec<u8> {
         let mut v = format!("{method_path} HTTP/1.1\r\n").into_bytes();
@@ -591,8 +602,7 @@ mod tests {
 
     #[test]
     fn the_server_stores_rows_dedupes_and_stops_on_idle() {
-        let conn = Connection::open_in_memory().unwrap();
-        migrate_up(&conn).unwrap();
+        let (conn, reader) = db("receiver-store");
         let listener = bind(0).unwrap();
         let port = listener.local_addr().unwrap().port();
         assert!(listener.local_addr().unwrap().ip().is_loopback());
@@ -619,15 +629,15 @@ mod tests {
             assert_eq!(e2.0, 200);
             [a.0, b.0, c.0, d.0, e.0]
         });
-        let why = serve(&listener, &conn, &c, &stop, || 1).unwrap();
+        let why = serve(&listener, conn, &c, &stop, || 1).unwrap();
         assert_eq!(client.join().unwrap(), [200, 200, 401, 400, 200]);
         assert_eq!(why, "idle");
-        assert_eq!(count_requests(&conn).unwrap(), 1);
-        let active: f64 = conn
+        assert_eq!(count_requests(&reader).unwrap(), 1);
+        let active: f64 = reader
             .query_row("SELECT SUM(value) FROM telemetry_metrics", [], |r| r.get(0))
             .unwrap();
         assert_eq!(active, 9.0, "a redelivered metric point is stored once");
-        let dump: String = conn
+        let dump: String = reader
             .query_row(
                 "SELECT group_concat(model||effort||agent_name) FROM telemetry_requests",
                 [],
@@ -640,20 +650,20 @@ mod tests {
 
     #[test]
     fn the_stop_flag_ends_the_server() {
-        let conn = Connection::open_in_memory().unwrap();
-        migrate_up(&conn).unwrap();
+        let (conn, _reader) = db("receiver-stop");
         let listener = bind(0).unwrap();
         let stop = Arc::new(AtomicBool::new(true));
         assert_eq!(
-            serve(&listener, &conn, &cfg(None), &stop, || 1).unwrap(),
+            serve(&listener, conn, &cfg(None), &stop, || 1).unwrap(),
             "stopped"
         );
     }
 
     #[test]
     fn tool_results_and_api_errors_are_stored_without_their_content() {
-        let conn = Connection::open_in_memory().unwrap();
-        migrate_up(&conn).unwrap();
+        let (conn, reader) = db("receiver-tools");
+        let stop = Arc::new(AtomicBool::new(false));
+        let (jobs, writer) = writer::spawn(conn, None, || 5, Arc::clone(&stop));
         let body = serde_json::json!({"resourceLogs":[{"scopeLogs":[{"logRecords":[
             {"timeUnixNano":"1760000000000000000","attributes":[
                 {"key":"event.name","value":{"stringValue":"tool_result"}},
@@ -676,14 +686,16 @@ mod tests {
             body: body.into_bytes(),
         };
         for _ in 0..2 {
-            assert_eq!(dispatch(&conn, &req, 5).0, 200);
+            assert_eq!(dispatch(&jobs, &stop, &req, 5).0, 200);
         }
-        let h = crate::telemetry_db::health(&conn, 0, i64::MAX).unwrap();
+        drop(jobs);
+        writer.join().unwrap();
+        let h = crate::telemetry_db::health(&reader, 0, i64::MAX).unwrap();
         assert_eq!(
             (h.tool_calls, h.tool_failures, h.errors, h.retried),
             (1, 1, 1, 1)
         );
-        let dump: String = conn
+        let dump: String = reader
             .query_row(
                 "SELECT (SELECT group_concat(tool_name) FROM telemetry_tools)
                       || (SELECT group_concat(model) FROM telemetry_errors)",
@@ -699,8 +711,7 @@ mod tests {
 
     #[test]
     fn a_probe_that_sends_nothing_does_not_keep_the_server_alive() {
-        let conn = Connection::open_in_memory().unwrap();
-        migrate_up(&conn).unwrap();
+        let (conn, _reader) = db("receiver-probe");
         let listener = bind(0).unwrap();
         let port = listener.local_addr().unwrap().port();
         let c = Config {
@@ -718,10 +729,75 @@ mod tests {
             }
         });
         let started = Instant::now();
-        let why = serve(&listener, &conn, &c, &stop, || 1).unwrap();
+        let why = serve(&listener, conn, &c, &stop, || 1).unwrap();
         done.store(true, Ordering::SeqCst);
         prober.join().unwrap();
         assert_eq!(why, "idle");
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    fn logs_request() -> Request {
+        Request {
+            path: "/v1/logs".into(),
+            body: logs_body("r1"),
+        }
+    }
+
+    #[test]
+    fn a_full_writer_channel_answers_503_without_waiting() {
+        let (jobs, _held_back) = std::sync::mpsc::sync_channel(1);
+        let stop = AtomicBool::new(false);
+        let filler = std::sync::mpsc::sync_channel(1).0;
+        jobs.try_send(Job {
+            kind: Kind::Metrics(Vec::new()),
+            reply: filler,
+        })
+        .unwrap();
+
+        let (status, _) = dispatch(&jobs, &stop, &logs_request(), 1);
+
+        assert_eq!(status, 503);
+        assert!(!stop.load(Ordering::SeqCst), "a full channel is not fatal");
+    }
+
+    #[test]
+    fn a_gone_writer_answers_503_and_stops_the_collector() {
+        let (jobs, gone) = std::sync::mpsc::sync_channel(1);
+        drop(gone);
+        let stop = AtomicBool::new(false);
+
+        let (status, _) = dispatch(&jobs, &stop, &logs_request(), 1);
+
+        assert_eq!(status, 503);
+        assert!(stop.load(Ordering::SeqCst));
+    }
+
+    /// A stand in writer that takes one job and hands it to `answer`.
+    fn fake_writer(answer: fn(Job)) -> (SyncSender<Job>, std::thread::JoinHandle<()>) {
+        let (jobs, queue) = std::sync::mpsc::sync_channel::<Job>(1);
+        let handle = std::thread::spawn(move || answer(queue.recv().unwrap()));
+        (jobs, handle)
+    }
+
+    #[test]
+    fn a_writer_that_replies_false_answers_503() {
+        let (jobs, handle) = fake_writer(|job| job.reply.send(false).unwrap());
+        let stop = AtomicBool::new(false);
+
+        let (status, _) = dispatch(&jobs, &stop, &logs_request(), 1);
+
+        assert_eq!(status, 503);
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn a_dropped_job_reply_answers_503() {
+        let (jobs, handle) = fake_writer(drop);
+        let stop = AtomicBool::new(false);
+
+        let (status, _) = dispatch(&jobs, &stop, &logs_request(), 1);
+
+        assert_eq!(status, 503);
+        handle.join().unwrap();
     }
 }
