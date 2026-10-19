@@ -166,8 +166,9 @@ pub fn ensure_for(trigger: Trigger) -> Ensured {
 /// The gates, cheapest first, then `daemon::ensure`. A collector at this
 /// version costs the file gates plus one open and one `try_lock`. The
 /// `usage.telemetry` lookup can open `config.db`, so it runs after the lock
-/// check, with the consent check, only when a probe, a spawn or a hand-over
-/// would follow; a running collector is left alone either way.
+/// check, with the consent check, whenever `daemon::ensure` could spawn: a
+/// missing or older holder, or a probe, which replaces a silent one. Only a
+/// current holder with no probe skips them.
 fn ensure_at(home: &Path, exe: &Path, trigger: Trigger) -> Ensured {
     if crate::common::home_error(home).is_some() {
         return Ensured::NotConfigured;
@@ -190,8 +191,9 @@ fn ensure_at(home: &Path, exe: &Path, trigger: Trigger) -> Ensured {
     if current && !opts.probe {
         return Ensured::Running;
     }
-    let consent = || spawn_allowed() && telemetry_points_here(home);
-    if !telemetry_auto(home) || (!current && !consent()) {
+    // Past this point `ensure` may spawn: a missing or older holder, or a
+    // probe that finds a current one silent and replaces it.
+    if !telemetry_auto(home) || !spawn_allowed() || !telemetry_points_here(home) {
         return Ensured::NotConfigured;
     }
     daemon::ensure(&paths, exe, opts)

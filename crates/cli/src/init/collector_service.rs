@@ -8,6 +8,7 @@
 //! [`crate::usage::service`]; this module decides, records the answer, and
 //! reports.
 
+use crate::cc::telemetry::telemetry_points_here;
 use crate::init::run::{StepReport, StepStatus};
 use crate::service_manager::{self as manager, Installed, Manager};
 use crate::usage::service::{self, Kind};
@@ -71,8 +72,6 @@ fn collector_state(home: &Path) -> Option<crate::usage::collector::State> {
     let paths = crate::usage::run::Paths::from_home(home);
     crate::usage::collector::read_state(&crate::usage::collector::state_path(&paths))
 }
-
-pub use crate::cc::telemetry::telemetry_points_here;
 
 /// Whether a collector answers for the user at `home`.
 pub fn collector_running(home: &Path) -> bool {

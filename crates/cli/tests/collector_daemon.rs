@@ -6,14 +6,16 @@
 //! Every test runs the real binary in a scratch HOME, and every test that can
 //! start a collector holds a `Daemon` guard that kills it.
 
+#[path = "support/collector_guard.rs"]
+mod collector_guard;
 #[path = "support/isolated.rs"]
 mod isolated;
 
+use collector_guard::{kill_all, within, GONE_BOUND};
 use playbook::cc::telemetry::TEST_SPAWN_VAR;
 use playbook::usage::collector::{probe, Probe};
 use playbook::usage::daemon::{
-    lock_path, lock_state, stamp_path, LockState, STAMP_SECS_VAR, TEST_HANG_VAR, TEST_VARS,
-    TEST_VERSION_VAR,
+    lock_path, lock_state, stamp_path, LockState, STAMP_SECS_VAR, TEST_HANG_VAR, TEST_VERSION_VAR,
 };
 use playbook::usage::run::Paths;
 use std::fs;
@@ -31,14 +33,9 @@ const D1_BOUND: Duration = Duration::from_millis(1500);
 const D5_BOUND: Duration = Duration::from_secs(5);
 /// How long a collector the test or a command started may take to come up.
 const UP_BOUND: Duration = Duration::from_secs(10);
-/// How long a killed collector may take to let go of the lock.
-const GONE_BOUND: Duration = Duration::from_secs(5);
 /// D2: how long the test waits after the last hook, so every losing
 /// collector has had time to start and give up.
 const SETTLE: Duration = Duration::from_secs(3);
-const POLL: Duration = Duration::from_millis(50);
-/// How long the guard watches for a late collector after the lock freed.
-const RECHECK: Duration = Duration::from_millis(500);
 /// The CI test count for D2, and the stress count.
 const CI_STARTS: usize = 50;
 const STRESS_STARTS: usize = 1000;
@@ -47,21 +44,6 @@ const OLD_VERSION: &str = "0.0.1";
 const SESSION_START: &[u8] = br#"{"session_id":"s1","source":"startup"}"#;
 const PROMPT: &[u8] =
     br#"{"session_id":"s1","prompt":"hello","hook_event_name":"UserPromptSubmit"}"#;
-
-/// Polls `done` every `POLL` until `bound`, checking it before the deadline
-/// so a condition met on the last poll still counts.
-fn within(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
-    let deadline = Instant::now() + bound;
-    loop {
-        if done() {
-            return true;
-        }
-        if Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::sleep(POLL);
-    }
-}
 
 fn pid_alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
@@ -255,16 +237,6 @@ struct Daemon {
 
 impl Daemon {
     fn new(home: &Home) -> Daemon {
-        // A test variable in this process would reach a child that the
-        // helper does not clean, and a release build would ignore it.
-        let stray: Vec<_> = TEST_VARS
-            .iter()
-            .filter(|v| std::env::var_os(v).is_some())
-            .collect();
-        assert!(
-            stray.is_empty() || cfg!(debug_assertions),
-            "test-only variables {stray:?} are set but this is a release build"
-        );
         Daemon {
             paths: home.paths(),
             home: home.home.clone(),
@@ -280,16 +252,7 @@ impl Daemon {
     }
 
     fn kill_holder(&self) -> bool {
-        match lock_state(&self.paths) {
-            LockState::Held(h) => {
-                if let Some(pid) = h.pid.and_then(|p| libc::pid_t::try_from(p).ok()) {
-                    // SAFETY: plain kill(2) on the pid the lock names.
-                    unsafe { libc::kill(pid, libc::SIGKILL) };
-                }
-                true
-            }
-            _ => false,
-        }
+        collector_guard::kill_holder(&self.paths)
     }
 }
 
@@ -299,16 +262,10 @@ impl Drop for Daemon {
             let _ = child.kill();
             let _ = child.wait();
         }
-        // A collector still starting writes its pid a moment later, and a
-        // late spawn can take the lock after the first one goes: repeat.
-        let free = within(GONE_BOUND, || {
-            self.kill_holder();
-            lock_state(&self.paths) == LockState::Free
-        });
-        let settled = free && !within(RECHECK, || self.kill_holder());
+        let settled = kill_all(&self.paths);
         let _ = fs::remove_dir_all(&self.home);
         if !std::thread::panicking() {
-            assert!(free && settled, "a collector kept the lock after SIGKILL");
+            assert!(settled, "a collector kept the lock after SIGKILL");
         }
     }
 }
@@ -332,26 +289,42 @@ fn d1_a_session_start_with_no_collector_accepts_otlp_within_the_bound() {
     );
 }
 
+/// Hook processes a test started, killed and reaped on drop so a failing
+/// test leaves none behind.
+struct Children(Vec<Child>);
+
+impl Drop for Children {
+    fn drop(&mut self) {
+        for child in &mut self.0 {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 /// Starts `count` `session-init` hooks at once with the stamp window at zero,
 /// so every one of them may spawn, then checks that one collector won.
 fn concurrent_starts_leave_one_collector(count: usize) {
     let home = Home::new();
     let _daemon = Daemon::new(&home);
-    let mut children: Vec<Child> = (0..count)
-        .map(|_| {
-            let mut cmd = home.cmd();
-            cmd.args(["hook", "session-init"])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            test_var(&mut cmd, STAMP_SECS_VAR, "0");
-            cmd.spawn().unwrap()
-        })
-        .collect();
-    for child in &mut children {
+    // Declared after the daemon guard, so it drops first.
+    let mut children = Children(
+        (0..count)
+            .map(|_| {
+                let mut cmd = home.cmd();
+                cmd.args(["hook", "session-init"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                test_var(&mut cmd, STAMP_SECS_VAR, "0");
+                cmd.spawn().unwrap()
+            })
+            .collect(),
+    );
+    for child in &mut children.0 {
         let _ = child.stdin.take().unwrap().write_all(SESSION_START);
     }
-    for child in &mut children {
+    for child in &mut children.0 {
         assert!(child.wait().unwrap().success());
     }
     std::thread::sleep(SETTLE);
@@ -506,23 +479,29 @@ fn settings_that_do_not_point_at_the_collector_start_nothing() {
     assert!(!stamp_path(&paths).exists(), "a spawn was attempted");
 }
 
+/// Holds the lock of `home` at this version in the name of `pid`, the way
+/// a running collector does. Drop it before the `Daemon` guard.
+fn hold_lock(home: &Home, pid: u32) -> fs::File {
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(lock_path(&home.paths()))
+        .unwrap();
+    lock.try_lock().unwrap();
+    (&lock)
+        .write_all(format!("{pid} {VERSION}\n").as_bytes())
+        .unwrap();
+    lock
+}
+
 #[test]
 fn a_prompt_hook_with_a_running_collector_spawns_nothing_and_connects_nowhere() {
     let home = Home::new();
     let _daemon = Daemon::new(&home);
     // This test plays the running collector: it holds the lock at this
     // version and listens on the recorded port, counting connections.
-    let lock_file = lock_path(&home.paths());
-    let lock = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&lock_file)
-        .unwrap();
-    lock.try_lock().unwrap();
-    (&lock)
-        .write_all(format!("{} {VERSION}\n", std::process::id()).as_bytes())
-        .unwrap();
+    let lock = hold_lock(&home, std::process::id());
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, home.port)).unwrap();
     listener.set_nonblocking(true).unwrap();
 
@@ -580,4 +559,19 @@ fn usage_stop_frees_the_lock_and_reports_not_running_after() {
         String::from_utf8_lossy(&second.stdout).contains("not running"),
         "{second:?}"
     );
+}
+
+#[test]
+fn a_session_start_without_consent_leaves_a_hung_collector_alone() {
+    let home = Home::new();
+    let mut daemon = Daemon::new(&home);
+    let hung = home.start_collector(&mut daemon, &[(TEST_HANG_VAR, "1")]);
+    // Consent goes: the settings no longer point at the collector.
+    fs::write(home.home.join(".claude/settings.json"), "{}").unwrap();
+
+    home.session_start();
+
+    assert!(!stamp_path(&home.paths()).exists(), "a spawn was attempted");
+    assert_eq!(home.holder().map(|h| h.0), Some(hung), "the holder changed");
+    assert!(pid_alive(hung), "the hung collector was stopped");
 }
