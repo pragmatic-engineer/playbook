@@ -10,7 +10,7 @@
 #   eval "$(scripts/dev-disk.sh env)"      lean build settings and a private
 #                                          target folder for this worktree
 #   scripts/dev-disk.sh clean [--dry-run]  remove idle target folders of the
-#                                          linked worktrees of this repo
+#                                          other linked worktrees of this repo
 #   scripts/dev-disk.sh warn               warn when free space is low
 #
 # Settings (environment variables):
@@ -36,16 +36,20 @@ warn_low_space() {
   fi
 }
 
+# Prints the private target folder of the worktree at $1: a sibling folder
+# named cargo-<worktree name>-<hash of its path>.
+private_dir() {
+  local hash
+  hash="$(printf '%s' "$1" | shasum | cut -c1-"$HASH_LENGTH")"
+  echo "$(dirname "$1")/cargo-$(basename "$1")-$hash"
+}
+
 # Prints the export line for a lean build in a private target folder next to
 # this worktree. Incremental data and debug info are the two big parts of a
 # target folder; a panic keeps its file and line without debug info.
 print_env() {
-  local top hash dir
-  top="$(git rev-parse --show-toplevel)"
-  hash="$(printf '%s' "$top" | shasum | cut -c1-"$HASH_LENGTH")"
-  dir="$(dirname "$top")/cargo-$(basename "$top")-$hash"
   warn_low_space
-  printf "export CARGO_TARGET_DIR='%s' CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0\n" "$dir"
+  printf 'export CARGO_TARGET_DIR=%q CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0\n' "$(private_dir "$(git rev-parse --show-toplevel)")"
 }
 
 # Succeeds when a cargo build holds a lock under the target folder $1.
@@ -59,34 +63,46 @@ build_running() {
 
 # Succeeds when a running process names the folder $1 on its command line.
 named_by_a_process() {
-  ps -axww -o args= | grep -F -q -- "$1"
+  local processes
+  processes="$(ps -axww -o args=)"
+  grep -F -q -- "$1" <<<"$processes"
 }
 
-# Removes the target folder of each linked worktree of this repo that is a
-# cargo target folder, is not a link, has not changed for IDLE_MINUTES, has no
-# build holding its lock and is named by no running process. The main
-# worktree is never touched.
+# Removes the target folder $2 when it is a cargo target folder, is not a link,
+# has not changed for IDLE_MINUTES, has no build holding its lock and is named
+# by no running process. $1 is 1 for a dry run.
+remove_if_idle() {
+  local dry_run="$1" target="$2"
+  [ -d "$target" ] || return 0
+  if [ -L "$target" ] || [ ! -f "$target/CACHEDIR.TAG" ]; then
+    echo "kept $target: not a cargo target folder"
+  elif [ -n "$(find "$target" -mmin "-$IDLE_MINUTES" -print -quit)" ]; then
+    echo "kept $target: changed in the last $IDLE_MINUTES minutes"
+  elif build_running "$target"; then
+    echo "kept $target: a cargo build holds its lock"
+  elif named_by_a_process "$target"; then
+    echo "kept $target: a running process names it"
+  elif [ "$dry_run" = 1 ]; then
+    echo "would remove $target ($(du -sh "$target" | cut -f1))"
+  else
+    echo "removing $target ($(du -sh "$target" | cut -f1))"
+    rm -rf -- "$target"
+  fi
+}
+
+# Applies remove_if_idle to the target folder and the private target folder of
+# each linked worktree of this repo. The main worktree and the one this runs
+# in are never touched.
 clean_targets() {
-  local dry_run="$1" main path target
+  local dry_run="$1" main here path
   main="$(git worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')"
+  here="$(git rev-parse --show-toplevel)"
   while IFS= read -r path; do
-    [ "$path" = "$main" ] && continue
-    target="$path/$TARGET_NAME"
-    [ -d "$target" ] || continue
-    if [ -L "$target" ] || [ ! -f "$target/CACHEDIR.TAG" ]; then
-      echo "kept $target: not a cargo target folder"
-    elif [ -n "$(find "$target" -mmin "-$IDLE_MINUTES" -print -quit)" ]; then
-      echo "kept $target: changed in the last $IDLE_MINUTES minutes"
-    elif build_running "$target"; then
-      echo "kept $target: a cargo build holds its lock"
-    elif named_by_a_process "$target"; then
-      echo "kept $target: a running process names it"
-    elif [ "$dry_run" = 1 ]; then
-      echo "would remove $target ($(du -sh "$target" | cut -f1))"
-    else
-      echo "removing $target ($(du -sh "$target" | cut -f1))"
-      rm -rf -- "$target"
+    if [ "$path" = "$main" ] || [ "$path" = "$here" ]; then
+      continue
     fi
+    remove_if_idle "$dry_run" "$path/$TARGET_NAME"
+    remove_if_idle "$dry_run" "$(private_dir "$path")"
   done < <(git worktree list --porcelain | awk '/^worktree / { print substr($0, 10) }')
 }
 
