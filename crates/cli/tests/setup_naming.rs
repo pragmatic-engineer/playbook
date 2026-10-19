@@ -54,7 +54,7 @@ fn production_part(text: &str) -> &str {
                 .clone()
                 .map(str::trim_start)
                 .find(|l| !l.starts_with("#["))
-                .is_some_and(|l| l.starts_with("mod tests"));
+                .is_some_and(|l| l.trim_start_matches("pub(crate) ").starts_with("mod tests"));
             if module {
                 return &text[..at];
             }

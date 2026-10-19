@@ -358,6 +358,9 @@ struct Shared {
     started: Instant,
     addr: SocketAddr,
     now: fn() -> i64,
+    /// Test-only (debug builds): read each request and never reply, to stage
+    /// a hung collector.
+    hang: bool,
 }
 
 impl Shared {
@@ -383,6 +386,7 @@ impl Shared {
             started,
             addr,
             now,
+            hang: super::daemon::test_hang(),
         }
     }
 
@@ -562,6 +566,13 @@ fn accept_loop(listener: &TcpListener, shared: &Arc<Shared>) -> std::io::Result<
 
 /// Reads, routes and answers one connection on its own thread.
 fn handle(shared: &Shared, mut stream: TcpStream) {
+    if shared.hang {
+        let _ = read_request(&mut stream, &|_, _, _| Ok(()));
+        // Holds the stream open with no reply, shutdown included.
+        loop {
+            std::thread::park();
+        }
+    }
     let token = shared.token.as_deref();
     // The limit is checked once the headers are in, so an authenticated
     // shutdown is never starved by a flood.
@@ -1237,6 +1248,31 @@ mod tests {
         assert!(reply.starts_with("HTTP/1.1 408"), "{reply}");
         assert!(waited < READ_DEADLINE + GRACE, "{waited:?}");
         assert!(within(PROMPT, || shared.live.load(Ordering::SeqCst) == 0));
+    }
+
+    #[test]
+    fn a_hanging_server_reads_the_request_and_never_replies() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let server = Server::spawn(move |listener, stop| {
+            let (jobs, _unread) = std::sync::mpsc::sync_channel(1);
+            let mut shared = Shared::new(listener.local_addr()?, jobs, None, stop, || 1);
+            shared.hang = true;
+            let shared = Arc::new(shared);
+            tx.send(Arc::clone(&shared)).unwrap();
+            run(listener, &shared, None)
+        });
+        let shared = rx.recv().unwrap();
+        let mut client = connect(server.port);
+        client.set_read_timeout(Some(PROMPT)).unwrap();
+        client
+            .write_all(b"POST /v1/playbook/shutdown HTTP/1.1\r\nContent-Length: 0\r\n\r\n")
+            .unwrap();
+
+        let mut buf = [0u8; 64];
+        let read = client.read(&mut buf);
+
+        assert!(read.is_err(), "{read:?}");
+        assert!(!shared.stop.load(Ordering::SeqCst));
     }
 
     #[test]
