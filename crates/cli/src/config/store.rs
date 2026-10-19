@@ -519,6 +519,27 @@ fn flatten_leaves(node: &Value, prefix: &str, out: &mut Vec<(String, Value)>) {
 /// is, and a store that holds nothing is not created. Returns how many values
 /// changed.
 pub fn replace_number(root: &Path, key: &str, old: f64, new: &Value) -> Result<usize, ConfigError> {
+    replace_matching(root, key, |stored| stored.as_f64() == Some(old), new)
+}
+
+/// [`replace_number`] for any JSON value: rewrites every stored `key` that
+/// equals `old` to `new`. A number compares by its JSON form, so use
+/// [`replace_number`] for one.
+pub fn replace_value(
+    root: &Path,
+    key: &str,
+    old: &Value,
+    new: &Value,
+) -> Result<usize, ConfigError> {
+    replace_matching(root, key, |stored| stored == old, new)
+}
+
+fn replace_matching(
+    root: &Path,
+    key: &str,
+    is_old: impl Fn(&Value) -> bool,
+    new: &Value,
+) -> Result<usize, ConfigError> {
     if !has_data(root) {
         return Ok(0);
     }
@@ -546,7 +567,7 @@ pub fn replace_number(root: &Path, key: &str, old: f64, new: &Value) -> Result<u
     let mut changed = 0;
     for (tier, scope, raw) in rows {
         let stored = serde_json::from_str::<Value>(&raw).ok();
-        if stored.as_ref().and_then(Value::as_f64) == Some(old) {
+        if stored.as_ref().is_some_and(&is_old) {
             upsert(&tx, &tier, &scope, key, new).map_err(broken(root))?;
             changed += 1;
         }
@@ -741,6 +762,52 @@ mod tests {
         assert!(other.org.is_none() && other.repo.is_none());
         let none = lookup(&r, "mode", None).unwrap();
         assert!(none.org.is_none() && none.repo.is_none());
+    }
+
+    #[test]
+    fn replace_value_without_a_data_folder_creates_nothing() {
+        // Arrange
+        let r = root("store-replace-none");
+
+        // Act
+        let changed = replace_value(&r, "update.plugin", &json!(false), &json!("off")).unwrap();
+
+        // Assert
+        assert_eq!(changed, 0);
+        assert!(!db_path(&r).exists());
+    }
+
+    #[test]
+    fn replace_value_rewrites_only_the_matching_values_in_every_tier() {
+        // Arrange
+        let r = root("store-replace-value");
+        put(&r, Tier::Global, None, "update.plugin", &json!(false)).unwrap();
+        put(
+            &r,
+            Tier::Repo,
+            Some("acme/app"),
+            "update.plugin",
+            &json!(false),
+        )
+        .unwrap();
+        put(
+            &r,
+            Tier::Org,
+            Some("acme/app"),
+            "update.plugin",
+            &json!("ask"),
+        )
+        .unwrap();
+
+        // Act
+        let changed = replace_value(&r, "update.plugin", &json!(false), &json!("off")).unwrap();
+
+        // Assert
+        assert_eq!(changed, 2);
+        let got = lookup(&r, "update.plugin", Some("acme/app")).unwrap();
+        assert_eq!(got.global, Some(json!("off")));
+        assert_eq!(got.repo, Some(json!("off")));
+        assert_eq!(got.org, Some(json!("ask")));
     }
 
     #[test]
