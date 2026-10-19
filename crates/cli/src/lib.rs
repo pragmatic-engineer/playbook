@@ -313,7 +313,7 @@ pub enum Command {
         #[command(flatten)]
         flags: init::choices::Flags,
     },
-    /// List the hooks that `playbook setup` wires into Claude Code
+    /// List the hooks that `playbook setup` wires into Claude Code, or explain a guard verdict
     Hooks {
         #[command(subcommand)]
         sub: HooksCommand,
@@ -2272,6 +2272,22 @@ pub enum HooksCommand {
     /// Lists the hooks setup adds to settings.json, grouped by purpose.
     /// Changes nothing.
     List,
+    /// Show what the rm guard does with a Bash command
+    ///
+    /// Reads the command the way the guard does and prints each path it
+    /// deletes or overwrites, with the verdict and the rule that matched,
+    /// then the denial text Claude would see. Runs nothing and changes
+    /// nothing.
+    ExplainRm {
+        /// The Bash command, quoted as one argument
+        command: String,
+        /// The folder the command runs in (default: the current folder)
+        #[arg(long)]
+        cwd: Option<std::path::PathBuf>,
+        /// Print JSON instead of text
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `playbook cc` subcommands.

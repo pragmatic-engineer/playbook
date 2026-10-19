@@ -170,6 +170,14 @@ Each denied target is listed with the rule that matched:
 
 For a path outside the roots, the message gives the exact command that keeps your current roots and adds the folder that holds the target. It offers this only for a folder inside your home whose first folder under home does not start with a dot, so it never suggests `/etc` or `~/.ssh`. The model cannot change the key, so it asks you to run the command yourself.
 
+## Checking a command
+
+`playbook hooks explain-rm '<command>'` reads a command the way the guard does and prints each path it deletes or overwrites, with its verdict and the rule that matched, then the denial text Claude would see. `--cwd <folder>` sets the folder the command runs in, and `--json` prints the same as JSON. It runs nothing.
+
+```bash
+playbook hooks explain-rm 'cd /tmp && rm -rf pb-scratch ~/.ssh'
+```
+
 ## Adding a root
 
 `hooks.rmGuard.allowedRoots` adds folders whose contents may be deleted. It adds to the built-in list and never removes from it. There is no append command, so `config set` replaces the whole list: include the roots you already have. `playbook config get hooks.rmGuard.allowedRoots` shows them.

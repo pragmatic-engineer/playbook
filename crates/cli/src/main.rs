@@ -701,6 +701,15 @@ fn main() {
         }
         Command::Hooks { sub } => match sub {
             playbook::HooksCommand::List => print!("{}", init::catalog::hooks_list()),
+            playbook::HooksCommand::ExplainRm { command, cwd, json } => {
+                match playbook::hooks::explain_rm(&command, cwd.as_deref(), json) {
+                    Ok(text) => print!("{text}"),
+                    Err(e) => {
+                        eprintln!("playbook hooks explain-rm: {e}");
+                        std::process::exit(2);
+                    }
+                }
+            }
         },
         Command::Settings { sub } => match sub {
             SettingsCommand::Gen { src, seed } => match settings::gen::generate(&src, &seed) {
