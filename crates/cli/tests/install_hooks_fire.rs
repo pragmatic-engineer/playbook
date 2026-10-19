@@ -404,6 +404,26 @@ fn fires(f: &Fire, name: &str) -> bool {
             .1
             .is_empty()
         }
+        "disk-guard" => {
+            let home = f.home.clone();
+            let tmp = home.join("disk-tmp");
+            fs::create_dir_all(&tmp).unwrap();
+            let tmp = tmp.to_string_lossy().into_owned();
+            run_hook(
+                &f.playbook,
+                name,
+                r#"{"tool_name":"Bash","tool_input":{"command":"cargo build"}}"#,
+                &home,
+                &home,
+                &[
+                    ("PLAYBOOK_TEST_DISK_FREE_GB", "1"),
+                    ("PLAYBOOK_TEST_DISK_TMP", &tmp),
+                ],
+                &[],
+            )
+            .1
+            .contains("\"permissionDecision\":\"deny\"")
+        }
         "no-slop-guard" => {
             let home = f.home.clone();
             let cmd = "git commit -m \"x \u{2014} y\"";

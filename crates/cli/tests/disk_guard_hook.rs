@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook hook disk-guard`, run as the built binary in a scratch home.
+//! `playbook hook disk-guard` and the SessionStart disk line, run as the
+//! built binary in a scratch home.
 //! Free space comes from `PLAYBOOK_TEST_DISK_FREE_GB`, which debug builds
 //! read in place of the real value. Only the test that checks the
 //! background cleanup sets `PLAYBOOK_TEST_DISK_TMP`, which points that
@@ -245,4 +246,24 @@ fn the_first_denial_starts_one_background_cleanup_per_window() {
     );
     assert!(denied(&second), "{second}");
     assert!(!second.contains("has started"), "{second}");
+}
+
+#[test]
+fn session_start_prints_the_warning_when_space_is_low() {
+    let home = isolated::fresh_home();
+    let payload = |sid: &str| {
+        serde_json::json!({
+            "session_id": sid,
+            "hook_event_name": "SessionStart",
+            "source": "startup",
+            "cwd": home,
+            "transcript_path": home.join("none.jsonl"),
+        })
+        .to_string()
+    };
+    let low = hook(&home, "session-init", "5", &payload(&session()), &[]);
+    assert!(low.contains("Disk guard: 5.0 GB free"), "{low}");
+    let fine = hook(&home, "session-init", "50", &payload(&session()), &[]);
+    assert!(!fine.contains("Disk guard"), "{fine}");
+    let _ = std::fs::remove_dir_all(&home);
 }

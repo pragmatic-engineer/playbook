@@ -171,3 +171,24 @@ fn release_deletes_an_existing_ballast() {
     assert!(stdout(&out).contains("given back"), "{}", stdout(&out));
     assert!(!ballast.exists());
 }
+
+#[test]
+fn statusline_warns_in_red_under_the_warn_threshold() {
+    let home = isolated::fresh_home();
+    let low = isolated::playbook_in(&home)
+        .arg("statusline")
+        .env(FREE_VAR, "3")
+        .env("COLUMNS", "200")
+        .current_dir(&home)
+        .output()
+        .unwrap();
+    let text = stdout(&low);
+    assert!(text.contains("disk 3.0 GB free, builds blocked"), "{text}");
+    let fine = isolated::playbook_in(&home)
+        .arg("statusline")
+        .env(FREE_VAR, "50")
+        .current_dir(&home)
+        .output()
+        .unwrap();
+    assert!(!stdout(&fine).contains("disk "), "{}", stdout(&fine));
+}

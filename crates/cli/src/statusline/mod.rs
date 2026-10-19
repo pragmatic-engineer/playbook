@@ -362,6 +362,34 @@ fn logical_pwd(env: &Env) -> String {
     }
 }
 
+/// A red warning when the tightest volume behind `home` and `cwd` has less
+/// free space than `disk.warnFreeGb`. One config read and a `statvfs` per
+/// volume.
+fn disk_badge(home: &Path, cwd: &Path) -> Option<String> {
+    use crate::disk::policy;
+    // Debug builds show it only for an injected reading, so status line
+    // tests do not depend on the free space of the machine running them.
+    if cfg!(debug_assertions) && std::env::var_os(crate::disk::probe::TEST_FREE_GB_VAR).is_none() {
+        return None;
+    }
+    let policy = policy::load(home);
+    let volumes = policy::volumes(&policy::measured_paths(&policy, home, Some(cwd)));
+    let free = policy::tightest(&volumes)?.space.free;
+    disk_badge_for(&policy, free)
+}
+
+fn disk_badge_for(policy: &crate::disk::Policy, free: u64) -> Option<String> {
+    use crate::disk::Level;
+    let gb = free as f64 / crate::disk::probe::GIB as f64;
+    match policy.level(free) {
+        Level::Ok => None,
+        Level::Low => Some(format!("{RED}⚠ disk {gb:.1} GB free{RESET}")),
+        Level::Critical => Some(format!(
+            "{RED}⚠ disk {gb:.1} GB free, builds blocked{RESET}"
+        )),
+    }
+}
+
 /// Renders the whole status line for `input`, as the bytes to print.
 pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
     let home = env
@@ -459,6 +487,13 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         }
     }
 
+    if let Some(badge) = disk_badge(Path::new(&home), Path::new(&cwd)) {
+        if !right.is_empty() {
+            right.push(' ');
+        }
+        right.push_str(&badge);
+    }
+
     let width = env.get("COLUMNS").map_or(120, int_part).clamp(0, MAX_WIDTH);
     let pad = (width - visible_len(&left) as i64 - visible_len(&right) as i64).max(1);
     let (mut out, stopped) = percent_b(&left);
@@ -500,4 +535,24 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod disk_tests {
+    use super::*;
+    use crate::disk::probe::GIB;
+
+    #[test]
+    fn the_disk_badge_shows_only_under_the_warn_threshold() {
+        let policy = crate::disk::Policy::default();
+        assert_eq!(disk_badge_for(&policy, 15 * GIB), None);
+        let low = disk_badge_for(&policy, 14 * GIB).unwrap();
+        assert_eq!(low, format!("{RED}⚠ disk 14.0 GB free{RESET}"));
+        let critical = disk_badge_for(&policy, GIB / 2).unwrap();
+        assert!(
+            critical.contains("0.5 GB free, builds blocked"),
+            "{critical}"
+        );
+        assert!(critical.starts_with(RED));
+    }
 }
