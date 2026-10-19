@@ -11,8 +11,9 @@
 #      with a boolean `required` field;
 #   2. when a playbook binary is given, warns about each listed intent the
 #      binary does not offer, and fails only for an intent marked required;
-#   3. fails when a command the tool map or the playbook:cli skill names is
-#      not in the binary's `playbook commands --json`.
+#   3. when a binary is given, fails when a command the tool map or the
+#      playbook:cli skill names is not in its `playbook commands --json`. A
+#      binary with no command list fails only under INTENTS_STRICT=1.
 #
 # Usage: [INTENTS_STRICT=1] check-intents.sh [path-to-playbook-binary]
 set -euo pipefail
@@ -58,7 +59,9 @@ done < <(jq -r '.[] | [.intent, (.required | tostring)] | @tsv' "$FILE")
 
 # 3. Every command the tool map and the playbook:cli skill name must exist in
 #    `playbook commands --json`, the list the binary builds from its own
-#    command tree.
+#    command tree: a tool map row as `group verb` when the group has
+#    subcommands, else as its group, and each `playbook <words>` in the skill
+#    as its full path. A missing one fails, strict or not.
 if ! cmds="$("$bin" commands --json 2>/dev/null)" || ! printf '%s' "$cmds" | jq -e 'type == "array"' >/dev/null 2>&1; then
   if [ "${INTENTS_STRICT:-}" = "1" ]; then
     echo "FAIL $bin gave no command list"; exit 1
@@ -67,11 +70,14 @@ if ! cmds="$("$bin" commands --json 2>/dev/null)" || ! printf '%s' "$cmds" | jq 
   exit "$fail"
 fi
 known="$(printf '%s' "$cmds" | jq -r '.[].command')"
-named="$(printf '%s' "$map" | jq -r '.[].group')"
+named="$(printf '%s' "$map" | jq -r --argjson cmds "$cmds" '.[]
+  | .group as $g
+  | (($cmds | map(select(.command == $g)) | .[0].subcommands) // []) as $subs
+  | if .verb != "" and ($subs | length) > 0 then "\($g) \(.verb)" else $g end')"
 SKILL="$ROOT/plugins/playbook/skills/cli/SKILL.md"
 if [ -f "$SKILL" ]; then
   named="$named
-$(grep -oE '`playbook [a-z][a-z-]*' "$SKILL" | sed 's/^`playbook //')"
+$({ grep -oE '`playbook [a-z][a-z-]*( [a-z][a-z-]*)*' "$SKILL" || true; } | sed 's/^`playbook //')"
 fi
 while IFS= read -r command; do
   [ -n "$command" ] || continue

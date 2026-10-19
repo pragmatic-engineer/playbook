@@ -92,7 +92,7 @@ The skills, commands, agents and output style live in `plugins/playbook` and shi
 
 - Keep the folder to markdown and `plugin.json`. The `payload-guard` check fails on anything else.
 - Do not bump the plugin version. The plugin ships with the next `vX.Y.Z` release, which sets one version for the binary and the plugin ([ADR-0038](docs/adr/0038-one-release-line.md)). Claude Code updates an installed plugin only when that version rises, so a plugin fix reaches users with the next release.
-- When prose needs a task from the binary, name the task in plain words and list its intent in `plugins/intents.json`. Do not write a subcommand into the prose. The `intents-contract` check compares the list with `playbook tools map`. The one exception is the `playbook:cli` skill, which points to `playbook commands` for the full list.
+- When prose needs a task from the binary, name the task in plain words and list its intent in `plugins/intents.json`. Do not write a subcommand into the prose. The one exception is the `playbook:cli` skill, which points to `playbook commands` for the full list. The `intents-contract` check compares the list with `playbook tools map`, and fails when a command the tool map or the `playbook:cli` skill names is missing from `playbook commands --json`.
 - Run `cargo test -p playbook-plugin-checks` for the prose and structure checks, and `scripts/check-plugin.sh payload` for the payload.
 
 ### Editing agents
