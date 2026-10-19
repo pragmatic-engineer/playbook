@@ -72,7 +72,7 @@ Each item is fixed in the pull request named in decision 6.
 | `docs/policy-table.md` alone at the docs root | `docs/` | move to `docs/reference/` (6.6) |
 | `docs/concepts/` and `docs/internals/` both explain how it works | `docs/` | merge into `docs/internals/` (6.6) |
 | ADR 0024 and 0025 still Proposed | `docs/adr/` | set the status the code shows (6.6) |
-| `.github/release-notes-upgrade.md` tells users about the `playbook-hooks` plugin of 0.34 | `.github/` | trim to what still applies (6.4) |
+| `.github/release-notes-upgrade.md` tells users about the `playbook-hooks` plugin of 0.34 | `.github/` | delete; `CHANGELOG.md` keeps the version note (6.4) |
 | Four `agent-*.yml` workflows run `npm ci` and `npm run build` in this Rust repo, and `agent-triage.yml` calls the same unpinned outside workflow (issue #547) | `.github/workflows/` | delete, close #547 (6.7) |
 | `dependabot.yml` has no `updates` | `.github/dependabot.yml` | weekly grouped cargo and GitHub Actions updates (6.7) |
 | `CONTRIBUTING.md` says "until 0.36.0" for `breaking-changes.json` | `CONTRIBUTING.md` | remove (6.4) |

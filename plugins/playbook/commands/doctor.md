@@ -81,10 +81,10 @@ and stop.
    After an upgrade, `playbook migrate` (binary 0.27.0 or later) brings
    playbook's own files up to date, and `playbook doctor --fix` runs the same
    step. `--status` and `--dry-run` show what is pending and write nothing.
-   `playbook update` runs it and prints the breaking changes since your
-   previous version. The install script does the same with a terminal or
-   `--yes`, unless `--no-init` is set. After `brew upgrade`, the release page
-   on GitHub lists that release's breaking changes.
+   `playbook update` runs it and prints the breaking changes of the new
+   release. The install script does the same with a terminal or `--yes`,
+   unless `--no-init` is set. After `brew upgrade`, or to see the breaking
+   changes of releases you skipped, read the release pages on GitHub.
 7. **No hook command points at a missing file.** A hook that names a path
    which does not exist fails open: it never runs and nothing says so. Bare
    binary hook commands are skipped, as is any path with an
