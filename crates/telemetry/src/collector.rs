@@ -60,12 +60,6 @@ pub struct State {
     pub version: String,
 }
 
-/// Whether a collector runs from a build other than this one, so a
-/// background service should restart it after an upgrade.
-pub fn runs_other_build(state: &State) -> bool {
-    running(state) && state.version != env!("CARGO_PKG_VERSION")
-}
-
 pub fn state_path(paths: &Paths) -> PathBuf {
     paths
         .db
@@ -574,25 +568,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_collector_from_another_build_is_flagged_for_a_restart() {
+    fn a_collector_records_the_version_that_started_it() {
         let p = paths("collector-version");
         let stop = Arc::new(AtomicBool::new(false));
         run_collect(&p, Some(0), 1, &stop).unwrap();
         let written = read_state(&state_path(&p)).unwrap();
         assert_eq!(written.version, env!("CARGO_PKG_VERSION"));
-
-        let listener = bind(0).unwrap();
-        let live = |version: &str| State {
-            pid: std::process::id(),
-            port: listener.local_addr().unwrap().port(),
-            version: version.into(),
-            ..State::default()
-        };
-
-        assert!(runs_other_build(&live("0.1.0")));
-        assert!(runs_other_build(&live("")));
-        assert!(!runs_other_build(&live(env!("CARGO_PKG_VERSION"))));
-        assert!(!runs_other_build(&State::default()));
     }
 
     /// Sets the stop flag and wakes the blocking accept on `port`.
