@@ -102,7 +102,7 @@ fn not_started(kind: Kind, file: &Path, why: &str) -> String {
     format!(
         "{} is in place but did not start ({why}); to start it, run: {}",
         file.display(),
-        manager::load_hint(kind, file, manager::uid())
+        manager::load_hint(kind, file, crate::common::account::uid())
     )
 }
 
@@ -152,16 +152,28 @@ pub fn step(
         // An agent left under the old label moves first, so setup never
         // loads a second collector next to it.
         let up = || collector_running(home);
-        if let Err(why) =
-            manager::move_old_agent(home, program, manager, manager::uid(), &up, Duration::ZERO)
-        {
+        if let Err(why) = manager::move_old_agent(
+            home,
+            program,
+            manager,
+            crate::common::account::uid(),
+            &up,
+            Duration::ZERO,
+        ) {
             return StepReport::failed(PART, format!("{why}; to try again, run: playbook migrate"));
         }
     }
     let file = kind.file(home);
     let outdated =
         collector_state(home).is_some_and(|s| crate::usage::collector::runs_other_build(&s));
-    let report = match manager::install(kind, home, program, manager, manager::uid(), outdated) {
+    let report = match manager::install(
+        kind,
+        home,
+        program,
+        manager,
+        crate::common::account::uid(),
+        outdated,
+    ) {
         Ok(Installed::Unchanged) => {
             StepReport::already_correct(PART, format!("the {} runs the collector", kind.name()))
         }
@@ -226,7 +238,7 @@ pub fn preview(home: &Path, telemetry_on: bool, program: &Path) -> String {
 pub fn foreign_old_agent_fix(file: &Path) -> String {
     format!(
         "launchctl bootout gui/{}/{}; rm {}",
-        manager::uid(),
+        crate::common::account::uid(),
         service::OLD_LABEL,
         crate::common::shell::word(&file.to_string_lossy())
     )
@@ -270,9 +282,9 @@ pub fn remove_with(home: &Path, manager: &dyn Manager) -> Result<Option<String>,
         return Ok(None);
     };
     for kind in KINDS {
-        manager::remove(kind, home, manager, manager::uid())?;
+        manager::remove(kind, home, manager, crate::common::account::uid())?;
     }
-    manager::remove_old(home, manager, manager::uid())?;
+    manager::remove_old(home, manager, crate::common::account::uid())?;
     Ok(Some(format!("stopped and removed the {names}")))
 }
 

@@ -131,7 +131,7 @@ fn process_args() -> String {
 }
 
 fn current_uid() -> Option<u32> {
-    cfg!(unix).then(crate::service_manager::uid)
+    cfg!(unix).then(crate::common::account::uid)
 }
 
 /// The playbook data that is never removed. It is the list the rm guard

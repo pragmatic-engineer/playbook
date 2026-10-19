@@ -82,7 +82,7 @@ impl RootEnv {
             local_app_data: var("LOCALAPPDATA"),
             app_data: var("APPDATA"),
             temp_dir: std::env::temp_dir(),
-            uid: crate::service_manager::uid(),
+            uid: crate::common::account::uid(),
             bin_dir: crate::uninstall::install_dir(&home),
             home,
         }

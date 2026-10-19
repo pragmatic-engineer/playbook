@@ -43,7 +43,7 @@ fn account_home() -> Option<PathBuf> {
     if let Some(home) = PRETEND.with(|p| p.borrow().clone()) {
         return Some(home);
     }
-    crate::service_manager::account_home()
+    crate::common::account::account_home()
 }
 
 /// Whether `home` is the home the account database lists for this user. A
