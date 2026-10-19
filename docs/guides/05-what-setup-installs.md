@@ -155,9 +155,13 @@ If `~/.claude.json` exists, setup marks `~/.config/playbook` as trusted there, s
 
 Older installs placed `~/.config/playbook/hooks/lib/config-hash.sh`. The config hash now runs inside `playbook`, so setup removes that script once. The hash itself is a fingerprint of your Claude Code config files that `session-init` stores in the session directory, to warn when a resumed session's config has changed. It is never sent anywhere.
 
+## Codex skills (not part of setup)
+
+`playbook setup` never writes to `~/.agents/skills`. `playbook skills sync` is a separate command you run on purpose. It writes one `playbook-<name>/` folder per skill and per command, as real copies, and records the plugin version and a hash of each file it wrote. It skips a folder it did not write or one you edited. After the first run, a plugin update refreshes only the folders that record lists. `playbook uninstall` removes a recorded folder when it still matches the record, and keeps one you edited. See [Codex skills](../internals/15-codex-skills.md).
+
 ## Undo
 
-- `playbook uninstall` removes the hook entries and status line setup wrote, the launcher block, the files setup placed under `~/.config/playbook`, and the collector service. Run it with `--dry-run` first to see the list. Add `--remove-binary` to remove the binary and its PATH block too.
+- `playbook uninstall` removes the hook entries and status line setup wrote, the launcher block, the files setup placed under `~/.config/playbook`, the collector service, and the Codex skill folders that `skills sync` wrote and you did not edit. Run it with `--dry-run` first to see the list. Add `--remove-binary` to remove the binary and its PATH block too.
 - Memory, your own settings, sessions, history and earlier backups are never removed.
 - Backups of `settings.json` are timestamped files next to it, named `settings.json.bak.<time>`.
 - Any single part can be turned off by running `setup` again with its `--no-` flag, then removing the entries by hand. Setup never deletes a value you have.
