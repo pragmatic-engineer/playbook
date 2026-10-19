@@ -386,12 +386,8 @@ fn main() {
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
         Command::Setup { flags } | Command::Init { flags } if flags.explain.is_some() => {
+            init::choices::note_retired(&flags);
             let which = flags.explain.as_ref().and_then(|w| w.as_deref());
-            if std::io::stderr().is_terminal() {
-                for note in init::choices::retired_notes(&flags) {
-                    eprintln!("{note}");
-                }
-            }
             let named: Vec<String> = init::choices::only_parts(&flags)
                 .into_iter()
                 .filter(|n| !init::choices::RETIRED_PARTS.contains(&n.as_str()))
@@ -415,6 +411,7 @@ fn main() {
             }
         }
         Command::Setup { flags } | Command::Init { flags } => {
+            init::choices::note_retired(&flags);
             let security_config = config::resolve("security.defaults", &common::home_dir(), None)
                 .map(|(value, _)| value.as_bool().unwrap_or(false))
                 .unwrap_or(false);
@@ -425,11 +422,6 @@ fn main() {
                     std::process::exit(2);
                 }
             };
-            if std::io::stderr().is_terminal() {
-                for note in init::choices::retired_notes(&flags) {
-                    eprintln!("{note}");
-                }
-            }
             let asking = init::choices::stdio_is_interactive()
                 && !flags.yes
                 && !flags.dry_run
@@ -490,7 +482,13 @@ fn main() {
                 .into_iter()
                 .filter_map(|(id, no)| no.then_some(id))
                 .collect();
-                let items = init::wizard::items_for(&flags, security_on, &skipped, &said_no);
+                let chose_on: &[&str] = if init::attribution::enabled(&home_dir) {
+                    &[init::attribution::PART]
+                } else {
+                    &[]
+                };
+                let items =
+                    init::wizard::items_for(&flags, security_on, &skipped, &said_no, chose_on);
                 print!("{}", init::wizard::welcome(&caps));
                 let stdin = std::io::stdin();
                 let mut input = stdin.lock();
@@ -570,6 +568,7 @@ fn main() {
                         &std::env::var_os("PATH").unwrap_or_default(),
                     )
                     .is_none(),
+                    attribution_on: init::attribution::enabled(&home_dir),
                 };
                 for line in init::choices::unattended_lines(&flags, &choices, &left) {
                     eprintln!("{line}");
@@ -640,11 +639,7 @@ fn main() {
                     asking,
                     init::pb_link::declined(&common::home_dir()),
                 ),
-                attribution: init::choices::attribution_choice(
-                    &flags,
-                    choices.attribution_off,
-                    asking,
-                ),
+                attribution: choices.attribution.resolve(&common::home_dir()),
             };
             if flags.dry_run {
                 print!("{}", init::preview::dry_run(&paths, &choices));

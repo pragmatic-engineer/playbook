@@ -58,8 +58,9 @@ pub struct InitPaths {
     pub short_name: crate::init::pb_link::Choice,
     /// Where the `pb` link may go. `None` when the binary's location is unknown.
     pub pb_target: Option<crate::init::pb_link::Target>,
-    /// What the attribution-off part does: skip, record a no, add the missing
-    /// `attribution` keys, or also replace values the user set.
+    /// What the attribution part does: skip, OFF (add the missing
+    /// `attribution` keys, or also replace values the user set), or ON
+    /// (remove the keys playbook wrote).
     pub attribution: crate::init::attribution::Choice,
     /// Where the binary lives and the shell to wire it for. `None` skips the
     /// `path` step.
@@ -323,7 +324,7 @@ pub(crate) fn collector_service_step(paths: &InitPaths) -> StepReport {
     )
 }
 
-/// The attribution-off part, as `paths.attribution` says.
+/// The attribution part, as `paths.attribution` says.
 pub(crate) fn attribution_step(paths: &InitPaths, epoch: u64) -> StepReport {
     crate::init::attribution::step(
         &paths.home,
