@@ -1,6 +1,7 @@
 # ADR-0009 Execution Blueprint
 
 - **Parent ADR:** `docs/adr/0009-evidence-verified-memory-capture-and-bounded-handoff-nudging.md`
+- **Amended 2026-10-19:** the memory graph now lives in `~/.config/playbook/data/memory.db` (moved there in #925), not in `memory.graph.json` or `graph.json`. `playbook memory rebuild` rebuilds it and `playbook memory stats` shows what it holds. The fact files stay in `~/.config/playbook/memory/`. Paths below are as they were when this record was written.
 
 ## System Snapshot
 

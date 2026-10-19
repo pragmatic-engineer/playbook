@@ -142,7 +142,7 @@ The choice is stored as `attribution.enabled`, so `--yes` and `--only attributio
 
 ### Memory migration
 
-Early installs kept playbook's memory in `~/.claude/memory`. On the first run, setup moves that tree to `~/.config/playbook/memory` and renames `graph.json` to `memory.graph.json`. The move runs once and a `.migration-complete` marker records it. This is playbook's own store. Claude Code's auto memory under `~/.claude/projects/` is never touched. The `session-init` and `memory-capture` hooks run the same check, so a store left behind by a partial move heals itself.
+Early installs kept playbook's memory in `~/.claude/memory`. On the first run, setup moves that tree to `~/.config/playbook/memory` and renames `graph.json` to `memory.graph.json`. The next tool that reads the graph folds that file into `~/.config/playbook/data/memory.db`, where the graph lives now, and renames it `memory.graph.json.migrated`. The move runs once and a `.migration-complete` marker records it. This is playbook's own store. Claude Code's auto memory under `~/.claude/projects/` is never touched. The `session-init` and `memory-capture` hooks run the same check, so a store left behind by a partial move heals itself.
 
 ### Trust step
 
