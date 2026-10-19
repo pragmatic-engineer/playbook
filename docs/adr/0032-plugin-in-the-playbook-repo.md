@@ -1,8 +1,8 @@
 # ADR-0032: Keep the Plugin in the Playbook Repository
 
-- **Status:** Accepted. Decisions 3 and 5 are superseded by [ADR 0038](0038-one-release-line.md): the plugin shares the binary's version and ships in its `vX.Y.Z` release. Decision 2 is amended by ADR 0038: the marketplace entry gets a `ref` on the release tag. Decision 5 was first amended by [ADR 0037](0037-release-notes-from-conventional-commits.md).
+- **Status:** Accepted. Decisions 3 and 5 are superseded by [ADR 0038](0038-one-release-line.md): the plugin shares the binary's version and ships in its `vX.Y.Z` release. Decision 2 is amended by ADR 0038: the marketplace entry gets a `ref` on the release tag. Decision 5 was first amended by [ADR 0037](0037-release-notes-from-conventional-commits.md). Decision 6 is amended on 2026-10-19: the `playbook:cli` skill names `playbook commands`.
 - **Date created:** 2026-10-14
-- **Date modified:** 2026-10-16
+- **Date modified:** 2026-10-19
 - **Supersedes:** decisions 1, 5, 6 and 7 of [ADR 0030](0030-skills-and-commands-in-their-own-repo.md): the second repository, the daily comparison, the checks crate there and the version line
 
 ## Context
@@ -24,6 +24,7 @@ Claude Code can install a plugin from a folder inside a git repository (a `git-s
 4. **The payload is markdown only.** The `payload-guard` check fails on any other file type, a symlink, or markdown nested deeper than the layout allows.
 5. **The plugin is released by its own workflow.** When `plugin.json` or `CHANGELOG.md` changes on `main`, `plugin-release.yml` creates the tag `playbook-plugin-v<version>` and a GitHub release with the changelog section, unless the tag exists. The release is not marked latest, and the tag does not match the `v*` pattern of the binary release workflow.
 6. **The contract with the binary stays a list.** `intents.json` names the tasks the plugin expects the binary to offer. The `intents-contract` check builds the binary from the same commit and compares the list with `playbook tools map`. No intent is required, so a missing one is a warning.
+   - Amended 2026-10-19: the prose still names tasks, with one exception. The `playbook:cli` skill names `playbook commands`, which prints the binary's own list of commands, who may run each one and their flags, built from the clap tree at run time. The skill holds no list of its own, so it cannot drift. The same check confirms that every command the tool map and that skill name exists in `playbook commands --json`, and the release build runs it against the built binary.
 7. **The prose checks run here.** They live in the `playbook-plugin-checks` crate and read `plugins/playbook`.
 8. **Users keep the same ids.** They run `claude plugin marketplace add pragmatic-engineer/marketplace` and `claude plugin install playbook@pragmatic-engineer`. The old repository name keeps working through the GitHub redirect.
 
