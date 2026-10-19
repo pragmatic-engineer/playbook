@@ -127,40 +127,7 @@ jobs:
 
       # Always runs, docs-only or not: it greps docs/ and README.md too.
       - name: Personal-identifier grep
-        # Regression guard for everything S2-S4 of the product-hardening
-        # wrap-up removed from the shipped surface (settings.shared.json,
-        # README.md, docs, Brewfile): a maintainer
-        # home-directory convention, a Jira host, the `rtk` local CLI wrapper,
-        # and the maintainer's own username. Excludes docs/adr/**: ADRs are
-        # a historical record (ADR 0001/0002/0006 alone carry 10+ legitimate
-        # references to `rtk` and `Workspace/` documenting real past
-        # decisions), and rewriting history after the fact is wrong. A
-        # further handful of test fixtures and doc-comments legitimately
-        # reuse these strings to exercise or document real, intentional
-        # product behaviour rather than leaking an identifier; each is
-        # excluded by exact path below. This step's own file is also
-        # excluded: its comments and its regex literal necessarily spell out
-        # the very strings it searches for.
-        run: |
-          if git ls-files -- \
-              ':!.github/workflows/shell-ci.yml' \
-              ':!docs/adr/**' \
-              ':!crates/cli/src/hooks/rm_workspace_guard.rs' \
-              ':!crates/cli/src/hooks/commit_message_sanitizer/engine.rs' \
-              ':!crates/cli/src/hooks/commit_message_sanitizer/git.rs' \
-              ':!crates/cli/src/init/wire.rs' \
-              ':!crates/cli/tests/fixtures/golden/init.clean-install.json' \
-              ':!crates/cli/tests/fixtures/golden/init.skip-triggering.json' \
-              ':!crates/cli/tests/hooks_commit_message_sanitizer.rs' \
-              ':!crates/cli/tests/hooks_guards.rs' \
-              ':!crates/cli/tests/init_wire.rs' \
-              ':!crates/cli/tests/settings_check.rs' \
-              ':!crates/cli/tests/settings_gen.rs' \
-              ':!crates/cli/tests/support/sanitizer_lab.rs' \
-              | xargs grep -nE 'Workspace/|atlassian\.net|\brtk\b|isantos'; then
-            echo "::error::personal identifier or maintainer-specific string found in tracked files (see above)"
-            exit 1
-          fi
+        run: scripts/check-identifiers.sh
 
       - name: Run behavioral test suites
         if: needs.changes.outputs.docs_only != 'true'

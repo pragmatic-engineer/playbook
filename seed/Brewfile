@@ -16,7 +16,6 @@
 
 # Core
 brew "git"          # used everywhere; hooks drive git directly
-brew "just"         # task runner for the justfile in this repository
 
 # Statusline and PR/CI integration
 brew "gh"           # statusline PR and CI status (optional but recommended)

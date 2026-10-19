@@ -15,25 +15,14 @@ bin := "./target/release/playbook"
 default:
     @just --list
 
-# Refresh the hooks and status line of settings.shared.json from a live
-# settings.json. The permissions block of the seed is kept as it is: edit it
-# by hand. Dry run by default.
+# The permissions block of the seed is kept as it is: edit it by hand.
+#
+# Refresh the seed's hooks and status line from a live settings.json (dry run by default).
 settings-shared write="0": build
     #!/usr/bin/env bash
-    # Reads a file that is NOT in the repo, so this is a manual step and never
-    # part of CI; see ADR 0006 on why the seed is generated rather than
-    # reproducible.
-    #
-    # DRY RUN BY DEFAULT, and that default is load-bearing. The generator
-    # derives the seed from the maintainer's live settings.json, so whatever
-    # has drifted there lands in a tracked file. Measured 2026-08-21: running
-    # this on a machine whose settings.json still carried the legacy
-    # ~/.claude/hooks/<name>.sh guard commands deleted the ENTIRE .hooks block
-    # from the seed, because ADR 0007 WU-13 removed that form from the
-    # generator's SAFETY_REGEXP. `playbook settings check` passed on the gutted
-    # result, so nothing downstream would have objected.
-    #
-    # Pass write=1 only after reading the diff this prints.
+    # Reads the maintainer's live settings.json, so it never runs in CI. Dry
+    # run by default: anything that drifted in the live file lands in the
+    # seed, so read the diff before you pass write=1.
     set -uo pipefail
     test -r "{{ src }}" || { echo "just: source settings not readable: {{ src }}; nothing regenerated" >&2; exit 1; }
     {{ bin }} settings gen "{{ src }}" "{{ out }}" > "{{ out }}.tmp" || exit 1
@@ -50,6 +39,7 @@ settings-shared write="0": build
         echo "just: DRY RUN, nothing written. Review the diff above, then:"
         echo "just: only the .hooks block should differ; any other changed key is"
         echo "just: personal drift from {{ src }} and must not be committed."
+        echo "just: a removed or emptied guard in .hooks is a regression, not drift."
         echo "just:   just settings-shared write=1"
         exit 0
     fi
@@ -61,24 +51,30 @@ settings-shared write="0": build
 build:
     @cargo build --release --quiet
 
-# Everything CI runs, so a green local run means a green PR.
+# The checks CI runs, so a green local run means a green PR.
 check: build
     cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
     just test
+    just test-shell
     git ls-files '*.sh' | xargs shellcheck --severity=warning
     @for f in $(git ls-files '*.sh'); do bash -n "$f"; done
-    {{ bin }} settings check "{{ out }}" .
-    {{ bin }} manifest check .
+    {{ bin }} ci --dir . --strict
+    bash scripts/check-links.sh
+    scripts/check-identifiers.sh
+    scripts/check-plugin.sh payload
+    scripts/check-plugin.sh version
+    INTENTS_STRICT=1 scripts/check-intents.sh {{ bin }}
 
-# Run the test suite with cargo-nextest (install: `cargo install cargo-nextest --locked`),
-# which schedules tests across every test binary at once. Doctests run apart.
+# cargo-nextest schedules tests across every test binary at once.
+#
+# Run the test suite with cargo-nextest, then the doc tests.
 test *args:
     cargo nextest run --workspace --config-file .github/nextest.toml {{ args }}
     cargo test --workspace --doc
 
-# Run every behavioural shell suite exactly the way CI does.
+# Run every `*.test.sh` suite the way shell-ci does.
 test-shell:
     #!/usr/bin/env bash
     set -uo pipefail

@@ -4,12 +4,11 @@ This project follows the standard igorjs contribution rules. Start here:
 
 - **[.github/CONTRIBUTING-RULES.md](.github/CONTRIBUTING-RULES.md)**: DCO, CLA, commit conventions, PR process, and the code style baseline (SPDX headers, dependency policy, commit signing). These rules are shared across all igorjs repos.
 - **[README](README.md)**: project description and install.
-- **[justfile](justfile)**: build and test commands (`just --list`).
 - **[SECURITY.md](SECURITY.md)**: vulnerability disclosure process.
 
 ## Project-Specific Notes
 
-See the [justfile](justfile) for build and test commands (`just --list`).
+See the [justfile](justfile) for build and test commands (`just --list`). The recipes need `just`, `cargo-nextest`, `shellcheck` and `jq`: `brew install just cargo-nextest shellcheck jq`. `seed/Brewfile` lists only what playbook itself calls on a user's machine.
 
 ### Repository layout
 
@@ -104,6 +103,6 @@ No project-specific code style rules beyond the baseline. See [.github/CONTRIBUT
 
 ## Project-Specific Tests
 
-See the [justfile](justfile) for test commands. `just check` runs everything CI runs.
+See the [justfile](justfile) for test commands. `just check` runs the checks CI runs, apart from the cross builds and `cargo audit`.
 
 A test that starts the built `playbook` gives it a scratch home: use `isolated::playbook()` from `crates/cli/tests/support/isolated.rs`, or set `HOME` yourself. `test_isolation.rs` fails for a spawn that does neither. As a second net, a debug build started by cargo or nextest does not run migrations, the upgrade heal or the real `launchctl` and `systemctl` against the real home of your account, and prints a note instead. Other writes are not covered by that net, so the scratch home stays the rule. Set `PLAYBOOK_ALLOW_REAL_HOME=1` to run a dev build against your real home on purpose.
