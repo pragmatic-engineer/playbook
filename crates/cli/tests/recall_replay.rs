@@ -50,8 +50,6 @@ enum Outcome {
     Hint,
     /// No output at all.
     Silent,
-    /// Hint or silence, but never a fact.
-    HintOrSilent,
 }
 
 struct Case {
@@ -92,7 +90,7 @@ const CASES: [Case; 11] = [
     },
     Case {
         prompt: "fix the bug in src",
-        expected: Outcome::HintOrSilent,
+        expected: Outcome::Hint,
         marker: None,
         searchable: true,
     },
@@ -254,24 +252,33 @@ fn run_prompt(home: &Path, prompt: &str, session_id: &str) -> String {
     let parsed: Value = serde_json::from_str(out).expect("hook output should be JSON");
     parsed["hookSpecificOutput"]["additionalContext"]
         .as_str()
-        .unwrap_or_default()
+        .expect("additionalContext should be a string")
         .to_string()
+}
+
+/// Removes the scratch HOME on drop, so a panic still cleans up.
+struct HomeGuard(PathBuf);
+
+impl Drop for HomeGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 /// Runs every prompt once, each in its own session, and shares the result.
 fn replays() -> &'static Vec<Replay> {
     static REPLAYS: OnceLock<Vec<Replay>> = OnceLock::new();
     REPLAYS.get_or_init(|| {
-        let home = seed_home();
+        let guard = HomeGuard(seed_home());
+        let home = &guard.0;
         let replays = CASES
             .iter()
             .enumerate()
             .map(|(i, case)| Replay {
                 prompt: case.prompt,
-                message: run_prompt(&home, case.prompt, &format!("replay-{i}")),
+                message: run_prompt(home, case.prompt, &format!("replay-{i}")),
             })
             .collect();
-        let _ = fs::remove_dir_all(&home);
         replays
     })
 }
@@ -290,7 +297,6 @@ fn every_prompt_produces_its_planned_outcome() {
             Outcome::Weak => facts > 0 && hinted,
             Outcome::Hint => facts == 0 && hinted,
             Outcome::Silent => m.is_empty(),
-            Outcome::HintOrSilent => facts == 0,
         };
         assert!(
             ok,
@@ -321,7 +327,7 @@ fn the_crate_prompt_ranks_the_code_fact_first() {
 #[test]
 fn a_prompt_with_a_searchable_term_gets_output() {
     for (case, replay) in CASES.iter().zip(replays()) {
-        if case.searchable && case.prompt != "fix the bug in src" {
+        if case.searchable {
             assert!(
                 !replay.message.is_empty(),
                 "{:?} got silence",
@@ -344,13 +350,12 @@ fn no_prompt_injects_more_than_three_facts() {
     }
 }
 
-/// Bar 3: a hint-only message stays within 400 characters.
+/// Bar 3: every hint line stays within 400 characters.
 #[test]
-fn a_hint_only_message_stays_within_the_hint_budget() {
+fn every_hint_line_stays_within_the_hint_budget() {
     for replay in replays() {
-        let hint_only = replay.fact_count() == 0 && !replay.hint_lines().is_empty();
-        if hint_only {
-            let len = replay.message.chars().count();
+        for line in replay.hint_lines() {
+            let len = line.chars().count();
             assert!(
                 len <= MAX_HINT_CHARS,
                 "{:?} hint is {len} chars",
