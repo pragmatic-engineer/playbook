@@ -53,7 +53,8 @@
       "Bash(mkdir:*)",
       "Bash(playbook mode status:*)",
       "Bash(playbook mode ask)",
-      "Bash(playbook run-context:*)"
+      "Bash(playbook run-context:*)",
+      "Bash(playbook commands:*)"
     ],
     "deny": [
       "Read(**/.env)",
