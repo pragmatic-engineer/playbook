@@ -661,6 +661,7 @@ mod tests {
             ("dependencies", vec![file("requirements-dev.txt", 3)], Review::Deep),
             ("cli-surface", vec![file("crates/cli/src/main.rs", 3)], Review::Deep),
             ("plugin-payload", vec![file("plugins/p/skills/x/SKILL.md", 61)], Review::Deep),
+            ("seed-prompt", vec![file("seed/prompts/SYSTEM_PROMPT.md", 61)], Review::Deep),
             ("untested-code", vec![file("src/a.py", 150)], Review::Deep),
             ("no-code", vec![file("README.md", 500), file("Cargo.lock", 500), file("tests/a.rs", 90)], Review::Quick),
             ("small", vec![file("src/a.rs", 40), file("tests/a.rs", 20)], Review::Quick),

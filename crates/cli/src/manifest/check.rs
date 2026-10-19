@@ -40,11 +40,11 @@ const ALLOW_DIRS: [&str; 7] = [
     "seed", "plugins", "scripts", "docs", ".github", "crates", ".cargo",
 ];
 
-/// Belt-and-suspenders: the owner's personal settings.json must never track,
-/// even though nothing in `ALLOW_FILES` would otherwise admit it. Returns the
-/// offender's report line, or `None` if `path` is allowlisted.
+/// A personal settings.json must never track, at the root or inside an
+/// allowed folder such as `seed/`, where the folder rule would admit it.
+/// Returns the offender's report line, or `None` if `path` is allowlisted.
 fn offender(path: &str) -> Option<String> {
-    if path == "settings.json" {
+    if path == "settings.json" || path.ends_with("/settings.json") {
         return Some(format!(
             "{path}  (personal settings.json must not be tracked)"
         ));
@@ -206,6 +206,14 @@ mod tests {
         let result = violations(&tracked);
         assert_eq!(result.len(), 1);
         assert!(result[0].contains("settings.json"));
+        assert!(result[0].contains("personal settings.json must not be tracked"));
+    }
+
+    #[test]
+    fn a_personal_settings_json_inside_an_allowed_folder_is_an_offender() {
+        let tracked = vec!["seed/settings.json".to_string()];
+        let result = violations(&tracked);
+        assert_eq!(result.len(), 1);
         assert!(result[0].contains("personal settings.json must not be tracked"));
     }
 

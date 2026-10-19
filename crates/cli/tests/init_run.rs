@@ -950,6 +950,10 @@ fn binary_clean_init_exits_zero_and_is_idempotent() {
         second_out.lines().all(|l| !l.starts_with("[ok]")),
         "second run should report no changes: {second_out}"
     );
+    assert!(
+        !home.join(".config/playbook/embedded").exists(),
+        "the checkout's seed/ folder should be the seed, not the embedded copies"
+    );
 }
 
 /// The `memory` step must appear in `run()`'s reported steps.

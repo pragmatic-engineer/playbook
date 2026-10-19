@@ -12,7 +12,6 @@ name: intents-contract
 on:
   pull_request:
     paths:
-      - "plugins/intents.json"
       - "scripts/check-intents.sh"
       - "plugins/**"
       - "crates/cli/**"
