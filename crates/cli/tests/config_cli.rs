@@ -983,8 +983,14 @@ fn spend_cache_seconds_stays_between_30_and_600() {
     let (low, min, max, high) = (set("29"), set("30"), set("600"), set("601"));
 
     // Assert
-    assert!(!low.status.success() && !high.status.success());
-    assert!(min.status.success() && max.status.success());
+    assert!(!low.status.success(), "29 was accepted");
+    assert!(!high.status.success(), "601 was accepted");
+    assert!(min.status.success(), "stderr: {}", stderr_of(&min));
+    assert!(max.status.success(), "stderr: {}", stderr_of(&max));
+    assert_eq!(
+        stored(&home)["global"]["usage.spend.cacheSeconds"],
+        Value::from(600)
+    );
     assert!(
         stderr_of(&low).contains("30 and 600"),
         "{}",

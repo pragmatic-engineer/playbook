@@ -1030,12 +1030,36 @@ mod tests {
             ..Sources::default()
         };
 
-        let v = report_json(&s, &[], NOW, WeekStart::Monday);
-        let base = report_json(&Sources::default(), &[], NOW, WeekStart::Monday);
+        let mut v = report_json(&s, &[], NOW, WeekStart::Monday);
+        let mut base = report_json(
+            &Sources {
+                plan_choice: PlanChoice::Auto,
+                ..s.clone()
+            },
+            &[],
+            NOW,
+            WeekStart::Monday,
+        );
 
         assert_eq!(v["plan_label"], "Team (set by you)");
-        assert_eq!(v["plan"], base["plan"]);
-        assert_eq!(v["windows_note"], base["windows_note"]);
+        v.as_object_mut().unwrap().remove("plan_label");
+        base.as_object_mut().unwrap().remove("plan_label");
+        assert_eq!(v, base);
+    }
+
+    #[test]
+    fn load_reads_the_plan_setting_from_the_config_store() {
+        let home = crate::util::scratch_dir("limits-load-plan");
+        let dir = home.join(".config/playbook");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.json"), r#"{"usage":{"plan":"team"}}"#).unwrap();
+        let none = crate::util::scratch_dir("limits-load-plan-none");
+
+        let set = Sources::load(None, &home.join(".claude.json"), &home);
+        let unset = Sources::load(None, &none.join(".claude.json"), &none);
+
+        assert_eq!(plan_label(&set), "Team (set by you)");
+        assert_eq!(unset.plan_choice, PlanChoice::Auto);
     }
 
     #[test]

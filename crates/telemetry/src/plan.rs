@@ -167,7 +167,9 @@ const API_KEY_ENV: &str = "ANTHROPIC_API_KEY";
 impl LoginKind {
     /// The login from whether the config file names an OAuth account and from
     /// the environment (`env` returns a variable's value). A cloud provider
-    /// variable wins, then an API key variable, then an OAuth account. The
+    /// variable wins, then an API key variable, which Claude Code prefers over
+    /// a subscription login, then an OAuth account. A set API key variable
+    /// means no token is read, so a doubt leans to skipping the read. The
     /// names of the cloud variables are not all documented, so a missing one
     /// shows as `OAuth` or `Unknown`, which only costs a skipped optimization.
     pub fn detect(has_oauth_account: bool, env: &dyn Fn(&str) -> Option<String>) -> LoginKind {
@@ -179,7 +181,7 @@ impl LoginKind {
         };
         if CLOUD_ENV.iter().any(|n| on(n)) {
             LoginKind::Cloud
-        } else if on(API_KEY_ENV) && !has_oauth_account {
+        } else if on(API_KEY_ENV) {
             LoginKind::ApiKey
         } else if has_oauth_account {
             LoginKind::OAuth
@@ -1363,8 +1365,11 @@ mod tests {
             assert!(c.local_only, "{login:?}");
             assert_eq!(c.lines(), [DisplayLine::LocalEstimate]);
         }
-        assert!(synthetic("api-key-login").local_only);
-        assert!(synthetic("cloud-login").local_only);
+        for name in ["api-key-login", "cloud-login"] {
+            let c = synthetic(name).for_login(LoginKind::OAuth, PlanChoice::Auto);
+
+            assert_eq!(c.lines(), [DisplayLine::LocalEstimate], "{name}");
+        }
         assert!(
             !rich
                 .clone()
@@ -1435,6 +1440,13 @@ mod tests {
     }
 
     #[test]
+    fn every_value_the_config_accepts_for_usage_plan_parses() {
+        for value in crate::config::allowed_values("usage.plan").unwrap() {
+            assert!(PlanChoice::parse(value).is_some(), "{value}");
+        }
+    }
+
+    #[test]
     fn an_unknown_plan_with_no_data_gets_one_neutral_line() {
         let none = synthetic("empty");
         let rich = synthetic("windows-only");
@@ -1494,12 +1506,14 @@ mod tests {
         let off = LoginKind::detect(true, &env(&[("CLAUDE_CODE_USE_VERTEX", "0")]));
         let key = LoginKind::detect(false, &env(&[("ANTHROPIC_API_KEY", "set")]));
         let key_and_account = LoginKind::detect(true, &env(&[("ANTHROPIC_API_KEY", "set")]));
+        let empty_key = LoginKind::detect(true, &env(&[("ANTHROPIC_API_KEY", " ")]));
         let none = LoginKind::detect(false, &env(&[]));
 
         assert_eq!(cloud, LoginKind::Cloud);
         assert_eq!(off, LoginKind::OAuth);
         assert_eq!(key, LoginKind::ApiKey);
-        assert_eq!(key_and_account, LoginKind::OAuth);
+        assert_eq!(key_and_account, LoginKind::ApiKey);
+        assert_eq!(empty_key, LoginKind::OAuth);
         assert_eq!(none, LoginKind::Unknown);
     }
 }
