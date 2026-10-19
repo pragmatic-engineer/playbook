@@ -221,6 +221,7 @@ pub fn run(probe: &Probe) -> Outcome {
     let mut cmd = std::process::Command::new(claude);
     cmd.args(["plugin", "update", &id])
         .env("HOME", &probe.home)
+        .env(SKIP_ENV, SKIP_VALUE)
         .stdin(std::process::Stdio::null());
     let Some(out) = crate::common::proc::run_with_timeout(&mut cmd, TIMEOUT) else {
         return Outcome::Failed {
@@ -455,8 +456,8 @@ pub fn claim(root: &Path, seen: Option<&str>, running: &str, now: u64) -> bool {
     .unwrap_or(false)
 }
 
-/// Records how the attempt ended. An update that changed nothing while the
-/// plugin is still older than the binary counts as failed, so it retries
+/// Records how the attempt ended. An update that left the plugin older than
+/// the binary, changed or not, counts as failed, so it retries
 /// after [`FAILED_RETRY`]. Best effort: a store that cannot be written
 /// leaves the `running` marker, which goes stale on its own.
 pub fn finish(
@@ -470,7 +471,7 @@ pub fn finish(
         installed_after.is_none_or(|v| crate::update::resolve::compare(v, running).is_lt());
     let state = match outcome {
         Outcome::Failed { .. } | Outcome::NoCli { .. } => State::Failed,
-        Outcome::Current { .. } if still_older => State::Failed,
+        Outcome::Current { .. } | Outcome::Updated { .. } if still_older => State::Failed,
         _ => State::Done,
     };
     write(root, running, state, now);
@@ -491,17 +492,30 @@ fn write(root: &Path, running: &str, state: State, now: u64) {
     let _ = crate::state::set(root, MARKER_KEY, &marker.format());
 }
 
-/// The test seam that stands in for a terminal on both stdin and stderr.
-/// Read only in debug builds, so a release binary cannot be fooled by it.
+/// The test seam that stands in for a terminal. Read only in debug builds,
+/// so a release binary cannot be fooled by it.
 #[cfg(debug_assertions)]
 const ASSUME_TTY_ENV: &str = "PLAYBOOK_TEST_ASSUME_TTY";
 
-fn is_terminal(stream: &impl std::io::IsTerminal) -> bool {
+/// Seam value for a terminal on stderr and stdin.
+#[cfg(debug_assertions)]
+const ASSUME_BOTH_TTY: &str = "1";
+
+/// Seam value for a terminal on stderr only, with stdin left as it is.
+#[cfg(debug_assertions)]
+const ASSUME_STDERR_TTY: &str = "stderr";
+
+fn assumed_tty(for_stdin: bool) -> bool {
     #[cfg(debug_assertions)]
-    if std::env::var_os(ASSUME_TTY_ENV).is_some_and(|v| v == SKIP_VALUE) {
-        return true;
+    if let Some(v) = std::env::var_os(ASSUME_TTY_ENV) {
+        return v == ASSUME_BOTH_TTY || (!for_stdin && v == ASSUME_STDERR_TTY);
     }
-    stream.is_terminal()
+    let _ = for_stdin;
+    false
+}
+
+fn is_terminal(stream: &impl std::io::IsTerminal, for_stdin: bool) -> bool {
+    assumed_tty(for_stdin) || stream.is_terminal()
 }
 
 fn has_json_arg(args: &[std::ffi::OsString]) -> bool {
@@ -510,6 +524,9 @@ fn has_json_arg(args: &[std::ffi::OsString]) -> bool {
             .is_some_and(|s| s == "--json" || s.starts_with("--json="))
     })
 }
+
+/// Printed when a yes loses the claim to another running process.
+const ALREADY_UPDATING: &str = "playbook: another playbook process is already updating the plugin";
 
 /// The question `Ask` mode puts on stderr.
 const QUESTION: &str = "Update the playbook plugin now? [Y/n] ";
@@ -522,7 +539,7 @@ const QUESTION: &str = "Update the playbook plugin now? [Y/n] ";
 pub fn on_start(command: &crate::Command, args: &[std::ffi::OsString]) {
     if !crate::heal::runs_on_start(command)
         || has_json_arg(args)
-        || !is_terminal(&std::io::stderr())
+        || !is_terminal(&std::io::stderr(), false)
     {
         return;
     }
@@ -530,7 +547,7 @@ pub fn on_start(command: &crate::Command, args: &[std::ffi::OsString]) {
     if crate::common::home_error(&home).is_some() {
         return;
     }
-    let stdin_is_terminal = is_terminal(&std::io::stdin());
+    let stdin_is_terminal = is_terminal(&std::io::stdin(), true);
     let _ = std::panic::catch_unwind(|| start(&home, stdin_is_terminal));
 }
 
@@ -556,6 +573,7 @@ fn start(home: &Path, stdin_is_terminal: bool) {
         }
         Mode::Ask if stdin_is_terminal => match ask() {
             Some(true) if claim_now() => update_and_report(home, &root),
+            Some(true) => eprintln!("{ALREADY_UPDATING}"),
             Some(false) if claim_now() => {
                 record_done(&root, running, now());
                 if let Some(id) = plugin_id(&home.join(".claude")) {
@@ -1046,7 +1064,7 @@ mod tests {
                 Due::Current,
             ),
             (
-                "plugin newer prerelease order",
+                "a prerelease plugin is older than the release",
                 DueInputs {
                     installed: Some("1.2.0-rc.1"),
                     ..base()
@@ -1269,6 +1287,12 @@ mod tests {
                 State::Done,
             ),
             ("updated", updated(), Some(RUN), State::Done),
+            (
+                "updated but still older",
+                updated(),
+                Some("1.1.0"),
+                State::Failed,
+            ),
             ("not installed", Outcome::NotInstalled, None, State::Done),
             (
                 "no claude on PATH",

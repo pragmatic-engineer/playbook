@@ -33,6 +33,8 @@ const CI_VARS: [&str; 7] = [
     "TF_BUILD",
 ];
 const HOUR_SECS: u64 = 60 * 60;
+const SKIP_ENV: &str = "PLAYBOOK_SKIP_PLUGIN_UPDATE";
+const ASSUME_TTY_ENV: &str = "PLAYBOOK_TEST_ASSUME_TTY";
 const MINUTE_SECS: u64 = 60;
 
 struct Fixture {
@@ -40,8 +42,9 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// A home with the previous minor line of the plugin installed next to an unrelated
-    /// plugin, and a `claude` that installs `VERSION` and exits `exit`.
+    /// A home with an older plugin installed next to an unrelated plugin, and
+    /// a `claude` that installs `VERSION` only when `moves_to_current` and
+    /// exits `exit`.
     fn new(moves_to_current: bool, exit: i32) -> Fixture {
         let home = isolated::fresh_home();
         assert_state_db_under(&home);
@@ -97,7 +100,7 @@ impl Fixture {
         fs::write(
             &bin,
             format!(
-                "#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\n{swap}echo 'network is down' >&2\nexit {exit}\n"
+                "#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\necho \"${{{SKIP_ENV}-unset}}\" >> \"$HOME/claude-env.log\"\n{swap}echo 'network is down' >&2\nexit {exit}\n"
             ),
         )
         .unwrap();
@@ -106,6 +109,10 @@ impl Fixture {
 
     fn calls(&self) -> String {
         fs::read_to_string(self.home.join("claude-calls.log")).unwrap_or_default()
+    }
+
+    fn claude_env(&self) -> String {
+        fs::read_to_string(self.home.join("claude-env.log")).unwrap_or_default()
     }
 
     fn root(&self) -> PathBuf {
@@ -121,7 +128,8 @@ impl Fixture {
     }
 
     /// `playbook <args>` with `stdin` as its input. `tty` turns on the
-    /// terminal seam; `env` adds variables after the CI ones are removed.
+    /// terminal seam for both streams; `env` adds variables after the CI ones
+    /// are removed.
     fn run(&self, args: &[&str], tty: bool, stdin: &str, env: &[(&str, &str)]) -> Output {
         let mut cmd = isolated::playbook_in(&self.home);
         cmd.args(args)
@@ -141,7 +149,7 @@ impl Fixture {
             if !cfg!(debug_assertions) {
                 panic!("the terminal seam exists only in debug builds; run these tests without --release");
             }
-            cmd.env("PLAYBOOK_TEST_ASSUME_TTY", "1");
+            cmd.env(ASSUME_TTY_ENV, "1");
         }
         for (k, v) in env {
             cmd.env(k, v);
@@ -166,13 +174,18 @@ impl Fixture {
     }
 }
 
+/// Used when the binary is on a `X.0.Y` line and has no earlier minor line.
+const FALLBACK_OLD_VERSION: &str = "0.0.1";
+
 /// The plugin one minor line behind the binary, the shape the pending list
 /// reports as out of range.
 fn old_version() -> String {
     let mut parts = VERSION.split('.').map(|p| p.parse::<u64>().unwrap());
     let (major, minor) = (parts.next().unwrap(), parts.next().unwrap());
-    assert!(minor > 0, "a 0.x.0 binary has no earlier minor line");
-    format!("{major}.{}.0", minor - 1)
+    match minor.checked_sub(1) {
+        Some(previous) => format!("{major}.{previous}.0"),
+        None => FALLBACK_OLD_VERSION.to_string(),
+    }
 }
 
 fn stderr(out: &Output) -> String {
@@ -404,10 +417,36 @@ fn ask_without_a_terminal_on_stdin_asks_nothing_and_claims_nothing() {
     let f = Fixture::new(true, 0);
     f.set_config("update.plugin", "ask");
 
-    // No seam: stderr is a pipe too, so nothing is asked.
-    let out = f.run(&["config", "list"], false, "y\n", &[]);
+    // Only stderr is a terminal, so the Ask arm is reached with stdin piped.
+    let out = f.run(
+        &["config", "list"],
+        false,
+        "y\n",
+        &[(ASSUME_TTY_ENV, "stderr")],
+    );
 
     assert_eq!(f.calls(), "");
     assert!(!stderr(&out).contains("Update the playbook plugin now?"));
     assert_eq!(f.marker(), None);
+}
+
+#[test]
+fn the_claude_child_gets_the_re_entry_guard() {
+    let f = Fixture::new(true, 0);
+
+    f.config_list(true, &[]);
+
+    assert_eq!(f.claude_env(), "1\n");
+}
+
+#[test]
+fn a_json_command_never_calls_claude() {
+    let f = Fixture::new(true, 0);
+
+    let out = f.run(&["sessions", "--json"], true, "", &[]);
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(f.calls(), "");
+    assert_eq!(f.marker(), None);
+    assert!(!stderr(&out).contains(START_LINE));
 }
