@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook hook disk-guard`, run as the built binary in a scratch home.
+//! `playbook hook disk-guard` and the SessionStart disk line, run as the
+//! built binary in a scratch home.
 //! Free space comes from `PLAYBOOK_TEST_DISK_FREE_GB`, which debug builds
 //! read in place of the real value. Only the test that checks the
 //! background cleanup sets `PLAYBOOK_TEST_DISK_TMP`, which points that
@@ -245,4 +246,44 @@ fn the_first_denial_starts_one_background_cleanup_per_window() {
     );
     assert!(denied(&second), "{second}");
     assert!(!second.contains("has started"), "{second}");
+}
+
+#[test]
+fn session_start_prints_the_warning_when_space_is_low() {
+    let home = isolated::fresh_home();
+    let payload = |sid: &str| {
+        serde_json::json!({
+            "session_id": sid,
+            "hook_event_name": "SessionStart",
+            "source": "startup",
+            "cwd": home,
+            "transcript_path": home.join("none.jsonl"),
+        })
+        .to_string()
+    };
+    let unwired = hook(&home, "session-init", "5", &payload(&session()), &[]);
+    assert!(!unwired.contains("Disk guard"), "not wired yet: {unwired}");
+    wire_guard(&home);
+    let low = hook(&home, "session-init", "5", &payload(&session()), &[]);
+    let value: serde_json::Value = serde_json::from_str(low.trim()).expect("json");
+    let line = "Disk guard: 5.0 GB free";
+    let message = value["systemMessage"].as_str().unwrap_or_default();
+    assert!(message.contains(line), "systemMessage: {low}");
+    let context = value["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(context.contains(line), "additionalContext: {low}");
+    let fine = hook(&home, "session-init", "50", &payload(&session()), &[]);
+    assert!(!fine.contains("Disk guard"), "{fine}");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Writes a `settings.json` that wires the guard for Bash, as setup does.
+fn wire_guard(home: &Path) {
+    let settings = home.join(".claude/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let doc = serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "playbook hook disk-guard"}
+    ]}]}});
+    std::fs::write(settings, doc.to_string()).unwrap();
 }

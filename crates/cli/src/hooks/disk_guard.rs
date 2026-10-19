@@ -157,15 +157,45 @@ pub fn run(payload: &Payload) {
     }
 }
 
+/// Whether `settings.json` under `claude_home` wires the guard for Bash.
+/// SessionStart and the status line act on the guard only then, so its side
+/// effects and its "blocked" wording follow the user's consent.
+pub fn wired(claude_home: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(claude_home.join("settings.json")) else {
+        return false;
+    };
+    let Ok(doc) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    let runs_guard = |group: &serde_json::Value| {
+        group["hooks"].as_array().is_some_and(|hooks| {
+            hooks
+                .iter()
+                .any(|h| h["command"].as_str() == Some("playbook hook disk-guard"))
+        })
+    };
+    doc["hooks"]["PreToolUse"].as_array().is_some_and(|groups| {
+        groups.iter().any(|g| {
+            g["matcher"]
+                .as_str()
+                .is_some_and(|m| m.split('|').any(|tool| tool == "Bash"))
+                && runs_guard(g)
+        })
+    })
+}
+
 /// The SessionStart line: the warning when space is below
-/// `disk.warnFreeGb`, after starting a background cleanup when one is due.
-/// `None` when space is fine or the guard is off.
-pub fn session_start(payload: &Payload) -> Option<String> {
+/// `disk.warnFreeGb`, after starting a background cleanup when one is due
+/// and the session is not headless. `None` when space is fine or the guard
+/// is off.
+pub fn session_start(payload: &Payload, headless: bool) -> Option<String> {
     let r = read(payload)?;
     if r.level == Level::Ok {
         return None;
     }
-    r.maybe_clean();
+    if !headless {
+        r.maybe_clean();
+    }
     stamp(r.session.as_deref(), WARNED_FILE, r.now);
     Some(r.warning())
 }

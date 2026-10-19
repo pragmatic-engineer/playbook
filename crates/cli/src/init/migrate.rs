@@ -34,6 +34,8 @@ pub const PROMPT_DEFAULT_MIGRATION: &str = "system-prompt-default-on";
 /// The `Owned` move of the collector agent to its new launchd label (ADR
 /// 0043, 2026-10-18 amendment).
 pub const COLLECTOR_LABEL_MIGRATION: &str = "collector-service-label";
+/// The `Consent` item that adds the disk guard hook (ADR 0047 decision 8).
+pub const DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
 /// How long `collector-service-label` waits for the moved collector to run.
 const COLLECTOR_LABEL_WAIT: Duration = Duration::from_secs(3);
 
@@ -368,7 +370,36 @@ pub fn registry() -> Vec<Migration> {
             scope: Scope::Owned,
             run: collector_service_label,
         },
+        Migration {
+            id: DISK_GUARD_MIGRATION,
+            since: "next",
+            kind: Kind::Idempotent,
+            scope: Scope::Consent {
+                check: disk_guard_hook_pending,
+                command: "playbook setup --hooks",
+            },
+            run: disk_guard_hook_by_setup,
+        },
     ]
+}
+
+/// An install with the policy guard wired and no disk guard on Bash (ADR
+/// 0047 decision 8). One without the policy guard declined the hooks, so it
+/// stays quiet.
+fn disk_guard_hook_pending(ctx: &Ctx) -> Option<String> {
+    let settings = ctx.claude_home.join("settings.json");
+    let policy_guard =
+        crate::doctor::field::hook_commands_for_event(&settings, "PreToolUse", &["policy-guard"])
+            .iter()
+            .any(|(_, n)| *n > 0);
+    (policy_guard && !crate::hooks::disk_guard::wired(&ctx.claude_home)).then(|| {
+        "the disk guard hook, which stops builds when the disk is nearly full, is not wired; setup adds it".to_string()
+    })
+}
+
+/// Setup's hooks part wires the disk guard with the other guards.
+fn disk_guard_hook_by_setup(_: &Ctx) -> Outcome {
+    Outcome::Quiet
 }
 
 /// Moves the collector agent playbook 0.37.0 installed under the old label
@@ -2166,6 +2197,40 @@ mod tests {
         assert!(open
             .iter()
             .any(|i| i.id == "other-playbook-plugins" && i.command.is_none()));
+    }
+
+    #[test]
+    fn the_disk_guard_check_is_open_only_when_the_other_guards_are_wired() {
+        let h = home("disk-guard-pending");
+        let ctx = ctx(&h);
+        assert_eq!(disk_guard_hook_pending(&ctx), None, "no settings");
+        let settings = ctx.claude_home.join("settings.json");
+        let write = |commands: &[&str]| {
+            let hooks: Vec<_> = commands
+                .iter()
+                .map(|c| serde_json::json!({"type": "command", "command": c}))
+                .collect();
+            let doc =
+                serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": hooks}]}});
+            std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+            std::fs::write(&settings, doc.to_string()).unwrap();
+        };
+        write(&["playbook hook policy-guard"]);
+        let open = disk_guard_hook_pending(&ctx).expect("open");
+        assert!(open.contains("disk guard"), "{open}");
+        write(&["playbook hook policy-guard", "playbook hook disk-guard"]);
+        assert_eq!(disk_guard_hook_pending(&ctx), None);
+        write(&["my-own-hook"]);
+        assert_eq!(disk_guard_hook_pending(&ctx), None, "hooks declined");
+        let doc = serde_json::json!({"hooks": {"PreToolUse": [
+            {"matcher": "Bash", "hooks": [{"type": "command", "command": "playbook hook policy-guard"}]},
+            {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "playbook hook disk-guard"}]},
+        ]}});
+        std::fs::write(&settings, doc.to_string()).unwrap();
+        assert!(
+            disk_guard_hook_pending(&ctx).is_some(),
+            "wired for agents only leaves builds unguarded"
+        );
     }
 
     #[test]

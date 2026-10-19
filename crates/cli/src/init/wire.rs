@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wires the 24 hooks Claude Code can invoke into `settings.json` as a bare
-//! `playbook hook <name>` command: 18 functional hooks plus 6 guards.
+//! Wires the 25 hooks Claude Code can invoke into `settings.json` as a bare
+//! `playbook hook <name>` command: 18 functional hooks plus 7 guards.
 //!
 //! `GUARD_SPECS` stays a separate list from `PORTED_HOOK_SPECS` because the
 //! two mirror different sources: `PORTED_HOOK_SPECS` is the 18 functional
@@ -103,7 +103,7 @@ pub fn wired_hooks() -> impl Iterator<Item = &'static HookSpec> {
 /// `hooks/hooks.json` (since removed), line for line (`session-clean-exit` fires on both
 /// `Stop` and `SessionEnd`), while `auto-guard` and `auto-cost` never had a
 /// `hooks/hooks.json` entry. Together with `GUARD_SPECS` below these are exactly
-/// the 24 settings-wired `HookName` variants.
+/// the 25 settings-wired `HookName` variants.
 ///
 /// Divergence from `hooks/hooks.json`'s literal shape: that file shipped
 /// `Stop`'s two hooks (`session-clean-exit`, `memory-capture`) as two
@@ -119,7 +119,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         matcher: None,
         name: "session-init",
         group: Group::Session,
-        purpose: "Prepares the session directory, warns when a resumed session's config drifted, and adds the tool map, a handoff, an auto-learn nudge and a small memory block to the context. Also sweeps stale worktrees.",
+        purpose: "Prepares the session directory, warns when a resumed session's config drifted, and adds the tool map, a handoff, an auto-learn nudge and a small memory block to the context. Also sweeps stale worktrees. When the disk guard is wired, it warns below `disk.warnFreeGb` and can start `playbook disk clean --auto` in the background.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -402,6 +402,26 @@ const GUARD_SPECS: &[HookSpec] = &[
         name: "policy-guard",
         group: Group::Safety,
         purpose: "Denies skipped git hooks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, a Bash write to a Claude Code settings file (a redirect, `tee`, `sed -i`, `cp`, `mv` or an interpreter one-liner), and model-run changes to the `rm` guard's roots, the prose lint mode, the PR rules or the disk guard's thresholds (`config set` on `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`, `pr.ticketPatterns` or `disk.*`, `config import`, `config unset`, `config edit`, writes to the config database or a config file (reads are allowed, and the denial names the rule that matched), inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`). The denial tells the model to ask the user to run it with `!`. It also denies `playbook uninstall --yes`.",
+        if_cond: None,
+        timeout: Some(10),
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "PreToolUse",
+        matcher: Some("Bash"),
+        name: "disk-guard",
+        group: Group::Safety,
+        purpose: "Denies build commands (`cargo build`, `cargo test`, `npm install`, `docker build`, `make` and the like) when free disk space is below `disk.blockFreeGb`, and warns below `disk.warnFreeGb`, at most once every 10 minutes per session. Reads, `rm`, `cargo clean`, `git worktree remove`, `df`, `du` and every `playbook` command stay allowed so the disk can be cleaned. With `disk.autoCleanup` on it also starts `playbook disk clean --auto` in the background when none runs, and below 1 GB it deletes the ballast file. Runs for every Bash command.",
+        if_cond: None,
+        timeout: Some(10),
+        also_replaces: None,
+    },
+    HookSpec {
+        event: "PreToolUse",
+        matcher: Some("Agent|Task"),
+        name: "disk-guard",
+        group: Group::Safety,
+        purpose: "Denies starting a new agent when free disk space is below `disk.blockFreeGb`, since agents build in parallel, and warns below `disk.warnFreeGb`. Like the Bash entry, it can start `playbook disk clean --auto` and delete the ballast file.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
