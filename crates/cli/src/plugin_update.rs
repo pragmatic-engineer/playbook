@@ -469,15 +469,16 @@ pub fn finish(
     let still_older =
         installed_after.is_none_or(|v| crate::update::resolve::compare(v, running).is_lt());
     let state = match outcome {
-        Outcome::Failed { .. } => State::Failed,
+        Outcome::Failed { .. } | Outcome::NoCli { .. } => State::Failed,
         Outcome::Current { .. } if still_older => State::Failed,
         _ => State::Done,
     };
     write(root, running, state, now);
 }
 
-/// Records `done` for a plugin that is already current ([`Due::Current`]).
-pub fn record_current(root: &Path, running: &str, now: u64) {
+/// Records `done` for the running version: the plugin is already current
+/// ([`Due::Current`]), or the user declined the update.
+pub fn record_done(root: &Path, running: &str, now: u64) {
     write(root, running, State::Done, now);
 }
 
@@ -488,6 +489,123 @@ fn write(root: &Path, running: &str, state: State, now: u64) {
         at: now,
     };
     let _ = crate::state::set(root, MARKER_KEY, &marker.format());
+}
+
+/// The test seam that stands in for a terminal on both stdin and stderr.
+/// Read only in debug builds, so a release binary cannot be fooled by it.
+#[cfg(debug_assertions)]
+const ASSUME_TTY_ENV: &str = "PLAYBOOK_TEST_ASSUME_TTY";
+
+fn is_terminal(stream: &impl std::io::IsTerminal) -> bool {
+    #[cfg(debug_assertions)]
+    if std::env::var_os(ASSUME_TTY_ENV).is_some_and(|v| v == SKIP_VALUE) {
+        return true;
+    }
+    stream.is_terminal()
+}
+
+fn has_json_arg(args: &[std::ffi::OsString]) -> bool {
+    args.iter().any(|a| {
+        a.to_str()
+            .is_some_and(|s| s == "--json" || s.starts_with("--json="))
+    })
+}
+
+/// The question `Ask` mode puts on stderr.
+const QUESTION: &str = "Update the playbook plugin now? [Y/n] ";
+
+/// Updates the plugin at the first command after an upgrade, when the
+/// command is at a terminal (ADR 0034, 2026-10-19 amendment). `Auto` runs
+/// the update; `Ask` asks first and needs a terminal on stdin too. Output
+/// goes to stderr, so the command's own stdout stays as it was, and nothing
+/// here changes the exit code.
+pub fn on_start(command: &crate::Command, args: &[std::ffi::OsString]) {
+    if !crate::heal::runs_on_start(command)
+        || has_json_arg(args)
+        || !is_terminal(&std::io::stderr())
+    {
+        return;
+    }
+    let home = crate::common::home_dir();
+    if crate::common::home_error(&home).is_some() {
+        return;
+    }
+    let stdin_is_terminal = is_terminal(&std::io::stdin());
+    let _ = std::panic::catch_unwind(|| start(&home, stdin_is_terminal));
+}
+
+/// The steps of one trigger: due check, mode, claim, update, report.
+fn start(home: &Path, stdin_is_terminal: bool) {
+    let root = crate::common::paths::playbook_root_from(home);
+    let running = env!("CARGO_PKG_VERSION");
+    let seen_before = seen(&root);
+    let mode = match due(home) {
+        Due::Run(mode) => mode,
+        Due::Current => {
+            record_done(&root, running, now());
+            return;
+        }
+        Due::NotDue(_) => return,
+    };
+    let claim_now = || claim(&root, seen_before.as_deref(), running, now());
+    match mode {
+        Mode::Auto => {
+            if claim_now() {
+                update_and_report(home, &root);
+            }
+        }
+        Mode::Ask if stdin_is_terminal => match ask() {
+            Some(true) if claim_now() => update_and_report(home, &root),
+            Some(false) if claim_now() => {
+                record_done(&root, running, now());
+                if let Some(id) = plugin_id(&home.join(".claude")) {
+                    eprintln!(
+                        "playbook: not updating the plugin; to update it, run: {}",
+                        command(&id)
+                    );
+                }
+            }
+            _ => {}
+        },
+        Mode::Ask | Mode::Off => {}
+    }
+}
+
+/// `Some(answer)` for a yes or no; `None` for end of input or any other
+/// reply, so the question comes back at the next command.
+fn ask() -> Option<bool> {
+    use crate::ui::wizard::{parse_answer, Answer};
+    use std::io::{BufRead, Write};
+    eprint!("{QUESTION}");
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    if std::io::stdin().lock().read_line(&mut line).ok()? == 0 {
+        return None;
+    }
+    match parse_answer(&line, true) {
+        Answer::Yes => Some(true),
+        Answer::No => Some(false),
+        _ => None,
+    }
+}
+
+fn update_and_report(home: &Path, root: &Path) {
+    let claude_home = home.join(".claude");
+    if let Some(id) = plugin_id(&claude_home) {
+        eprintln!("playbook: updating the playbook plugin ({})", command(&id));
+    }
+    let outcome = run(&Probe::for_home(home));
+    let after = plugin_id(&claude_home).and_then(|id| installed_version(&claude_home, &id));
+    finish(
+        root,
+        &outcome,
+        env!("CARGO_PKG_VERSION"),
+        after.as_deref(),
+        now(),
+    );
+    if let Some(line) = outcome.line() {
+        eprintln!("{line}");
+    }
 }
 
 #[cfg(test)]
@@ -1152,6 +1270,12 @@ mod tests {
             ),
             ("updated", updated(), Some(RUN), State::Done),
             ("not installed", Outcome::NotInstalled, None, State::Done),
+            (
+                "no claude on PATH",
+                Outcome::NoCli { id: "p@x".into() },
+                Some("1.1.0"),
+                State::Failed,
+            ),
         ];
         for (name, outcome, after, expected) in cases {
             // Arrange
@@ -1180,7 +1304,7 @@ mod tests {
         let root = store("pu-record");
 
         // Act
-        record_current(&root, RUN, T0);
+        record_done(&root, RUN, T0);
 
         // Assert
         assert_eq!(seen(&root), Some(format!("{RUN} done {T0}")));
