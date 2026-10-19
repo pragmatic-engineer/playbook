@@ -176,3 +176,37 @@ fn an_unknown_agent_exits_two_with_the_supported_list() {
     assert_eq!(out.status.code(), Some(EXIT_USAGE), "{out:?}");
     assert!(String::from_utf8_lossy(&out.stderr).contains("codex"));
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_agents_folder_exits_one_with_a_failed_line_and_valid_json() {
+    use std::os::unix::fs::PermissionsExt;
+    const READ_ONLY: u32 = 0o555;
+    const WRITABLE: u32 = 0o755;
+    // Arrange
+    let (home, plugin) = codex_home();
+    let agents = home.join(".agents");
+    fs::create_dir_all(&agents).unwrap();
+    fs::set_permissions(&agents, fs::Permissions::from_mode(READ_ONLY)).unwrap();
+    let probe = agents.join("probe");
+    if fs::create_dir(&probe).is_ok() {
+        fs::remove_dir(&probe).unwrap();
+        return; // running as a user the mode does not bind
+    }
+
+    // Act
+    let plain = sync(&home, &plugin, &[]);
+    let json = sync(&home, &plugin, &["--json"]);
+
+    // Assert
+    fs::set_permissions(&agents, fs::Permissions::from_mode(WRITABLE)).unwrap();
+    assert_eq!(plain.status.code(), Some(EXIT_FAILURE), "{plain:?}");
+    assert!(
+        stdout(&plain).lines().any(|l| l.starts_with("failed ")),
+        "{}",
+        stdout(&plain)
+    );
+    assert_eq!(json.status.code(), Some(EXIT_FAILURE), "{json:?}");
+    let value: serde_json::Value = serde_json::from_str(&stdout(&json)).expect("JSON output");
+    assert!(value.as_array().expect("an array").len() > 1);
+}

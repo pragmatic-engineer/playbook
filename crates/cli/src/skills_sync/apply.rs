@@ -47,6 +47,8 @@ pub enum Step {
     AfterOldMoved,
     AfterNewMoved,
     OnDoneRecord,
+    AfterDropParked,
+    AfterDropRecord,
 }
 
 /// Makes one step fail. The default fails nothing.
@@ -61,6 +63,8 @@ pub struct Report {
     pub lines: Vec<String>,
     /// Folders that could not be written because of an error.
     pub failed: usize,
+    /// Another sync held the lock, so nothing was written.
+    pub busy: bool,
     added: usize,
     updated: usize,
     removed: usize,
@@ -74,12 +78,30 @@ enum Change {
     Skipped(&'static str),
 }
 
+/// The word for a change, in the future tense on a dry run.
+fn verb(change: &Change, dry_run: bool) -> &'static str {
+    match (change, dry_run) {
+        (Change::Added, false) => "added",
+        (Change::Added, true) => "would add",
+        (Change::Updated, false) => "updated",
+        (Change::Updated, true) => "would update",
+        (Change::Removed, false) => "removed",
+        (Change::Removed, true) => "would remove",
+        (Change::Skipped(_), _) => "skipped",
+    }
+}
+
 impl Report {
+    /// True when every folder was handled: no error and no busy lock.
+    pub fn is_clean(&self) -> bool {
+        self.failed == 0 && !self.busy
+    }
+
     fn record(&mut self, name: &str, change: &Change, dry_run: bool) {
-        let (counter, past, future) = match change {
-            Change::Added => (&mut self.added, "added", "would add"),
-            Change::Updated => (&mut self.updated, "updated", "would update"),
-            Change::Removed => (&mut self.removed, "removed", "would remove"),
+        let counter = match change {
+            Change::Added => &mut self.added,
+            Change::Updated => &mut self.updated,
+            Change::Removed => &mut self.removed,
             Change::Skipped(reason) => {
                 self.skipped += 1;
                 self.lines.push(format!("skipped {name}, {reason}"));
@@ -87,8 +109,7 @@ impl Report {
             }
         };
         *counter += 1;
-        let verb = if dry_run { future } else { past };
-        self.lines.push(format!("{verb} {name}"));
+        self.lines.push(format!("{} {name}", verb(change, dry_run)));
     }
 
     fn fail(&mut self, name: &str, why: &str) {
@@ -97,16 +118,11 @@ impl Report {
     }
 
     fn finish(mut self, dry_run: bool) -> Self {
-        let (add, update, remove) = if dry_run {
-            ("would add", "would update", "would remove")
-        } else {
-            ("added", "updated", "removed")
-        };
         let parts: Vec<String> = [
-            (self.added, add),
-            (self.updated, update),
-            (self.removed, remove),
-            (self.skipped, "skipped"),
+            (self.added, verb(&Change::Added, dry_run)),
+            (self.updated, verb(&Change::Updated, dry_run)),
+            (self.removed, verb(&Change::Removed, dry_run)),
+            (self.skipped, verb(&Change::Skipped(""), dry_run)),
             (self.failed, "failed"),
         ]
         .iter()
@@ -280,6 +296,7 @@ pub fn apply(
     // Fail-open helper: the closure only runs either way, the flag decides.
     let (acquired, ()) = with_dir_lock_aged(&lock, 0, Duration::ZERO, LONG_LOCK_STALE_AGE, || ());
     if !acquired {
+        report.busy = true;
         report.skipped += 1;
         report.lines.push(format!("skipped, {SKIP_BUSY}"));
         return report.finish(false);
@@ -368,18 +385,32 @@ impl Run<'_> {
 
     fn remove_dropped(&self, name: &str, record: &Record) -> Result<Option<Change>, String> {
         let dir = self.target_root.join(name);
-        if !dir.is_dir() {
-            if !self.dry_run {
-                self.delete_record(name)?;
+        match fs::symlink_metadata(&dir) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                if !self.dry_run {
+                    self.delete_record(name)?;
+                }
+                return Ok(None);
             }
-            return Ok(None);
+            Err(e) => return Err(format!("cannot read the folder: {e}")),
+            // A link or file is the user's, even when its target looks like ours.
+            Ok(meta) if !meta.is_dir() => return Ok(Some(Change::Skipped(SKIP_NOT_OURS))),
+            Ok(_) => {}
         }
         if !record.owns(&hash_folder(&dir).map_err(io_msg)?) {
             return Ok(Some(Change::Skipped(SKIP_EDITED)));
         }
         if !self.dry_run {
-            fs::remove_dir_all(&dir).map_err(io_msg)?;
+            // Parked first so a half-finished delete never leaves a partial
+            // folder under the real name; leftover cleanup finishes it.
+            let parked = self
+                .target_root
+                .join(format!("{OLD_PREFIX}{}", unique_suffix(name)));
+            fs::rename(&dir, &parked).map_err(io_msg)?;
+            self.fault(Step::AfterDropParked)?;
             self.delete_record(name)?;
+            self.fault(Step::AfterDropRecord)?;
+            fs::remove_dir_all(&parked).map_err(io_msg)?;
         }
         Ok(Some(Change::Removed))
     }
@@ -396,12 +427,7 @@ impl Run<'_> {
         if self.dry_run {
             return Ok(());
         }
-        let suffix = format!(
-            "{}-{}-{}",
-            folder.name,
-            std::process::id(),
-            NONCE.fetch_add(1, Ordering::Relaxed)
-        );
+        let suffix = unique_suffix(&folder.name);
         let tmp = self.target_root.join(format!("{TMP_PREFIX}{suffix}"));
         let parked = self.target_root.join(format!("{OLD_PREFIX}{suffix}"));
         let dir = self.target_root.join(&folder.name);
@@ -451,6 +477,15 @@ impl Run<'_> {
             .map(|_| ())
             .map_err(|e| format!("cannot delete the ownership record: {e}"))
     }
+}
+
+/// A name no other run or step of this process shares.
+fn unique_suffix(name: &str) -> String {
+    format!(
+        "{name}-{}-{}",
+        std::process::id(),
+        NONCE.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn io_msg(e: io::Error) -> String {
@@ -694,6 +729,13 @@ mod tests {
         );
         assert_eq!(crashed.failed, 1);
         backdate_leftovers(&s);
+        // A real crash never releases the lock folder.
+        let lock = s.target.join(LOCK_NAME);
+        fs::create_dir_all(&lock).unwrap();
+        fs::File::open(&lock)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - LONG_LOCK_STALE_AGE * 2)
+            .unwrap();
 
         // Act
         let report = sync(&s, V2, &[folder(NAME, "two")]);
@@ -730,6 +772,73 @@ mod tests {
     #[test]
     fn a_stop_on_the_done_record_recovers() {
         crash_then_recover(Step::OnDoneRecord);
+    }
+
+    #[test]
+    fn a_stop_while_dropping_a_folder_recovers_on_the_next_run() {
+        for step in [Step::AfterDropParked, Step::AfterDropRecord] {
+            // Arrange
+            let s = setup(&format!("apply-drop-crash-{step:?}"));
+            sync(&s, V1, &[folder(NAME, "one"), folder("playbook-gone", "x")]);
+            let crashed = run(
+                &s,
+                V1,
+                &[folder(NAME, "one")],
+                false,
+                Faults {
+                    fail_at: Some(step),
+                },
+            );
+            assert_eq!(crashed.failed, 1, "{:?}", crashed.lines);
+            assert!(!s.target.join("playbook-gone").exists());
+            backdate_leftovers(&s);
+
+            // Act
+            let report = sync(&s, V1, &[folder(NAME, "one")]);
+
+            // Assert
+            assert_eq!(report.failed, 0, "{:?}", report.lines);
+            assert!(record(&s, "playbook-gone").is_none());
+            assert_eq!(leftovers(&s), Vec::<String>::new());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dropped_name_that_is_a_symlink_is_left_in_place_and_reported() {
+        // Arrange
+        let s = setup("apply-drop-symlink");
+        sync(&s, V1, &[folder(NAME, "one"), folder("playbook-gone", "x")]);
+        let real = s.target.join("real-copy");
+        fs::rename(s.target.join("playbook-gone"), &real).unwrap();
+        std::os::unix::fs::symlink(&real, s.target.join("playbook-gone")).unwrap();
+
+        // Act
+        let report = sync(&s, V1, &[folder(NAME, "one")]);
+
+        // Assert
+        assert_eq!(
+            report.lines[0],
+            "skipped playbook-gone, not written by playbook"
+        );
+        assert!(s.target.join("playbook-gone").is_symlink());
+        assert!(real.join("SKILL.md").is_file());
+    }
+
+    #[test]
+    fn a_held_lock_marks_the_report_busy() {
+        // Arrange
+        let s = setup("apply-busy-flag");
+        fs::create_dir_all(s.target.join(LOCK_NAME)).unwrap();
+
+        // Act
+        let busy = sync(&s, V1, &[folder(NAME, "one")]);
+        fs::remove_dir(s.target.join(LOCK_NAME)).unwrap();
+        let free = sync(&s, V1, &[folder(NAME, "one")]);
+
+        // Assert
+        assert!(busy.busy && !busy.is_clean());
+        assert!(!free.busy && free.is_clean());
     }
 
     #[test]

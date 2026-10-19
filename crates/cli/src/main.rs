@@ -2592,13 +2592,6 @@ fn print_resolved(
     );
 }
 
-/// Parse `config set`'s raw `value` string into the JSON type `key` expects,
-/// using `config::keys::default_value` to learn that type generically so an
-/// unknown key or a wrong-type value is rejected before `write::set` ever
-/// runs and touches a file. A boolean key accepts `true`/`false`
-/// case-insensitively; a numeric key accepts any finite number, left to `write::set` to range check; any
-/// other known key is passed through as a string, leaving an out-of-enum
-/// value for `write::set`'s own check to reject.
 /// `playbook skills sync`: returns the exit code.
 fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
     use skills_sync::{apply, Agent};
@@ -2635,6 +2628,7 @@ fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
     let target_root = home.join(TARGET_DIR);
     let mut lines = Vec::new();
     let mut failed = 0;
+    let mut clean = true;
     for agent in agents {
         let report = apply::apply(
             &root,
@@ -2645,6 +2639,7 @@ fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
             dry_run,
             &apply::Faults::default(),
         );
+        clean &= report.is_clean();
         failed += report.failed;
         lines.extend(report.lines);
     }
@@ -2658,9 +2653,19 @@ fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
             println!("{line}");
         }
     }
+    if !clean && !json {
+        eprintln!("skills sync: not every folder was synced");
+    }
     i32::from(failed > 0)
 }
 
+/// Parse `config set`'s raw `value` string into the JSON type `key` expects,
+/// using `config::keys::default_value` to learn that type generically so an
+/// unknown key or a wrong-type value is rejected before `write::set` ever
+/// runs and touches a file. A boolean key accepts `true`/`false`
+/// case-insensitively; a numeric key accepts any finite number, left to `write::set` to range check; any
+/// other known key is passed through as a string, leaving an out-of-enum
+/// value for `write::set`'s own check to reject.
 fn parse_config_value(key: &str, value: &str) -> Result<serde_json::Value, config::ConfigError> {
     let default = config::keys::default_value(key)
         .ok_or_else(|| config::ConfigError::UnknownKey(key.to_string()))?;
