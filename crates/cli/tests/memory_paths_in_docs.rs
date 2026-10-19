@@ -16,18 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// What the plugin, setup and the docs ship. Each must exist.
-const SCANNED: [&str; 6] = [
-    "plugins",
-    "prompts",
-    "docs",
-    "settings.shared.json",
-    "README.md",
-    "CONTRIBUTING.md",
-];
-
-/// Scanned when present: the folder the repo tidy-up (ADR 0048) moves the
-/// setup files into.
-const SCANNED_WHEN_PRESENT: [&str; 1] = ["seed"];
+const SCANNED: [&str; 5] = ["plugins", "seed", "docs", "README.md", "CONTRIBUTING.md"];
 
 /// Not scanned: decision records keep the paths of their day.
 const SKIPPED: &str = "docs/adr";
@@ -48,7 +37,7 @@ fn root() -> PathBuf {
 fn scanned_files() -> Vec<PathBuf> {
     let root = root();
     let mut files = Vec::new();
-    for rel in SCANNED.iter().chain(&SCANNED_WHEN_PRESENT) {
+    for rel in SCANNED {
         shipped::files_under(&root.join(rel), &["md", "json", "sh", "txt"], &mut files);
     }
     files

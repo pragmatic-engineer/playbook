@@ -1,6 +1,6 @@
 # The Custom System Prompt
 
-`prompts/SYSTEM_PROMPT.md` loads at the start of every `playbook cc` session and sets the persona, output rules, and operating constraints Claude follows from the first token. Without it, Claude starts from its training defaults: generally helpful, but uncalibrated to this workflow. This prompt closes that gap.
+The system prompt ships as `seed/prompts/SYSTEM_PROMPT.md`. `playbook setup` copies it to `~/.config/playbook/prompts/`, and that copy loads at the start of every `playbook cc` session. It sets the persona, output rules, and operating constraints Claude follows from the first token. Without it, Claude starts from its training defaults: generally helpful, but uncalibrated to this workflow. This prompt closes that gap.
 
 ## How it loads
 

@@ -11,7 +11,7 @@ Gather the facts first. For a PR: `gh api --paginate repos/{owner}/{repo}/pulls/
 Sort every changed file into one kind. A file that fits more than one kind takes the first in this list:
 
 - **Tests:** paths under `test/`, `tests/`, `__tests__/`, `spec/` or `fixtures/`, and names ending `_test.*`, `_spec.*`, `.test.*` or `.spec.*`.
-- **Plugin files:** commands, skills, agents and hooks of a plugin (`plugins/<name>/commands/`, `skills/`, `agents/`, `hooks/`), and `prompts/`.
+- **Plugin files:** commands, skills, agents and hooks of a plugin (`plugins/<name>/commands/`, `skills/`, `agents/`, `hooks/`), and `prompts/` or `seed/prompts/`.
 - **Dependency manifests:** `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml`, `Gemfile`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `Pipfile` and `requirements*.txt`. They count as code.
 - **Docs:** `.md`, `.mdx`, `.txt`, `.rst`, `LICENSE`, `NOTICE`, `CODEOWNERS`, anything under `docs/`.
 - **Lock files:** `Cargo.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `Gemfile.lock`, `go.sum`, `uv.lock`, `composer.lock`, `bun.lockb`, `Pipfile.lock`.

@@ -26,7 +26,7 @@ fn expected() -> BTreeSet<String> {
 }
 
 fn seed() -> Value {
-    let path = std::path::Path::new(env!("PLAYBOOK_REPO_ROOT")).join("settings.shared.json");
+    let path = std::path::Path::new(env!("PLAYBOOK_REPO_ROOT")).join("seed/settings.shared.json");
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 

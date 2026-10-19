@@ -12,7 +12,7 @@ use std::path::Path;
 const PROMPT_BUDGET_CHARS: usize = 9500;
 
 fn prompt() -> String {
-    let path = Path::new(env!("PLAYBOOK_REPO_ROOT")).join("prompts/SYSTEM_PROMPT.md");
+    let path = Path::new(env!("PLAYBOOK_REPO_ROOT")).join("seed/prompts/SYSTEM_PROMPT.md");
     fs::read_to_string(path).expect("shipped system prompt")
 }
 

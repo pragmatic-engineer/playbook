@@ -680,7 +680,7 @@ fn shape_valid_but_nonexistent_hook_name_is_dropped() {
 // seed is a no-op.
 #[test]
 fn the_real_seed_regenerates_to_itself() {
-    let seed = Path::new(env!("PLAYBOOK_REPO_ROOT")).join("settings.shared.json");
+    let seed = Path::new(env!("PLAYBOOK_REPO_ROOT")).join("seed/settings.shared.json");
     let output = generate(&seed, &seed).expect("the real seed should generate");
     assert_eq!(output, fs::read_to_string(&seed).expect("seed is readable"));
 }
