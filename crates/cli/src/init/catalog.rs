@@ -119,6 +119,16 @@ pub const PARTS: &[Part] = &[
         undo: "Delete `pb` from the install folder and run `playbook config set launcher.shortName false`. `playbook uninstall --remove-binary` also removes the link.",
     },
     Part {
+        id: "disk-ballast",
+        asked: true,
+        default_on: false,
+        flags: "--disk-ballast, --no-disk-ballast",
+        question: "Keep 1 GB in reserve as a ballast file in ~/.cache/playbook/ballast, so a full disk can get room back with `playbook disk release`?",
+        does: "Runs `playbook disk reserve`: writes a 1 GB file of real blocks. Deleting it needs no free space, so it gives room back for a shell and a cleanup when the disk is full. The disk guard hook deletes it by itself when free space on its volume falls below 1 GB. The folder carries a CACHEDIR.TAG, and on macOS the file is kept out of Time Machine. Setup refuses when writing it would leave less than `disk.warnFreeGb` free. Off by default, and `--yes` leaves it off.",
+        changes: "~/.cache/playbook/ballast (ballast.bin, CACHEDIR.TAG and a lock file)",
+        undo: "Run `playbook disk release`.",
+    },
+    Part {
         id: "attribution",
         asked: true,
         default_on: false,
