@@ -7,6 +7,7 @@
 use std::path::Path;
 
 pub mod plan;
+pub mod render;
 
 /// An agent that reads skills from a shared folder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
