@@ -2772,6 +2772,30 @@ fn run_disk(sub: DiskCommand) {
                 }
             }
         }
+        DiskCommand::TargetDir => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
+            let Some(worktree) = playbook_common::gitfacts::toplevel(&cwd) else {
+                eprintln!("disk target-dir: not inside a git worktree");
+                std::process::exit(1);
+            };
+            let Some(root) = disk::targets::worktrees_root(&worktree) else {
+                eprintln!("disk target-dir: cannot find the worktrees root of {}", worktree.display());
+                std::process::exit(1);
+            };
+            let Some(target) = disk::targets::target_for(&root, &worktree) else {
+                eprintln!("disk target-dir: {} has no folder name", worktree.display());
+                std::process::exit(1);
+            };
+            let max = disk::policy::load(&home).max_target_dirs;
+            let count = disk::targets::target_dirs(&root).len() as u64;
+            if count > max {
+                eprintln!(
+                    "disk target-dir: {count} cargo target folders exist under {}, more than disk.maxTargetDirs ({max}). `playbook disk clean` removes idle ones",
+                    root.display()
+                );
+            }
+            println!("{}", target.display());
+        }
         DiskCommand::Release => match disk::ballast::release(&home) {
             Ok(Some(bytes)) => println!(
                 "disk release: deleted the ballast, {} given back. Run `playbook disk reserve` after a cleanup to put it back",

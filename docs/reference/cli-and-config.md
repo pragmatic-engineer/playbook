@@ -480,7 +480,7 @@ Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb` and the folder
 
 Example: `playbook disk status`
 
-Subcommands: `clean`, `release`, `reserve`, `status`
+Subcommands: `clean`, `release`, `reserve`, `status`, `target-dir`
 
 ### `playbook disk clean`
 
@@ -506,6 +506,14 @@ Write a 1 GB ballast file under ~/.cache/playbook/ballast that `disk release` de
 Show free space per volume, the thresholds, and the biggest folders playbook and its agents made: cargo target folders, worktrees, caches and the ballast. Also lists cargo target folders of any project under the home folder and `disk.paths`
 
 - `--json`: Print JSON for tools
+
+### `playbook disk target-dir`
+
+Print the private cargo target folder for this worktree
+
+Prints `<worktrees root>/cargo-<worktree name>`, the folder an agent sets as `CARGO_TARGET_DIR` so each worktree builds into its own target folder, which playbook removes with the worktree. Warns on stderr when more than `disk.maxTargetDirs` target folders exist.
+
+Example: `export CARGO_TARGET_DIR="$(playbook disk target-dir)"`
 
 ### `playbook doc`
 

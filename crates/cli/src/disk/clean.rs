@@ -537,6 +537,34 @@ pub fn try_lock(_file: &std::fs::File) -> bool {
     false
 }
 
+/// Removes the `cargo-<name>` target folder of a worktree that was just
+/// removed (ADR 0047 decision 7), with the cleanup's checks but no idle
+/// time, since the worktree it built for is gone: it must be a cargo target
+/// folder directly under `root`, outside protected data, named by no
+/// running process, and free of build locks, which stay held while it goes.
+/// Returns a line to report, or `None` when there is no such folder.
+pub fn remove_worktree_target(home: &Path, root: &Path, worktree: &Path) -> Option<String> {
+    let target = targets::target_for(root, worktree)?;
+    std::fs::symlink_metadata(&target).ok()?;
+    let shown = target.display();
+    let keep = unsafe_target(root, &target, &protected(home))
+        .or_else(|| (!is_cargo_target(&target)).then(|| "not a cargo target folder".to_string()))
+        .or_else(|| named_by_a_process(&target, &process_args()));
+    if let Some(why) = keep {
+        return Some(format!("kept target folder {shown}: {why}"));
+    }
+    let Some(_locks) = take_locks(&target) else {
+        return Some(format!(
+            "kept target folder {shown}: a cargo build holds its lock"
+        ));
+    };
+    let bytes = size::allocated(&target);
+    Some(match std::fs::remove_dir_all(&target) {
+        Ok(()) => format!("removed target folder {shown} ({})", size::gb(bytes)),
+        Err(e) => format!("could not remove target folder {shown}: {e}"),
+    })
+}
+
 /// Whether an automatic cleanup should run: `disk.autoCleanup` is on and
 /// the tightest volume is below `disk.warnFreeGb`.
 pub fn auto_due(home: &Path, cwd: &Path) -> bool {
@@ -803,6 +831,42 @@ mod tests {
         f.env.now = SystemTime::now() + Duration::from_secs(10 * 60);
         assert!(picked(&f.env).is_empty());
         assert!(reason(&f.env, &dir).unwrap().starts_with("changed"));
+        fs::remove_dir_all(&f.root).unwrap();
+    }
+
+    #[test]
+    fn a_removed_worktree_takes_its_idle_free_target_folder_along() {
+        use std::os::unix::io::AsRawFd;
+        let f = fixture("worktree-target");
+        let root = f.root.join("worktrees");
+        let home = &f.env.home;
+        assert_eq!(
+            remove_worktree_target(home, &root, &root.join("none")),
+            None
+        );
+        target(&root.join("cargo-done"));
+        let line = remove_worktree_target(home, &root, &root.join("done")).unwrap();
+        assert!(line.starts_with("removed target folder"), "{line}");
+        assert!(!root.join("cargo-done").exists());
+        write(&root.join("cargo-plain/notes.txt"));
+        let line = remove_worktree_target(home, &root, &root.join("plain")).unwrap();
+        assert!(line.contains("not a cargo target folder"), "{line}");
+        assert!(root.join("cargo-plain/notes.txt").exists());
+        let busy = root.join("cargo-busy");
+        target(&busy);
+        let lock = busy.join("debug/.cargo-lock");
+        write(&lock);
+        let held = fs::File::open(&lock).unwrap();
+        // SAFETY: `held` stays open until it is dropped below.
+        assert_eq!(unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX) }, 0);
+        let line = remove_worktree_target(home, &root, &root.join("busy")).unwrap();
+        assert!(line.contains("a cargo build holds its lock"), "{line}");
+        assert!(busy.exists());
+        drop(held);
+        std::os::unix::fs::symlink(f.root.join("tmp"), root.join("cargo-link")).unwrap();
+        let line = remove_worktree_target(home, &root, &root.join("link")).unwrap();
+        assert!(line.contains("a symlink"), "{line}");
+        assert!(f.root.join("tmp").exists());
         fs::remove_dir_all(&f.root).unwrap();
     }
 
