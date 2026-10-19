@@ -244,6 +244,7 @@ pub(crate) const META: &[Meta] = &[
     ro("usage doctor"),
     user("usage prune"),
     ro("usage status"),
+    user("usage stop"),
     ro("version"),
     free("worktree"),
     free("worktree remove"),
