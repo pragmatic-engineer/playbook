@@ -225,7 +225,7 @@ mod tests {
             "seed/settings.shared.json".to_string(),
             "scripts/check-links.sh".to_string(),
             "seed/prompts/system.md".to_string(),
-            "docs/index.md".to_string(),
+            "docs/README.md".to_string(),
             ".github/workflows/ci.yml".to_string(),
         ];
         assert!(violations(&tracked).is_empty());

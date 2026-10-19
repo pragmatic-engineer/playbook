@@ -1,6 +1,6 @@
 # Document conversion benchmark
 
-This page records the measurement behind the `docs.convert` default. Design: [ADR-0027](../adr/0027-anydoc-as-optional-local-tool.md). Command and safeguards: [Reading documents](../guides/07-reading-documents.md).
+This page records the measurement behind the `docs.convert` default. Design: [ADR-0027](../adr/0027-anydoc-as-optional-local-tool.md). Command and safeguards: [Reading documents](../guides/06-reading-documents.md).
 
 ## Question
 

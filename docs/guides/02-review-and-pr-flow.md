@@ -32,7 +32,7 @@ Flags combine (`-Au`). After a rebase or amend it pushes with `--force-with-leas
 playbook review suggest 4265    # the recommendation alone, with its reasons
 ```
 
-The recommendation is a fixed rule list, so the same diff gets the same answer. The full list is in the [review routing reference](../../plugins/playbook/skills/grounding-review/references/review-routing.md). `review.suggest.*` config keys move the cuts, see [config keys](04-config-keys.md). When no rule is decisive the answer has low confidence and one cheap Haiku pass gives a second opinion. In auto mode the command takes the recommendation.
+The recommendation is a fixed rule list, so the same diff gets the same answer. The full list is in the [review routing reference](../../plugins/playbook/skills/grounding-review/references/review-routing.md). `review.suggest.*` config keys move the cuts, see [config keys](../reference/config-keys.md). When no rule is decisive the answer has low confidence and one cheap Haiku pass gives a second opinion. In auto mode the command takes the recommendation.
 
 `/playbook:quick-review` and `/playbook:deep-review` do the work and stay available as direct entry points. The two sections below describe them.
 
@@ -86,7 +86,7 @@ What a whole-stack review does:
 - **Merged PRs are never reviewed or commented on.** A PR closed without merging is skipped.
 - **Findings go to the PR that holds the line.** `playbook pr stack map` matches each finding's `file:line` against the diff hunks of the open PRs and creates one pending review per PR. A finding no open PR changes is shown in the report and not posted.
 - **Safe against change.** If a PR was pushed to, retargeted or closed after the review started, its findings are held back and listed as stale.
-- **Cost guard.** The command asks again before it starts when the open PRs exceed `review.stackMaxPrs` (default 6) or `review.stackMaxLines` (default 3000). See [Config keys](../guides/04-config-keys.md).
+- **Cost guard.** The command asks again before it starts when the open PRs exceed `review.stackMaxPrs` (default 6) or `review.stackMaxLines` (default 3000). See [Config keys](../reference/config-keys.md).
 
 ## How findings are graded
 
@@ -112,7 +112,7 @@ For each comment you choose `[F]ix`, `[R]eply`, `[B]oth`, `[S]kip`, `[Q]uit` or 
 
 ## Auto mode
 
-In `ask` mode, the default, nothing changes. Pass `--auto` or `--ask` to override the mode for one run. See [Auto mode](../guides/05-auto-mode.md).
+In `ask` mode, the default, nothing changes. Pass `--auto` or `--ask` to override the mode for one run. See [Auto mode](../guides/04-auto-mode.md).
 
 - `/playbook:commit-and-push` commits and pushes without asking. It never force-pushes. A push that would need a force is left on the local branch and reported, so you decide how to publish it.
 - `/playbook:review`, `/playbook:quick-review` and `/playbook:deep-review` take the recommended depth without asking. A review still asks what to post unless you pass `--self` or `--no-post`, because a posted review speaks as you.
@@ -120,7 +120,7 @@ In `ask` mode, the default, nothing changes. Pass `--auto` or `--ask` to overrid
 
 ## PR and commit settings
 
-Six keys shape the PR flow and the commit trailer. Read one with `playbook config get <key>`. Set it with `playbook config set [--global|--org] <key> <value>`: no flag writes the repo tier. Repo wins over org, and org over global. All keys: [Config keys](../guides/04-config-keys.md).
+Six keys shape the PR flow and the commit trailer. Read one with `playbook config get <key>`. Set it with `playbook config set [--global|--org] <key> <value>`: no flag writes the repo tier. Repo wins over org, and org over global. All keys: [Config keys](../reference/config-keys.md).
 
 | Key | Default | What it does |
 |---|---|---|
@@ -177,4 +177,4 @@ playbook deliver --dir ../.worktrees/repo/feature -A \
 
 - [Plan and Implement](01-plan-and-implement.md): producing the branch that this flow starts from.
 - [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md): why deep-review's subagents run on a different model than the orchestrating session.
-- [Docs index](../index.md)
+- [Docs index](../README.md)

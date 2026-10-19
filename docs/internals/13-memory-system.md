@@ -120,5 +120,5 @@ This loop is nudge-and-approve by design. Memory is durable. A bad fact, a dupli
 
 - [Decisions and Memory](../guides/03-decisions-and-memory.md)
 - [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md)
-- [The system prompt](01-system-prompt.md)
-- [Docs index](../index.md)
+- [The system prompt](12-system-prompt.md)
+- [Docs index](../README.md)

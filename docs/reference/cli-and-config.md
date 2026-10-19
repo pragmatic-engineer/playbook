@@ -5,7 +5,7 @@ Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs
 
 This page lists every `playbook` command, flag and config key. It is generated from the
 clap definitions and the config key table, and a test fails when it is out of date.
-For what each key means and when to change it, read the [config keys guide](../guides/04-config-keys.md).
+For what each key means and when to change it, read the [config keys page](config-keys.md).
 For one line per command and who may run it, run `playbook commands`.
 
 ## Config keys
@@ -25,11 +25,11 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `pr.rules.issue` | `warn` | `off`, `warn`, `block` |
 | `pr.rules.ticketLine` | `block` | `off`, `warn`, `block` |
 | `pr.rules.scope` | `warn` | `off`, `warn`, `block` |
-| `pr.bodyMaxChars` | `1200` | a number, see the config keys guide for the range |
-| `pr.ticketPatterns` | `["[A-Z][A-Z0-9]+-[0-9]+"]` | see the config keys guide |
+| `pr.bodyMaxChars` | `1200` | a number, see the config keys page for the range |
+| `pr.ticketPatterns` | `["[A-Z][A-Z0-9]+-[0-9]+"]` | see the config keys page |
 | `worktreeCleanup.enabled` | `true` | `true`, `false` |
-| `worktreeCleanup.staleAfterDays` | `30` | a number, see the config keys guide for the range |
-| `worktreeCleanup.conflictGracePeriodDays` | `90` | a number, see the config keys guide for the range |
+| `worktreeCleanup.staleAfterDays` | `30` | a number, see the config keys page for the range |
+| `worktreeCleanup.conflictGracePeriodDays` | `90` | a number, see the config keys page for the range |
 | `mode` | `ask` | `ask`, `auto` |
 | `maxEffortLevel` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `effort.auto` | `off` | `off`, `suggest`, `on` |
@@ -39,55 +39,55 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `models.sonnet` | empty | empty, or `claude-<tier>-<major>[-<minor>]` for that tier |
 | `models.opus` | empty | empty, or `claude-<tier>-<major>[-<minor>]` for that tier |
 | `routing.escalate` | `ask` | `ask`, `auto`, `deny` |
-| `auto.budgetUsd` | `200` | a number, see the config keys guide for the range |
-| `auto.agentBudgetUsd` | `50` | a number, see the config keys guide for the range |
-| `auto.sessionCeilingUsd` | `0` | a number, see the config keys guide for the range |
-| `auto.warnPct` | `70` | a number, see the config keys guide for the range |
-| `fix.maxFiles` | `3` | a number, see the config keys guide for the range |
-| `fix.maxLines` | `500` | a number, see the config keys guide for the range |
-| `review.stackMaxPrs` | `6` | a number, see the config keys guide for the range |
-| `review.stackMaxLines` | `3000` | a number, see the config keys guide for the range |
-| `review.suggest.deepLines` | `400` | a number, see the config keys guide for the range |
-| `review.suggest.quickLines` | `60` | a number, see the config keys guide for the range |
-| `review.suggest.deepFiles` | `25` | a number, see the config keys guide for the range |
-| `review.suggest.packageSpan` | `3` | a number, see the config keys guide for the range |
-| `review.suggest.untestedLines` | `150` | a number, see the config keys guide for the range |
+| `auto.budgetUsd` | `200` | a number, see the config keys page for the range |
+| `auto.agentBudgetUsd` | `50` | a number, see the config keys page for the range |
+| `auto.sessionCeilingUsd` | `0` | a number, see the config keys page for the range |
+| `auto.warnPct` | `70` | a number, see the config keys page for the range |
+| `fix.maxFiles` | `3` | a number, see the config keys page for the range |
+| `fix.maxLines` | `500` | a number, see the config keys page for the range |
+| `review.stackMaxPrs` | `6` | a number, see the config keys page for the range |
+| `review.stackMaxLines` | `3000` | a number, see the config keys page for the range |
+| `review.suggest.deepLines` | `400` | a number, see the config keys page for the range |
+| `review.suggest.quickLines` | `60` | a number, see the config keys page for the range |
+| `review.suggest.deepFiles` | `25` | a number, see the config keys page for the range |
+| `review.suggest.packageSpan` | `3` | a number, see the config keys page for the range |
+| `review.suggest.untestedLines` | `150` | a number, see the config keys page for the range |
 | `security.defaults` | `false` | `true`, `false` |
 | `usage.theme` | `default` | `default`, `dark`, `light`, `mono` |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` |
-| `usage.refreshSeconds` | `5` | a number, see the config keys guide for the range |
+| `usage.refreshSeconds` | `5` | a number, see the config keys page for the range |
 | `usage.telemetry` | `auto` | `auto`, `off` |
-| `usage.telemetryRetentionDays` | `90` | a number, see the config keys guide for the range |
-| `usage.telemetryMaxRows` | `500000` | a number, see the config keys guide for the range |
+| `usage.telemetryRetentionDays` | `90` | a number, see the config keys page for the range |
+| `usage.telemetryMaxRows` | `500000` | a number, see the config keys page for the range |
 | `usage.autoIngest` | `true` | `true`, `false` |
-| `usage.autoIngestMinutes` | `10` | a number, see the config keys guide for the range |
-| `usage.budget.monthlyUsd` | `0` | a number, see the config keys guide for the range |
-| `usage.budget.weeklyUsd` | `0` | a number, see the config keys guide for the range |
-| `usage.ui.layout` | empty | see the config keys guide |
-| `usage.ui.state` | empty | see the config keys guide |
-| `sessions.staleAfterDays` | `3` | a number, see the config keys guide for the range |
-| `sessions.recentDays` | `7` | a number, see the config keys guide for the range |
+| `usage.autoIngestMinutes` | `10` | a number, see the config keys page for the range |
+| `usage.budget.monthlyUsd` | `0` | a number, see the config keys page for the range |
+| `usage.budget.weeklyUsd` | `0` | a number, see the config keys page for the range |
+| `usage.ui.layout` | empty | see the config keys page |
+| `usage.ui.state` | empty | see the config keys page |
+| `sessions.staleAfterDays` | `3` | a number, see the config keys page for the range |
+| `sessions.recentDays` | `7` | a number, see the config keys page for the range |
 | `hygiene.enabled` | `true` | `true`, `false` |
-| `hygiene.thresholdTokens` | `250000` | a number, see the config keys guide for the range |
+| `hygiene.thresholdTokens` | `250000` | a number, see the config keys page for the range |
 | `docs.convert` | `auto` | `auto`, `off` |
-| `docs.maxBytes` | `26214400` | a number, see the config keys guide for the range |
-| `docs.timeoutSeconds` | `30` | a number, see the config keys guide for the range |
-| `docs.maxOutputChars` | `200000` | a number, see the config keys guide for the range |
-| `docs.maxMemoryMb` | `1024` | a number, see the config keys guide for the range |
-| `docs.anydocPath` | empty | see the config keys guide |
+| `docs.maxBytes` | `26214400` | a number, see the config keys page for the range |
+| `docs.timeoutSeconds` | `30` | a number, see the config keys page for the range |
+| `docs.maxOutputChars` | `200000` | a number, see the config keys page for the range |
+| `docs.maxMemoryMb` | `1024` | a number, see the config keys page for the range |
+| `docs.anydocPath` | empty | see the config keys page |
 | `launcher.claudeOverride` | `false` | `true`, `false` |
 | `launcher.shortName` | `false` | `true`, `false` |
 | `systemPrompt.enabled` | `true` | `true`, `false` |
 | `attribution.enabled` | `false` | `true`, `false` |
-| `hooks.rmGuard.allowedRoots` | `[]` | see the config keys guide |
+| `hooks.rmGuard.allowedRoots` | `[]` | see the config keys page |
 | `hooks.proseLint.mode` | `warn` | `warn`, `block`, `off` |
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
-| `update.checkIntervalHours` | `24` | a number, see the config keys guide for the range |
-| `disk.warnFreeGb` | `15` | a number, see the config keys guide for the range |
-| `disk.blockFreeGb` | `6` | a number, see the config keys guide for the range |
+| `update.checkIntervalHours` | `24` | a number, see the config keys page for the range |
+| `disk.warnFreeGb` | `15` | a number, see the config keys page for the range |
+| `disk.blockFreeGb` | `6` | a number, see the config keys page for the range |
 | `disk.autoCleanup` | `true` | `true`, `false` |
-| `disk.paths` | `[]` | see the config keys guide |
-| `disk.maxTargetDirs` | `4` | a number, see the config keys guide for the range |
+| `disk.paths` | `[]` | see the config keys page |
+| `disk.maxTargetDirs` | `4` | a number, see the config keys page for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
