@@ -53,5 +53,7 @@ pub fn isolate(cmd: &mut Command, home: &Path) {
         .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("XDG_CACHE_HOME", home.join(".cache"))
         .env("XDG_DATA_HOME", home.join(".local/share"))
-        .env("CLAUDE_CONFIG_DIR", home.join(".claude"));
+        .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
+        // No real `claude plugin update` from a test.
+        .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1");
 }

@@ -21,7 +21,7 @@ fn update_and_its_hidden_alias_share_one_help() {
         let out = playbook().args([name, "--help"]).output().unwrap();
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(out.status.success(), "{name} --help failed");
-        for flag in ["--check", "--list", "--pre", "--yes"] {
+        for flag in ["--check", "--list", "--pre", "--yes", "--no-plugin"] {
             assert!(text.contains(flag), "{name} help lacks {flag}: {text}");
         }
     }

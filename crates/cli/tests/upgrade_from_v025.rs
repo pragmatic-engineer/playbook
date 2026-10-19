@@ -104,6 +104,8 @@ impl V025Home {
             .current_dir(&self.home)
             .env("HOME", &self.home)
             .env("SHELL", "/bin/zsh")
+            // No real `claude plugin update` from a test.
+            .env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1")
             .env_remove("CLAUDE_PLUGIN_ROOT")
             .env_remove("PLAYBOOK_PLUGIN_DIR")
             .env_remove("HOOK_INPUT")

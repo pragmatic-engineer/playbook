@@ -135,7 +135,7 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 | Install script (recommended) | `playbook update`, or run the installer again (`--check` to look, `--list` for releases, `--pre` for pre-releases, `--yes` in auto mode) |
 | Homebrew | `brew upgrade playbook` |
 
-`playbook update` verifies SHA256SUMS and the attestation, keeps the old binary as `playbook.<version>.bak` (the newest three are kept), refuses a Homebrew install, and warns when another `playbook` earlier on `PATH` hides the new one. The binary and the plugin share one version line ([ADR 0038](../adr/0038-one-release-line.md)), and they work together while they are on the same MAJOR.MINOR. After a binary update to a new minor line, update the plugin with `claude plugin update playbook@pragmatic-engineer`, and `playbook doctor` warns until you do. When something needs you after an upgrade, the next session lists it, one bullet per item with why it matters and the command that fixes it. It shows each item once, then at most once a day. A list that `playbook migrate` printed in your terminal counts as shown: a setup item comes back after a day and a report does not come back. `playbook migrate --status` shows the list again. See [What needs you](../internals/07-migrations.md#what-needs-you). A binary pinned with `PLAYBOOK_REF` gets the same warning once the plugin moves to a newer minor line. To roll back, move a backup over the binary:
+`playbook update` verifies SHA256SUMS and the attestation, keeps the old binary as `playbook.<version>.bak` (the newest three are kept), refuses a Homebrew install, and warns when another `playbook` earlier on `PATH` hides the new one. The binary and the plugin share one version line ([ADR 0038](../adr/0038-one-release-line.md)), and they work together while they are on the same MAJOR.MINOR. After the binary, `playbook update` updates the plugin with `claude plugin update playbook@pragmatic-engineer` and says to restart Claude Code, and `playbook migrate` does the same. Without the `claude` command, or when the update fails, they print that command for you to run, and `playbook doctor` warns until the plugin is on the binary's minor line. A plugin turned off in Claude Code is left alone. `--no-plugin` skips this step for one run, and `playbook config set update.plugin false` turns it off. When something needs you after an upgrade, the next session lists it, one bullet per item with why it matters and the command that fixes it. It shows each item once, then at most once a day. A list that `playbook migrate` printed in your terminal counts as shown: a setup item comes back after a day and a report does not come back. `playbook migrate --status` shows the list again. See [What needs you](../internals/07-migrations.md#what-needs-you). A binary pinned with `PLAYBOOK_REF` gets the same warning once the plugin moves to a newer minor line. To roll back, move a backup over the binary:
 
 ```bash
 mv -f ~/.local/bin/playbook.0.19.0.bak ~/.local/bin/playbook
@@ -157,7 +157,7 @@ Turn on automatic updates with:
 playbook config set --global update.mode auto
 ```
 
-`update.mode` and `update.checkIntervalHours` are settings for each user, so `config set` writes them to the global tier even without `--global` and refuses `--org`.
+`update.mode`, `update.checkIntervalHours` and `update.plugin` are settings for each user, so `config set` writes them to the global tier even without `--global` and refuses `--org`.
 
 How the check works:
 
@@ -241,7 +241,7 @@ It removes only what playbook placed: the hook entries whose command is exactly 
 
 Everything else stays: the rest of `settings.json` and your rc files, `.settings.base.json`, `backups/`, memory, the [data folder](../internals/11-data-folder.md) with every database, and all runtime state. Each changed file is backed up first (`settings.json.bak.<epoch>`). A status line script or system prompt you edited by hand is kept. If `settings.json` cannot be edited, such as invalid JSON, the placed files and the binary stay too.
 
-At the end it lists the manual steps that still apply, because playbook never changes Claude Code's plugins: `claude plugin uninstall playbook@pragmatic-engineer` while it is installed, `claude plugin uninstall playbook-hooks@pragmatic-engineer` if the retired hooks plugin is still there, and `claude plugin marketplace remove pragmatic-engineer` while the marketplace is listed.
+At the end it lists the manual steps that still apply, because playbook does not remove Claude Code's plugins: `claude plugin uninstall playbook@pragmatic-engineer` while it is installed, `claude plugin uninstall playbook-hooks@pragmatic-engineer` if the retired hooks plugin is still there, and `claude plugin marketplace remove pragmatic-engineer` while the marketplace is listed.
 
 `--remove-binary` also removes the binary, its `.bak` backups and the `PATH` block the installer added.
 

@@ -2160,20 +2160,27 @@ fn main() {
                     true
                 }
             };
-            let code = playbook::migrate_cli::run(&home, playbook::migrate_cli::Mode::Run, false);
+            let code =
+                playbook::migrate_cli::run(&home, playbook::migrate_cli::Mode::Run, false, false);
             std::process::exit(if failed { 1 } else { code });
         }
         Command::Migrate {
             status,
             dry_run,
             json,
+            no_plugin,
         } => {
             let mode = match (status, dry_run) {
                 (true, _) => playbook::migrate_cli::Mode::Status,
                 (_, true) => playbook::migrate_cli::Mode::DryRun,
                 _ => playbook::migrate_cli::Mode::Run,
             };
-            std::process::exit(playbook::migrate_cli::run(&common::home_dir(), mode, json));
+            std::process::exit(playbook::migrate_cli::run(
+                &common::home_dir(),
+                mode,
+                json,
+                !no_plugin,
+            ));
         }
         Command::Doctor {
             fix: false,
@@ -2398,6 +2405,7 @@ fn main() {
             refresh_check,
             print_notes,
             from,
+            no_plugin,
         } => {
             if refresh_check {
                 update::check::run_refresh();
@@ -2437,6 +2445,16 @@ fn main() {
                     &update::swap::run_version,
                 )?;
                 update::finish_with_heal(&mut outcome, &env);
+                // After the binary and its heal, also when the binary was
+                // already current (ADR 0034, 2026-10-19 amendment).
+                if !opts.check && !opts.list {
+                    let home = common::home_dir();
+                    if let Some(line) = playbook::plugin_update::run_for_command(&home, no_plugin)
+                        .and_then(|o| o.line())
+                    {
+                        outcome.out.push(line);
+                    }
+                }
                 if opts.check {
                     outcome
                         .out

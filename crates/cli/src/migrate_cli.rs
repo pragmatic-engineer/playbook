@@ -22,27 +22,40 @@ pub enum Mode {
 /// Runs `playbook migrate` for `home`, prints the result, and returns the
 /// exit code: 1 when the record could not be read or written, a migration
 /// failed, or the lock was busy, else 0.
-pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
+/// A run also updates the playbook plugin when `plugin` is true (ADR 0034,
+/// 2026-10-19 amendment, decision 6); `--dry-run` and `--status` never do.
+pub fn run(home: &Path, mode: Mode, json: bool, plugin: bool) -> i32 {
     use std::io::IsTerminal;
     // The list counts as seen only when a person reads it: not when a
     // caller such as `playbook update` or the automatic update captures it.
     let seen = std::io::stdout().is_terminal() && !crate::common::headless::is_headless();
-    run_with(home, mode, json, seen)
+    run_with(home, mode, json, seen, plugin)
 }
 
 /// [`run`], where `seen` says whether a person reads the output, so the
 /// session hook counts the printed items as seen.
-pub fn run_with(home: &Path, mode: Mode, json: bool, seen: bool) -> i32 {
+pub fn run_with(home: &Path, mode: Mode, json: bool, seen: bool, plugin: bool) -> i32 {
     let ctx = Ctx::for_home(home);
     match mode {
         Mode::Run => {
             let now = crate::common::time::now_epoch_secs();
             let out = heal::run(&ctx, Trigger::Fix, now);
             eprint!("{}", out.notices.render());
+            // Before the list, so an updated plugin drops off it.
+            let plugin_line = plugin
+                .then(|| crate::plugin_update::run_for_command(home, false))
+                .flatten()
+                .and_then(|o| o.line());
             let items = out.items(home);
             if json {
+                if let Some(line) = &plugin_line {
+                    eprintln!("{line}");
+                }
                 println!("{}", run_json(&out, &items));
             } else {
+                if let Some(line) = &plugin_line {
+                    println!("{line}");
+                }
                 print!("{}", heal::render_fix(&out, &items));
                 // Printed to a person, so the session hook counts them as
                 // seen (ADR 0034, 2026-10-19 amendment, decision 3). JSON
@@ -362,9 +375,9 @@ mod tests {
         };
 
         // Act: a captured run, then a run a person reads.
-        run_with(&home, Mode::Run, false, false);
+        run_with(&home, Mode::Run, false, false, false);
         let after_captured = session();
-        run_with(&home, Mode::Run, false, true);
+        run_with(&home, Mode::Run, false, true, false);
         let after_seen = crate::pending::session_notice(
             &root,
             &crate::pending::plugin_items(&crate::pending::PluginProbe {
