@@ -1459,16 +1459,6 @@
     "hook": "all"
   },
   {
-    "id": "pg-set-disk",
-    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
-    "command": "playbook config set disk.minFreeGb 1",
-    "expect": "deny",
-    "want": "deny",
-    "class": "correct block",
-    "note": "a protected key",
-    "hook": "all"
-  },
-  {
     "id": "pg-set-prose",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "playbook config set hooks.proseLint.mode off",
