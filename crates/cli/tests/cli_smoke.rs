@@ -497,10 +497,7 @@ fn table() -> Vec<Case> {
         case("init", &["init", "--dry-run"]).out("nothing is changed"),
         case("init", &["init", "--yes"]).out("Applying").writes(),
         case("hooks list", &["hooks", "list"]).out("Safety guards").plain(),
-        case("hooks explain-rm", &["hooks", "explain-rm", "unlink /etc/hosts"])
-            .out("verdict: deny")
-            .plain(),
-        case("hooks explain-rm", &["hooks", "explain-rm", "--json", "ls"]).out(r#""verdict":"allow""#),
+        case("hooks explain-rm", &["hooks", "explain-rm", "ls"]).code(2).err("was removed"),
         case("uninstall", &["uninstall"]).code(1).err("nothing was changed"),
         case("uninstall", &["uninstall", "--dry-run"]).pre(&["setup", "--yes"]),
         case("uninstall", &["uninstall", "--yes"]).pre(&["setup", "--yes"]).writes(),

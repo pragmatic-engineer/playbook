@@ -43,6 +43,13 @@ pub const PROMPT_DEFAULT_MIGRATION: &str = "system-prompt-default-on";
 pub const COLLECTOR_LABEL_MIGRATION: &str = "collector-service-label";
 /// The `Consent` item that adds the disk guard hook (ADR 0047 decision 8).
 pub const DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
+/// The `Owned` notice that the rm guard is now a short fixed rule (ADR 0045,
+/// 2026-10-19 amendment). It changes nothing and is recorded once it has run.
+pub const RM_GUARD_NOTICE_MIGRATION: &str = "rm-guard-simplified";
+/// The step name of that notice, which the heal line shows in full.
+pub const RM_GUARD_NOTICE_STEP: &str = "rm guard";
+/// What the notice says (docs/guides/07-rm-guard.md).
+const RM_GUARD_NOTICE: &str = "the rm guard now denies only rm of / or your home folder, and hooks.rmGuard.allowedRoots is no longer used; see docs/guides/07-rm-guard.md";
 /// How long `collector-service-label` waits for the moved collector to run.
 const COLLECTOR_LABEL_WAIT: Duration = Duration::from_secs(3);
 
@@ -377,7 +384,35 @@ pub fn registry() -> Vec<Migration> {
             },
             run: disk_guard_hook_by_setup,
         },
+        Migration {
+            id: RM_GUARD_NOTICE_MIGRATION,
+            since: "next",
+            kind: Kind::Auto,
+            scope: Scope::Owned,
+            run: rm_guard_simplified_notice,
+        },
     ]
+}
+
+/// One notice for an install that had the rm guard wired: it now denies only
+/// `rm` of `/` or the home folder, and `hooks.rmGuard.allowedRoots` is no
+/// longer read. It changes nothing. A fresh install gets nothing.
+fn rm_guard_simplified_notice(ctx: &Ctx) -> Outcome {
+    let settings = ctx.claude_home.join("settings.json");
+    let wired = crate::doctor::field::hook_commands_for_event(
+        &settings,
+        "PreToolUse",
+        &["rm-workspace-guard"],
+    )
+    .iter()
+    .any(|(_, n)| *n > 0);
+    if !wired {
+        return Outcome::Done(StepReport::skipped(
+            RM_GUARD_NOTICE_STEP,
+            "the rm guard was not in use",
+        ));
+    }
+    Outcome::Done(StepReport::wired(RM_GUARD_NOTICE_STEP, RM_GUARD_NOTICE))
 }
 
 /// An install with the policy guard wired and no disk guard on Bash (ADR
@@ -2240,6 +2275,39 @@ mod tests {
             disk_guard_hook_pending(&ctx).is_some(),
             "wired for agents only leaves builds unguarded"
         );
+    }
+
+    #[test]
+    fn the_rm_guard_notice_shows_once_and_only_where_the_guard_was_wired() {
+        let h = home("rm-guard-notice");
+        let ctx = ctx(&h);
+        let step = |o: Outcome| match o {
+            Outcome::Done(step) => step,
+            _ => panic!("the notice is an Auto migration that finishes"),
+        };
+        let fresh = step(rm_guard_simplified_notice(&ctx));
+        assert!(
+            fresh.status != crate::init::run::StepStatus::Wired,
+            "fresh install"
+        );
+        let settings = ctx.claude_home.join("settings.json");
+        let doc = serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "playbook hook rm-workspace-guard"}]}]}});
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(&settings, doc.to_string()).unwrap();
+        let ms = [Migration {
+            id: RM_GUARD_NOTICE_MIGRATION,
+            since: "0.1.0",
+            kind: Kind::Auto,
+            scope: Scope::Owned,
+            run: rm_guard_simplified_notice,
+        }];
+        let (mut first, mut second) = (Report::default(), Report::default());
+        run_auto(&ms, &ctx, &mut first, None);
+        run_auto(&ms, &ctx, &mut second, None);
+        assert_eq!(first.steps.len(), 1, "shown on the first run");
+        assert!(first.steps[0].detail.contains("hooks.rmGuard.allowedRoots"));
+        assert!(second.steps.is_empty(), "recorded, so not shown again");
     }
 
     #[test]

@@ -220,6 +220,12 @@ impl Outcome {
                 self.changed.len()
             ));
         }
+        parts.extend(
+            self.changed
+                .iter()
+                .filter(|s| s.name == migrate::RM_GUARD_NOTICE_STEP)
+                .map(|s| s.detail.clone()),
+        );
         if !self.failed.is_empty() {
             parts.push(format!(
                 "{} migration(s) failed: run `playbook migrate`",
