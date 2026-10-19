@@ -20,14 +20,17 @@ use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 /// Largest header block read.
 pub const MAX_HEADER_BYTES: usize = 16 * 1024;
 /// Largest body accepted, plain or after chunk decoding.
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
-/// Requests allowed in one second; more get 429.
+/// Requests allowed in one `RATE_WINDOW`; more get 429.
 pub const MAX_REQUESTS_PER_SEC: u32 = 50;
+/// The span `MAX_REQUESTS_PER_SEC` counts over.
+pub const RATE_WINDOW: Duration = Duration::from_secs(1);
 /// Deadline for reading one whole request.
 pub const READ_DEADLINE: Duration = Duration::from_secs(5);
 /// Connection threads alive at once; one more is answered 503 and closed.
@@ -317,7 +320,7 @@ fn respond(stream: &mut TcpStream, status: u16, body: &str) {
     let _ = stream.write_all(text.as_bytes());
 }
 
-/// Counts requests in the current second.
+/// Counts requests in the current `RATE_WINDOW`.
 struct RateLimiter {
     window: Instant,
     count: u32,
@@ -325,7 +328,7 @@ struct RateLimiter {
 
 impl RateLimiter {
     fn allow(&mut self, now: Instant) -> bool {
-        if now.duration_since(self.window) >= Duration::from_secs(1) {
+        if now.duration_since(self.window) >= RATE_WINDOW {
             self.window = now;
             self.count = 0;
         }
@@ -445,10 +448,33 @@ pub fn serve(
     let addr = listener.local_addr()?;
     let (jobs, writer) = writer::spawn(conn, cfg.prune, now, Arc::clone(stop));
     let shared = Arc::new(Shared::new(addr, jobs, cfg.token.clone(), stop, now));
-    let why = run(listener, &shared, cfg.idle);
+    serve_with_writer(listener, &shared, writer, cfg.idle)
+}
+
+/// `run` while a thread waits on the writer: a writer that ends before
+/// `run` does (a panic sets only the flag) halts the loop, so `accept` does
+/// not wait forever for a client that never comes.
+fn serve_with_writer(
+    listener: &TcpListener,
+    shared: &Arc<Shared>,
+    writer: JoinHandle<()>,
+    idle: Option<Duration>,
+) -> std::io::Result<&'static str> {
+    let returned = Arc::new(AtomicBool::new(false));
+    let monitor = {
+        let (shared, returned) = (Arc::clone(shared), Arc::clone(&returned));
+        std::thread::spawn(move || {
+            let _ = writer.join();
+            if !returned.load(Ordering::SeqCst) {
+                shared.halt();
+            }
+        })
+    };
+    let why = run(listener, shared, idle);
+    returned.store(true, Ordering::SeqCst);
     // Closing the channel lets the writer commit its last batch and exit.
     shared.close();
-    let _ = writer.join();
+    let _ = monitor.join();
     why
 }
 
@@ -536,17 +562,23 @@ fn accept_loop(listener: &TcpListener, shared: &Arc<Shared>) -> std::io::Result<
 
 /// Reads, routes and answers one connection on its own thread.
 fn handle(shared: &Shared, mut stream: TcpStream) {
-    let allowed = shared
-        .limiter
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .allow(Instant::now());
-    if !allowed {
-        respond(&mut stream, 429, r#"{"error":"rate limit"}"#);
-        return;
-    }
     let token = shared.token.as_deref();
-    let check = |m: &str, p: &str, h: &[(String, String)]| precheck(token, m, p, h);
+    // The limit is checked once the headers are in, so an authenticated
+    // shutdown is never starved by a flood.
+    let check = |m: &str, p: &str, h: &[(String, String)]| {
+        let allowed = shared
+            .limiter
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .allow(Instant::now());
+        let verdict = precheck(token, m, p, h);
+        let shutdown = verdict.is_ok() && p.split('?').next() == Some(SHUTDOWN_PATH);
+        if allowed || shutdown {
+            verdict
+        } else {
+            Err(HttpError(429, "rate limit"))
+        }
+    };
     let req = match read_request(&mut stream, &check) {
         Ok(req) => req,
         Err(HttpError(status, msg)) => {
@@ -748,7 +780,7 @@ mod tests {
             assert!(l.allow(t));
         }
         assert!(!l.allow(t));
-        assert!(l.allow(t + Duration::from_millis(1001)));
+        assert!(l.allow(t + RATE_WINDOW));
     }
 
     // End to end over a real loopback socket.
@@ -1061,12 +1093,22 @@ mod tests {
         assert!(started.elapsed() < PROMPT, "{:?}", started.elapsed());
     }
 
+    /// Starts the rate window this far ahead, so it cannot roll over while a
+    /// test counts.
+    const FROZEN: Duration = Duration::from_secs(3600);
+
+    fn freeze_rate_window(shared: &Shared) {
+        let mut l = shared.limiter.lock().unwrap();
+        l.window = Instant::now() + FROZEN;
+        l.count = 0;
+    }
+
     #[test]
     fn the_rate_limit_holds_across_threads() {
         const THREADS: u32 = 6;
         const EACH: u32 = 10;
-        let (conn, _reader) = db("receiver-rate");
-        let server = Server::serve(conn, token_cfg(None));
+        let (server, shared) = serve_shared(None);
+        freeze_rate_window(&shared);
         let port = server.port;
         let gate = Arc::new(std::sync::Barrier::new(THREADS as usize));
         let clients: Vec<_> = (0..THREADS)
@@ -1074,7 +1116,7 @@ mod tests {
                 let gate = Arc::clone(&gate);
                 std::thread::spawn(move || {
                     gate.wait();
-                    // Traces skip the writer, so all requests land in one second.
+                    // Traces skip the writer, which nobody reads here.
                     (0..EACH)
                         .map(|_| post(port, "/v1/traces", &[AUTH], b"{}"))
                         .collect::<Vec<_>>()
@@ -1088,7 +1130,7 @@ mod tests {
 
         let limited: Vec<_> = replies.iter().filter(|(s, _)| *s == 429).collect();
         let expected = (THREADS * EACH - MAX_REQUESTS_PER_SEC) as usize;
-        assert!(limited.len() >= expected, "{} got 429", limited.len());
+        assert_eq!(limited.len(), expected);
         assert!(limited
             .iter()
             .all(|(_, text)| text.contains("X-Playbook-Collector: 1")));
@@ -1167,11 +1209,13 @@ mod tests {
     }
 
     /// Serves with a writer channel nobody reads, exposing the shared state.
-    fn serve_shared() -> (Server, Arc<Shared>) {
+    fn serve_shared(token: Option<&str>) -> (Server, Arc<Shared>) {
+        let token = token.map(str::to_string);
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let server = Server::spawn(move |listener, stop| {
             let (jobs, _unread) = std::sync::mpsc::sync_channel(1);
-            let shared = Arc::new(Shared::new(listener.local_addr()?, jobs, None, stop, || 1));
+            let addr = listener.local_addr()?;
+            let shared = Arc::new(Shared::new(addr, jobs, token, stop, || 1));
             tx.send(Arc::clone(&shared)).unwrap();
             run(listener, &shared, None)
         });
@@ -1181,8 +1225,8 @@ mod tests {
 
     #[test]
     fn a_silent_client_is_closed_after_the_read_deadline_and_frees_its_slot() {
-        let (_server, shared) = serve_shared();
-        let mut silent = connect(_server.port);
+        let (server, shared) = serve_shared(None);
+        let mut silent = connect(server.port);
         let started = Instant::now();
         assert!(within(PROMPT, || shared.live.load(Ordering::SeqCst) == 1));
 
@@ -1197,17 +1241,13 @@ mod tests {
 
     #[test]
     fn a_connection_over_the_thread_cap_gets_503() {
-        // Past the rate limit a client gets 429 and frees its slot, so the
-        // clients are opened in two halves, one rate window apart.
-        const RATE_WINDOW: Duration = Duration::from_millis(1100);
-        let half = MAX_LIVE_CONNECTIONS / 2;
-        let (server, shared) = serve_shared();
-        let live = |n: usize| within(PROMPT, || shared.live.load(Ordering::SeqCst) == n);
-        let mut held: Vec<_> = (0..half).map(|_| connect(server.port)).collect();
-        assert!(live(half));
-        std::thread::sleep(RATE_WINDOW);
-        held.extend((half..MAX_LIVE_CONNECTIONS).map(|_| connect(server.port)));
-        assert!(live(MAX_LIVE_CONNECTIONS));
+        // Silent clients send no headers, so the rate limit never sees them.
+        let (server, shared) = serve_shared(None);
+        let held: Vec<_> = (0..MAX_LIVE_CONNECTIONS)
+            .map(|_| connect(server.port))
+            .collect();
+        assert!(within(PROMPT, || shared.live.load(Ordering::SeqCst)
+            == MAX_LIVE_CONNECTIONS));
 
         let mut over = connect(server.port);
         let mut reply = String::new();
@@ -1245,5 +1285,81 @@ mod tests {
 
         assert_eq!(status, 503);
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn an_authenticated_shutdown_is_not_rate_limited() {
+        let (mut server, shared) = serve_shared(Some("tok"));
+        freeze_rate_window(&shared);
+        for _ in 0..MAX_REQUESTS_PER_SEC {
+            assert_eq!(post(server.port, "/v1/traces", &[AUTH], b"{}").0, 200);
+        }
+        assert_eq!(post(server.port, "/v1/traces", &[AUTH], b"{}").0, 429);
+        assert_eq!(shutdown(server.port, "Authorization: Bearer nope").0, 429);
+
+        assert_eq!(shutdown(server.port, AUTH).0, 200);
+
+        assert_eq!(server.ended_within(PROMPT), Some("stopped"));
+    }
+
+    /// Bound for serve to notice a writer that died with no client waiting.
+    const WRITER_GONE: Duration = Duration::from_secs(2);
+
+    #[test]
+    fn a_writer_panic_with_no_request_in_flight_ends_serve() {
+        let (conn, _reader) = db("receiver-writer-panic");
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let mut server = Server::spawn(move |listener, stop| {
+            let (jobs, writer) = writer::spawn(conn, None, || 1, Arc::clone(stop));
+            tx.send(jobs.clone()).unwrap();
+            let addr = listener.local_addr()?;
+            let shared = Arc::new(Shared::new(addr, jobs, None, stop, || 1));
+            serve_with_writer(listener, &shared, writer, None)
+        });
+        let jobs = rx.recv().unwrap();
+        // Sent straight to the writer: no connection is open or waiting.
+        let (reply, _answer) = std::sync::mpsc::sync_channel(1);
+        jobs.send(Job {
+            kind: Kind::Panic,
+            reply,
+        })
+        .unwrap();
+
+        assert_eq!(server.ended_within(WRITER_GONE), Some("stopped"));
+    }
+
+    #[test]
+    fn a_job_queued_when_shutdown_comes_is_still_stored() {
+        let (conn, reader) = db("receiver-shutdown-queued");
+        let (queued_tx, queued) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let mut server = Server::spawn(move |listener, stop| {
+            let (real, writer) = writer::spawn(conn, None, || 1, Arc::clone(stop));
+            // A relay holds each job until the test releases it.
+            let (jobs, held) = std::sync::mpsc::sync_channel::<Job>(1);
+            let relay = std::thread::spawn(move || {
+                for job in held {
+                    queued_tx.send(()).unwrap();
+                    released.recv().unwrap();
+                    real.send(job).unwrap();
+                }
+                drop(real);
+                writer.join().unwrap();
+            });
+            let addr = listener.local_addr()?;
+            let shared = Arc::new(Shared::new(addr, jobs, Some("tok".into()), stop, || 1));
+            serve_with_writer(listener, &shared, relay, None)
+        });
+        let port = server.port;
+        let client = std::thread::spawn(move || post(port, "/v1/logs", &[AUTH], &logs_body("r1")));
+        queued.recv_timeout(PROMPT).unwrap();
+
+        assert_eq!(shutdown(server.port, AUTH).0, 200);
+        assert_eq!(server.ended_within(Duration::ZERO), None, "serve waits");
+        release.send(()).unwrap();
+
+        assert_eq!(client.join().unwrap().0, 200);
+        assert_eq!(server.ended_within(PROMPT), Some("stopped"));
+        assert_eq!(count_requests(&reader).unwrap(), 1);
     }
 }

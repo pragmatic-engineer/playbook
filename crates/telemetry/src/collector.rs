@@ -637,9 +637,10 @@ mod tests {
 
     impl Drop for Running {
         fn drop(&mut self) {
-            self.stop.store(true, Ordering::SeqCst);
-            // With no port known nothing can wake accept, so a join could hang.
+            // With no port known nothing can wake accept, so a join could hang;
+            // the flag still ends a serve that has not reached accept yet.
             if self.port == 0 {
+                self.stop.store(true, Ordering::SeqCst);
                 return;
             }
             halt(&self.stop, self.port);
