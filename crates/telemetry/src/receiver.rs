@@ -771,4 +771,33 @@ mod tests {
         assert_eq!(status, 503);
         assert!(stop.load(Ordering::SeqCst));
     }
+
+    /// A stand in writer that takes one job and hands it to `answer`.
+    fn fake_writer(answer: fn(Job)) -> (SyncSender<Job>, std::thread::JoinHandle<()>) {
+        let (jobs, queue) = std::sync::mpsc::sync_channel::<Job>(1);
+        let handle = std::thread::spawn(move || answer(queue.recv().unwrap()));
+        (jobs, handle)
+    }
+
+    #[test]
+    fn a_writer_that_replies_false_answers_503() {
+        let (jobs, handle) = fake_writer(|job| job.reply.send(false).unwrap());
+        let stop = AtomicBool::new(false);
+
+        let (status, _) = dispatch(&jobs, &stop, &logs_request(), 1);
+
+        assert_eq!(status, 503);
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn a_dropped_job_reply_answers_503() {
+        let (jobs, handle) = fake_writer(drop);
+        let stop = AtomicBool::new(false);
+
+        let (status, _) = dispatch(&jobs, &stop, &logs_request(), 1);
+
+        assert_eq!(status, 503);
+        handle.join().unwrap();
+    }
 }

@@ -21,6 +21,7 @@
 //! Claude Code may drop data that is sent while no receiver listens. That is
 //! by design: such sessions are read from transcripts.
 
+use super::daemon::{self, Lock};
 use super::receiver::{bind, serve, Config};
 use super::run::Paths;
 use super::telemetry_db::{migrate_up, prune, Pruned, Retention};
@@ -83,7 +84,7 @@ fn write_state(path: &Path, state: &State) -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn pid_alive(pid: u32) -> bool {
+pub(super) fn pid_alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
     };
@@ -96,7 +97,7 @@ fn pid_alive(pid: u32) -> bool {
 }
 
 #[cfg(not(unix))]
-fn pid_alive(_pid: u32) -> bool {
+pub(super) fn pid_alive(_pid: u32) -> bool {
     false
 }
 
@@ -470,13 +471,13 @@ fn run_collect_with(
 ) -> Result<String, String> {
     // First local, so it drops last: after the listener closes and after the
     // pid is cleared, which lets a successor bind the port at once.
-    let _lock = match super::daemon::acquire(paths) {
-        super::daemon::Lock::Held(file) => file,
-        super::daemon::Lock::Busy => return Ok("collector already running".to_string()),
-        super::daemon::Lock::Unavailable(e) => {
+    let _lock = match daemon::acquire(paths) {
+        Lock::Held(file) => file,
+        Lock::Busy => return Ok("collector already running".to_string()),
+        Lock::Unavailable(e) => {
             return Err(format!(
                 "cannot take the lock {}: {e}",
-                super::daemon::lock_path(paths).display()
+                daemon::lock_path(paths).display()
             ));
         }
     };
@@ -643,12 +644,24 @@ mod tests {
         let crate::daemon::Lock::Held(_held) = crate::daemon::acquire(&p) else {
             panic!("the first acquire must take the lock");
         };
+        let known = State {
+            pid: 1,
+            port: 1,
+            token: "known".into(),
+            ..State::default()
+        };
+        write_state(&state_path(&p), &known).unwrap();
+        let before = std::fs::read(state_path(&p)).unwrap();
         let stop = Arc::new(AtomicBool::new(false));
 
         let msg = run_collect(&p, Some(0), 0, &stop).unwrap();
 
         assert!(msg.contains("already running"), "{msg}");
-        assert!(!state_path(&p).exists(), "a busy lock writes no state");
+        assert_eq!(
+            std::fs::read(state_path(&p)).unwrap(),
+            before,
+            "a busy lock leaves the state as it was"
+        );
     }
 
     #[test]
@@ -679,6 +692,7 @@ mod tests {
         assert_eq!(read_state(&state_path(&p)).unwrap().pid, 0);
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_lock_file_is_owner_only() {
         use std::os::unix::fs::PermissionsExt;
@@ -693,6 +707,7 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_read_only_data_folder_is_an_error_naming_the_lock_file() {
         use std::os::unix::fs::PermissionsExt;

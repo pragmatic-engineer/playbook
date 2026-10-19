@@ -261,6 +261,39 @@ mod tests {
         assert_eq!(stored, 1);
     }
 
+    #[test]
+    fn one_bad_job_rolls_back_the_whole_batch() {
+        let (conn, reader) = db("writer-rollback");
+        conn.execute("DROP TABLE telemetry_requests", []).unwrap();
+        // Queued before the loop starts, so both land in one batch.
+        let (tx, rx) = sync_channel(CHANNEL_BOUND);
+        let (good, good_answer) = job(metric());
+        let (bad, bad_answer) = job(logs("r1"));
+        tx.send(good).unwrap();
+        tx.send(bad).unwrap();
+        let p = parts();
+        let handle = start(
+            rx,
+            conn,
+            None,
+            || 1,
+            Arc::clone(&p.stop),
+            Arc::clone(&p.commits),
+            FAR,
+        );
+
+        assert!(!good_answer.recv().unwrap());
+        assert!(!bad_answer.recv().unwrap());
+        drop(tx);
+        handle.join().unwrap();
+
+        let stored: i64 = reader
+            .query_row("SELECT COUNT(*) FROM telemetry_metrics", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stored, 0);
+        assert_eq!(p.commits.load(Ordering::SeqCst), 0);
+    }
+
     fn spawn_with(
         conn: rusqlite::Connection,
         p: &Parts,

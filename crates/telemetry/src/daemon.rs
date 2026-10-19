@@ -10,11 +10,11 @@
 //! handle, because `collector.json` is written late in startup and keeps a
 //! dead pid after a crash.
 
-use super::collector::state_path;
+use super::collector::{pid_alive, state_path};
 use super::run::Paths;
 use crate::util::atomic::ensure_private_dir;
 use std::fs::{File, OpenOptions, TryLockError};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -26,7 +26,7 @@ const LOCK_MODE: u32 = 0o600;
 /// retried a few times before it counts as a live collector.
 const QUICK_RETRIES: u32 = 3;
 const RETRY_PAUSE: Duration = Duration::from_millis(50);
-/// How long to keep retrying while the holder line is not yet a whole line:
+/// How long to keep retrying while the holder line names no live process:
 /// a descheduled starter's probe must not make a lone new collector give up.
 const INCOMPLETE_HOLDER_WAIT: Duration = Duration::from_secs(1);
 
@@ -51,17 +51,24 @@ fn holder_line() -> String {
     format!("{} {}\n", std::process::id(), env!("CARGO_PKG_VERSION"))
 }
 
-/// Whether `text` is a whole `<pid> <version>\n` line. Without the newline
-/// the holder is still starting, or the file is only held by a shared probe.
-fn holder_is_complete(text: &str) -> bool {
-    text.strip_suffix('\n')
-        .and_then(|line| line.split_once(' '))
-        .is_some_and(|(pid, version)| pid.parse::<u32>().is_ok() && !version.is_empty())
+/// The pid in a whole `<pid> <version>\n` line. Without the newline the
+/// holder is still starting, or the file is only held by a shared probe.
+fn holder_pid(text: &str) -> Option<u32> {
+    let (pid, version) = text.strip_suffix('\n')?.split_once(' ')?;
+    pid.parse().ok().filter(|_| !version.is_empty())
 }
 
-fn holder_text(file: &File) -> String {
+/// Whether the lock file names a running collector. A dead collector leaves
+/// a whole line behind, so a dead pid counts like a partial line.
+fn holder_is_live(text: &str) -> bool {
+    holder_pid(text).is_some_and(pid_alive)
+}
+
+fn holder_text(mut file: &File) -> String {
     let mut text = String::new();
-    let _ = (&*file).read_to_string(&mut text);
+    if file.rewind().is_ok() {
+        let _ = file.read_to_string(&mut text);
+    }
     text
 }
 
@@ -95,7 +102,7 @@ pub fn acquire(paths: &Paths) -> Lock {
             Err(TryLockError::WouldBlock) => {
                 tries += 1;
                 let settled = tries > QUICK_RETRIES
-                    && (holder_is_complete(&holder_text(&file))
+                    && (holder_is_live(&holder_text(&file))
                         || started.elapsed() >= INCOMPLETE_HOLDER_WAIT);
                 if settled {
                     return Lock::Busy;
@@ -104,10 +111,12 @@ pub fn acquire(paths: &Paths) -> Lock {
             }
         }
     }
-    // One write, so a reader sees either no line or the whole line.
+    // One write, so a reader sees either no line or the whole line. The
+    // rewind matters: set_len does not move the cursor a read left behind.
     let wrote = file
         .set_len(0)
-        .and_then(|()| file.write_all(holder_line().as_bytes()));
+        .and_then(|()| file.seek(SeekFrom::Start(0)))
+        .and_then(|_| file.write_all(holder_line().as_bytes()));
     match wrote {
         Ok(()) => Lock::Held(file),
         Err(e) => Lock::Unavailable(e),
@@ -143,13 +152,58 @@ mod tests {
         })
     }
 
+    /// How long the probe holds in the seeded file tests: past the quick
+    /// retries, well inside the wait.
+    const SEEDED_PROBE_HOLD: Duration = Duration::from_millis(300);
+
+    fn seed(p: &Paths, text: &str) {
+        let path = lock_path(p);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
     #[test]
     fn a_whole_holder_line_needs_a_pid_a_version_and_the_newline() {
-        assert!(holder_is_complete("123 0.39.0\n"));
-        assert!(!holder_is_complete("123 0.39.0"));
-        assert!(!holder_is_complete(""));
-        assert!(!holder_is_complete("abc\n"));
-        assert!(!holder_is_complete("abc 1\n"));
+        assert_eq!(holder_pid("123 0.39.0\n"), Some(123));
+        assert_eq!(holder_pid("123 0.39.0"), None);
+        assert_eq!(holder_pid(""), None);
+        assert_eq!(holder_pid("abc\n"), None);
+        assert_eq!(holder_pid("abc 1\n"), None);
+        assert_eq!(holder_pid("123 \n"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dead_holder_line_is_waited_out_and_replaced() {
+        let p = paths("daemon-dead-holder");
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let dead = child.id();
+        child.wait().unwrap();
+        seed(&p, &format!("{dead} 0.0.1\n"));
+        let probe = shared_probe(&p, SEEDED_PROBE_HOLD);
+
+        assert!(matches!(acquire(&p), Lock::Held(_)));
+        probe.join().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(lock_path(&p)).unwrap(),
+            holder_line()
+        );
+    }
+
+    #[test]
+    fn a_partial_line_read_while_waiting_is_overwritten_from_the_start() {
+        let p = paths("daemon-partial-rewind");
+        seed(&p, "123456789 0.0.1-partial");
+        let probe = shared_probe(&p, SEEDED_PROBE_HOLD);
+
+        let Lock::Held(_held) = acquire(&p) else {
+            panic!("acquire must succeed once the probe ends");
+        };
+        probe.join().unwrap();
+        assert_eq!(
+            std::fs::read(lock_path(&p)).unwrap(),
+            holder_line().as_bytes()
+        );
     }
 
     #[test]
