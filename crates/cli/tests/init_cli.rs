@@ -346,9 +346,10 @@ fn only_a_retired_part_runs_nothing() {
 fn the_system_prompt_flag_places_the_prompt_where_the_launcher_reads_it() {
     let sb = Sandbox::new("prompt");
     sb.init("/bin/bash", &["--system-prompt"]);
-    let shipped =
-        fs::read_to_string(Path::new(env!("PLAYBOOK_REPO_ROOT")).join("prompts/SYSTEM_PROMPT.md"))
-            .unwrap();
+    let shipped = fs::read_to_string(
+        Path::new(env!("PLAYBOOK_REPO_ROOT")).join("seed/prompts/SYSTEM_PROMPT.md"),
+    )
+    .unwrap();
     assert_eq!(
         sb.read(".config/playbook/prompts/SYSTEM_PROMPT.md"),
         shipped
@@ -364,9 +365,10 @@ fn a_run_refreshes_an_installed_prompt_and_an_unattended_one_adds_none() {
         "a stale copy\n",
     );
     sb.init("/bin/bash", &[]);
-    let shipped =
-        fs::read_to_string(Path::new(env!("PLAYBOOK_REPO_ROOT")).join("prompts/SYSTEM_PROMPT.md"))
-            .unwrap();
+    let shipped = fs::read_to_string(
+        Path::new(env!("PLAYBOOK_REPO_ROOT")).join("seed/prompts/SYSTEM_PROMPT.md"),
+    )
+    .unwrap();
     assert_eq!(
         sb.read(".config/playbook/prompts/SYSTEM_PROMPT.md"),
         shipped

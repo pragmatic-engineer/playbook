@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: Apache-2.0
 #
-# The contract between the plugin and the binary. intents.json lists the
+# The contract between the plugin and the binary. plugins/intents.json lists the
 # intents the plugin relies on. This job builds the playbook binary from the
 # same commit and compares `playbook tools map --json` with the list. A listed
 # intent the binary lacks is a warning, and a failure only when intents.json
@@ -12,7 +12,6 @@ name: intents-contract
 on:
   pull_request:
     paths:
-      - "intents.json"
       - "scripts/check-intents.sh"
       - "plugins/**"
       - "crates/cli/**"

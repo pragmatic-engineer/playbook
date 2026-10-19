@@ -303,11 +303,11 @@ fn intent_ids_and_reference_paths_in_the_prose_resolve() {
     let listed = fs::read_dir(root)
         .ok()
         .and_then(|_| {
-            ["../../intents.json", "../intents.json", "intents.json"]
+            ["../intents.json", "intents.json"]
                 .iter()
                 .find_map(|p| fs::read_to_string(root.join(p)).ok())
         })
-        .expect("intents.json should sit above the plugin root");
+        .expect("intents.json should sit in plugins/, above the plugin root");
     let intent = regex::Regex::new(r"Intent: ([a-z][a-z0-9-]*)").unwrap();
     let path =
         regex::Regex::new(r"skills/([a-z][a-z-]*)/references/([a-z][a-z0-9-]*)\.md").unwrap();

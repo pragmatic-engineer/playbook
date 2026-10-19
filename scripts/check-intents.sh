@@ -4,7 +4,7 @@
 #
 # check-intents.sh: the contract between this repo and the playbook binary.
 #
-# intents.json lists the intents the skills, commands and agents rely on, each
+# plugins/intents.json lists the intents the skills, commands and agents rely on, each
 # named like a tool map entry (for example `pr-reply`). The binary prints its
 # own list with `playbook tools map --json`. This script:
 #   1. fails when intents.json is not valid: sorted, unique ids in kebab case
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FILE="$ROOT/intents.json"
+FILE="$ROOT/plugins/intents.json"
 fail=0
 
 jq -e 'type == "array" and length > 0' "$FILE" >/dev/null || { echo "FAIL intents.json must be a non-empty array"; exit 1; }

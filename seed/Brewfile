@@ -8,7 +8,7 @@
 # for each one it uses the version already on PATH (brew, nvm, pyenv, system, a
 # manual install) and installs via brew only when the tool is missing, so an
 # existing tool is never shadowed by a duplicate brew install. You can still run
-# `brew bundle --file Brewfile` from a checkout, which installs the brew
+# `brew bundle --file seed/Brewfile` from a checkout, which installs the brew
 # formula for each regardless of a non-brew copy.
 #
 # Not available via Homebrew, install separately:

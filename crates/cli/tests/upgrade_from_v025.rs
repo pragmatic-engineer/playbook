@@ -138,7 +138,7 @@ impl V025Home {
     fn init(&self) {
         let outcome = run(&InitPaths {
             plugin_root: None,
-            self_root: Some(PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))),
+            self_root: Some(PathBuf::from(env!("PLAYBOOK_REPO_ROOT")).join("seed")),
             claude_home: self.home.join(".claude"),
             home: self.home.clone(),
             system_prompt: playbook::init::system_prompt::Answer::Unasked,

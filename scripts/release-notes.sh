@@ -72,7 +72,7 @@ prefix_of() {
 paths_of() {
   case "$1" in
     playbook) printf '%s\n' crates ':(exclude)crates/plugin-checks' \
-      Cargo.toml install.sh settings.shared.json prompts Brewfile plugins/playbook ;;
+      Cargo.toml install.sh seed settings.shared.json prompts Brewfile plugins/playbook ;;
   esac
 }
 
