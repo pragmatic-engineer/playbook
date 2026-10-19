@@ -69,3 +69,21 @@ fn the_prompt_points_at_the_files_that_own_routing_and_the_hooks_that_enforce_ru
         assert!(text.contains(needle), "missing `{needle}`");
     }
 }
+
+#[test]
+fn the_prompt_requires_a_memory_search_before_claiming_no_knowledge() {
+    // Arrange
+    let text = prompt();
+
+    // Act
+    let missing: Vec<&str> = ["search memory and the repo", "name the sources you checked"]
+        .into_iter()
+        .filter(|needle| !text.contains(needle))
+        .collect();
+
+    // Assert
+    assert!(
+        missing.is_empty(),
+        "missing the search-before-no-knowledge rule: {missing:?}"
+    );
+}
