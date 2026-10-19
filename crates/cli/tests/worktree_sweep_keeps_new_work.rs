@@ -97,6 +97,21 @@ fn agent_worktree(f: &Fixture, name: &str) -> PathBuf {
     dest.canonicalize().unwrap()
 }
 
+/// Plants a cargo target folder, with the markers cargo writes, for the
+/// worktree at `wt`, where `disk target-dir` would put it.
+fn plant_target(f: &Fixture, wt: &Path) -> PathBuf {
+    let root = f.container.join(".worktrees");
+    let dir = playbook::disk::targets::target_for(&root, wt).unwrap();
+    fs::create_dir_all(dir.join("debug/deps")).unwrap();
+    fs::write(
+        dir.join("CACHEDIR.TAG"),
+        "Signature: 8a477f597d28d172789f06886806bc55",
+    )
+    .unwrap();
+    fs::write(dir.join(".rustc_info.json"), "{}").unwrap();
+    dir
+}
+
 fn age(path: &Path, days: u64) {
     let when = SystemTime::now() - Duration::from_secs(days * 86_400);
     fs::File::open(path.join(".git"))
@@ -110,6 +125,7 @@ fn sweep(f: &Fixture) -> String {
         .args(["worktree", "sweep"])
         .current_dir(&f.repo)
         .env("HOME", &f.home)
+        .env_remove("WORKTREE_BASE_DIR")
         .output()
         .expect("playbook should spawn");
     assert!(
@@ -243,10 +259,20 @@ fn removing_a_worktree_removes_its_databases_from_the_data_folder() {
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(&p, "x").unwrap();
     }
+    let target = plant_target(&f, &wt);
+    let other = plant_target(&f, &f.container.join("elsewhere/agent-data"));
 
     let out = sweep(&f);
 
     assert!(!wt.exists(), "{out}");
+    assert!(
+        !target.exists(),
+        "the worktree's target folder goes with it: {out}"
+    );
+    assert!(
+        other.exists(),
+        "a same-named worktree elsewhere keeps its folder"
+    );
     assert!(!db("gate", &id).exists() && !db("code", &id).exists());
     assert!(
         db("gate", "other-worktree").exists(),
@@ -277,12 +303,14 @@ fn worktree_remove_takes_its_databases_and_an_id_shared_with_a_live_worktree_kee
         .join(format!("{id}.db"));
     fs::create_dir_all(file.parent().unwrap()).unwrap();
     fs::write(&file, "x").unwrap();
+    let target = plant_target(&f, &wt);
 
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["worktree", "remove"])
         .arg(&wt)
         .current_dir(&f.repo)
         .env("HOME", &f.home)
+        .env_remove("WORKTREE_BASE_DIR")
         .output()
         .expect("playbook should spawn");
 
@@ -296,6 +324,7 @@ fn worktree_remove_takes_its_databases_and_an_id_shared_with_a_live_worktree_kee
         !file.exists(),
         "the removed worktree's database goes with it"
     );
+    assert!(!target.exists(), "{}", String::from_utf8_lossy(&out.stdout));
     cleanup(&f);
 }
 

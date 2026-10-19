@@ -266,11 +266,9 @@ pub fn render(report: &Report) -> String {
     if !report.home_scan_complete {
         out.push_str("\nThe search for other cargo target folders stopped at its time or folder limit, so some may be missing.\n");
     }
-    if report.target_count as u64 > p.max_target_dirs {
-        out.push_str(&format!(
-            "\n{} cargo target folders exist, more than disk.maxTargetDirs ({}). Run `cargo clean` in the ones no agent uses.\n",
-            report.target_count, p.max_target_dirs
-        ));
+    if let Some(warning) = super::targets::too_many_warning(report.target_count, p.max_target_dirs)
+    {
+        out.push_str(&format!("\n{warning}\n"));
     }
     out
 }
