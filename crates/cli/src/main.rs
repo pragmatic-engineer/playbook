@@ -726,13 +726,17 @@ fn main() {
             },
         },
         Command::Memory { sub } => match sub {
-            MemoryCommand::Rebuild => match hooks::rebuild_memory_graph::rebuild_now() {
-                Ok(()) => println!("memory: memory.db rebuilt"),
-                Err(err) => {
+            MemoryCommand::Rebuild { json } => {
+                if let Err(err) = hooks::rebuild_memory_graph::rebuild_now() {
                     eprintln!("memory rebuild: {err}");
                     std::process::exit(1);
                 }
-            },
+                if !json {
+                    println!("memory: memory.db rebuilt");
+                }
+                print_memory_stats("memory rebuild", json);
+            }
+            MemoryCommand::Stats { json } => print_memory_stats("memory stats", json),
             MemoryCommand::Export { json: _ } => {
                 let root = common::paths::playbook_root();
                 // Folds an older memory.graph.json into the database first.
@@ -2466,6 +2470,20 @@ fn main() {
                     println!("{}", mode::run_status(flag.map(to_mode), json));
                 }
             }
+        }
+    }
+}
+
+/// Prints the memory graph summary for `playbook memory stats` and after a
+/// rebuild; exits 1 when the database cannot be read.
+fn print_memory_stats(label: &str, json: bool) {
+    let repo = playbook::memory_stats::current_repo();
+    match playbook::memory_stats::collect(&common::home_dir(), repo) {
+        Ok(stats) if json => println!("{}", playbook::memory_stats::render_json(&stats)),
+        Ok(stats) => print!("{}", playbook::memory_stats::render_text(&stats)),
+        Err(err) => {
+            eprintln!("{label}: {err}");
+            std::process::exit(1);
         }
     }
 }

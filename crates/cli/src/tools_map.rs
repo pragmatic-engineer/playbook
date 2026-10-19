@@ -238,6 +238,7 @@ pub const TOOLS: &[Tool] = &[
     t("handoff-check", "handoff", "check", "", "handoff check"),
     t("memory-context", "memory", "context", "", "memory context"),
     t("memory-rebuild", "memory", "rebuild", "", "memory rebuild"),
+    t("memory-stats", "memory", "stats", "", "memory stats"),
     t("next-adr-number", "adr", "next", "", "adr next"),
     t(
         "prose-check",

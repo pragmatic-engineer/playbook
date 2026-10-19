@@ -88,6 +88,10 @@
     "required": false
   },
   {
+    "intent": "memory-stats",
+    "required": false
+  },
+  {
     "intent": "mode-status",
     "required": false
   },

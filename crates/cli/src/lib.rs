@@ -59,6 +59,7 @@ pub mod json;
 pub mod learn;
 pub mod manifest;
 pub mod memory_import;
+pub mod memory_stats;
 pub mod migrate_cli;
 pub mod mode;
 pub mod models;
@@ -1164,9 +1165,29 @@ pub enum MemoryCommand {
     ///
     /// Memory is rebuilt on its own when a fact is saved, so you only need
     /// this after editing fact files by hand. The graph is written to
-    /// `~/.config/playbook/data/memory.db`; the fact files stay the source of
-    /// truth, so the database is safe to delete.
-    Rebuild,
+    /// `~/.config/playbook/data/memory.db`; the fact files in
+    /// `~/.config/playbook/memory/` stay the source of truth, so the database
+    /// is safe to delete. Prints the same summary as `playbook memory stats`.
+    Rebuild {
+        /// Print the summary as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Summarize the memory graph without changing it
+    ///
+    /// Prints the database path, size and last rebuild time, the fact count
+    /// per scope (global, org, project), the node count, the edge count per
+    /// relation, the anchor count, and the dangling edges (target missing)
+    /// and anchors (path missing on disk). Anchors are checked only for the
+    /// repo you run it in. Read only: a missing database is reported, not
+    /// built.
+    ///
+    /// Example: `playbook memory stats --json`
+    Stats {
+        /// Print the summary as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the memory graph as JSON
     ///
     /// The graph lives in `~/.config/playbook/data/memory.db`, rebuilt from

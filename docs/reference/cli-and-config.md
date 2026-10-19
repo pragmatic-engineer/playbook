@@ -896,7 +896,7 @@ Exits 0 when all pass and 1 otherwise.
 
 Manage the memory graph that sessions read from
 
-Subcommands: `context`, `export`, `import-claude`, `rebuild`
+Subcommands: `context`, `export`, `import-claude`, `rebuild`, `stats`
 
 ### `playbook memory context`
 
@@ -930,7 +930,19 @@ Example: `playbook memory import-claude --dry-run`
 
 Rebuild the memory graph from every fact on disk
 
-Memory is rebuilt on its own when a fact is saved, so you only need this after editing fact files by hand. The graph is written to `~/.config/playbook/data/memory.db`; the fact files stay the source of truth, so the database is safe to delete.
+Memory is rebuilt on its own when a fact is saved, so you only need this after editing fact files by hand. The graph is written to `~/.config/playbook/data/memory.db`; the fact files in `~/.config/playbook/memory/` stay the source of truth, so the database is safe to delete. Prints the same summary as `playbook memory stats`.
+
+- `--json`: Print the summary as JSON
+
+### `playbook memory stats`
+
+Summarize the memory graph without changing it
+
+Prints the database path, size and last rebuild time, the fact count per scope (global, org, project), the node count, the edge count per relation, the anchor count, and the dangling edges (target missing) and anchors (path missing on disk). Anchors are checked only for the repo you run it in. Read only: a missing database is reported, not built.
+
+Example: `playbook memory stats --json`
+
+- `--json`: Print the summary as JSON
 
 ### `playbook migrate`
 
