@@ -675,6 +675,45 @@ fn a_fact_alias_in_the_prompt_recalls_the_fact() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// A fact anchored to a crate folder is recalled by "<name> crate" in the
+/// prompt, and the recall is strong (no weak hint).
+#[test]
+fn a_crate_name_in_the_prompt_recalls_the_fact_anchored_to_the_crate() {
+    // Arrange
+    let home = scratch_home("prompt-crate-name");
+    let graph = json!({
+        "nodes": [
+            {"id": "global/idx-fact", "file": "idx-fact.md", "scope": "global",
+             "type": "reference", "name": "source-index-notes",
+             "description": "How the symbol store is laid out."},
+            {"id": "code:crates/code/", "file": "crates/code/", "scope": "code", "type": "code"}
+        ],
+        "edges": [
+            {"from": "global/idx-fact", "to": "code:crates/code/", "relation": "anchors"}
+        ]
+    })
+    .to_string();
+    write_graph(&home, &graph);
+    write_fact_body(
+        &home,
+        "idx-fact.md",
+        "---\nname: source-index-notes\n---\n\nCRATEBODYMARKER\n",
+    );
+
+    // Act
+    let output = run_prompt_hook(&home, "tell me about the code crate", "p-crate");
+
+    // Assert
+    let context = additional_context(&output);
+    assert!(context.contains("CRATEBODYMARKER"), "{context}");
+    assert!(
+        !context.contains("Memory:"),
+        "a crate hit is strong: {context}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// Refinement pass finding: the `.prompt` empty, fall back to `.user_prompt`
 /// branch (added defensively because the official docs and this repo's own
 /// live code disagree on the field name, see the blueprint's resolved open

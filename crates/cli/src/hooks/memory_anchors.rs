@@ -93,6 +93,16 @@ const ALIAS_HIT_SCORE: usize = 2;
 /// Index column that holds the fact file, relative to the memory root.
 const FACT_FILE_COLUMN: usize = 5;
 
+/// Index column that holds the fact aliases, joined with `ALIAS_SEPARATOR`.
+/// Older rows have six columns and no aliases.
+const ALIAS_COLUMN: usize = 6;
+
+/// Joins the aliases of one fact inside the alias column.
+const ALIAS_SEPARATOR: char = '|';
+
+/// Word that names the crates folder in an anchor path.
+const CRATES_DIR: &str = "crates";
+
 /// Score of a prompt word that names the crate folder of an anchor.
 const PATH_HIT_SCORE: usize = 2;
 
@@ -271,7 +281,7 @@ fn run_prompt(payload: &Payload, dir: &str) {
 
     let root = git_toplevel();
     let query = PromptQuery::new(&prompt);
-    let tokens = query.tokens.clone();
+    let tokens = &query.tokens;
     let mut matches = prompt_token_matches(&contents, &query);
     let index = AnchorIndex::parse(&contents);
     for touched_abs in touched_paths(dir) {
@@ -285,13 +295,14 @@ fn run_prompt(payload: &Payload, dir: &str) {
                 matches.push(RecallMatch {
                     score: TOUCHED_FILE_SCORE,
                     strong: true,
+                    path_scored: false,
                     row,
                 });
             }
         }
     }
     if matches.is_empty() {
-        emit_zero_match_hint(dir, &tokens);
+        emit_zero_match_hint(dir, tokens);
         return;
     }
 
@@ -347,7 +358,7 @@ fn run_prompt(payload: &Payload, dir: &str) {
     if entries.is_empty() {
         // Matches existed but none could be read: the model got nothing.
         if unreadable {
-            emit_zero_match_hint(dir, &tokens);
+            emit_zero_match_hint(dir, tokens);
         }
         return;
     }
@@ -367,7 +378,7 @@ fn run_prompt(payload: &Payload, dir: &str) {
     // Strength is judged over every match, so a strong fact shown on an
     // earlier prompt still keeps the weak hint away.
     if !tokens.is_empty() && !matches.iter().any(|m| m.strong) {
-        let hint = recall_hint(&tokens, &repo_slug(), true);
+        let hint = recall_hint(tokens, &repo_slug(), true);
         let fits = msg.chars().count() + 2 + hint.chars().count() <= PROMPT_RECALL_CAP_CHARS;
         if fits && reserve_hint_slot(dir) {
             msg.push_str("\n\n");
@@ -477,9 +488,6 @@ fn contains_at_boundary(text: &str, token: &str) -> bool {
     })
 }
 
-/// Word that names the crates folder in an anchor path and in a prompt.
-const CRATES_DIR: &str = "crates";
-
 /// The searchable parts of one prompt.
 struct PromptQuery {
     /// Words that can match a fact name or description.
@@ -495,17 +503,14 @@ impl PromptQuery {
         Self {
             tokens: prompt_tokens(prompt),
             path_tokens: prompt_path_tokens(prompt),
-            lower: prompt.to_lowercase(),
+            lower: prompt
+                .to_lowercase()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
         }
     }
 }
-
-/// Index column that holds the fact aliases, joined with `ALIAS_SEPARATOR`.
-/// Older rows have six columns and no aliases.
-const ALIAS_COLUMN: usize = 6;
-
-/// Joins the aliases of one fact inside the alias column.
-const ALIAS_SEPARATOR: char = '|';
 
 /// Whether any alias in `aliases` appears in the lowercased `prompt` as a
 /// whole word or phrase, so "pbcode" does not match "pbcodex".
@@ -576,32 +581,37 @@ fn prompt_path_tokens(prompt: &str) -> Vec<String> {
     out
 }
 
-/// The crate folder name of an anchor: the segment right after `crates/`.
-/// Files and folders deeper in the crate (`src`, `main.rs`) do not count.
+/// The crate folder name of an anchor that is the crate folder itself
+/// (`crates/code` or `crates/code/`). Anchors on files or folders inside the
+/// crate (`src`, `main.rs`) give `None`, so a prompt naming a crate does not
+/// pull in every fact anchored somewhere under it.
 fn anchor_crate_name(anchor: &str) -> Option<&str> {
     let mut segments = anchor.split('/');
     segments.find(|s| *s == CRATES_DIR)?;
-    segments.next().filter(|s| !s.is_empty())
+    let name = segments.next().filter(|s| !s.is_empty())?;
+    segments.all(str::is_empty).then_some(name)
 }
 
 /// A fact row that matched the prompt or a touched file. `strong` marks a
 /// match specific enough to trust: a hyphenated name token, two distinct name
-/// tokens, or a touched-file anchor. Anything else is weak.
+/// tokens, an alias hit, a crate-folder hit, or a touched-file anchor. Anything
+/// else is weak.
 struct RecallMatch {
     score: usize,
     strong: bool,
+    /// Whether the crate-folder bonus is already in `score`.
+    path_scored: bool,
     row: Vec<String>,
 }
 
 /// Rows whose name or description matches a prompt token, best first: each
-/// distinct token that hits counts one, two when it hits the name. Ties keep
-/// index order. Deduplicated by from_id, same as `matching_rows`.
+/// distinct token that hits counts one, two when it hits the name. An alias
+/// phrase in the prompt and a crate-folder anchor named before "crate" add
+/// their own bonus and make the match strong. Ties keep index order. One match
+/// per from_id; a later anchor row of the same fact can add the crate-folder
+/// bonus to it.
 fn prompt_token_matches(idx_contents: &str, query: &PromptQuery) -> Vec<RecallMatch> {
     let tokens = &query.tokens;
-    if tokens.is_empty() {
-        return Vec::new();
-    }
-
     let mut scored: Vec<RecallMatch> = Vec::new();
     let mut seen_from: HashMap<String, usize> = HashMap::new();
     for line in idx_contents.lines() {
@@ -653,8 +663,9 @@ fn prompt_token_matches(idx_contents: &str, query: &PromptQuery) -> Vec<RecallMa
         // Another anchor row of a fact already scored: only the crate-folder
         // hit differs per row, so let it upgrade the first row's match.
         if let Some(&at) = seen_from.get(&from_id) {
-            if path_hit && !scored[at].strong {
+            if path_hit && !scored[at].path_scored {
                 scored[at].strong = true;
+                scored[at].path_scored = true;
                 scored[at].score += PATH_HIT_SCORE;
             }
             continue;
@@ -662,6 +673,7 @@ fn prompt_token_matches(idx_contents: &str, query: &PromptQuery) -> Vec<RecallMa
         seen_from.insert(from_id, scored.len());
         scored.push(RecallMatch {
             score,
+            path_scored: path_hit,
             strong: path_hit
                 || alias_hit
                 || hyphenated_name_hit
@@ -922,7 +934,7 @@ fn git_last_commit_epoch(path: &Path) -> Option<staleness::DateTime> {
 
 /// Build the tab-separated anchor index from `memory.db` for the current
 /// repo scope. One row per in-scope `anchors` edge, columns anchor, from_id,
-/// name, description, neighbours, file. The `file` column exists solely for
+/// name, description, neighbours, file, aliases. The `file` column exists solely for
 /// `run_prompt`'s body reads; `PreToolUse`'s `format_message` only reads
 /// columns 2 through 4, so this addition is safe for that path. Any failure
 /// (missing or malformed graph)
@@ -1192,8 +1204,8 @@ mod tests {
         prompt_token_matches(index, &PromptQuery::new(prompt))
     }
 
-    /// Two anchored rows in the `RECALL_INDEX` shape: a crate folder and a
-    /// file inside another crate.
+    /// Four anchored rows in the `RECALL_INDEX` shape: a crate folder, two files
+    /// inside another crate, and a file outside `crates/`.
     const PATH_INDEX: &str = "crates/code/\tproject/a\tcode-index\tsource index\t\ta.md\n\
         crates/cli/src/x.rs\tproject/b\tcli-helper\tlives in crates\t\tb.md\n\
         crates/cli/src/main.rs\tproject/c\tentry-point\tthe binary start\t\tc.md\n\
@@ -1227,8 +1239,9 @@ mod tests {
     #[test]
     fn the_word_crate_alone_matches_no_path() {
         let got = scored(PATH_INDEX, "crate");
-        assert!(got.iter().all(|m| m.row[1] == "project/b"));
-        assert!(got.iter().all(|m| !m.strong));
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].row[1], "project/b");
+        assert!(!got[0].strong);
     }
 
     #[test]
@@ -1253,6 +1266,24 @@ mod tests {
     }
 
     #[test]
+    fn a_file_inside_a_crate_is_not_a_crate_folder_hit() {
+        // PATH_INDEX anchors project/b at crates/cli/src/x.rs
+        let got = scored(PATH_INDEX, "the cli crate");
+        assert!(got.iter().all(|m| !m.strong));
+    }
+
+    #[test]
+    fn the_crate_bonus_is_added_once_whatever_the_row_order() {
+        let file_first = "crates/cli/src/x.rs\tproject/a\tnotes\tabout the index\t\ta.md\n\
+            crates/code/\tproject/a\tnotes\tabout the index\t\ta.md\n";
+        let dir_first = "crates/code/\tproject/a\tnotes\tabout the index\t\ta.md\n\
+            crates/cli/src/x.rs\tproject/a\tnotes\tabout the index\t\ta.md\n";
+        let a = scored(file_first, "code crate index");
+        let b = scored(dir_first, "code crate index");
+        assert_eq!(a[0].score, b[0].score);
+    }
+
+    #[test]
     fn a_crate_name_never_matches_by_prefix() {
         // "cod" is a prefix of the crate "code"
         let got = scored(PATH_INDEX, "cod crate");
@@ -1271,6 +1302,25 @@ mod tests {
             let got = scored(ALIAS_INDEX, prompt);
             assert_eq!(got[0].row[1], "project/a", "{prompt}");
             assert!(got[0].strong, "{prompt}");
+        }
+    }
+
+    #[test]
+    fn an_alias_of_short_or_stop_words_matches_without_other_tokens() {
+        // "pb" is under the token length and "code" is a stopword, so the
+        // prompt has no searchable token; the alias must still match.
+        let index = "\tproject/a\tnotes\tnothing here\t\ta.md\tpb code\n";
+        let got = scored(index, "pb code");
+        assert_eq!(got.len(), 1);
+        assert!(got[0].strong);
+    }
+
+    #[test]
+    fn an_alias_matches_across_a_newline_or_double_space() {
+        let index = "\tproject/a\tnotes\tnothing here\t\ta.md\ttoken flow\n";
+        for prompt in ["about token\nflow", "about token  flow"] {
+            let got = scored(index, prompt);
+            assert_eq!(got.len(), 1, "{prompt:?}");
         }
     }
 
