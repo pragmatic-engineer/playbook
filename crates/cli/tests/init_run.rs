@@ -197,7 +197,6 @@ fn base_paths(home: &Path) -> InitPaths {
         security: false,
         telemetry: false,
         telemetry_replace_off: false,
-        collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
         disk_ballast: false,
@@ -250,7 +249,6 @@ fn fresh_config_gets_fully_wired() {
             "trust",
             "path",
             "telemetry",
-            "collector-service",
             "short-name",
             "disk-ballast",
         ]
@@ -798,7 +796,6 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
             "trust",
             "path",
             "telemetry",
-            "collector-service",
             "short-name",
             "disk-ballast",
         ]
@@ -921,7 +918,6 @@ fn missing_self_root_skips_template_dependent_steps() {
         security: false,
         telemetry: false,
         telemetry_replace_off: false,
-        collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
         disk_ballast: false,

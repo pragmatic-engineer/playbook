@@ -4,7 +4,7 @@
 //! The optional parts of `playbook setup` and how each one gets decided: a flag
 //! wins, else a question in a terminal, else the default.
 
-use crate::init::{attribution, catalog, collector_service, pb_link, system_prompt};
+use crate::init::{attribution, catalog, pb_link, system_prompt};
 use clap::Args;
 use std::io::{self, IsTerminal};
 
@@ -53,11 +53,11 @@ pub struct Flags {
     /// Do not write telemetry variables into settings.json
     #[arg(long, overrides_with = "telemetry")]
     pub no_telemetry: bool,
-    /// Keep the usage collector running in a per-user background service (launchd agent or systemd user unit), when telemetry points at it
-    #[arg(long, overrides_with = "no_collector_service")]
+    /// Retired: playbook starts the collector itself, so no service is installed. Accepted with a notice for one release
+    #[arg(long, hide = true, overrides_with = "no_collector_service")]
     pub collector_service: bool,
-    /// Do not install the background service for the usage collector
-    #[arg(long, overrides_with = "collector_service")]
+    /// Retired with `--collector-service`
+    #[arg(long, hide = true, overrides_with = "collector_service")]
     pub no_collector_service: bool,
     /// Retired: setup no longer defines a `claude` shell function (ADR 0044). Accepted and ignored until 1.0
     #[arg(long, hide = true, overrides_with = "no_claude_override")]
@@ -100,7 +100,7 @@ pub struct Flags {
         value_name = "PART",
         value_delimiter = ',',
         num_args = 1..,
-        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, disk-ballast, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
+        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, disk-ballast, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
     )]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
@@ -123,7 +123,6 @@ pub struct Choices {
     pub path: bool,
     pub system_prompt: bool,
     pub telemetry: bool,
-    pub collector_service: bool,
     pub short_name: bool,
     /// Whether to write the 1 GB disk ballast. Off unless chosen.
     pub disk_ballast: bool,
@@ -149,7 +148,6 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
         "path" => (flags.path, flags.no_path),
         "system-prompt" => (flags.system_prompt, flags.no_system_prompt),
         "telemetry" => (flags.telemetry, flags.no_telemetry),
-        "collector-service" => (flags.collector_service, flags.no_collector_service),
         "short-name" => (flags.short_name, flags.no_short_name),
         "disk-ballast" => (flags.disk_ballast, flags.no_disk_ballast),
         "attribution" => (flags.attribution, flags.no_attribution),
@@ -157,23 +155,34 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
     })
 }
 
-/// The part names setup took before ADR 0044 and now ignores.
-pub const RETIRED_PARTS: [&str; 2] = ["aliases", "claude-override"];
+/// The part `--collector-service` set up until playbook started the
+/// collector itself.
+pub const COLLECTOR_SERVICE_PART: &str = "collector-service";
+
+/// What setup prints for the retired collector-service part.
+pub const COLLECTOR_SERVICE_RETIRED: &str =
+    "the collector service is no longer needed; playbook starts the collector itself";
+
+/// The part names setup took once and now ignores: the launchers ADR 0044
+/// dropped and the collector service.
+pub const RETIRED_PARTS: [&str; 3] = ["aliases", "claude-override", COLLECTOR_SERVICE_PART];
 
 /// One stderr line per retired flag or `--only` name in use, for a terminal.
 pub fn retired_notes(flags: &Flags) -> Vec<String> {
     let set_by_flag = [
         flags.aliases || flags.no_aliases,
         flags.claude_override || flags.no_claude_override,
+        flags.collector_service || flags.no_collector_service,
     ];
     RETIRED_PARTS
         .iter()
         .zip(set_by_flag)
         .filter(|(id, flag)| *flag || flags.only.iter().any(|n| n == *id))
-        .map(|(id, _)| {
-            format!(
+        .map(|(id, _)| match *id {
+            COLLECTOR_SERVICE_PART => format!("playbook setup: {COLLECTOR_SERVICE_RETIRED}"),
+            _ => format!(
                 "playbook setup: `{id}` is retired and does nothing; `playbook cc` and `pb cc` need no shell line (ADR 0044)"
-            )
+            ),
         })
         .collect()
 }
@@ -301,7 +310,6 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         path: has("path"),
         system_prompt: has("system-prompt"),
         telemetry: has("telemetry"),
-        collector_service: has("collector-service"),
         short_name: has("short-name"),
         disk_ballast: has("disk-ballast"),
         attribution: match has(attribution::PART) {
@@ -326,16 +334,6 @@ fn attribution_from_flags(flags: &Flags) -> Option<attribution::Choice> {
         true => attribution::Choice::On,
         false => attribution::Choice::Off { replace: true },
     })
-}
-
-/// What the collector-service part does. A no or `--no-collector-service`
-/// is recorded; a run that asked nothing is not.
-pub fn collector_service_choice(flags: &Flags, on: bool, asked: bool) -> collector_service::Choice {
-    match (on, flags.no_collector_service || asked) {
-        (true, _) => collector_service::Choice::Install,
-        (false, true) => collector_service::Choice::Declined,
-        (false, false) => collector_service::Choice::Skip,
-    }
 }
 
 /// What the short-name part does. A no or `--no-short-name` is recorded; a
@@ -507,12 +505,6 @@ pub fn resolve_with(
             catalog::question("telemetry"),
             settings_default,
         ),
-        collector_service: decide(
-            flags.collector_service,
-            flags.no_collector_service,
-            catalog::question("collector-service"),
-            settings_default,
-        ),
         short_name: decide(
             flags.short_name,
             flags.no_short_name,
@@ -564,7 +556,6 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
         (flags.path, flags.no_path),
         (flags.system_prompt, flags.no_system_prompt),
         (flags.telemetry, flags.no_telemetry),
-        (flags.collector_service, flags.no_collector_service),
         (flags.short_name, flags.no_short_name),
         (flags.disk_ballast, flags.no_disk_ballast),
         (flags.attribution, flags.no_attribution),
@@ -573,7 +564,7 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
         "setup: output is not a terminal, so no questions were asked; the hooks, status line, \
-         system-prompt, telemetry, collector-service, short-name and disk-ballast parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
+         system-prompt, telemetry, short-name and disk-ballast parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
 }
@@ -598,7 +589,6 @@ mod tests {
             path: true,
             system_prompt: true,
             no_telemetry: true,
-            no_collector_service: true,
             no_short_name: true,
             no_disk_ballast: true,
             no_attribution: true,
@@ -650,7 +640,6 @@ mod tests {
                 path: true,
                 system_prompt: false,
                 telemetry: false,
-                collector_service: false,
                 short_name: false,
                 disk_ballast: false,
                 attribution: attribution::Choice::Skip
@@ -673,7 +662,7 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.path);
-        assert_eq!(asked.len(), 7, "{asked:?}");
+        assert_eq!(asked.len(), 6, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| !q.contains("hooks") && q != catalog::question("path")));
@@ -703,28 +692,6 @@ mod tests {
         };
         let c = only_choices(&only).unwrap().unwrap();
         assert!(c.disk_ballast && !c.hooks && !c.short_name);
-    }
-
-    #[test]
-    fn a_collector_service_no_is_recorded_only_when_someone_said_it() {
-        use collector_service::Choice::*;
-        let off = Flags {
-            no_collector_service: true,
-            ..Flags::default()
-        };
-        assert_eq!(
-            collector_service_choice(&Flags::default(), true, false),
-            Install
-        );
-        assert_eq!(
-            collector_service_choice(&Flags::default(), false, true),
-            Declined
-        );
-        assert_eq!(collector_service_choice(&off, false, false), Declined);
-        assert_eq!(
-            collector_service_choice(&Flags::default(), false, false),
-            Skip
-        );
     }
 
     #[test]
@@ -919,7 +886,6 @@ mod tests {
                 path: true,
                 system_prompt: true,
                 telemetry: true,
-                collector_service: true,
                 short_name: true,
                 disk_ballast: false,
                 attribution: attribution::Choice::Default
@@ -1014,7 +980,6 @@ mod tests {
                 path: false,
                 system_prompt: false,
                 telemetry: true,
-                collector_service: false,
                 short_name: false,
                 disk_ballast: false,
                 attribution: attribution::Choice::Skip
@@ -1049,6 +1014,51 @@ mod tests {
             only: vec!["aliases".into(), "hooks".into()],
             ..Flags::default()
         }));
+    }
+
+    #[test]
+    fn the_collector_service_flags_print_the_notice_and_change_nothing() {
+        let notice = format!("playbook setup: {COLLECTOR_SERVICE_RETIRED}");
+        let runs = [
+            Flags {
+                collector_service: true,
+                ..Flags::default()
+            },
+            Flags {
+                no_collector_service: true,
+                ..Flags::default()
+            },
+            Flags {
+                only: vec!["collector-service".into()],
+                ..Flags::default()
+            },
+        ];
+
+        for flags in &runs {
+            assert_eq!(retired_notes(flags), vec![notice.clone()], "{flags:?}");
+            assert!(!catalog::ids().contains(&"collector-service"));
+            assert_eq!(part_pair(flags, "collector-service"), None);
+        }
+        let only = only_choices(&runs[2]).unwrap().unwrap();
+        assert_eq!(only, all_off());
+        assert!(only_retired(&runs[2]));
+        assert_eq!(
+            COLLECTOR_SERVICE_RETIRED,
+            "the collector service is no longer needed; playbook starts the collector itself"
+        );
+    }
+
+    #[test]
+    fn a_retired_collector_flag_beside_only_is_no_conflict() {
+        let flags = Flags {
+            only: vec!["hooks".into()],
+            collector_service: true,
+            ..Flags::default()
+        };
+
+        let c = only_choices(&flags).unwrap().unwrap();
+
+        assert!(c.hooks && !c.path);
     }
 
     #[test]
@@ -1149,7 +1159,6 @@ mod tests {
             path: false,
             system_prompt: false,
             telemetry: false,
-            collector_service: false,
             short_name: false,
             disk_ballast: false,
             attribution: attribution::Choice::Skip,

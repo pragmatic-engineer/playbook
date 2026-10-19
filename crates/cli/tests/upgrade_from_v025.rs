@@ -149,7 +149,6 @@ impl V025Home {
             security: false,
             telemetry: false,
             telemetry_replace_off: false,
-            collector_service: playbook::init::collector_service::Choice::Skip,
             only: false,
             short_name: playbook::init::pb_link::Choice::Skip,
             disk_ballast: false,

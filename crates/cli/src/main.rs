@@ -445,18 +445,8 @@ fn main() {
                     init::telemetry::process_configured_beyond_settings(&home_dir.join(".claude")),
                 )
             };
-            // A service that is already installed is kept up to date without
-            // a question, as an explicit flag still decides.
-            let skip_service_question = if flags.collector_service || flags.no_collector_service {
-                None
-            } else {
-                init::collector_service::skip_line(&home_dir)
-            };
             if only.is_none() {
                 if let Some(line) = skip_telemetry_question {
-                    println!("{line}");
-                }
-                if let Some(line) = &skip_service_question {
                     println!("{line}");
                 }
             }
@@ -473,13 +463,10 @@ fn main() {
             let mut guided: Vec<(&'static str, bool)> = Vec::new();
             if asking {
                 let security_on = flags.security || (!flags.no_security && security_config);
-                let skipped: Vec<&str> = [
-                    ("telemetry", skip_telemetry_question.is_some()),
-                    ("collector-service", skip_service_question.is_some()),
-                ]
-                .into_iter()
-                .filter_map(|(id, skip)| skip.then_some(id))
-                .collect();
+                let skipped: Vec<&str> = [("telemetry", skip_telemetry_question.is_some())]
+                    .into_iter()
+                    .filter_map(|(id, skip)| skip.then_some(id))
+                    .collect();
                 let said_no: Vec<&str> = [
                     ("system-prompt", !init::system_prompt::enabled(&home_dir)),
                     ("short-name", init::pb_link::declined(&home_dir)),
@@ -632,11 +619,6 @@ fn main() {
                     choices.telemetry,
                     only_run,
                 ),
-                collector_service: init::choices::collector_service_choice(
-                    &flags,
-                    choices.collector_service,
-                    asking && skip_service_question.is_none(),
-                ),
                 only: only_run,
                 short_name: init::choices::short_name_choice(
                     &flags,
@@ -652,17 +634,7 @@ fn main() {
                 return;
             }
             let outcome = init::run::run(&paths);
-            let collector_next: Vec<String> = init::collector_service::next_step(
-                &paths.home,
-                &outcome.steps,
-                init::collector_service::START_WAIT,
-            )
-            .into_iter()
-            .collect();
-            print!(
-                "{}",
-                init::wizard::progress(&caps, &outcome.steps, &collector_next)
-            );
+            print!("{}", init::wizard::progress(&caps, &outcome.steps));
             for warning in &outcome.warnings {
                 eprintln!("setup: warning: {warning}");
             }
