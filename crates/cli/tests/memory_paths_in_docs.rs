@@ -5,24 +5,32 @@
 //! `~/.config/playbook/data/memory.db`. A command that sends the model to
 //! `memory.graph.json` or to `~/.config/playbook/memory.db` makes it look in
 //! the wrong place and reach for `sqlite3`. ADRs are history and are not
-//! scanned; the few docs that describe the old file as history are listed
-//! by name below.
+//! scanned. The few docs that describe the old file as history are listed
+//! by name below, and even there a line naming it must also name the
+//! current home or the `playbook memory` command.
+
+#[path = "support/shipped.rs"]
+mod shipped;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Folders and files the plugin, the setup and the docs ship.
+/// What the plugin, setup and the docs ship. Each must exist.
 const SCANNED: [&str; 6] = [
     "plugins",
     "prompts",
-    "seed",
     "docs",
+    "settings.shared.json",
     "README.md",
     "CONTRIBUTING.md",
 ];
 
+/// Scanned when present: the folder the repo tidy-up (ADR 0048) moves the
+/// setup files into.
+const SCANNED_WHEN_PRESENT: [&str; 1] = ["seed"];
+
 /// Not scanned: decision records keep the paths of their day.
-const SKIPPED_DIRS: [&str; 1] = ["docs/adr"];
+const SKIPPED: &str = "docs/adr";
 
 /// Docs that name `memory.graph.json` only as the file older versions kept.
 const OLD_FILE_HISTORY: [&str; 4] = [
@@ -36,55 +44,44 @@ fn root() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
 }
 
-fn text_files(path: &Path, rel: &str, out: &mut Vec<(String, PathBuf)>) {
-    if SKIPPED_DIRS.contains(&rel) {
-        return;
+/// Every scanned file, as its path relative to the repo root.
+fn scanned_files() -> Vec<PathBuf> {
+    let root = root();
+    let mut files = Vec::new();
+    for rel in SCANNED.iter().chain(&SCANNED_WHEN_PRESENT) {
+        shipped::files_under(&root.join(rel), &["md", "json", "sh", "txt"], &mut files);
     }
-    if path.is_file() {
-        if [".md", ".json", ".sh", ".txt"]
-            .iter()
-            .any(|e| rel.ends_with(e))
-        {
-            out.push((rel.to_string(), path.to_path_buf()));
-        }
-        return;
-    }
-    let Ok(entries) = fs::read_dir(path) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        text_files(&entry.path(), &format!("{rel}/{name}"), out);
-    }
+    files
+        .into_iter()
+        .filter_map(|f| f.strip_prefix(&root).ok().map(Path::to_path_buf))
+        .filter(|rel| !rel.starts_with(SKIPPED))
+        .collect()
 }
 
-/// `(file:line, text)` of every line in shipped text that names a stale
-/// memory graph path.
-fn stale_lines() -> Vec<String> {
-    let mut files = Vec::new();
-    for rel in SCANNED {
-        text_files(&root().join(rel), rel, &mut files);
+/// Whether `line` of the shipped file `rel` names a stale memory graph path.
+fn is_stale(rel: &Path, line: &str) -> bool {
+    if line.contains("config/playbook/memory.db") {
+        return true;
     }
-    let mut bad = Vec::new();
-    for (rel, path) in files {
-        let Ok(text) = fs::read_to_string(&path) else {
-            continue;
-        };
-        for (n, line) in text.lines().enumerate() {
-            let root_db = line.contains("config/playbook/memory.db");
-            let old_file =
-                line.contains("memory.graph.json") && !OLD_FILE_HISTORY.contains(&rel.as_str());
-            if root_db || old_file {
-                bad.push(format!("{rel}:{}: {}", n + 1, line.trim()));
-            }
-        }
+    if !line.contains("memory.graph.json") {
+        return false;
     }
-    bad
+    let history = OLD_FILE_HISTORY.iter().any(|h| rel == Path::new(h))
+        && (line.contains("memory.db") || line.contains("playbook memory"));
+    !history
 }
 
 #[test]
 fn shipped_text_names_the_real_memory_graph_path() {
-    let bad = stale_lines();
+    let mut bad = Vec::new();
+    for rel in scanned_files() {
+        let text = fs::read_to_string(root().join(&rel)).unwrap_or_default();
+        for (n, line) in text.lines().enumerate() {
+            if is_stale(&rel, line) {
+                bad.push(format!("{}:{}: {}", rel.display(), n + 1, line.trim()));
+            }
+        }
+    }
     assert!(
         bad.is_empty(),
         "the memory graph lives in ~/.config/playbook/data/memory.db; inspect it with \
@@ -95,13 +92,34 @@ fn shipped_text_names_the_real_memory_graph_path() {
 }
 
 #[test]
-fn the_scan_reaches_the_shipped_commands_and_the_prompt() {
-    let mut files = Vec::new();
+fn the_scan_reaches_every_shipped_root_and_skips_the_adrs() {
     for rel in SCANNED {
-        text_files(&root().join(rel), rel, &mut files);
+        assert!(root().join(rel).exists(), "scanned path {rel} is missing");
     }
-    let names: Vec<&str> = files.iter().map(|(rel, _)| rel.as_str()).collect();
-    assert!(names.contains(&"plugins/playbook/commands/learn-project.md"));
-    assert!(names.iter().any(|n| n.ends_with("SYSTEM_PROMPT.md")));
-    assert!(!names.iter().any(|n| n.starts_with("docs/adr/")));
+    for rel in OLD_FILE_HISTORY {
+        assert!(root().join(rel).is_file(), "history doc {rel} is missing");
+    }
+    let files = scanned_files();
+    assert!(files.contains(&PathBuf::from("plugins/playbook/commands/learn-project.md")));
+    assert!(files.iter().any(|f| f.ends_with("SYSTEM_PROMPT.md")));
+    assert!(!files.iter().any(|f| f.starts_with(SKIPPED)));
+}
+
+#[test]
+fn the_line_check_flags_stale_paths_and_keeps_history() {
+    let cmd = Path::new("plugins/playbook/commands/learn-project.md");
+    let history = Path::new("docs/internals/11-data-folder.md");
+
+    assert!(is_stale(cmd, "read ~/.config/playbook/memory.db"));
+    assert!(is_stale(cmd, "the graph is memory.graph.json"));
+    assert!(is_stale(history, "the graph is memory.graph.json"));
+    assert!(is_stale(history, "see ~/.config/playbook/memory.db"));
+    assert!(!is_stale(
+        history,
+        "older memory.graph.json moved into data/memory.db"
+    ));
+    assert!(!is_stale(
+        cmd,
+        "the graph is ~/.config/playbook/data/memory.db"
+    ));
 }

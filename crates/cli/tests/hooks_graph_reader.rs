@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Behavioural tests for the `memory-anchors` hook, the sole reader of
+//! Behavioural tests for the `memory-anchors` hook, a reader of
 //! the memory graph in `~/.config/playbook/data/memory.db`. Exercised black-box, through the
 //! compiled `playbook` binary, the same way
 //! the retired shell test exercises the python original. Every

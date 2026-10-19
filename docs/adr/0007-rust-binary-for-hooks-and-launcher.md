@@ -1,10 +1,9 @@
 # ADR 0007: Move the hooks and the launcher into a single Rust binary
 
-- **Status:** Accepted. The shell function per shell family is dropped by [ADR 0044](0044-drop-the-shell-launcher.md): `playbook cc` runs with no shell line, and the `shell-init` command is removed.
+- **Status:** Accepted. The shell function per shell family is dropped by [ADR 0044](0044-drop-the-shell-launcher.md): `playbook cc` runs with no shell line, and the `shell-init` command is removed. Amended 2026-10-19: the memory graph now lives in `~/.config/playbook/data/memory.db` (moved there in #925), not in `memory.graph.json` or `graph.json`. `playbook memory rebuild` rebuilds it and `playbook memory stats` shows what it holds. The fact files stay in `~/.config/playbook/memory/`. Paths below are as they were when this record was written.
 - **Date created:** 2026-08-13
 - **Date modified:** 2026-10-19
 - **Amends:** ADR 0005 (migrate the hooks and the config scripts from shell to Python), ADR 0001 (package the toolkit as a plugin), ADR 0002 (plugin based install with always-on safety hooks)
-- **Amended 2026-10-19:** the memory graph now lives in `~/.config/playbook/data/memory.db` (moved there in #925), not in `memory.graph.json` or `graph.json`. `playbook memory rebuild` rebuilds it and `playbook memory stats` shows what it holds. The fact files stay in `~/.config/playbook/memory/`. Paths below are as they were when this record was written.
 
 ## Context
 
