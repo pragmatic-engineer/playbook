@@ -1,12 +1,32 @@
-# Managed by repo-config. Direct edits are overwritten on the next `terraform apply`.
+# Dependabot version updates (ADR 0048). repo-config also writes this file:
+# its playbook entry must match, or the next `terraform apply` puts back the
+# empty version.
 #
-# Dependabot version-update schedule. `monthly` runs in the first week of the
-# month (GitHub does not support pinning to a specific day number). Patch and
-# minor PRs are auto-merged by .github/workflows/dependabot-auto-merge.yml;
-# major-version bumps require manual review. PRs are grouped to minimise noise.
-#
-# When dependabot_version_updates = false only the file header is written;
-# GitHub's automatic security updates (enabled via the repo setting) still run
-# without any entry here.
+# Weekly, one grouped PR per ecosystem. Cargo.toml pins every crate exactly,
+# so a cargo PR bumps the pin and Cargo.lock together. Patch and minor PRs
+# are auto-merged by dependabot-auto-merge.yml; a major bump waits for review.
 
 version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      all-github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      all-cargo:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 10
