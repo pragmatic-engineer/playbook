@@ -35,7 +35,7 @@ const PLAN_FIELDS: [&str; 6] = [
 ];
 
 /// How far ahead of this clock a fetch time may be before it is not believed.
-const CLOCK_SKEW_SECONDS: i64 = 300;
+pub(crate) const CLOCK_SKEW_SECONDS: i64 = 300;
 
 /// What the account looks like from the tier names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,7 +139,7 @@ fn load(path: &Path) -> Option<Value> {
 /// An ISO 8601 time with an optional fraction and an optional `Z` or
 /// `+hh:mm` / `-hh:mm` offset, as UTC seconds. Claude Code writes
 /// `2026-09-03T05:00:00.123456+00:00`.
-fn parse_time(text: &str) -> Option<i64> {
+pub(crate) fn parse_time(text: &str) -> Option<i64> {
     let (date, time) = text.split_once('T')?;
     let cut = time.find(['.', 'Z', '+', '-']).unwrap_or(time.len());
     let base = parse_iso8601_utc(&format!("{date}T{}Z", &time[..cut]))?;
@@ -155,7 +155,7 @@ fn parse_time(text: &str) -> Option<i64> {
     Some(base - offset)
 }
 
-fn window(v: Option<&Value>) -> Option<Window> {
+pub(crate) fn window(v: Option<&Value>) -> Option<Window> {
     let v = v?;
     let pct = v.get("utilization")?.as_f64()?;
     let at = parse_time(v.get("resets_at")?.as_str()?)?;
@@ -433,6 +433,17 @@ fn verdict_lines(s: &limits_source::Sources, now: i64) -> Vec<String> {
             "  monthly limit: from the statusline reading (a manual budget is shown beside it)"
                 .to_string()
         }
+        limits_source::Monthly::Server {
+            limit_usd,
+            age,
+            fresh,
+            ..
+        } => format!(
+            "  monthly limit: {} billed by the server, fetched {} ago{}",
+            limits_source::amount(Unit::Dollars, limit_usd),
+            elapsed_text(age),
+            if fresh { "" } else { " (stale)" }
+        ),
         limits_source::Monthly::Cached {
             limit_usd,
             age,

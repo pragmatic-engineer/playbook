@@ -132,6 +132,7 @@ fn tag(origin: Origin, stale: bool, cache_age: Option<i64>) -> String {
         (Origin::Measured, true) => "measured, stale".to_string(),
         (Origin::Measured, _) => "measured".to_string(),
         (Origin::Manual, _) => "manual".to_string(),
+        (Origin::Server, _) => "server billed".to_string(),
         (Origin::Cached, _) => match cache_age {
             Some(a) if a > STALE_SECONDS => {
                 format!("cached, stale {} ago", elapsed_text(a))
