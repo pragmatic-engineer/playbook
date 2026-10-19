@@ -349,7 +349,7 @@ pub enum Command {
     /// installed, its build attestation, then swaps the binary and keeps the
     /// old one as a backup. In auto mode it refuses unless you pass `--yes`.
     /// Then it updates the playbook plugin through `claude plugin update`,
-    /// unless you pass `--no-plugin` or `update.plugin` is false.
+    /// unless you pass `--no-plugin` or `update.plugin` is `off`.
     /// `--check` and `--list` change nothing. `--check` exits 0 whether or not
     /// an update exists, and 1 on an error such as an unreachable release list
     /// or an unknown version.
@@ -383,7 +383,7 @@ pub enum Command {
         from: Option<String>,
         /// Leave the playbook plugin in Claude Code as it is. By default
         /// `update` runs `claude plugin update` for it, unless the config key
-        /// `update.plugin` is false
+        /// `update.plugin` is `off`
         #[arg(long)]
         no_plugin: bool,
     },
@@ -446,7 +446,7 @@ pub enum Command {
     /// `claude plugin update`, then says to restart Claude Code. A missing
     /// `claude` command or a failed update prints the command to run and
     /// does not change the exit code. `--no-plugin` or
-    /// `playbook config set update.plugin false` turns this off.
+    /// `playbook config set update.plugin off` turns this off.
     /// `update`, the install script and `doctor --fix` run the same step.
     ///
     /// Exit codes: 0 when it finished or had nothing to do, 1 when the record
@@ -466,7 +466,7 @@ pub enum Command {
         json: bool,
         /// Leave the playbook plugin in Claude Code as it is. By default a
         /// run updates it with `claude plugin update`, unless the config key
-        /// `update.plugin` is false
+        /// `update.plugin` is `off`
         #[arg(long)]
         no_plugin: bool,
     },
