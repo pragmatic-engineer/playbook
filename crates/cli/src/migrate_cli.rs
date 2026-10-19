@@ -26,13 +26,20 @@ pub fn run(home: &Path, mode: Mode, json: bool) -> i32 {
     let ctx = Ctx::for_home(home);
     match mode {
         Mode::Run => {
-            let out = heal::run(&ctx, Trigger::Fix, crate::common::time::now_epoch_secs());
+            let now = crate::common::time::now_epoch_secs();
+            let out = heal::run(&ctx, Trigger::Fix, now);
             eprint!("{}", out.notices.render());
             let items = out.items(home);
             if json {
                 println!("{}", run_json(&out, &items));
             } else {
                 print!("{}", heal::render_fix(&out, &items));
+            }
+            // Printed, so the session hook counts them as seen (ADR 0034,
+            // 2026-10-19 amendment, decision 3).
+            if out.skipped != Some(heal::Skip::RealHomeUnderTest) {
+                let root = crate::common::paths::playbook_root_from(home);
+                crate::pending::acknowledge(&root, &items, now);
             }
             out.exit_code()
         }

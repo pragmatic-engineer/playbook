@@ -463,19 +463,27 @@ pub fn session_line(home: &Path) -> Option<String> {
     std::panic::catch_unwind(|| {
         let shown = !crate::common::headless::is_headless();
         let out = run_shown(&ctx, Trigger::Hook, now, shown);
-        notice(home, &out)
+        notice(home, &out, now, shown)
     })
     .ok()?
 }
 
-/// What the heal did, the list of items that need the user, and the
-/// release notes line, in that order, or `None` when all are empty.
-fn notice(home: &Path, out: &Outcome) -> Option<String> {
+/// What the heal did, the items that need the user as the hook shows them
+/// (`pending::session_notice`), and the release notes line, in that order,
+/// or `None` when all are empty. A home under test that counts as the real
+/// one gets no item list, so nothing is written there.
+fn notice(home: &Path, out: &Outcome, now: u64, shown: bool) -> Option<String> {
+    let items = if out.skipped == Some(Skip::RealHomeUnderTest) {
+        None
+    } else {
+        let root = crate::common::paths::playbook_root_from(home);
+        crate::pending::session_notice(&root, &out.items(home), now, shown)
+    };
     let block = out.notices.render();
     let parts: Vec<String> = out
         .line()
         .into_iter()
-        .chain(crate::pending::session_text(&out.items(home)))
+        .chain(items)
         .chain((!block.is_empty()).then(|| block.trim_end().to_string()))
         .collect();
     (!parts.is_empty()).then(|| parts.join("\n"))
@@ -546,7 +554,7 @@ fn start(home: &Path, deadline: Instant) -> Option<String> {
     if out.skipped == Some(Skip::RealHomeUnderTest) {
         return Some(format!("playbook: {}", crate::common::real_home::NOTE));
     }
-    let text = notice(home, &out);
+    let text = notice(home, &out, now, true);
     if !out.timed_out {
         return text;
     }

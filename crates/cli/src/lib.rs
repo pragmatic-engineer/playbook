@@ -432,7 +432,8 @@ pub enum Command {
     /// It ends with the list of what still needs you, one bullet per item
     /// with why it matters and the command that fixes it: `playbook setup`
     /// for a change to Claude Code settings or a shell file, and its own fix
-    /// for a report.
+    /// for a report. The session start then stops repeating a report it
+    /// printed.
     /// `update`, the install script and `doctor --fix` run the same step.
     ///
     /// Exit codes: 0 when it finished or had nothing to do, 1 when the record
