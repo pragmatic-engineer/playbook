@@ -870,7 +870,7 @@ pub const HOOK_COMMAND_PREFIX: &str = "playbook hook ";
 
 /// The bare command `wire` writes for the hook named `name`: no path,
 /// resolved on `PATH` the same way a hand-written `rtk hook claude` entry is.
-fn bare_command(name: &str) -> String {
+pub(super) fn bare_command(name: &str) -> String {
     format!("{HOOK_COMMAND_PREFIX}{name}")
 }
 

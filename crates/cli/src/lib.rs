@@ -2425,6 +2425,10 @@ mod tests {
         for name in names {
             assert!(help.contains(name), "hook --help is missing '{name}'");
         }
+        assert!(
+            !help.contains("no-slop-guard"),
+            "retired hook shows in help"
+        );
     }
 
     #[test]

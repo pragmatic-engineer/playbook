@@ -87,7 +87,7 @@ pub fn dead_commands(settings: &Value, home: &Path, claude_home: &Path) -> Vec<S
     out
 }
 
-fn read_settings(path: &Path) -> Option<Value> {
+pub(super) fn read_settings(path: &Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
@@ -104,8 +104,10 @@ pub fn pending(settings_path: &Path, home: &Path, claude_home: &Path) -> Option<
 }
 
 /// Removes every hook entry `is_target` accepts, then any matcher group or
-/// event that leaves empty. A group or event empty before stays.
-pub(super) fn drop_entries(settings: &mut Value, is_target: impl Fn(&Value) -> bool) {
+/// event that leaves empty. A group or event empty before stays. Returns how
+/// many entries went.
+pub(super) fn drop_entries(settings: &mut Value, is_target: impl Fn(&Value) -> bool) -> usize {
+    let mut removed = 0;
     if let Some(events) = settings.get_mut("hooks").and_then(Value::as_object_mut) {
         let mut emptied_events = Vec::new();
         for (event, groups) in events.iter_mut() {
@@ -119,6 +121,7 @@ pub(super) fn drop_entries(settings: &mut Value, is_target: impl Fn(&Value) -> b
                 };
                 let had = entries.len();
                 entries.retain(|e| !is_target(e));
+                removed += had - entries.len();
                 entries.len() == had || !entries.is_empty()
             });
             if groups.is_empty() && before > 0 {
@@ -133,6 +136,7 @@ pub(super) fn drop_entries(settings: &mut Value, is_target: impl Fn(&Value) -> b
             settings.as_object_mut().map(|root| root.remove("hooks"));
         }
     }
+    removed
 }
 
 /// Removes the dead entries from `settings_path` after a backup under
@@ -152,7 +156,7 @@ pub fn remove(
     if dead.is_empty() {
         return Ok(dead);
     }
-    drop_entries(&mut settings, |e| {
+    let _ = drop_entries(&mut settings, |e| {
         e.get("command")
             .and_then(Value::as_str)
             .is_some_and(|c| dead.iter().any(|d| d == c))

@@ -441,7 +441,7 @@ fn hook_cases() -> Vec<Case> {
                 // A worktree hook with no worktree name refuses and says so.
                 "worktree-create" => c.code(1).err("unsafe worktree name"),
                 "worktree-remove" => c.err("worktree_path is missing"),
-                "migration-check" => c,
+                "migration-check" | "no-slop-guard" => c,
                 // These keep a log or a counter, so a second run adds to it.
                 "session-init" | "session-clean-exit" | "search-counter" | "precompact-warn"
                 | "usage-warm" => c.grows(),

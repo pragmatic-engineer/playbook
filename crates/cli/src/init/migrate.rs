@@ -414,10 +414,11 @@ fn no_slop_guard_entry(ctx: &Ctx) -> Outcome {
     let settings = ctx.claude_home.join("settings.json");
     match crate::init::retired_hooks::remove(&settings, ctx.epoch) {
         Ok(0) => Outcome::Quiet,
-        Ok(_) => Outcome::Repeat(StepReport::wired(
+        Ok(n) => Outcome::Repeat(StepReport::wired(
             "retired-hooks",
-            "removed the retired no-slop-guard hook entry; its rules live in the prompt and skills"
-                .to_string(),
+            format!(
+                "removed {n} retired hook entries (no-slop-guard, no-dash-guard); their rules live in the prompt and skills"
+            ),
         )),
         Err(err) => Outcome::Failed(StepReport::failed("retired-hooks", err.to_string())),
     }

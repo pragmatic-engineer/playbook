@@ -1271,13 +1271,18 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
         ));
     }
     for cmd in &found.stale {
+        let hint = if crate::init::retired_hooks::is_retired_command(cmd) {
+            "run: playbook doctor --fix"
+        } else {
+            "delete the entry from ~/.claude/settings.json by hand"
+        };
         rows.push(
             Row::new(
                 "-",
                 Level::Warn,
                 format!("settings.json has a hook the binary no longer writes: {cmd}"),
             )
-            .hint("delete the entry from ~/.claude/settings.json by hand"),
+            .hint(hint),
         );
     }
     let cwd = env.repo_root.clone().unwrap_or_else(|| env.home.clone());

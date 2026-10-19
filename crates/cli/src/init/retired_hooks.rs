@@ -9,48 +9,35 @@ use std::path::Path;
 
 /// Hook names setup no longer writes. `no-slop-guard` keeps a hidden no-op
 /// subcommand for one release; `no-dash-guard` (its old name) has none.
-pub const RETIRED: [&str; 2] = ["no-slop-guard", "no-dash-guard"];
+const RETIRED: [&str; 2] = ["no-slop-guard", "no-dash-guard"];
+
+/// Whether `command` is the bare entry setup wrote for a retired hook.
+pub fn is_retired_command(command: &str) -> bool {
+    RETIRED
+        .iter()
+        .any(|name| command == super::wire::bare_command(name))
+}
 
 fn is_retired_entry(entry: &Value) -> bool {
     entry
         .get("command")
         .and_then(Value::as_str)
-        .is_some_and(|cmd| {
-            RETIRED
-                .iter()
-                .any(|name| cmd == format!("{}{name}", super::wire::HOOK_COMMAND_PREFIX))
-        })
-}
-
-fn count(settings: &Value) -> usize {
-    let events = settings.get("hooks").and_then(Value::as_object);
-    events
-        .into_iter()
-        .flat_map(|e| e.values())
-        .flat_map(|groups| groups.as_array().into_iter().flatten())
-        .filter_map(|group| group.get("hooks").and_then(Value::as_array))
-        .flatten()
-        .filter(|e| is_retired_entry(e))
-        .count()
+        .is_some_and(is_retired_command)
 }
 
 /// Removes the retired entries after a backup under `epoch`. Returns how many
 /// went. A missing or invalid file is left alone.
 pub fn remove(settings_path: &Path, epoch: u64) -> std::io::Result<usize> {
-    let Some(mut settings) = std::fs::read_to_string(settings_path)
-        .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-    else {
+    let Some(mut settings) = super::dead_hooks::read_settings(settings_path) else {
         return Ok(0);
     };
-    let found = count(&settings);
-    if found == 0 {
+    let removed = super::dead_hooks::drop_entries(&mut settings, is_retired_entry);
+    if removed == 0 {
         return Ok(0);
     }
-    super::dead_hooks::drop_entries(&mut settings, is_retired_entry);
     let rendered = format!("{settings:#}\n");
     crate::init::run::backup_then_write(settings_path, &rendered, &[], epoch)?;
-    Ok(found)
+    Ok(removed)
 }
 
 #[cfg(test)]
@@ -88,7 +75,7 @@ mod tests {
         let text = after.to_string();
         assert!(text.contains("policy-guard"));
         assert!(text.contains("my-wrapper playbook hook no-slop-guard"));
-        assert_eq!(count(&after), 0);
+        assert!(!text.contains("hook no-dash-guard"));
         assert_eq!(after["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
         assert!(dir.join("settings.json.bak.100").is_file());
     }
