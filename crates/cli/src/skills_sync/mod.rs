@@ -46,10 +46,11 @@ mod tests {
     fn a_codex_folder_alone_finds_codex() {
         // Arrange
         let home = empty_home("detect-folder");
+        let bin = empty_home("detect-folder-bin");
         fs::create_dir(home.join(".codex")).unwrap();
 
         // Act
-        let found = detect(&home, "");
+        let found = detect(&home, bin.to_str().unwrap());
 
         // Assert
         assert_eq!(found, vec![Agent::Codex]);

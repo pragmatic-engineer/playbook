@@ -2,6 +2,8 @@
 
 `playbook skills sync` copies the playbook skills and commands into the skill folder Codex reads. The code is in `crates/cli/src/skills_sync/`. The reasoning for multi-agent support is in [ADR 0015](../adr/0015-multi-agent-support.md).
 
+Status: this change ships only the planner and the renderer. The apply step and the `playbook skills sync` command come in later changes.
+
 ## Where the copies go
 
 The target is `~/.agents/skills`, the user skill path in the [Codex skills docs](https://learn.chatgpt.com/docs/build-skills) (read 2026-10-19) and in Codex source (`codex-rs/ext/skills/src/host_roots.rs`, which calls `$CODEX_HOME/skills` deprecated). It is not `~/.codex/skills`. Codex counts as present when `~/.codex` is a folder or `codex` is on `PATH`. `CODEX_HOME` is not read, because the skills path does not depend on it.
@@ -39,4 +41,4 @@ Codex has no subagents and no `AskUserQuestion` tool, so a command step that dis
 
 ## Open question
 
-Whether a Codex agent follows the one line in a split stub that points at `references/playbook-body.md` is not yet verified in a running Codex. If it does not, commands over 8,000 bytes run with their stub only.
+Whether a Codex agent follows the one line in a split stub that points at `references/playbook-body.md` is not yet verified in a running Codex. If it does not, skills and commands over 8,000 bytes run with their stub only.

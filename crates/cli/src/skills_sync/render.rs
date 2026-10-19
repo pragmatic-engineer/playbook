@@ -21,15 +21,13 @@ const FENCE: &str = "---";
 
 /// Renders a skill's `SKILL.md`: the `name:` value becomes `name`, and
 /// references to other playbook names are rewritten.
-pub fn render_skill_md(text: &str, name: &str, known: &BTreeSet<String>) -> String {
-    let rendered = match split_frontmatter(text) {
-        Some((front, body)) => {
-            let front = rename_in_frontmatter(front, name);
-            format!("{FENCE}\n{front}{FENCE}\n{body}")
-        }
-        None => text.to_string(),
-    };
-    rewrite_refs(&rendered, known)
+pub fn render_skill_md(text: &str, name: &str, known: &BTreeSet<String>) -> Result<String, String> {
+    let (front, body) = split_frontmatter(text).ok_or_else(|| {
+        format!("skill {name} has no closed frontmatter, so it cannot be rendered")
+    })?;
+    let front = rename_in_frontmatter(front, name);
+    let rendered = format!("{FENCE}\n{front}{FENCE}\n{body}");
+    Ok(rewrite_refs(&rendered, known))
 }
 
 /// Renders a command as the `SKILL.md` of a skill: only `name` and
@@ -208,7 +206,7 @@ mod tests {
         let input = include_str!("testdata/skill_input.md");
 
         // Act
-        let out = render_skill_md(input, "playbook-writing-style", &known());
+        let out = render_skill_md(input, "playbook-writing-style", &known()).unwrap();
 
         // Assert
         assert_eq!(out, include_str!("testdata/skill_expected.md"));
@@ -249,6 +247,24 @@ mod tests {
         // Assert
         assert!(err.contains("playbook-fix"), "{err}");
         assert!(err.contains("no frontmatter"), "{err}");
+    }
+
+    #[test]
+    fn a_skill_without_closed_frontmatter_is_an_error_naming_it() {
+        for input in [
+            "# Skill\n\nNo frontmatter.\n",
+            "---\nname: x\nno closing fence\n",
+        ] {
+            // Arrange
+            let name = "playbook-x";
+
+            // Act
+            let err = render_skill_md(input, name, &known()).unwrap_err();
+
+            // Assert
+            assert!(err.contains(name), "{err}");
+            assert!(err.contains("no closed frontmatter"), "{err}");
+        }
     }
 
     #[test]
@@ -319,7 +335,23 @@ mod tests {
 
         // Assert
         assert_eq!(stub, include_str!("testdata/split_stub_expected.md"));
-        assert!(stub.contains("from this skill folder, not from the body file"));
+    }
+
+    #[test]
+    fn a_large_skill_without_a_preamble_gets_a_stub_without_one() {
+        // Arrange
+        let head = include_str!("testdata/split_skill_head.md");
+        let text = format!("{head}{}", "a".repeat(MAX_SKILL_PROMPT_BYTES));
+
+        // Act
+        let (stub, body) = split_if_large(&text);
+
+        // Assert
+        assert_eq!(
+            stub,
+            include_str!("testdata/split_stub_no_preamble_expected.md")
+        );
+        assert!(body.unwrap().starts_with("# Big skill"));
     }
 
     #[test]
@@ -328,20 +360,24 @@ mod tests {
         let root = std::path::Path::new(env!("PLAYBOOK_PLUGIN_ROOT"));
         let command = std::fs::read_to_string(root.join("commands/fix.md")).unwrap();
         let skill = std::fs::read_to_string(root.join("skills/writing-style/SKILL.md")).unwrap();
-        let known = known();
+        let known: BTreeSet<String> = super::super::plan::plan(root)
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.name.strip_prefix(NAME_PREFIX).map(str::to_string))
+            .collect();
 
         // Act
         let command = render_command(&command, "playbook-fix", &known).unwrap();
-        let skill = render_skill_md(&skill, "playbook-writing-style", &known);
+        let skill = render_skill_md(&skill, "playbook-writing-style", &known).unwrap();
         let (stub, body) = split_if_large(&skill);
 
         // Assert
         assert!(command.contains("name: playbook-fix\n"));
         assert!(skill.contains("name: playbook-writing-style\n"));
         for text in [&command, &skill] {
-            for n in &known {
-                let left = format!("/playbook:{n}");
-                assert!(!text.contains(&left), "leftover {left}");
+            for (at, _) in text.match_indices("playbook:") {
+                let after = name_run(&text[at + "playbook:".len()..]);
+                assert!(!known.contains(after), "leftover playbook:{after}");
             }
         }
         assert!(stub.len() < MAX_SKILL_PROMPT_BYTES);

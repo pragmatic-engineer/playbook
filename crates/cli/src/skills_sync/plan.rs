@@ -37,26 +37,28 @@ pub struct Target {
 pub fn plan(plugin: &Path) -> Result<Vec<Target>, String> {
     let mut targets: BTreeMap<String, Target> = BTreeMap::new();
     for skill in sorted_entries(&plugin.join(SKILLS_DIR))? {
-        if !skill.is_dir() {
+        if !is_dir(&skill)? {
             continue;
         }
-        let rel = Path::new(SKILLS_DIR).join(file_name(&skill));
+        let name = file_name(&skill)?;
+        let rel = Path::new(SKILLS_DIR).join(&name);
         let mut files = Vec::new();
         collect_files(plugin, &rel, &mut files)?;
         let files = files.into_iter().map(|f| (f, Source::SkillFile)).collect();
-        insert(&mut targets, &file_name(&skill), files)?;
+        insert(&mut targets, &name, files)?;
     }
     for command in sorted_entries(&plugin.join(COMMANDS_DIR))? {
+        let file = file_name(&command)?;
         if command.extension().and_then(|e| e.to_str()) != Some(COMMAND_EXT) {
             continue;
         }
+        is_dir(&command)?;
         let stem = command
             .file_stem()
             .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .to_string();
-        let rel = Path::new(COMMANDS_DIR).join(file_name(&command));
-        insert(&mut targets, &stem, vec![(rel, Source::Command)])?;
+            .ok_or_else(|| format!("{} has no usable name", command.display()))?;
+        let rel = Path::new(COMMANDS_DIR).join(&file);
+        insert(&mut targets, stem, vec![(rel, Source::Command)])?;
     }
     Ok(targets.into_values().collect())
 }
@@ -66,6 +68,11 @@ fn insert(
     base: &str,
     files: Vec<(PathBuf, Source)>,
 ) -> Result<(), String> {
+    if base.is_empty() || !base.chars().all(is_name_char) {
+        return Err(format!(
+            "{base} is not a valid name: use only lowercase ASCII letters, digits and '-'"
+        ));
+    }
     let name = format!("{NAME_PREFIX}{base}");
     if name.len() > MAX_NAME_LEN {
         return Err(format!(
@@ -82,10 +89,32 @@ fn insert(
     Ok(())
 }
 
-fn file_name(path: &Path) -> String {
+/// Lowercase only, so names that differ by case cannot merge on a case
+/// insensitive file system.
+fn is_name_char(c: char) -> bool {
+    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'
+}
+
+fn file_name(path: &Path) -> Result<String, String> {
     path.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default()
+        .and_then(|n| n.to_str())
+        .map(str::to_string)
+        .ok_or_else(|| format!("{} is not a valid UTF-8 file name", path.display()))
+}
+
+/// Whether `path` is a folder, without following links. A symlink is an
+/// error, because plugin content must be plain files and folders.
+fn is_dir(path: &Path) -> Result<bool, String> {
+    let kind = fs::symlink_metadata(path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?
+        .file_type();
+    if kind.is_symlink() {
+        return Err(format!(
+            "{} is a symlink, but plugin content must be plain files and folders",
+            path.display()
+        ));
+    }
+    Ok(kind.is_dir())
 }
 
 /// Entries of `dir` in name order; a missing folder reads as empty. Hidden
@@ -96,11 +125,15 @@ fn sorted_entries(dir: &Path) -> Result<Vec<PathBuf>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(format!("cannot read {}: {e}", dir.display())),
     };
-    let mut entries: Vec<PathBuf> = read
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| !file_name(p).starts_with('.'))
-        .collect();
+    let mut entries = Vec::new();
+    for entry in read {
+        let path = entry
+            .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+            .path();
+        if !file_name(&path)?.starts_with('.') {
+            entries.push(path);
+        }
+    }
     entries.sort();
     Ok(entries)
 }
@@ -108,8 +141,8 @@ fn sorted_entries(dir: &Path) -> Result<Vec<PathBuf>, String> {
 /// Pushes every file under `plugin/rel`, as paths relative to `plugin`.
 fn collect_files(plugin: &Path, rel: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     for entry in sorted_entries(&plugin.join(rel))? {
-        let child = rel.join(file_name(&entry));
-        if entry.is_dir() {
+        let child = rel.join(file_name(&entry)?);
+        if is_dir(&entry)? {
             collect_files(plugin, &child, out)?;
         } else {
             out.push(child);
@@ -218,6 +251,88 @@ mod tests {
 
         // Assert
         assert!(err.contains("both named fix"), "{err}");
+    }
+
+    #[test]
+    fn a_symlinked_skill_folder_is_an_error_naming_it() {
+        // Arrange
+        let plugin = fixture("plan-link-dir", &["elsewhere/SKILL.md"]);
+        fs::create_dir_all(plugin.join("skills")).unwrap();
+        std::os::unix::fs::symlink(plugin.join("elsewhere"), plugin.join("skills/linked")).unwrap();
+
+        // Act
+        let err = plan(&plugin).unwrap_err();
+
+        // Assert
+        assert!(err.contains("linked"), "{err}");
+        assert!(err.contains("symlink"), "{err}");
+    }
+
+    #[test]
+    fn a_symlinked_file_inside_a_skill_is_an_error_naming_it() {
+        // Arrange
+        let plugin = fixture("plan-link-file", &["skills/alpha/SKILL.md", "outside.md"]);
+        std::os::unix::fs::symlink(
+            plugin.join("outside.md"),
+            plugin.join("skills/alpha/ref.md"),
+        )
+        .unwrap();
+
+        // Act
+        let err = plan(&plugin).unwrap_err();
+
+        // Assert
+        assert!(err.contains("ref.md"), "{err}");
+        assert!(err.contains("symlink"), "{err}");
+    }
+
+    #[test]
+    fn a_symlinked_command_is_an_error_naming_it() {
+        // Arrange
+        let plugin = fixture("plan-link-cmd", &["outside.md"]);
+        fs::create_dir_all(plugin.join("commands")).unwrap();
+        std::os::unix::fs::symlink(plugin.join("outside.md"), plugin.join("commands/go.md"))
+            .unwrap();
+
+        // Act
+        let err = plan(&plugin).unwrap_err();
+
+        // Assert
+        assert!(err.contains("go.md"), "{err}");
+        assert!(err.contains("symlink"), "{err}");
+    }
+
+    #[test]
+    fn a_name_with_uppercase_or_other_characters_is_an_error() {
+        for bad in ["Fix", "fix_it", "fix it", "fïx"] {
+            // Arrange
+            let plugin = fixture("plan-badname", &[&format!("commands/{bad}.md")]);
+
+            // Act
+            let err = plan(&plugin).unwrap_err();
+
+            // Assert
+            assert!(err.contains("not a valid name"), "{bad}: {err}");
+        }
+    }
+
+    // macOS file systems reject non-UTF-8 names, so only Linux can create one.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_non_utf8_file_name_is_an_error() {
+        use std::os::unix::ffi::OsStrExt;
+
+        // Arrange
+        let plugin = fixture("plan-utf8", &[]);
+        fs::create_dir_all(plugin.join("commands")).unwrap();
+        let bad = std::ffi::OsStr::from_bytes(b"f\xffx.md");
+        fs::write(plugin.join("commands").join(bad), "text").unwrap();
+
+        // Act
+        let err = plan(&plugin).unwrap_err();
+
+        // Assert
+        assert!(err.contains("not a valid UTF-8 file name"), "{err}");
     }
 
     #[test]
