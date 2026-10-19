@@ -214,13 +214,8 @@ impl Found {
     }
 }
 
-/// The service file under `home` for this system, if one exists.
-pub fn find(home: &Path) -> Option<Found> {
-    let kind = Kind::current()?;
-    find_kind(kind, home)
-}
-
-/// [`find`] for a given manager, so both can be tested on any system.
+/// The service file for `kind` under `home`, if one exists. Any file counts,
+/// readable or not, so removal also takes one it cannot parse.
 pub fn find_kind(kind: Kind, home: &Path) -> Option<Found> {
     let file = kind.file(home);
     file.is_file().then_some(Found { kind, file })
