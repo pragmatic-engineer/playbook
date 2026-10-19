@@ -7,9 +7,6 @@
 
 use std::path::{Path, PathBuf};
 
-/// The name of the target folder cargo makes inside a worktree.
-pub const IN_TREE_TARGET: &str = "target";
-
 /// The name prefix of a per-agent cargo target folder.
 pub const TARGET_PREFIX: &str = "cargo-";
 
@@ -73,42 +70,6 @@ pub fn too_many_warning(count: usize, max: u64) -> Option<String> {
             "{count} cargo target folders exist, more than disk.maxTargetDirs ({max}). `playbook disk clean` removes idle ones."
         )
     })
-}
-
-/// The warning for cargo target folders that hold more than `max_gb` GB
-/// together, or `None`.
-pub fn too_big_warning(bytes: u64, max_gb: u64) -> Option<String> {
-    (bytes > max_gb.saturating_mul(super::probe::GIB)).then(|| {
-        format!(
-            "cargo target folders hold {}, more than disk.maxTargetGb ({max_gb}). `playbook disk clean` removes idle ones.",
-            super::size::gb(bytes)
-        )
-    })
-}
-
-/// Build settings that keep an agent's target folder small. Measured on this
-/// workspace with `cargo test --workspace --no-run`: 3.0 GB with the cargo
-/// defaults, 1.1 GB with these. Incremental data and debug info are the two
-/// big parts. A panic keeps its file and line.
-pub const LEAN_BUILD_ENV: &[(&str, &str)] = &[
-    ("CARGO_INCREMENTAL", "0"),
-    ("CARGO_PROFILE_DEV_DEBUG", "0"),
-    ("CARGO_PROFILE_TEST_DEBUG", "0"),
-];
-
-/// The `export` line an agent evaluates before a cargo command: the private
-/// target folder, then [`LEAN_BUILD_ENV`].
-/// `None` when the path is not valid UTF-8, since a lossy copy would name
-/// another folder.
-pub fn export_line(target: &Path) -> Option<String> {
-    let mut line = format!(
-        "export CARGO_TARGET_DIR={}",
-        crate::common::shell::quote(target.to_str()?)
-    );
-    for (name, value) in LEAN_BUILD_ENV {
-        line.push_str(&format!(" {name}={value}"));
-    }
-    Some(line)
 }
 
 /// How deep below a scan root [`find_cargo_targets`] looks.
@@ -221,25 +182,6 @@ mod tests {
         assert_eq!(too_many_warning(4, 4), None);
         assert!(too_many_warning(5, 4).is_some_and(|w| w.contains("playbook disk clean")));
         fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn the_size_cap_warns_only_above_it() {
-        let gb = super::super::probe::GIB;
-        assert_eq!(too_big_warning(20 * gb, 20), None);
-        assert!(too_big_warning(20 * gb + 1, 20)
-            .is_some_and(|w| w.contains("disk.maxTargetGb (20)") && w.contains("disk clean")));
-    }
-
-    #[test]
-    fn the_export_line_quotes_the_folder_and_sets_the_lean_build() {
-        assert_eq!(
-            export_line(Path::new("/w/it's here/cargo-x-1")).as_deref(),
-            Some(
-                "export CARGO_TARGET_DIR='/w/it'\\''s here/cargo-x-1' CARGO_INCREMENTAL=0 \
-             CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0"
-            )
-        );
     }
 
     #[test]

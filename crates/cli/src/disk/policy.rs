@@ -21,9 +21,6 @@ pub const DEFAULT_BLOCK_FREE_GB: u64 = 6;
 /// Default `disk.maxTargetDirs`: more cargo target folders than this under
 /// a worktrees root earns a warning.
 pub const DEFAULT_MAX_TARGET_DIRS: u64 = 4;
-/// Default `disk.maxTargetGb`: more than this many GB in cargo target
-/// folders, summed, earns a warning.
-pub const DEFAULT_MAX_TARGET_GB: u64 = 20;
 /// The largest value `disk.maxTargetDirs` accepts.
 pub const MAX_TARGET_DIRS: u64 = 1000;
 /// The largest value either threshold accepts.
@@ -44,8 +41,6 @@ pub struct Policy {
     pub paths: Vec<PathBuf>,
     /// Warn when more cargo target folders than this exist.
     pub max_target_dirs: u64,
-    /// Warn when all cargo target folders together hold more GB than this.
-    pub max_target_gb: u64,
 }
 
 impl Default for Policy {
@@ -56,7 +51,6 @@ impl Default for Policy {
             auto_cleanup: true,
             paths: Vec::new(),
             max_target_dirs: DEFAULT_MAX_TARGET_DIRS,
-            max_target_gb: DEFAULT_MAX_TARGET_GB,
         }
     }
 }
@@ -119,11 +113,6 @@ impl Policy {
                 "disk.maxTargetDirs" => {
                     if let Some(n) = value.as_u64().filter(|n| (1..=MAX_TARGET_DIRS).contains(n)) {
                         policy.max_target_dirs = n;
-                    }
-                }
-                "disk.maxTargetGb" => {
-                    if let Some(gb) = threshold(value).filter(|gb| *gb >= 1) {
-                        policy.max_target_gb = gb;
                     }
                 }
                 _ => {}
@@ -237,14 +226,6 @@ pub fn volumes(paths: &[PathBuf]) -> Vec<Volume> {
     found
 }
 
-/// The free space and level of the tightest volume behind `paths`, when
-/// that level is below ok.
-pub fn low_space(policy: &Policy, paths: &[PathBuf]) -> Option<(u64, Level)> {
-    let free = tightest(&volumes(paths))?.space.free;
-    let level = policy.level(free);
-    (level != Level::Ok).then_some((free, level))
-}
-
 /// The volume with the least free space, which sets the level.
 pub fn tightest(volumes: &[Volume]) -> Option<&Volume> {
     volumes.iter().min_by_key(|v| v.space.free)
@@ -301,14 +282,12 @@ mod tests {
             ("disk.autoCleanup".to_string(), json!(false)),
             ("disk.paths".to_string(), json!(["~/code", "/Volumes/Work"])),
             ("disk.maxTargetDirs".to_string(), json!(8)),
-            ("disk.maxTargetGb".to_string(), json!(40)),
         ];
         let policy = Policy::from_values(&values, home);
         assert_eq!(policy.warn_free_gb, 30);
         assert_eq!(policy.block_free_gb, 10);
         assert!(!policy.auto_cleanup);
         assert_eq!(policy.max_target_dirs, 8);
-        assert_eq!(policy.max_target_gb, 40);
         assert_eq!(
             policy.paths,
             vec![
@@ -327,7 +306,6 @@ mod tests {
             ("disk.autoCleanup".to_string(), json!("yes")),
             ("disk.paths".to_string(), json!(["relative/path"])),
             ("disk.maxTargetDirs".to_string(), json!(0)),
-            ("disk.maxTargetGb".to_string(), json!(0)),
         ];
         assert_eq!(Policy::from_values(&values, home), Policy::default());
     }
@@ -373,7 +351,6 @@ mod tests {
             ("disk.autoCleanup", json!(false)),
             ("disk.paths", json!(["~/work"])),
             ("disk.maxTargetDirs", json!(8)),
-            ("disk.maxTargetGb", json!(40)),
         ] {
             write::set(Tier::Global, key, value, &home, None).expect(key);
         }
@@ -383,7 +360,6 @@ mod tests {
         assert!(!policy.auto_cleanup);
         assert_eq!(policy.paths, vec![home.join("work")]);
         assert_eq!(policy.max_target_dirs, 8);
-        assert_eq!(policy.max_target_gb, 40);
         let _ = std::fs::remove_dir_all(&home);
     }
 
@@ -402,8 +378,6 @@ mod tests {
             ("disk.paths", json!("/a")),
             ("disk.maxTargetDirs", json!(0)),
             ("disk.maxTargetDirs", json!(1001)),
-            ("disk.maxTargetGb", json!(0)),
-            ("disk.maxTargetGb", json!(10_001)),
             (
                 "disk.paths",
                 json!((0..17).map(|i| format!("/v{i}")).collect::<Vec<_>>()),

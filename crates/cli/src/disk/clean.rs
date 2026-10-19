@@ -27,8 +27,7 @@ pub const TEST_TMP_VAR: &str = "PLAYBOOK_TEST_DISK_TMP";
 /// Why a folder is a candidate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// A per-agent cargo target folder under a worktrees root, or the
-    /// `target` folder inside a linked worktree.
+    /// A per-agent cargo target folder under a worktrees root.
     Target,
     /// A `pb-*` entry in `/tmp`.
     Scratch,
@@ -86,9 +85,6 @@ pub struct Env {
     pub claude_home: PathBuf,
     /// The worktrees root of the current repo, where `cargo-*` folders live.
     pub worktrees_root: Option<PathBuf>,
-    /// The linked worktrees of the current repo, whose `target` folder is
-    /// a candidate too. The main worktree is left out.
-    pub linked_worktrees: Vec<PathBuf>,
     /// The system temp folders that hold `pb-*` scratch.
     pub tmp_dirs: Vec<PathBuf>,
     pub now: SystemTime,
@@ -105,10 +101,6 @@ impl Env {
             home: home.to_path_buf(),
             claude_home: super::status::claude_home(home),
             worktrees_root: repo_root.and_then(targets::worktrees_root),
-            linked_worktrees: repo_root
-                .and_then(|repo| crate::worktree::list_worktrees(repo).ok())
-                .map(|list| list.into_iter().skip(1).map(|w| w.path).collect())
-                .unwrap_or_default(),
             tmp_dirs: system_tmp_dirs(),
             now: SystemTime::now(),
             process_args: process_args(),
@@ -255,18 +247,6 @@ fn sources(env: &Env) -> Vec<Source> {
                 in_memory_store: false,
             }
         }));
-    }
-    for worktree in &env.linked_worktrees {
-        let path = worktree.join(targets::IN_TREE_TARGET);
-        if std::fs::symlink_metadata(&path).is_ok() {
-            found.push(Source {
-                kind: Kind::Target,
-                base: worktree.clone(),
-                keep: (!is_cargo_target(&path)).then(|| "not a cargo target folder".to_string()),
-                path,
-                in_memory_store: false,
-            });
-        }
     }
     for tmp in unique_dirs(&env.tmp_dirs) {
         for path in children(&tmp).into_iter().filter(|p| name_starts(p, "pb-")) {
@@ -605,8 +585,10 @@ fn remove_target_with(home: &Path, root: &Path, worktree: &Path, args: &str) -> 
 pub fn auto_due(home: &Path, cwd: &Path) -> bool {
     use super::policy;
     let policy = policy::load(home);
-    let paths = policy::measured_paths(&policy, home, Some(cwd));
-    policy.auto_cleanup && policy::low_space(&policy, &paths).is_some()
+    let volumes = policy::volumes(&policy::measured_paths(&policy, home, Some(cwd)));
+    policy.auto_cleanup
+        && policy::tightest(&volumes)
+            .is_some_and(|v| policy.level(v.space.free) != super::Level::Ok)
 }
 
 /// Runs the whole cleanup for the repo at `repo_root`, if any: the selection
@@ -700,7 +682,6 @@ mod tests {
             home: root.join("home"),
             claude_home: root.join("home/.claude"),
             worktrees_root: Some(root.join("worktrees")),
-            linked_worktrees: Vec::new(),
             tmp_dirs: vec![root.join("tmp")],
             now: SystemTime::now() + Duration::from_secs(2 * 60 * 60),
             process_args: String::new(),
@@ -921,76 +902,6 @@ mod tests {
         let line = remove_target_with(&inner_home, &root, &root.join("holder"), "").unwrap();
         assert!(line.contains("protected playbook data"), "{line}");
         assert!(holder.exists());
-        fs::remove_dir_all(&f.root).unwrap();
-    }
-
-    #[test]
-    fn picks_the_idle_target_inside_a_linked_worktree() {
-        use std::os::unix::io::AsRawFd;
-        let mut f = fixture("in-tree");
-        let wt = |name: &str| f.root.join("worktrees/repo").join(name);
-        let (idle, building, plain, linked) = (wt("idle"), wt("building"), wt("plain"), wt("link"));
-        for dir in [&idle, &building] {
-            target(&dir.join("target"));
-        }
-        write(&plain.join("target/notes.txt"));
-        fs::create_dir_all(&linked).unwrap();
-        std::os::unix::fs::symlink(f.root.join("tmp"), linked.join("target")).unwrap();
-        let lock = building.join("target/debug/.cargo-lock");
-        write(&lock);
-        f.env.linked_worktrees = vec![
-            idle.clone(),
-            building.clone(),
-            plain.clone(),
-            linked.clone(),
-        ];
-        let held = fs::File::open(&lock).unwrap();
-        // SAFETY: `held` stays open until it is dropped below.
-        assert_eq!(unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX) }, 0);
-        assert_eq!(picked(&f.env), vec![idle.join("target")]);
-        let why = |dir: &Path| reason(&f.env, &dir.join("target"));
-        assert_eq!(
-            why(&building).as_deref(),
-            Some("a cargo build holds its lock")
-        );
-        assert_eq!(why(&plain).as_deref(), Some("not a cargo target folder"));
-        assert_eq!(why(&linked).as_deref(), Some("not a cargo target folder"));
-        drop(held);
-        let (chosen, _) = select(&f.env);
-        let (removed, _) = remove(chosen);
-        assert_eq!(removed.len(), 2);
-        assert!(!idle.join("target").exists() && idle.exists());
-        assert!(!building.join("target").exists() && building.exists());
-        assert!(plain.join("target/notes.txt").exists());
-        fs::remove_dir_all(&f.root).unwrap();
-    }
-
-    #[test]
-    fn the_system_env_lists_linked_worktrees_but_not_the_main_one() {
-        let f = fixture("linked-list");
-        let main = f.root.join("main");
-        let linked = f.root.join("worktrees/feature");
-        fs::create_dir_all(&main).unwrap();
-        let run = |dir: &Path, args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .current_dir(dir)
-                .args(["-c", "user.email=t@t", "-c", "user.name=t"])
-                .args(["-c", "commit.gpgsign=false"])
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(out.status.success(), "{args:?}");
-        };
-        run(&main, &["init", "-q"]);
-        run(&main, &["commit", "-q", "--allow-empty", "-m", "x"]);
-        run(&main, &["worktree", "add", "-q", linked.to_str().unwrap()]);
-        let env = Env::from_system(&f.env.home, Some(&main));
-        let got: Vec<PathBuf> = env
-            .linked_worktrees
-            .iter()
-            .map(|p| fs::canonicalize(p).unwrap())
-            .collect();
-        assert_eq!(got, vec![fs::canonicalize(&linked).unwrap()]);
         fs::remove_dir_all(&f.root).unwrap();
     }
 

@@ -134,7 +134,6 @@ pub(crate) const META: &[Meta] = &[
     user("disk reserve").purpose("Write a 1 GB ballast file that `disk release` gives back"),
     ro("disk status").purpose("Show free space, the thresholds and the biggest folders"),
     ro("disk target-dir").purpose("Print the private cargo target folder for this worktree"),
-    ro("disk target-env").purpose("Print the export line for a private, small cargo build"),
     ro("doc").purpose("Read a PDF or Office file as text with anydoc"),
     ro("doc read"),
     ro("doc status"),

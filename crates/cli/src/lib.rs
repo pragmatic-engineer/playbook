@@ -2095,16 +2095,6 @@ pub enum DiskCommand {
     ///
     /// Example: `CARGO_TARGET_DIR="$(playbook disk target-dir)" cargo test`
     TargetDir,
-    /// Print the `export` line that gives this worktree a small private build
-    ///
-    /// Sets `CARGO_TARGET_DIR` to the folder `target-dir` prints, and turns
-    /// off incremental data and debug info in the dev and test profiles, which
-    /// cut a full test build of this workspace from 3.0 GB to 1.1 GB. Warns on
-    /// stderr when free space is below `disk.warnFreeGb`, or when target
-    /// folders pass `disk.maxTargetDirs`.
-    ///
-    /// Example: `eval "$(playbook disk target-env)" && cargo test`
-    TargetEnv,
 }
 
 /// `playbook worktree` subcommands.

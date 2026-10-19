@@ -103,7 +103,6 @@ pub const KNOWN_KEYS: &[&str] = &[
     "disk.autoCleanup",
     "disk.paths",
     "disk.maxTargetDirs",
-    "disk.maxTargetGb",
 ];
 
 /// The per-user settings, which live only in the global tier.
@@ -118,7 +117,6 @@ pub const USER_KEYS: &[&str] = &[
     "disk.autoCleanup",
     "disk.paths",
     "disk.maxTargetDirs",
-    "disk.maxTargetGb",
 ];
 
 /// Whether `key` is a per-user setting. `config set` writes it to the global
@@ -232,9 +230,6 @@ pub fn default_value(key: &str) -> Option<Value> {
         "disk.paths" => Some(Value::Array(Vec::new())),
         "disk.maxTargetDirs" => Some(Value::Number(
             crate::disk::policy::DEFAULT_MAX_TARGET_DIRS.into(),
-        )),
-        "disk.maxTargetGb" => Some(Value::Number(
-            crate::disk::policy::DEFAULT_MAX_TARGET_GB.into(),
         )),
         _ => None,
     }

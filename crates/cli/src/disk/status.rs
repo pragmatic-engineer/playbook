@@ -66,16 +66,6 @@ impl Report {
     pub fn level(&self) -> Option<Level> {
         policy::tightest(&self.volumes).map(|v| self.policy.level(v.space.free))
     }
-
-    /// Bytes in every cargo target folder the report found, each counted once.
-    pub fn target_bytes(&self) -> u64 {
-        let own = self.consumers.iter().filter(|c| c.kind == Kind::Target);
-        let mut seen = std::collections::HashSet::new();
-        own.chain(&self.home_targets)
-            .filter(|c| seen.insert(&c.path))
-            .map(|c| c.bytes)
-            .sum()
-    }
 }
 
 /// The folders to measure, before their sizes are known.
@@ -94,13 +84,7 @@ pub fn candidates(
             );
         }
         if let Ok(list) = crate::worktree::list_worktrees(repo) {
-            for worktree in list.into_iter().skip(1) {
-                let in_tree = worktree.path.join(targets::IN_TREE_TARGET);
-                if in_tree.join("CACHEDIR.TAG").is_file() {
-                    found.push((Kind::Target, in_tree));
-                }
-                found.push((Kind::Worktree, worktree.path));
-            }
+            found.extend(list.into_iter().skip(1).map(|w| (Kind::Worktree, w.path)));
         }
     }
     found.extend(
@@ -286,9 +270,6 @@ pub fn render(report: &Report) -> String {
     {
         out.push_str(&format!("\n{warning}\n"));
     }
-    if let Some(warning) = super::targets::too_big_warning(report.target_bytes(), p.max_target_gb) {
-        out.push_str(&format!("\n{warning}\n"));
-    }
     out
 }
 
@@ -302,7 +283,6 @@ pub fn to_json(report: &Report) -> Value {
             "blockFreeGb": p.block_free_gb,
             "autoCleanup": p.auto_cleanup,
             "maxTargetDirs": p.max_target_dirs,
-            "maxTargetGb": p.max_target_gb,
         },
         "volumes": report.volumes.iter().map(|v| json!({
             "path": v.path.to_string_lossy(),
@@ -317,7 +297,6 @@ pub fn to_json(report: &Report) -> Value {
             "complete": c.complete,
         })).collect::<Vec<_>>(),
         "targetDirs": report.target_count,
-        "targetBytes": report.target_bytes(),
         "homeCargoTargets": report.home_targets.iter().map(|c| json!({
             "path": c.path.to_string_lossy(),
             "bytes": c.bytes,
@@ -437,26 +416,6 @@ mod tests {
     }
 
     #[test]
-    fn text_warns_when_target_folders_pass_the_size_cap() {
-        let mut report = sample(1);
-        assert_eq!(report.target_bytes(), 6 * GIB);
-        assert!(!render(&report).contains("disk.maxTargetGb"));
-        report.policy.max_target_gb = 5;
-        let text = render(&report);
-        assert!(
-            text.contains("hold 6.0 GB, more than disk.maxTargetGb (5)"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn a_target_folder_listed_twice_counts_once() {
-        let mut report = sample(1);
-        report.home_targets[0].path = report.consumers[0].path.clone();
-        assert_eq!(report.target_bytes(), 2 * GIB + GIB);
-    }
-
-    #[test]
     fn json_has_every_field() {
         let value = to_json(&sample(1));
         assert_eq!(value["level"], "critical");
@@ -465,8 +424,6 @@ mod tests {
         assert_eq!(value["consumers"][0]["kind"], "target");
         assert_eq!(value["consumers"][1]["kind"], "ballast");
         assert_eq!(value["targetDirs"], 1);
-        assert_eq!(value["targetBytes"], 6 * GIB);
-        assert_eq!(value["thresholds"]["maxTargetGb"], 20);
         assert_eq!(value["homeCargoTargets"][0]["bytes"], 3 * GIB);
         assert_eq!(value["homeCargoTargets"][0]["complete"], true);
         assert_eq!(value["homeCargoTargets"][1]["complete"], false);

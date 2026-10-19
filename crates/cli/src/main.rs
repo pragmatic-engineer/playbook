@@ -2756,41 +2756,6 @@ fn effort_diff_shape(base: &str) -> Result<effort::auto::Shape, String> {
     effort::auto::Shape::from_numstat(&text)
 }
 
-/// The private target folder of the checkout the command runs in. Exits
-/// with an error outside one. Warns on stderr when free space is low or
-/// target folders pile up, since this runs before an agent builds.
-fn private_target(home: &std::path::Path, command: &str) -> std::path::PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| home.to_path_buf());
-    let Some(checkout) = playbook_common::gitfacts::toplevel(&cwd) else {
-        eprintln!("disk {command}: not inside a git checkout");
-        std::process::exit(1);
-    };
-    let Some(root) = disk::targets::worktrees_root(&checkout) else {
-        eprintln!(
-            "disk {command}: cannot find the worktrees root of {}",
-            checkout.display()
-        );
-        std::process::exit(1);
-    };
-    let Some(target) = disk::targets::target_for(&root, &checkout) else {
-        eprintln!("disk {command}: {} has no folder name", checkout.display());
-        std::process::exit(1);
-    };
-    let policy = disk::policy::load(home);
-    let count = disk::targets::target_dirs(&root).len();
-    if let Some(warning) = disk::targets::too_many_warning(count, policy.max_target_dirs) {
-        eprintln!("disk {command}: {warning}");
-    }
-    let paths = disk::policy::measured_paths(&policy, home, Some(&cwd));
-    if let Some((free, level)) = disk::policy::low_space(&policy, &paths) {
-        eprintln!(
-            "disk {command}: {}",
-            hooks::disk_guard::warning(free, level, &policy, None)
-        );
-    }
-    target
-}
-
 fn run_disk(sub: DiskCommand) {
     let home = common::home_dir();
     match sub {
@@ -2826,14 +2791,26 @@ fn run_disk(sub: DiskCommand) {
                 }
             }
         }
-        DiskCommand::TargetDir => println!("{}", private_target(&home, "target-dir").display()),
-        DiskCommand::TargetEnv => {
-            let target = private_target(&home, "target-env");
-            let Some(line) = disk::targets::export_line(&target) else {
-                eprintln!("disk target-env: {} is not valid UTF-8", target.display());
+        DiskCommand::TargetDir => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
+            let Some(worktree) = playbook_common::gitfacts::toplevel(&cwd) else {
+                eprintln!("disk target-dir: not inside a git worktree");
                 std::process::exit(1);
             };
-            println!("{line}");
+            let Some(root) = disk::targets::worktrees_root(&worktree) else {
+                eprintln!("disk target-dir: cannot find the worktrees root of {}", worktree.display());
+                std::process::exit(1);
+            };
+            let Some(target) = disk::targets::target_for(&root, &worktree) else {
+                eprintln!("disk target-dir: {} has no folder name", worktree.display());
+                std::process::exit(1);
+            };
+            let max = disk::policy::load(&home).max_target_dirs;
+            let count = disk::targets::target_dirs(&root).len();
+            if let Some(warning) = disk::targets::too_many_warning(count, max) {
+                eprintln!("disk target-dir: {warning}");
+            }
+            println!("{}", target.display());
         }
         DiskCommand::Release => match disk::ballast::release(&home) {
             Ok(Some(bytes)) => println!(
