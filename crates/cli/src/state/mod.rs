@@ -179,7 +179,12 @@ fn legacy_files(root: &Path) -> Vec<PathBuf> {
                 p.is_file()
                     && p.file_name()
                         .and_then(|n| n.to_str())
-                        .is_some_and(|n| n.starts_with(LEGACY_SWEEP_PREFIX))
+                        // A marker already imported carries `.migrated`.
+                        // Importing it again would rename it once more on
+                        // every run and store a key with the suffix.
+                        .is_some_and(|n| {
+                            n.starts_with(LEGACY_SWEEP_PREFIX) && !n.ends_with(".migrated")
+                        })
             })
             .collect();
         markers.sort();
@@ -386,6 +391,18 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(get(&r, "k").unwrap().as_deref(), Some("1"));
         assert_eq!(get(&r, "new").unwrap(), None);
+    }
+
+    #[test]
+    fn an_imported_marker_is_not_imported_or_renamed_again() {
+        let r = root("state-marker-again");
+        let done = r.join("worktree-sweep-marker-_tmp_repo.migrated");
+        fs::write(&done, "1700000000").unwrap();
+        assert_eq!(get(&r, "worktree-sweep/_tmp_repo.migrated").unwrap(), None);
+        assert!(done.is_file(), "the imported marker was renamed again");
+        assert!(!r
+            .join("worktree-sweep-marker-_tmp_repo.migrated.migrated")
+            .exists());
     }
 
     #[test]
