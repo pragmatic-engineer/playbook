@@ -85,6 +85,8 @@ The user ordered playbook's whole footprint hard-coded in the binary as allowed 
 
 The protected paths shrink to what cannot be made again: the memory store, `data/config.db` with its `-wal` and `-shm` files, `repos` (plans, handoffs), `orgs` and `runtime` (the spend ledger). The lock rule is gone. The denial names each protected item and the `playbook` command to use instead, or says to ask the user. This supersedes the protected list above and the rejected alternative to allow the binary: `playbook update` and `install.sh` still replace it, and the user chose to let the model remove a broken install.
 
+The policy guard follows the same line. It leaves `rm` of the store to the rm guard, so the two guards no longer disagree about a deletion, and it judges `cp`, `install`, `rsync` and `dd` by where they may write (any operand after the first, a `-t` folder, `of=`), so a backup copy out of the store is a read. A link into or out of the store, and `mv` either way, stay denied. It now also denies a shell write into the memory store (a redirect, `tee`, `cp` into it, `mv` into or out of it, `sed -i`), since a fact goes in with the Write tool, which shows the fact format. `mkdir` and `touch` there stay allowed. The rm guard corpus gains `"hook": "all"` cases, judged by both guards as the user sees them.
+
 ## Alternatives considered
 
 - **Allow the binary and its links** for self-healing, as first asked. Rejected: a deleted binary turns off every hook, and `playbook update` and `install.sh` replace it without an `rm`.

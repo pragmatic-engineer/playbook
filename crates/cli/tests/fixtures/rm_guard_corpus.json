@@ -591,7 +591,8 @@
     "expect": "deny",
     "want": "deny",
     "class": "correct block",
-    "note": "plans are protected"
+    "note": "plans are protected",
+    "hook": "all"
   },
   {
     "id": "prot-memory",
@@ -600,7 +601,8 @@
     "expect": "deny",
     "want": "deny",
     "class": "correct block",
-    "note": "memory store"
+    "note": "memory store",
+    "hook": "all"
   },
   {
     "id": "prot-config",
@@ -609,7 +611,8 @@
     "expect": "allow",
     "want": "allow",
     "class": "correct allow",
-    "note": "config.json can be made again: part of the playbook footprint"
+    "note": "config.json can be made again: part of the playbook footprint",
+    "hook": "all"
   },
   {
     "id": "deny-devnull",
@@ -889,7 +892,8 @@
     "expect": "deny",
     "want": "deny",
     "class": "bypass, now classified",
-    "note": "python os.remove of protected data"
+    "note": "python os.remove of protected data",
+    "hook": "all"
   },
   {
     "id": "py-heredoc-remove",
@@ -934,16 +938,18 @@
     "expect": "allow",
     "want": "allow",
     "class": "correct allow",
-    "note": "memory.db is an index rebuilt from the memory store: part of the footprint"
+    "note": "memory.db is an index rebuilt from the memory store: part of the footprint",
+    "hook": "all"
   },
   {
     "id": "redirect-config",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "echo '{}' > ~/.config/playbook/config.json",
-    "expect": "allow",
-    "want": "allow",
-    "class": "correct allow",
-    "note": "config.json can be made again: part of the playbook footprint"
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "the rm guard lets config.json go, but the policy guard keeps writes to config files",
+    "hook": "all"
   },
   {
     "id": "redirect-zshrc",
@@ -976,10 +982,11 @@
     "id": "dd-of",
     "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
     "command": "dd if=/dev/zero of=/Users/<user>/.config/playbook/data/usage.db bs=1 count=1",
-    "expect": "allow",
-    "want": "allow",
-    "class": "correct allow",
-    "note": "usage.db can be made again: part of the playbook footprint"
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "the rm guard lets usage.db go, but the policy guard keeps writes into data/",
+    "hook": "all"
   },
   {
     "id": "chmod-ssh",
@@ -1078,7 +1085,8 @@
     "expect": "deny",
     "want": "deny",
     "class": "correct block",
-    "note": "a trailing command does not hide a protected target"
+    "note": "a trailing command does not hide a protected target",
+    "hook": "all"
   },
   {
     "id": "fp-footprint-effort",
@@ -1087,7 +1095,8 @@
     "expect": "allow",
     "want": "allow",
     "class": "correct allow",
-    "note": "playbook footprint: can be made again"
+    "note": "playbook footprint: can be made again",
+    "hook": "all"
   },
   {
     "id": "fp-footprint-prompts",
@@ -1096,7 +1105,8 @@
     "expect": "allow",
     "want": "allow",
     "class": "correct allow",
-    "note": "playbook footprint: can be made again"
+    "note": "playbook footprint: can be made again",
+    "hook": "all"
   },
   {
     "id": "fp-footprint-tmp",
@@ -1105,7 +1115,8 @@
     "expect": "allow",
     "want": "allow",
     "class": "correct allow",
-    "note": "the playbook tmp folder itself"
+    "note": "the playbook tmp folder itself",
+    "hook": "all"
   },
   {
     "id": "fp-footprint-memory-db",
@@ -1114,7 +1125,8 @@
     "expect": "allow",
     "want": "allow",
     "class": "correct allow",
-    "note": "an index rebuilt from the memory store"
+    "note": "an index rebuilt from the memory store",
+    "hook": "all"
   },
   {
     "id": "fp-footprint-cache",
@@ -1123,7 +1135,8 @@
     "expect": "allow",
     "want": "allow",
     "class": "correct allow",
-    "note": "the playbook cache folder itself"
+    "note": "the playbook cache folder itself",
+    "hook": "all"
   },
   {
     "id": "fp-footprint-pb-link",
@@ -1132,7 +1145,8 @@
     "expect": "allow",
     "want": "allow",
     "class": "correct allow",
-    "note": "the pb link of the install"
+    "note": "the pb link of the install",
+    "hook": "all"
   },
   {
     "id": "fp-footprint-binary",
@@ -1141,7 +1155,8 @@
     "expect": "allow",
     "want": "allow",
     "class": "correct allow",
-    "note": "the playbook binary"
+    "note": "the playbook binary",
+    "hook": "all"
   },
   {
     "id": "fp-footprint-backup",
@@ -1150,7 +1165,8 @@
     "expect": "allow",
     "want": "allow",
     "class": "correct allow",
-    "note": "a backup from self-update"
+    "note": "a backup from self-update",
+    "hook": "all"
   },
   {
     "id": "fp-footprint-plugin",
@@ -1159,7 +1175,8 @@
     "expect": "allow",
     "want": "allow",
     "class": "correct allow",
-    "note": "an old plugin version in the cache"
+    "note": "an old plugin version in the cache",
+    "hook": "all"
   },
   {
     "id": "fp-protected-config-db",
@@ -1168,7 +1185,8 @@
     "expect": "deny",
     "want": "deny",
     "class": "correct block",
-    "note": "config.db cannot be made again"
+    "note": "config.db cannot be made again",
+    "hook": "all"
   },
   {
     "id": "fp-protected-wal",
@@ -1177,7 +1195,8 @@
     "expect": "deny",
     "want": "deny",
     "class": "correct block",
-    "note": "the config.db write-ahead log"
+    "note": "the config.db write-ahead log",
+    "hook": "all"
   },
   {
     "id": "fp-protected-runtime",
@@ -1186,7 +1205,8 @@
     "expect": "deny",
     "want": "deny",
     "class": "correct block",
-    "note": "the auto mode spend ledger"
+    "note": "the auto mode spend ledger",
+    "hook": "all"
   },
   {
     "id": "fp-footprint-root",
@@ -1195,7 +1215,8 @@
     "expect": "deny",
     "want": "deny",
     "class": "correct block",
-    "note": "the playbook folder holds protected data"
+    "note": "the playbook folder holds protected data",
+    "hook": "all"
   },
   {
     "id": "fp-bare-config",
@@ -1204,7 +1225,8 @@
     "expect": "deny",
     "want": "deny",
     "class": "correct block",
-    "note": "never the bare config folder"
+    "note": "never the bare config folder",
+    "hook": "all"
   },
   {
     "id": "fp-bare-cache",
@@ -1213,6 +1235,247 @@
     "expect": "deny",
     "want": "deny",
     "class": "correct block",
-    "note": "never the bare cache folder"
+    "note": "never the bare cache folder",
+    "hook": "all"
+  },
+  {
+    "id": "pg-memory-rebuild",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "playbook memory rebuild",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "a playbook subcommand that is not config set",
+    "hook": "all"
+  },
+  {
+    "id": "pg-ls-memory-db",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "ls -la ~/.config/playbook/memory.db ~/.config/playbook/data/memory.db",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "listing the store is a read",
+    "hook": "all"
+  },
+  {
+    "id": "pg-ls-root",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "ls ~/.config/playbook",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "listing the store is a read",
+    "hook": "all"
+  },
+  {
+    "id": "pg-sqlite-select",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "sqlite3 ~/.config/playbook/data/memory.db \"select count(*) from facts\"",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "a read-only sqlite3 query",
+    "hook": "all"
+  },
+  {
+    "id": "pg-cat-config",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cat ~/.config/playbook/config.json",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "reading a config file",
+    "hook": "all"
+  },
+  {
+    "id": "pg-head-db",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "head -c 16 ~/.config/playbook/data/memory.db",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "reading a database file",
+    "hook": "all"
+  },
+  {
+    "id": "pg-du-root",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "du -sh ~/.config/playbook",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "sizing the store",
+    "hook": "all"
+  },
+  {
+    "id": "pg-stat-db",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "stat ~/.config/playbook/data/config.db",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "stat of the config database",
+    "hook": "all"
+  },
+  {
+    "id": "pg-config-get",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "playbook config get hooks.rmGuard.allowedRoots",
+    "expect": "allow",
+    "want": "allow",
+    "class": "correct allow",
+    "note": "reading a protected key",
+    "hook": "all"
+  },
+  {
+    "id": "pg-backup-db",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cp ~/.config/playbook/data/config.db /tmp/config-backup.db",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "a copy out of the store is a read",
+    "hook": "all"
+  },
+  {
+    "id": "pg-rm-memory-db",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -f ~/.config/playbook/data/memory.db",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "the memory index is rebuilt; deleting is the rm guard's call",
+    "hook": "all"
+  },
+  {
+    "id": "pg-rm-config-json",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "rm -f ~/.config/playbook/config.json",
+    "expect": "allow",
+    "want": "allow",
+    "class": "false positive",
+    "note": "a config file can be made again",
+    "hook": "all"
+  },
+  {
+    "id": "pg-sqlite-delete",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "sqlite3 ~/.config/playbook/data/config.db \"delete from settings\"",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a sqlite3 write to the config database",
+    "hook": "all"
+  },
+  {
+    "id": "pg-sqlite-import",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "sqlite3 ~/.config/playbook/data/memory.db \".import x.csv facts\"",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a sqlite3 .import",
+    "hook": "all"
+  },
+  {
+    "id": "pg-cp-over-db",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cp /tmp/x ~/.config/playbook/data/config.db",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a copy over the config database",
+    "hook": "all"
+  },
+  {
+    "id": "pg-mv-over-db",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "mv /tmp/x ~/.config/playbook/data/memory.db",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a move over a database",
+    "hook": "all"
+  },
+  {
+    "id": "pg-cp-into-memory",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "cp /tmp/x.md ~/.config/playbook/memory/acme/x.md",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a fact goes in with the Write tool",
+    "hook": "all"
+  },
+  {
+    "id": "pg-redirect-config",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "echo x > ~/.config/playbook/config.json",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a redirect over a config file",
+    "hook": "all"
+  },
+  {
+    "id": "pg-tee-db",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "echo x | tee ~/.config/playbook/data/memory.db",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "tee over a database",
+    "hook": "all"
+  },
+  {
+    "id": "pg-sed-config",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "sed -i '' s/a/b/ ~/.config/playbook/config.json",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "sed -i on a config file",
+    "hook": "all"
+  },
+  {
+    "id": "pg-set-rm-roots",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "playbook config set --global hooks.rmGuard.allowedRoots x",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a protected key",
+    "hook": "all"
+  },
+  {
+    "id": "pg-unset-pr-rules",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "playbook config unset pr.rules.x",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a protected key",
+    "hook": "all"
+  },
+  {
+    "id": "pg-set-disk",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "playbook config set disk.minFreeGb 1",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a protected key",
+    "hook": "all"
+  },
+  {
+    "id": "pg-set-prose",
+    "cwd": "/Users/<user>/code/pragmatic-engineer/playbook",
+    "command": "playbook config set hooks.proseLint.mode off",
+    "expect": "deny",
+    "want": "deny",
+    "class": "correct block",
+    "note": "a protected key",
+    "hook": "all"
   }
 ]

@@ -13,8 +13,10 @@
 //!
 //! Paths in the corpus are written under `/Users/<user>`, which the test maps
 //! to a fake home in Cargo's scratch folder, where it also builds the repos and
-//! worktrees the cases name. A case with an `os` runs on that OS only. Set `RM_GUARD_CORPUS_PRINT=1` to print the
-//! verdict of every case.
+//! worktrees the cases name. A case with an `os` runs on that OS only. A case
+//! with `"hook": "all"` runs through the policy guard as well, and is denied
+//! when either guard denies it, which is what the user sees. Set
+//! `RM_GUARD_CORPUS_PRINT=1` to print the verdict of every case.
 
 use serde_json::Value;
 use std::fs;
@@ -35,6 +37,9 @@ struct Case {
     /// The one OS the case applies to, as `std::env::consts::OS` names it,
     /// or empty for every OS.
     os: String,
+    /// `all` to judge the case by the policy guard too, or empty for the rm
+    /// guard alone.
+    hook: String,
 }
 
 fn corpus() -> Vec<Case> {
@@ -52,6 +57,7 @@ fn corpus() -> Vec<Case> {
             expect: field(c, "expect"),
             class: field(c, "class"),
             os: field(c, "os"),
+            hook: field(c, "hook"),
         })
         .collect()
 }
@@ -148,8 +154,20 @@ impl Tree {
         text.replace(USER_HOME, &self.home.to_string_lossy())
     }
 
-    /// `allow` or `deny`, from the real binary.
+    /// `allow` or `deny`, from the real binary: `deny` when any guard the
+    /// case names denies it.
     fn verdict(&self, case: &Case) -> String {
+        let hooks: &[&str] = if case.hook == "all" {
+            &["rm-workspace-guard", "policy-guard"]
+        } else {
+            &["rm-workspace-guard"]
+        };
+        let denied = hooks.iter().any(|hook| self.denies(case, hook));
+        if denied { "deny" } else { "allow" }.to_string()
+    }
+
+    /// Whether `hook` denies the case.
+    fn denies(&self, case: &Case, hook: &str) -> bool {
         let cwd = PathBuf::from(self.map(&case.cwd));
         fs::create_dir_all(&cwd).expect("case cwd");
         let command = self.map(&case.command);
@@ -160,7 +178,7 @@ impl Tree {
         })
         .to_string();
         let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-            .args(["hook", "rm-workspace-guard"])
+            .args(["hook", hook])
             .env("HOOK_INPUT", payload)
             .env("HOME", &self.home)
             // A fixed value, so `$TMPDIR` cases judge the same everywhere.
@@ -172,18 +190,16 @@ impl Tree {
             .env_remove("PLAYBOOK_BIN_DIR")
             .env_remove("XDG_CACHE_HOME")
             .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_DATA_HOME")
+            .env_remove("XDG_STATE_HOME")
+            .env_remove("POLICY_GUARD")
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .current_dir(&cwd)
             .output()
             .expect("spawn");
         assert!(out.status.success(), "{}: a guard exits 0", case.id);
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        if stdout.contains(r#""permissionDecision":"deny""#) {
-            "deny".to_string()
-        } else {
-            "allow".to_string()
-        }
+        String::from_utf8_lossy(&out.stdout).contains(r#""permissionDecision":"deny""#)
     }
 }
 
@@ -214,6 +230,11 @@ fn the_corpus_is_well_formed() {
             case.id
         );
         assert!(!case.class.is_empty(), "{}: class", case.id);
+        assert!(
+            matches!(case.hook.as_str(), "" | "all"),
+            "{}: hook",
+            case.id
+        );
         for text in [&case.command, &case.cwd] {
             let named = text.match_indices("/Users/").all(|(at, _)| {
                 text[at + 7..].starts_with(USER) || text[at + 7..].starts_with("Shared")

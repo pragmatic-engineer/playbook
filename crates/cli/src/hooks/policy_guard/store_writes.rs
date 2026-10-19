@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Whether a simple command writes playbook's config store: the config
-//! database or a config file. Reading it is fine, so only a redirect into it,
-//! a program that writes a file it is handed, `sed` with `-i` or a `w`
-//! command, or `sqlite3` with anything but a read counts.
+//! database, a config file or the memory store. Reading it is fine, so only a
+//! redirect into it, a program that writes where it is pointed, `sed` with
+//! `-i` or a `w` command, or `sqlite3` with anything but a read counts. A copy
+//! counts only where it lands, so `cp config.db /tmp/backup` is a read.
+//! Deleting is the rm guard's call, so `rm` is left to it.
 
 use super::settings_writes::redirect_targets;
-use super::{is_short_cluster_with, names_config_store, WRITER_PROGRAMS};
+use super::{is_short_cluster_with, names_config_store, names_memory_store, WRITER_PROGRAMS};
 use crate::common::shell::{program_index, program_name, redirect_len, SHELLS};
 
 /// Interpreters, which can write any file they are handed.
@@ -110,10 +112,8 @@ const ARGUMENT_READ_PRAGMAS: [&str; 9] = [
 /// Whether this simple command writes the config store. A command that is
 /// only a redirection, as `>f` after `&` or `|` splits it off, counts too.
 pub(crate) fn writes_config_store(words: &[String], home: &str) -> bool {
-    if redirect_targets(words)
-        .iter()
-        .any(|t| names_config_store(t, home))
-    {
+    let store = |w: &str| names_config_store(w, home) || names_memory_store(w, home);
+    if redirect_targets(words).iter().any(|t| store(t)) {
         return true;
     }
     let Some(at) = program_index(words) else {
@@ -121,7 +121,72 @@ pub(crate) fn writes_config_store(words: &[String], home: &str) -> bool {
     };
     let program = program_name(&words[at]);
     let args = &words[at + 1..];
-    program_writes(&program, args) && args.iter().any(|w| names_config_store(w, home))
+    if !program_writes(&program, args) {
+        return false;
+    }
+    match program.as_str() {
+        // Deleting is judged by the rm guard, which keeps what cannot be made
+        // again and lets the rest of playbook's folder go.
+        "rm" => false,
+        // A copy or link writes only where it lands.
+        "cp" | "install" => copies_into(args, true, store),
+        // `rsync -t` keeps times; it names no folder.
+        "rsync" => copies_into(args, false, store),
+        "dd" => args.iter().filter_map(|w| w.strip_prefix("of=")).any(store),
+        // `mv` also takes its sources away, `tee` and `sed -i` write every
+        // file they name, and a link is a second name to write through.
+        "mv" | "tee" | "sed" | "ln" => args.iter().any(|w| store(w)),
+        // Making a folder or touching a file in the memory store is how a
+        // fact gets a home; only the config files are kept from these, and
+        // from interpreters, which may only read the memory store.
+        _ => args.iter().any(|w| names_config_store(w, home)),
+    }
+}
+
+/// Whether `cp`, `install` or `rsync` with `args` may write into the store:
+/// a `-t` folder in it, or any operand after the first in it. Options can
+/// follow the operands and take values, so the last operand is not trusted to
+/// be the destination; only the first operand, which is always a source, is
+/// left out. `cp <store file> /tmp/x` is a read, while `cp a <store file> -S x`
+/// and `cp <store file> <store file>` are writes.
+fn copies_into(args: &[String], target_option: bool, store: impl Fn(&str) -> bool) -> bool {
+    let mut operands = Vec::new();
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        if let Some(dir) = word.strip_prefix("--target-directory=") {
+            if store(dir) {
+                return true;
+            }
+            continue;
+        }
+        let short_t = target_option
+            && word.starts_with('-')
+            && !word.starts_with("--")
+            && word.ends_with('t');
+        if word == "--target-directory" || short_t {
+            if words.next().is_some_and(|dir| store(dir)) {
+                return true;
+            }
+            continue;
+        }
+        if let Some(dir) = target_option
+            .then_some(word)
+            .and_then(|w| w.strip_prefix('-'))
+            .filter(|w| !w.starts_with('-'))
+            .and_then(|w| w.split_once('t'))
+            .map(|(_, dir)| dir)
+            .filter(|d| !d.is_empty())
+        {
+            if store(dir) {
+                return true;
+            }
+            continue;
+        }
+        if !word.starts_with('-') && redirect_len(word) == 0 {
+            operands.push(word.as_str());
+        }
+    }
+    operands.iter().skip(1).any(|w| store(w))
 }
 
 /// Whether the previous command ended in a bare redirect operator (the lexer
@@ -135,7 +200,9 @@ pub(crate) fn is_open_redirect_into_store(
     previous
         .and_then(|p| p.last())
         .is_some_and(|w| w.ends_with('>'))
-        && words.first().is_some_and(|w| names_config_store(w, home))
+        && words
+            .first()
+            .is_some_and(|w| names_config_store(w, home) || names_memory_store(w, home))
 }
 
 /// Whether `program` with `args` can write a file it is handed.
@@ -309,6 +376,71 @@ mod tests {
         ];
         for words in writes {
             assert!(!sqlite_only_reads(&args(words)), "{words:?}");
+        }
+    }
+
+    #[test]
+    fn a_copy_writes_only_where_it_may_land() {
+        let store = |w: &str| w.starts_with("S");
+        let writes: &[&[&str]] = &[
+            &["a", "S"],
+            &["-r", "a", "b", "S/dir"],
+            &["-t", "S", "a", "b"],
+            &["-at", "S", "a"],
+            &["--target-directory=S", "a"],
+            &["--target-directory", "S", "a"],
+            &["-tS", "a"],
+            &["-atS", "a"],
+            &["a", "S", "-S", ".bak"],
+            &["S1", "S2"],
+        ];
+        for words in writes {
+            assert!(copies_into(&args(words), true, store), "{words:?}");
+        }
+        // For rsync `-t` keeps times, so the next word is still an operand.
+        assert!(copies_into(&args(&["-avt", "a", "S"]), false, store));
+        assert!(!copies_into(&args(&["-avt", "S", "b"]), false, store));
+        let reads: &[&[&str]] = &[
+            &["S", "b"],
+            &["-r", "S", "/tmp/x"],
+            &["S", "-S", ".bak", "b"],
+            &["-t", "/tmp", "S"],
+            &["S"],
+            &["S", "b", "2>/dev/null"],
+        ];
+        for words in reads {
+            assert!(!copies_into(&args(words), true, store), "{words:?}");
+        }
+    }
+
+    #[test]
+    fn deleting_and_reading_the_store_are_not_writes() {
+        let home = "/h";
+        let db = "/h/.config/playbook/data/config.db";
+        let fact = "/h/.config/playbook/memory/acme/x.md";
+        for words in [
+            vec!["rm", "-f", db],
+            vec!["cp", db, "/tmp/backup.db"],
+            vec!["cp", fact, "/tmp/x.md"],
+            vec!["mkdir", "-p", "/h/.config/playbook/memory/acme/app/staging"],
+            vec!["python3", "tool.py", fact],
+            vec!["dd", &format!("if={db}"), "of=/tmp/x"],
+        ] {
+            assert!(!writes_config_store(&args(&words), home), "{words:?}");
+        }
+        for words in [
+            vec!["cp", "/tmp/x", db],
+            vec!["cp", "/tmp/x.md", fact],
+            vec!["cp", "/tmp/x", db, "-S", ".bak"],
+            vec!["ln", "-s", db, "/tmp/c.db"],
+            vec!["mv", fact, "/tmp/x.md"],
+            vec!["tee", fact],
+            vec!["sed", "-i", "s/a/b/", fact],
+            vec!["dd", "if=/dev/zero", &format!("of={db}")],
+            vec!["echo", "x", &format!(">{fact}")],
+            vec!["python3", "tool.py", db],
+        ] {
+            assert!(writes_config_store(&args(&words), home), "{words:?}");
         }
     }
 
