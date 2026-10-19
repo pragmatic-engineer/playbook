@@ -603,7 +603,7 @@ fn prompt_token_matches(idx_contents: &str, query: &PromptQuery) -> Vec<RecallMa
     }
 
     let mut scored: Vec<RecallMatch> = Vec::new();
-    let mut seen_from: HashSet<String> = HashSet::new();
+    let mut seen_from: HashMap<String, usize> = HashMap::new();
     for line in idx_contents.lines() {
         if line.is_empty() {
             continue;
@@ -647,10 +647,19 @@ fn prompt_token_matches(idx_contents: &str, query: &PromptQuery) -> Vec<RecallMa
             continue;
         }
         let from_id = cols.get(1).copied().unwrap_or("").to_string();
-        if from_id.is_empty() || seen_from.contains(&from_id) {
+        if from_id.is_empty() {
             continue;
         }
-        seen_from.insert(from_id);
+        // Another anchor row of a fact already scored: only the crate-folder
+        // hit differs per row, so let it upgrade the first row's match.
+        if let Some(&at) = seen_from.get(&from_id) {
+            if path_hit && !scored[at].strong {
+                scored[at].strong = true;
+                scored[at].score += PATH_HIT_SCORE;
+            }
+            continue;
+        }
+        seen_from.insert(from_id, scored.len());
         scored.push(RecallMatch {
             score,
             strong: path_hit
@@ -1231,6 +1240,16 @@ mod tests {
         assert!(src.iter().all(|m| !m.strong));
         let rs = scored(PATH_INDEX, "rs crate");
         assert!(rs.iter().all(|m| !m.strong));
+    }
+
+    #[test]
+    fn a_path_hit_on_a_later_anchor_row_of_the_same_fact_is_kept() {
+        // One fact, two anchors: the first row hits only a description word
+        let index = "docs/a.md\tproject/a\tsome-notes\tabout the index\t\ta.md\n\
+            crates/code/\tproject/a\tsome-notes\tabout the index\t\ta.md\n";
+        let got = scored(index, "code crate index");
+        assert_eq!(got.len(), 1);
+        assert!(got[0].strong, "the crate-folder row must make it strong");
     }
 
     #[test]
