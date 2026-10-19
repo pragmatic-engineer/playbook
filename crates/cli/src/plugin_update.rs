@@ -459,6 +459,49 @@ mod tests {
     }
 
     #[test]
+    fn every_allowed_word_for_the_key_parses_to_a_mode() {
+        // Arrange
+        let words = crate::config::keys::allowed_enum_values(CONFIG_KEY).unwrap();
+
+        for word in words {
+            // Act
+            let mode = parse_mode(&serde_json::json!(word));
+
+            // Assert
+            assert!(mode.is_some(), "{word}");
+        }
+    }
+
+    #[test]
+    fn a_stored_ask_updates_the_plugin() {
+        // Arrange
+        let home = scratch_dir("plugin-update-ask");
+        let dir = plugin(&home, "0.36.0");
+        install(&home, "playbook@pragmatic-engineer", &dir);
+        let claude = fake_claude(&home, None, 0);
+        let root = crate::common::paths::playbook_root_from(&home);
+        fs::create_dir_all(&root).unwrap();
+        crate::config::store::put(
+            &root,
+            crate::config::write::Tier::Global,
+            None,
+            CONFIG_KEY,
+            &serde_json::json!(MODE_ASK),
+        )
+        .unwrap();
+
+        // Act
+        let out = run(&Probe {
+            home: home.clone(),
+            claude: Some(claude),
+        });
+
+        // Assert
+        assert_eq!(calls(&home), "plugin update playbook@pragmatic-engineer\n");
+        assert!(!matches!(out, Outcome::Skipped(_)), "{out:?}");
+    }
+
+    #[test]
     fn an_unknown_word_reads_as_auto() {
         // Arrange
         let unknown = serde_json::json!("sometimes");

@@ -12,7 +12,7 @@
 use playbook::config::store;
 use playbook::config::write::Tier;
 use playbook::init::migrate::{
-    registry, run_with, Ctx, Migration, Report, PLUGIN_UPDATE_MODE_MIGRATION,
+    registry, run_with, Ctx, Migration, Outcome, Report, PLUGIN_UPDATE_MODE_MIGRATION,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -127,9 +127,10 @@ fn a_stored_word_is_left_alone() {
     seed(&home, Tier::Global, json!("ask"));
 
     // Act
-    run(&home);
+    let report = run(&home);
 
     // Assert
+    assert!(!report.failed, "{:?}", report.warnings);
     assert_eq!(get(&home), "ask");
 }
 
@@ -139,10 +140,18 @@ fn a_fresh_home_gets_no_store_and_resolves_to_the_default() {
     let home = scratch("fresh");
 
     // Act
-    run(&home);
+    // The runner's own record lives in the config db, so the step is run
+    // alone to show it writes nothing.
+    let step = (migration().run)(&Ctx::for_home(&home));
+    let db_created = store::db_path(&root(&home)).exists();
+    let report = run(&home);
+    let resolved = get(&home);
 
     // Assert
-    assert_eq!(get(&home), "auto");
+    assert!(matches!(step, Outcome::Done(_)));
+    assert!(!db_created, "the step must not create the config db");
+    assert!(!report.failed, "{:?}", report.warnings);
+    assert_eq!(resolved, "auto");
     assert!(store::export(&root(&home)).unwrap()["global"]
         .get(KEY)
         .is_none());

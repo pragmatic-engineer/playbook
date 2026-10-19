@@ -241,6 +241,19 @@ pub struct IgnoredValue {
     pub warning: String,
 }
 
+/// Keys that once held a boolean and now hold words: the word a stored
+/// `true` and a stored `false` mean.
+const LEGACY_BOOL_WORDS: &[(&str, &str, &str)] = &[("update.plugin", "auto", "off")];
+
+/// The word a legacy boolean stored under `key` stands for.
+fn legacy_word(key: &str, value: &Value) -> Option<&'static str> {
+    let flag = value.as_bool()?;
+    LEGACY_BOOL_WORDS
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .map(|(_, on, off)| if flag { *on } else { *off })
+}
+
 /// `resolve`, except a string outside the key's allowed enum values (a file
 /// edited by hand, since `write::set` refuses it) is dropped in favour of the
 /// built-in default, with lower tiers not consulted. The third element
@@ -251,6 +264,7 @@ pub fn resolve_valid(
     repo_slug: Option<&str>,
 ) -> Result<(Value, Source, Option<IgnoredValue>), ConfigError> {
     let (value, source) = resolve(key, home, repo_slug)?;
+    let value = legacy_word(key, &value).map_or(value, Value::from);
     if let Some(problem) = value
         .as_str()
         .and_then(|s| keys::model_override_error(key, s))
@@ -325,6 +339,7 @@ pub(crate) fn any_scoped_config(root: &Path) -> bool {
 mod tests {
     use super::write::Tier;
     use super::*;
+    use serde_json::json;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -351,6 +366,26 @@ mod tests {
         let (value, _, ignored) = resolve_valid("usage.theme", &home, None).unwrap();
         assert_eq!(value, Value::String("default".into()));
         assert!(ignored.is_some());
+    }
+
+    #[test]
+    fn a_stored_boolean_for_update_plugin_reads_as_its_word() {
+        // Arrange
+        let home = scratch_home("update-plugin-legacy-bool");
+        let root = crate::common::paths::playbook_root_from(&home);
+        fs::create_dir_all(&root).unwrap();
+
+        for (stored, word) in [(true, "auto"), (false, "off")] {
+            store::put(&root, Tier::Global, None, "update.plugin", &json!(stored)).unwrap();
+
+            // Act
+            let (value, source, ignored) = resolve_valid("update.plugin", &home, None).unwrap();
+
+            // Assert
+            assert_eq!(value, json!(word), "{stored}");
+            assert_eq!(source, Source::Global, "{stored}");
+            assert!(ignored.is_none(), "{stored}");
+        }
     }
 
     #[test]
