@@ -4,6 +4,7 @@
 - **Date created:** 2026-10-19
 - **Date modified:** 2026-10-20
 - **Supersedes:** [ADR 0043](0043-collector-service-in-setup.md), which kept the collector alive with a launchd agent or a systemd user unit that setup installed.
+- **Amends:** [ADR 0041](0041-retire-playbook-telemetry.md), whose context describes how the collector starts; [ADR 0044](0044-drop-the-shell-launcher.md), decision 5, which lists the `collector-service` part; and [ADR 0046](0046-migrations-by-release-version.md), which names the retired `collector-service` and `collector-service-label` ids.
 
 ## Context
 
