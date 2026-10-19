@@ -268,8 +268,10 @@ impl Stamp {
         format!("{at} {} {reason}\n", window.as_secs())
     }
 
+    /// A stamp from the future (the clock stepped back) is stale, so it
+    /// cannot hold spawns off for longer than its window.
     fn fresh(&self, now: i64) -> bool {
-        now < self.at.saturating_add(self.window)
+        self.at <= now && now < self.at.saturating_add(self.window)
     }
 }
 
@@ -434,6 +436,25 @@ mod unix {
     /// Retries while a just-written binary reports ETXTBSY for a moment.
     const BUSY_RETRIES: u32 = 10;
     const BUSY_PAUSE: Duration = Duration::from_millis(50);
+
+    /// Spawns `cmd`, retrying while the binary reports ETXTBSY.
+    pub(super) fn spawn_retrying(
+        cmd: &mut std::process::Command,
+    ) -> std::io::Result<std::process::Child> {
+        let mut attempt = 0;
+        loop {
+            match cmd.spawn() {
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::ExecutableFileBusy
+                        && attempt < BUSY_RETRIES =>
+                {
+                    attempt += 1;
+                    std::thread::sleep(BUSY_PAUSE);
+                }
+                other => return other,
+            }
+        }
+    }
     const LOG_FILE: &str = "collector.log";
 
     /// Starts a collector process.
@@ -535,21 +556,8 @@ mod unix {
     impl Spawner for RealSpawner {
         fn spawn(&self, exe: &Path, paths: &Paths) -> std::io::Result<()> {
             let mut cmd = collector_command(exe, paths)?;
-            let mut attempt = 0;
-            loop {
-                match cmd.spawn() {
-                    // Not waited on: it outlives this process on purpose.
-                    Ok(_) => return Ok(()),
-                    Err(e)
-                        if e.kind() == std::io::ErrorKind::ExecutableFileBusy
-                            && attempt < BUSY_RETRIES =>
-                    {
-                        attempt += 1;
-                        std::thread::sleep(BUSY_PAUSE);
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
+            // Not waited on: it outlives this process on purpose.
+            spawn_retrying(&mut cmd).map(drop)
         }
     }
 
@@ -644,7 +652,10 @@ mod unix {
                     if !opts.probe {
                         return Ensured::Running;
                     }
-                    let Some(state) = recorded(paths) else {
+                    // A holder that has not written collector.json yet
+                    // leaves the last run's port there: probing it would
+                    // read a healthy new collector as hung.
+                    let Some(state) = recorded(paths).filter(|s| holder.pid == Some(s.pid)) else {
                         return Ensured::Running;
                     };
                     match probe(deps, state.port) {
@@ -715,7 +726,8 @@ mod unix {
             LockState::Unavailable => return Stopped::Unavailable,
             LockState::Held(h) => h,
         };
-        if let Some(state) = recorded(paths) {
+        // The token goes only to the port of the pid that holds the lock.
+        if let Some(state) = recorded(paths).filter(|s| holder.pid == Some(s.pid)) {
             send_shutdown(deps, &state);
         }
         if lock_frees_within(paths, budget) {
@@ -792,6 +804,8 @@ mod tests {
     /// How long the probe holds in the seeded file tests: past the quick
     /// retries, well inside the wait.
     const SEEDED_PROBE_HOLD: Duration = Duration::from_millis(300);
+    /// How far ahead a stamp from a stepped-back clock is dated.
+    const FUTURE_STAMP_SECS: i64 = 100;
 
     fn seed(p: &Paths, text: &str) {
         let path = lock_path(p);
@@ -939,6 +953,22 @@ mod tests {
     }
 
     #[test]
+    fn a_stamp_from_the_future_is_stale() {
+        let p = paths("daemon-stamp-future");
+        let now = 1_000;
+        let reason = port_busy_reason(4318);
+        std::fs::create_dir_all(stamp_path(&p).parent().unwrap()).unwrap();
+        std::fs::write(
+            stamp_path(&p),
+            Stamp::line(now + FUTURE_STAMP_SECS, PORT_BUSY_WINDOW, &reason),
+        )
+        .unwrap();
+
+        assert_eq!(stamp_reason_at(&p, now), None);
+        assert!(take_stamp(&p, SPAWN_WINDOW, now));
+    }
+
+    #[test]
     fn a_zero_window_never_holds_off() {
         let p = paths("daemon-stamp-zero");
 
@@ -972,7 +1002,7 @@ mod tests {
     }
 
     #[test]
-    fn test_variables_are_read_in_debug_builds_only() {
+    fn an_unset_test_variable_reads_as_none_and_all_share_the_prefix() {
         // An unset variable reads as nothing in every build.
         assert_eq!(test_var("PLAYBOOK_COLLECTOR_NO_SUCH_TEST_VAR"), None);
         assert!(TEST_VARS
@@ -1009,8 +1039,16 @@ mod tests {
         const SHORT_BUDGET: Duration = Duration::from_millis(400);
         /// Slack on top of a budget before a test calls a stop late.
         const SLACK: Duration = Duration::from_secs(1);
-        /// The hung collector bound of done bar D5.
+        /// The longest a starter may take to find a hung collector, kill it
+        /// and spawn a new one.
         const HUNG_BOUND: Duration = Duration::from_secs(5);
+        /// The longest `ensure` may take to give up on a holder that ignores
+        /// the shutdown, without a kill.
+        const IGNORED_BOUND: Duration = Duration::from_millis(600);
+        /// Scheduling slack on top of `IGNORED_BOUND`.
+        const IGNORED_SLACK: Duration = Duration::from_millis(250);
+        /// A stop budget an in-process collector meets even on a busy runner.
+        const ROUTE_BUDGET: Duration = Duration::from_secs(3);
 
         fn opts(probe: bool, may_kill: bool) -> EnsureOpts {
             EnsureOpts {
@@ -1192,16 +1230,16 @@ mod tests {
 
         impl Helper {
             fn start(exe: &Path, p: &Paths, mode: &str, env: &[(&str, String)]) -> Self {
-                let child = Command::new(exe)
-                    .args(["--exact", HELPER_TEST, "--nocapture", "--test-threads", "1"])
+                let mut cmd = Command::new(exe);
+                cmd.args(["--exact", HELPER_TEST, "--nocapture", "--test-threads", "1"])
                     .env(HELPER_VAR, mode)
                     .env(HELPER_DB_VAR, &p.db)
                     .envs(env.iter().map(|(k, v)| (*k, v.as_str())))
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .unwrap();
+                    .stderr(Stdio::null());
+                // A just-copied binary can report ETXTBSY for a moment.
+                let child = unix::spawn_retrying(&mut cmd).unwrap();
                 let me = Self(child);
                 let pid = me.pid();
                 let up = within(START_BOUND, || match mode {
@@ -1274,10 +1312,12 @@ mod tests {
             std::fs::write(lock_path(&p), format!("{} 0.0.1\n", std::process::id())).unwrap();
             let fakes = Fakes::new(Process::saying(true));
 
-            assert_eq!(
-                ensure_now(&p, opts(false, false), &fakes),
-                Ensured::Replaced
-            );
+            let o = EnsureOpts {
+                stop_budget: ROUTE_BUDGET,
+                ..opts(false, false)
+            };
+
+            assert_eq!(ensure_now(&p, o, &fakes), Ensured::Replaced);
             assert_eq!(fakes.spawns(), 1);
             assert!(fakes.process.sent().is_empty());
             assert_eq!(lock_state(&p), LockState::Free);
@@ -1287,7 +1327,13 @@ mod tests {
         #[cfg_attr(not(debug_assertions), ignore = "reads a debug-only variable")]
         fn a_holder_that_ignores_shutdown_without_may_kill_is_down_and_kept() {
             let p = paths("ensure-ignores");
-            let mut helper = Helper::holding(&p, &[(TEST_VERSION_VAR, "0.0.1".into())]);
+            // Takes the shutdown through the backlog and never answers it.
+            let silent = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let port = silent.local_addr().unwrap().port().to_string();
+            let mut helper = Helper::holding(
+                &p,
+                &[(TEST_VERSION_VAR, "0.0.1".into()), (HELPER_PORT_VAR, port)],
+            );
             assert_eq!(
                 lock_state(&p),
                 LockState::Held(Holder {
@@ -1299,10 +1345,46 @@ mod tests {
             let started = Instant::now();
 
             assert_eq!(ensure_now(&p, opts(false, false), &fakes), Ensured::Down);
-            assert!(started.elapsed() < SHORT_BUDGET + SLACK);
+            let elapsed = started.elapsed();
+            assert!(elapsed < IGNORED_BOUND + IGNORED_SLACK, "{elapsed:?}");
+            // The shutdown was sent: one connect, to the recorded port.
+            assert_eq!(fakes.connects(), 1);
             assert!(fakes.process.sent().is_empty());
             assert_eq!(fakes.spawns(), 0);
             assert!(!helper.exited_within(Duration::ZERO));
+        }
+
+        #[test]
+        fn a_holder_not_yet_in_collector_json_is_running_and_never_probed() {
+            let p = paths("ensure-holder-starting");
+            let me = std::process::id();
+            let _held = hold_with_line(&p, &format!("{me} {}\n", env!("CARGO_PKG_VERSION")));
+            // The previous run's port, which nothing answers.
+            let silent = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            write_state(&p, me + 1, silent.local_addr().unwrap().port());
+            let fakes = Fakes::new(Process::saying(true));
+
+            assert_eq!(ensure_now(&p, opts(true, true), &fakes), Ensured::Running);
+            assert!(fakes.process.sent().is_empty());
+            assert_eq!((fakes.connects(), fakes.spawns()), (0, 0));
+            assert!(matches!(lock_state(&p), LockState::Held(h) if h.pid == Some(me)));
+        }
+
+        #[test]
+        fn stop_sends_no_token_when_collector_json_names_another_pid() {
+            let p = paths("stop-token-other-pid");
+            let me = std::process::id();
+            let _held = hold_with_line(&p, &format!("{me} 0.0.1\n"));
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            write_state(&p, me + 1, listener.local_addr().unwrap().port());
+            let fakes = Fakes::new(Process::saying(true));
+
+            assert_eq!(
+                stop_with(&p, SHORT_BUDGET, false, &fakes.deps()),
+                Stopped::StillRunning
+            );
+            assert_eq!(fakes.connects(), 0);
+            assert!(fakes.process.sent().is_empty());
         }
 
         #[test]
@@ -1388,7 +1470,7 @@ mod tests {
             let fakes = Fakes::new(Process::saying(true));
 
             assert_eq!(
-                stop_with(&p, Duration::from_secs(3), true, &fakes.deps()),
+                stop_with(&p, ROUTE_BUDGET, true, &fakes.deps()),
                 Stopped::Stopped
             );
             assert!(fakes.process.sent().is_empty());
