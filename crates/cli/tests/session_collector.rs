@@ -3,7 +3,12 @@
 
 //! The SessionStart hook keeps the telemetry collector running for plain
 //! `claude` sessions, end to end with the real binary in a scratch HOME.
+//! `collector_daemon.rs` covers the daemon's done bars; this file covers the
+//! path through `setup --only telemetry`.
 
+use playbook::cc::telemetry::TEST_SPAWN_VAR;
+use playbook::usage::daemon::{lock_state, LockState};
+use playbook::usage::run::Paths;
 use serde_json::Value;
 use std::fs;
 use std::io::Write;
@@ -30,6 +35,10 @@ impl Home {
             .env("SHELL", "/bin/zsh")
             .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
             .env_remove("CLAUDE_CONFIG_DIR")
+            // CI sets `CI=true`, which makes the hook headless.
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
+            .env(TEST_SPAWN_VAR, "1")
             .current_dir(&self.0);
         for (name, _) in std::env::vars() {
             if name == "CLAUDE_CODE_ENABLE_TELEMETRY" || name.starts_with("OTEL_") {
@@ -115,14 +124,24 @@ impl Home {
     }
 }
 
+/// How long a killed collector may take to let go of the lock.
+const GONE_BOUND: Duration = Duration::from_secs(5);
+
 impl Drop for Home {
+    /// Kills the collector that holds the lock, and waits for the lock to
+    /// free, so no test leaves a collector running.
     fn drop(&mut self) {
-        if let Some(pid) = self
-            .state()
-            .and_then(|s| s["pid"].as_u64())
-            .filter(|p| *p != 0)
-        {
-            let _ = Command::new("kill").arg(pid.to_string()).status();
+        let paths = Paths::from_home(&self.0);
+        let deadline = Instant::now() + GONE_BOUND;
+        while let LockState::Held(holder) = lock_state(&paths) {
+            if let Some(pid) = holder.pid.and_then(|p| libc::pid_t::try_from(p).ok()) {
+                // SAFETY: plain kill(2) on the pid the lock names.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
         let _ = fs::remove_dir_all(&self.0);
     }

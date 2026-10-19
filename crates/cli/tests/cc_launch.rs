@@ -1026,47 +1026,51 @@ fn without_an_override_the_alias_variable_is_not_set() {
     assert_eq!(logged.trim(), "unset");
 }
 
-/// Reads the pid from `collector.json` and stops that process.
-fn stop_collector(state: &Path) {
-    let text = fs::read_to_string(state).unwrap_or_default();
-    let pid = text
-        .split("\"pid\":")
-        .nth(1)
-        .and_then(|t| t.split([',', '}']).next())
-        .unwrap_or("0")
-        .trim()
-        .to_string();
-    if pid != "0" {
-        let _ = Command::new("kill").arg(&pid).status();
-    }
-}
-
 #[test]
-fn cc_starts_the_collector_once_when_the_usage_db_exists_and_points_the_session_at_it() {
+fn cc_starts_the_collector_daemon_when_the_settings_point_at_it() {
+    use playbook::usage::daemon::{lock_state, LockState};
+    const UP_BOUND: std::time::Duration = std::time::Duration::from_secs(10);
     let e = env("collector-spawn");
-    let usage = e.home.join(".config/playbook/data");
-    fs::create_dir_all(&usage).unwrap();
-    fs::write(usage.join("usage.db"), "").unwrap();
-    make_exec(
-        &e.root.join("bin/claude"),
-        "#!/bin/sh\nprintf '%s %s\\n' \"$OTEL_EXPORTER_OTLP_ENDPOINT\" \"$OTEL_METRICS_EXPORTER\" >> \"$FAKE_LOG.otel\"\nexit 0\n",
-    );
-    let state = usage.join("collector.json");
-    let first = e.launch(&[]);
-    let second = e.launch(&[]);
-    let seen = fs::read_to_string(e.root.join("claude.log.otel")).unwrap_or_default();
-    let note = String::from_utf8_lossy(&first.stderr).to_string();
-    let again = String::from_utf8_lossy(&second.stderr).to_string();
-    stop_collector(&state);
-    let lines: Vec<&str> = seen.lines().collect();
-    assert_eq!(lines.len(), 2, "{seen}");
-    assert!(
-        lines[0].starts_with("http://127.0.0.1:") && lines[0].ends_with(" otlp"),
-        "seen={seen:?} note={note:?}"
-    );
-    assert_eq!(lines[0], lines[1], "the second session reuses the receiver");
-    assert!(note.contains("started the usage collector"), "{note}");
-    assert!(!again.contains("started the usage collector"), "{again}");
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let data = e.home.join(".config/playbook/data");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(
+        data.join("collector.json"),
+        format!(r#"{{"pid":0,"port":{port},"token":"t"}}"#),
+    )
+    .unwrap();
+    fs::create_dir_all(e.home.join(".claude")).unwrap();
+    fs::write(
+        e.home.join(".claude/settings.json"),
+        format!(r#"{{"env":{{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:{port}"}}}}"#),
+    )
+    .unwrap();
+    let paths = playbook::usage::run::Paths::from_home(&e.home);
+    let mut cmd = e.playbook(&["cc", "launch", "--"]);
+    cmd.env_remove("CI")
+        .env_remove("PLAYBOOK_HEADLESS")
+        .env(playbook::cc::telemetry::TEST_SPAWN_VAR, "1");
+
+    let out = cmd.output().unwrap();
+    let deadline = std::time::Instant::now() + UP_BOUND;
+    let mut holder = None;
+    while holder.is_none() && std::time::Instant::now() < deadline {
+        if let LockState::Held(h) = lock_state(&paths) {
+            holder = h.pid;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    if let Some(pid) = holder.and_then(|p| libc::pid_t::try_from(p).ok()) {
+        // SAFETY: plain kill(2) on the pid the lock names.
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+
+    assert!(out.status.success(), "{out:?}");
+    assert!(holder.is_some(), "cc started no collector");
 }
 
 #[test]

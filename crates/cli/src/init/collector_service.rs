@@ -72,13 +72,7 @@ fn collector_state(home: &Path) -> Option<crate::usage::collector::State> {
     crate::usage::collector::read_state(&crate::usage::collector::state_path(&paths))
 }
 
-/// Whether the Claude Code user settings point telemetry at the playbook
-/// collector, the case where a receiver is needed.
-pub fn telemetry_points_here(home: &Path) -> bool {
-    use crate::usage::telemetry_detect::{configured_from_files, Configured};
-    let port = collector_state(home).map(|s| s.port).filter(|p| *p != 0);
-    configured_from_files(home, home, port) == Configured::Playbook
-}
+pub use crate::cc::telemetry::telemetry_points_here;
 
 /// Whether a collector answers for the user at `home`.
 pub fn collector_running(home: &Path) -> bool {
