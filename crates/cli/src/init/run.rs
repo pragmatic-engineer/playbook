@@ -56,8 +56,6 @@ pub struct InitPaths {
     pub only: bool,
     /// What the short-name part does: skip, record a no, or link `pb`.
     pub short_name: crate::init::pb_link::Choice,
-    /// Whether to write the 1 GB disk ballast (`playbook disk reserve`).
-    pub disk_ballast: bool,
     /// Where the `pb` link may go. `None` when the binary's location is unknown.
     pub pb_target: Option<crate::init::pb_link::Target>,
     /// What the attribution part does: skip, OFF (add the missing
@@ -208,7 +206,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     // After telemetry, so the service sees the settings that step wrote.
     let service_step = collector_service_step(paths);
     let short_name_step = short_name_step(paths);
-    let ballast_step = disk_ballast_step(paths);
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
 
     let trust_step = trust_config_dir_step(&paths.home);
@@ -221,7 +218,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         service_step,
         attribution_step,
         short_name_step,
-        ballast_step,
         path_step,
     ];
     steps.extend(migrated.steps);
@@ -264,9 +260,6 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     }
     if paths.short_name != crate::init::pb_link::Choice::Skip {
         steps.push(short_name_step(paths));
-    }
-    if paths.disk_ballast {
-        steps.push(disk_ballast_step(paths));
     }
     if paths.path_setup.is_some() {
         steps.push(path_step(&paths.home, paths.path_setup.as_ref()));
@@ -344,32 +337,6 @@ pub(crate) fn attribution_step(paths: &InitPaths, epoch: u64) -> StepReport {
 /// The short-name part, as `paths.short_name` says.
 pub(crate) fn short_name_step(paths: &InitPaths) -> StepReport {
     crate::init::pb_link::step(&paths.home, paths.short_name, paths.pb_target.as_ref())
-}
-
-/// The disk-ballast part: `playbook disk reserve` on a yes.
-pub(crate) fn disk_ballast_step(paths: &InitPaths) -> StepReport {
-    use crate::disk::{ballast, policy, size};
-    const PART: &str = "disk-ballast";
-    if !paths.disk_ballast {
-        return StepReport::skipped(PART, "not requested; pass --disk-ballast to opt in");
-    }
-    match ballast::reserve_for(&paths.home, &policy::load(&paths.home)) {
-        Ok(ballast::Reserved::Wrote(bytes)) => StepReport::wired(
-            PART,
-            format!(
-                "wrote a {} ballast to {}; `playbook disk release` gives it back",
-                size::gb(bytes),
-                ballast::file(&paths.home).display()
-            ),
-        ),
-        Ok(ballast::Reserved::Existing(bytes)) => StepReport::already_correct(
-            PART,
-            format!("a {} ballast is already in place", size::gb(bytes)),
-        ),
-        // Expected on a nearly full disk or a busy lock: setup goes on.
-        Err(err) if ballast::is_expected_refusal(&err) => StepReport::skipped(PART, err),
-        Err(err) => StepReport::failed(PART, err),
-    }
 }
 
 /// The telemetry part: writes the collector variables when asked and when the

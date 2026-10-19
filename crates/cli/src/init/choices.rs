@@ -71,12 +71,6 @@ pub struct Flags {
     /// Do not add the `pb` short name
     #[arg(long, overrides_with = "short_name")]
     pub no_short_name: bool,
-    /// Write a 1 GB ballast file under ~/.cache/playbook/ballast that `playbook disk release` deletes to give space back on a full disk
-    #[arg(long, overrides_with = "no_disk_ballast")]
-    pub disk_ballast: bool,
-    /// Do not write the disk ballast file, the default
-    #[arg(long, overrides_with = "disk_ballast")]
-    pub no_disk_ballast: bool,
     #[arg(
         long,
         overrides_with_all = ["no_attribution", "attribution_off", "no_attribution_off"],
@@ -100,7 +94,7 @@ pub struct Flags {
         value_name = "PART",
         value_delimiter = ',',
         num_args = 1..,
-        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, disk-ballast, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
+        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
     )]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
@@ -125,8 +119,6 @@ pub struct Choices {
     pub telemetry: bool,
     pub collector_service: bool,
     pub short_name: bool,
-    /// Whether to write the 1 GB disk ballast. Off unless chosen.
-    pub disk_ballast: bool,
     /// Attribution OFF (the default), ON, or left as it is.
     pub attribution: attribution::Choice,
 }
@@ -151,7 +143,6 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
         "telemetry" => (flags.telemetry, flags.no_telemetry),
         "collector-service" => (flags.collector_service, flags.no_collector_service),
         "short-name" => (flags.short_name, flags.no_short_name),
-        "disk-ballast" => (flags.disk_ballast, flags.no_disk_ballast),
         "attribution" => (flags.attribution, flags.no_attribution),
         _ => return None,
     })
@@ -303,7 +294,6 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         telemetry: has("telemetry"),
         collector_service: has("collector-service"),
         short_name: has("short-name"),
-        disk_ballast: has("disk-ballast"),
         attribution: match has(attribution::PART) {
             true => attribution_from_flags(flags).unwrap_or(attribution::Choice::Default),
             false => attribution::Choice::Skip,
@@ -519,14 +509,6 @@ pub fn resolve_with(
             catalog::question("short-name"),
             settings_default,
         ),
-        // It costs 1 GB, so it stays off unless a flag or an answer says yes,
-        // `--yes` included.
-        disk_ballast: decide(
-            flags.disk_ballast,
-            flags.no_disk_ballast,
-            catalog::question("disk-ballast"),
-            false,
-        ),
         attribution: attribution::Choice::Skip,
     };
     // The question asks for ON, so a no, or Enter, is OFF that keeps the
@@ -566,14 +548,13 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
         (flags.telemetry, flags.no_telemetry),
         (flags.collector_service, flags.no_collector_service),
         (flags.short_name, flags.no_short_name),
-        (flags.disk_ballast, flags.no_disk_ballast),
         (flags.attribution, flags.no_attribution),
     ]
     .iter()
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
         "setup: output is not a terminal, so no questions were asked; the hooks, status line, \
-         system-prompt, telemetry, collector-service, short-name and disk-ballast parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
+         system-prompt, telemetry, collector-service and short-name parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
 }
@@ -600,7 +581,6 @@ mod tests {
             no_telemetry: true,
             no_collector_service: true,
             no_short_name: true,
-            no_disk_ballast: true,
             no_attribution: true,
             ..Flags::default()
         };
@@ -652,7 +632,6 @@ mod tests {
                 telemetry: false,
                 collector_service: false,
                 short_name: false,
-                disk_ballast: false,
                 attribution: attribution::Choice::Skip
             }
         );
@@ -673,36 +652,10 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.path);
-        assert_eq!(asked.len(), 7, "{asked:?}");
+        assert_eq!(asked.len(), 6, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| !q.contains("hooks") && q != catalog::question("path")));
-    }
-
-    #[test]
-    fn the_disk_ballast_stays_off_unless_a_flag_or_an_answer_says_yes() {
-        let yes = Flags {
-            yes: true,
-            ..Flags::default()
-        };
-        assert!(!resolve(&yes, false, true, &mut never).disk_ballast);
-        assert!(!resolve(&yes, true, true, &mut never).disk_ballast);
-        let flag = Flags {
-            yes: true,
-            disk_ballast: true,
-            ..Flags::default()
-        };
-        assert!(resolve(&flag, false, true, &mut never).disk_ballast);
-        let answered = resolve(&Flags::default(), true, true, &mut |q, d| {
-            q == catalog::question("disk-ballast") || d
-        });
-        assert!(answered.disk_ballast);
-        let only = Flags {
-            only: vec!["disk-ballast".into()],
-            ..Flags::default()
-        };
-        let c = only_choices(&only).unwrap().unwrap();
-        assert!(c.disk_ballast && !c.hooks && !c.short_name);
     }
 
     #[test]
@@ -921,7 +874,6 @@ mod tests {
                 telemetry: true,
                 collector_service: true,
                 short_name: true,
-                disk_ballast: false,
                 attribution: attribution::Choice::Default
             }
         );
@@ -1016,7 +968,6 @@ mod tests {
                 telemetry: true,
                 collector_service: false,
                 short_name: false,
-                disk_ballast: false,
                 attribution: attribution::Choice::Skip
             }
         );
@@ -1151,7 +1102,6 @@ mod tests {
             telemetry: false,
             collector_service: false,
             short_name: false,
-            disk_ballast: false,
             attribution: attribution::Choice::Skip,
         }
     }

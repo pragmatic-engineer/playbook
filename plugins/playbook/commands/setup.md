@@ -1,7 +1,7 @@
 ---
 description: Use on first install or to repair the local setup. Wires safety guards, settings.json, the pb short name and system prompt.
 allowed-tools: Bash, Read, AskUserQuestion
-argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--collector-service|--no-collector-service] [--short-name|--no-short-name] [--disk-ballast|--no-disk-ballast] [--attribution|--no-attribution] [--help] [--auto] [--ask]"
+argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--collector-service|--no-collector-service] [--short-name|--no-short-name] [--attribution|--no-attribution] [--help] [--auto] [--ask]"
 model: haiku
 effort: low
 ---
@@ -137,11 +137,9 @@ The same flags as `playbook setup`, with the same text as `playbook setup --help
 | `--no-collector-service` | Do not install the background service for the usage collector |
 | `--short-name` | Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free |
 | `--no-short-name` | Do not add the `pb` short name |
-| `--disk-ballast` | Write a 1 GB ballast file under ~/.cache/playbook/ballast that `playbook disk release` deletes to give space back on a full disk |
-| `--no-disk-ballast` | Do not write the disk ballast file, the default |
 | `--attribution` | Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true |
 | `--no-attribution` | Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values |
-| `--only <PART>...` | Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, disk-ballast, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON |
+| `--only <PART>...` | Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON |
 | `-y`, `--yes`, `--defaults` | Never ask: use the default for every part you did not answer with a flag |
 | `--dry-run` | Print what would change for each part and change nothing |
 | `--explain [<PART>]` | Describe a part, or every part when none is named, and change nothing |
@@ -162,7 +160,6 @@ The questions `playbook setup` asks in a terminal, in its order, with its defaul
 | 5 | `telemetry` | Telemetry | Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting that `playbook setup` will not change) | Yes | No variables are written. `playbook usage` reads transcripts instead. |
 | 6 | `collector-service` | Collector | Keep the usage collector (`playbook usage collect`) running in the background, so telemetry has a receiver after every login? This installs a per-user service: a launchd agent in ~/Library/LaunchAgents on macOS, a systemd user unit on Linux. It acts only when telemetry points at the playbook collector. | Yes | No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`. |
 | 7 | `short-name` | Short name | Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists. | Yes | No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing. |
-| 8 | `disk-ballast` | Disk ballast | Keep 1 GB in reserve as a ballast file in ~/.cache/playbook/ballast, so a full disk can get room back with `playbook disk release`? | No | No ballast is written. A full disk then needs a cleanup from outside the session. `playbook disk reserve` writes it later. |
-| 9 | `attribution` | Attribution | Turn attribution ON, so Claude Code adds its Co-Authored-By trailer, generated-by line and claude.ai session link to commits and pull requests? The default is OFF: playbook sets `attribution` in ~/.claude/settings.json so Claude Code adds none of them. | No | Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link. |
+| 8 | `attribution` | Attribution | Turn attribution ON, so Claude Code adds its Co-Authored-By trailer, generated-by line and claude.ai session link to commits and pull requests? The default is OFF: playbook sets `attribution` in ~/.claude/settings.json so Claude Code adds none of them. | No | Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link. |
 
 The security part is never asked about, in a terminal or here. It runs only with `--security` or when `security.defaults` is true.

@@ -62,9 +62,6 @@ fn extra_lines(id: &str) -> Vec<String> {
             "Adds the same link install.sh makes: pb -> playbook, in the playbook install folder."
                 .to_string(),
         ],
-        "disk-ballast" => {
-            vec!["Run `playbook disk reserve` later to put it back after a release.".to_string()]
-        }
         "attribution" => {
             vec!["Claude Code reads the key in every session it starts after this.".to_string()]
         }
@@ -83,7 +80,6 @@ pub fn decline_line(id: &str) -> &'static str {
         "telemetry" => "No variables are written. `playbook usage` reads transcripts instead.",
         "collector-service" => "No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`.",
         "short-name" => "No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing.",
-        "disk-ballast" => "No ballast is written. A full disk then needs a cleanup from outside the session. `playbook disk reserve` writes it later.",
         "attribution" => "Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link.",
         _ => "Nothing changes for this part.",
     }
@@ -259,7 +255,6 @@ mod tests {
             telemetry: true,
             collector_service: true,
             short_name: true,
-            disk_ballast: true,
             attribution: true,
             ..Flags::default()
         };
@@ -341,7 +336,6 @@ mod tests {
         });
         assert!(!c.hooks && !c.statusline && !c.path);
         assert!(!c.system_prompt && !c.short_name);
-        assert!(c.disk_ballast, "off by default, so a yes turns it on");
         assert!(
             !c.telemetry && !c.collector_service,
             "these parts are on by default, so a no flips them off"

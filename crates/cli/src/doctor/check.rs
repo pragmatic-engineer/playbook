@@ -95,7 +95,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 19] = [
+const PROBES: [Probe; 18] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -119,7 +119,6 @@ const PROBES: [Probe; 19] = [
     },
     |env| vec![attribution_row(env)],
     update_rows,
-    |env| vec![disk_row(env)],
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -708,48 +707,6 @@ fn config_rows(env: &Env) -> Vec<Row> {
     .collect()
 }
 
-/// Free disk space against `disk.warnFreeGb` and `disk.blockFreeGb`, on
-/// the volume with the least room.
-fn disk_row(env: &Env) -> Row {
-    use crate::disk::{ballast, policy};
-    let policy = policy::load(&env.home);
-    let paths = policy::measured_paths(&policy, &env.home, env.repo_root.as_deref());
-    let volumes = policy::volumes(&paths);
-    let Some(tight) = policy::tightest(&volumes) else {
-        return Row::new("-", Level::Info, "disk: could not read free space");
-    };
-    disk_row_for(&policy, tight, ballast::size(&env.home))
-}
-
-fn disk_row_for(
-    policy: &crate::disk::Policy,
-    tight: &crate::disk::policy::Volume,
-    ballast: Option<u64>,
-) -> Row {
-    use crate::disk::{size::gb, Level as Disk};
-    let level = match policy.level(tight.space.free) {
-        Disk::Ok => Level::Pass,
-        Disk::Low => Level::Warn,
-        Disk::Critical => Level::Fail,
-    };
-    let mut message = format!(
-        "disk: {} free on {} (warn below {} GB, block builds below {} GB)",
-        gb(tight.space.free),
-        tight.path.display(),
-        policy.warn_free_gb,
-        policy.block_free_gb
-    );
-    if let Some(bytes) = ballast {
-        message.push_str(&format!(", ballast {} reserved", gb(bytes)));
-    }
-    let row = Row::new("-", level, message);
-    if level == Level::Pass {
-        row
-    } else {
-        row.hint("run: playbook disk status to see what uses the space")
-    }
-}
-
 fn worktree_rows(env: &Env) -> Vec<Row> {
     let Some(root) = &env.repo_root else {
         return vec![Row::new(
@@ -1131,31 +1088,7 @@ fn data_rows(env: &Env) -> Vec<Row> {
     }
     let mut rows = vec![Row::new("-", Level::Info, msg)];
     rows.extend(orphan_rows(env, &dir));
-    rows.extend(backup_row(env));
     rows
-}
-
-/// One row when old migration backups sit in the playbook folder.
-fn backup_row(env: &Env) -> Option<Row> {
-    let found: Vec<_> = crate::disk::backups::leftovers(&env.home)
-        .into_iter()
-        .filter(|l| !l.junk)
-        .collect();
-    if found.is_empty() {
-        return None;
-    }
-    Some(
-        Row::new(
-            "-",
-            Level::Info,
-            format!(
-                "disk: {} old migration backup file(s), {} KB",
-                found.len(),
-                crate::disk::backups::total_bytes(&found) / 1024
-            ),
-        )
-        .hint("`playbook disk clean` removes those older than 7 days once data/config.db and data/memory.db hold their data, and keeps the newest"),
-    )
 }
 
 /// Databases in the data folder with no worktree of this clone. They belong
@@ -1457,35 +1390,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_backup_row_counts_old_migration_copies_and_not_junk() {
-        let home =
-            std::env::temp_dir().join(format!("pb-doctor-backups-{}", crate::testing::run_id()));
-        let root = home.join(".config/playbook");
-        std::fs::create_dir_all(&root).unwrap();
-        let env = Env {
-            home: home.clone(),
-            claude_home: home.join(".claude"),
-            plugin_root: None,
-            shell: String::new(),
-            path_var: OsString::new(),
-            repo_root: None,
-            repo_slug: None,
-        };
-        std::fs::write(root.join(".DS_Store"), b"x").unwrap();
-        assert!(backup_row(&env).is_none(), "junk alone is not a backup");
-        std::fs::write(root.join("playbook.db.migrated"), vec![0u8; 2048]).unwrap();
-        std::fs::write(root.join("playbook.db.migrated-wal"), b"").unwrap();
-        let row = backup_row(&env).expect("row");
-        assert!(
-            row.message
-                .starts_with("disk: 2 old migration backup file(s), 2 KB"),
-            "{}",
-            row.message
-        );
-        std::fs::remove_dir_all(&home).unwrap();
-    }
-
-    #[test]
     fn a_paused_plugin_downgrades_only_the_hook_and_status_line_passes() {
         let rows = vec![
             Row::new("1", Level::Pass, "plugin enabled"),
@@ -1540,44 +1444,5 @@ mod tests {
         assert_eq!(without[1].level, Level::Fail);
         assert_eq!(failing.len(), 1);
         assert_eq!(failing[0].level, Level::Fail);
-    }
-
-    #[test]
-    fn the_disk_row_follows_the_thresholds() {
-        use crate::disk::policy::Volume;
-        use crate::disk::probe::{Space, GIB};
-        let volume = |gb: f64| Volume {
-            path: PathBuf::from("/Users/me"),
-            space: Space {
-                free: (gb * GIB as f64) as u64,
-                total: 460 * GIB,
-                device: 1,
-            },
-        };
-        let policy = crate::disk::Policy::default();
-        let cases = [
-            (0.0, Level::Fail),
-            (5.9, Level::Fail),
-            (6.0, Level::Warn),
-            (14.9, Level::Warn),
-            (15.0, Level::Pass),
-        ];
-        for (gb, want) in cases {
-            let row = disk_row_for(&policy, &volume(gb), None);
-            assert_eq!(row.level, want, "{gb} GB");
-            assert_eq!(row.hint.is_some(), want != Level::Pass, "{gb} GB");
-            assert!(
-                row.message
-                    .contains("warn below 15 GB, block builds below 6 GB"),
-                "{}",
-                row.message
-            );
-        }
-        let row = disk_row_for(&policy, &volume(20.0), Some(GIB));
-        assert!(
-            row.message.ends_with("ballast 1.0 GB reserved"),
-            "{}",
-            row.message
-        );
     }
 }
