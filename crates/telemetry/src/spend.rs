@@ -28,6 +28,11 @@ const MAX_MINOR_UNITS: f64 = 1e15;
 /// The currency code of dollars.
 const USD: &str = "USD";
 
+/// The longest currency code that is kept. Anything longer or with other
+/// characters than letters and digits is treated as absent, so a hostile
+/// document cannot put text into a label.
+const MAX_CURRENCY_LEN: usize = 8;
+
 /// A difference below this many dollars is never a disagreement.
 pub const DISAGREE_MIN_USD: f64 = 1.0;
 
@@ -83,15 +88,18 @@ impl Money {
     /// The amount with exactly `decimals` places and no currency sign, as
     /// `1059.50`.
     pub fn format(&self) -> String {
-        if self.decimals == 0 {
-            return self.minor.to_string();
+        let decimals = self.decimals.min(MAX_DECIMALS);
+        let sign = if self.minor < 0 { "-" } else { "" };
+        let units = self.minor.unsigned_abs();
+        if decimals == 0 {
+            return format!("{sign}{units}");
         }
-        let scale = 10i64.pow(u32::from(self.decimals));
+        let scale = 10u64.pow(u32::from(decimals));
         format!(
-            "{}.{:0width$}",
-            self.minor / scale,
-            self.minor % scale,
-            width = usize::from(self.decimals)
+            "{sign}{}.{:0width$}",
+            units / scale,
+            units % scale,
+            width = usize::from(decimals)
         )
     }
 }
@@ -198,7 +206,8 @@ pub fn parse(body: &str, fetched_at: i64) -> Result<Parsed, SpendError> {
     let spend = object(root, "spend");
 
     let places = decimals(field("decimal_places"))?;
-    let currency = text(field("currency"));
+    let currency = text(field("currency"))
+        .filter(|c| c.len() <= MAX_CURRENCY_LEN && c.chars().all(|ch| ch.is_ascii_alphanumeric()));
     let money = |key: &str| -> Result<Option<Money>, SpendError> {
         Ok(number(field(key))?
             .zip(places)
@@ -483,6 +492,82 @@ mod tests {
         assert_eq!(m(7, 0).format(), "7");
         assert_eq!(m(1_234_567, 6).format(), "1.234567");
         assert_eq!(m(105_950, 2).to_f64(), 1059.5);
+    }
+
+    #[test]
+    fn money_never_panics_or_misplaces_a_sign_when_built_by_hand() {
+        let m = |minor, decimals| Money {
+            minor,
+            decimals,
+            currency: None,
+        };
+
+        assert_eq!(m(-50, 2).format(), "-0.50");
+        assert_eq!(m(-105_950, 2).format(), "-1059.50");
+        assert_eq!(m(i64::MIN, 2).format(), "-92233720368547758.08");
+        assert_eq!(m(1_234_567, 200).format(), "1.234567");
+    }
+
+    #[test]
+    fn the_spend_percent_is_used_when_utilization_is_missing() {
+        let with =
+            r#"{"extra_usage":{"monthly_limit":1,"decimal_places":2},"spend":{"percent":71}}"#;
+        let junk =
+            r#"{"extra_usage":{"monthly_limit":1,"decimal_places":2},"spend":{"percent":"lots"}}"#;
+
+        let Ok(Parsed::Figure(a)) = parse(with, NOW) else {
+            panic!("expected a figure");
+        };
+        let Ok(Parsed::Figure(b)) = parse(junk, NOW) else {
+            panic!("expected a figure");
+        };
+
+        assert_eq!(a.percent, Some(71.0));
+        assert_eq!(b.percent, None);
+    }
+
+    #[test]
+    fn the_reset_time_reads_as_iso_text_or_whole_seconds() {
+        let iso = r#"{"extra_usage":{"monthly_limit":1,"decimal_places":2,"resets_at":"2026-10-01T00:00:00Z"}}"#;
+        let secs =
+            r#"{"extra_usage":{"monthly_limit":1,"decimal_places":2,"resets_at":1790000000}}"#;
+        let junk = r#"{"extra_usage":{"monthly_limit":1,"decimal_places":2,"resets_at":"soon"}}"#;
+        let resets = |body: &str| match parse(body, NOW) {
+            Ok(Parsed::Figure(f)) => f.resets_at,
+            other => panic!("expected a figure, got {other:?}"),
+        };
+
+        assert_eq!(resets(iso), Some(1_790_812_800));
+        assert_eq!(resets(secs), Some(1_790_000_000));
+        assert_eq!(resets(junk), None);
+    }
+
+    #[test]
+    fn null_money_fields_and_a_null_currency_are_absent() {
+        let body = r#"{"extra_usage":{"monthly_limit":150000,"used_credits":null,"decimal_places":2,"currency":null}}"#;
+
+        let Ok(Parsed::Figure(f)) = parse(body, NOW) else {
+            panic!("expected a figure");
+        };
+
+        assert!(f.used.is_none());
+        assert_eq!(f.limit_usd(), None);
+        assert_eq!(f.limit.unwrap().currency, None);
+    }
+
+    #[test]
+    fn a_currency_with_other_than_letters_and_digits_or_too_long_is_absent() {
+        for code in ["US D", "\\u001b[31mUSD", "ABCDEFGHI", ""] {
+            let body = format!(
+                r#"{{"extra_usage":{{"monthly_limit":1,"decimal_places":2,"currency":"{code}"}}}}"#
+            );
+
+            let Ok(Parsed::Figure(f)) = parse(&body, NOW) else {
+                panic!("expected a figure for {code}");
+            };
+
+            assert_eq!(f.limit.unwrap().currency, None, "{code}");
+        }
     }
 
     #[test]

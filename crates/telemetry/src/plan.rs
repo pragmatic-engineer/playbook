@@ -1018,4 +1018,37 @@ mod tests {
 
         assert_eq!(read_cached(&missing), Account::default());
     }
+
+    #[test]
+    fn a_server_figure_is_named_in_the_verdict_with_its_age_and_staleness() {
+        let figure = |age: i64| crate::spend::SpendFigure {
+            limit: Some(crate::spend::Money {
+                minor: 150_000,
+                decimals: 2,
+                currency: Some("USD".to_string()),
+            }),
+            used: None,
+            percent: None,
+            severity: None,
+            resets_at: None,
+            limit_reached: None,
+            windows: Vec::new(),
+            fetched_at: NOW - age,
+            origin: crate::limits::Origin::Server,
+        };
+        let sources = |age| limits_source::Sources {
+            server: Some(figure(age)),
+            ..limits_source::Sources::default()
+        };
+
+        let fresh = verdict_lines(&sources(600), NOW).join("\n");
+        let stale = verdict_lines(&sources(7 * 3600), NOW).join("\n");
+
+        assert!(
+            fresh.contains("monthly limit: $1500.00 billed by the server, fetched 10m ago\n")
+                || fresh.ends_with("fetched 10m ago"),
+            "{fresh}"
+        );
+        assert!(stale.contains("(stale)"), "{stale}");
+    }
 }

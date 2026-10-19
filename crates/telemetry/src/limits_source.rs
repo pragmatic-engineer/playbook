@@ -15,7 +15,7 @@
 use super::limits::{Burn, Limit, LimitPeriod, Origin, State, Unit};
 use super::period::Period;
 use super::plan::Account;
-use super::query::WeekStart;
+use super::query::{month_first_day, WeekStart};
 use super::spend::{Comparison, NotCompared, SpendFigure};
 use super::UsageEvent;
 use crate::util::atomic::write_atomic_private;
@@ -291,6 +291,12 @@ pub enum Monthly {
     Unset,
 }
 
+/// The first second of the UTC month that holds `now`.
+fn utc_month_start(now: i64) -> i64 {
+    let utc = crate::tz::Zone::Utc;
+    utc.day_start(month_first_day(utc.day_of(now)))
+}
+
 /// The monthly limit to use. A measured one comes first. Then a server figure
 /// under six hours old that is newer than the cache, because it is the amount
 /// billed. Then a cached spend limit under six hours old, because it is what
@@ -326,7 +332,8 @@ pub fn monthly(s: &Sources, now: i64) -> Monthly {
                 fresh: c.is_fresh(now),
             })
         });
-    let month_start = LimitPeriod::Monthly.containing(now, WeekStart::default()).0;
+    // The server bills by the UTC month, whatever zone this machine is in.
+    let month_start = utc_month_start(now);
     let server = s
         .server
         .as_ref()
@@ -456,14 +463,17 @@ pub fn compare_server(
     if !matches!(monthly(s, now), Monthly::Server { .. }) {
         return None;
     }
-    let (start, _) = LimitPeriod::Monthly.containing(now, WeekStart::default());
+    let figure = s.server.clone()?;
+    // The server billed up to the moment it was asked, so only the local
+    // spend up to then is comparable.
+    let until = now.min(figure.fetched_at);
     let local = events
         .iter()
-        .filter(|e| e.timestamp >= start && e.timestamp <= now)
+        .filter(|e| e.timestamp >= utc_month_start(now) && e.timestamp <= until)
         .map(|e| e.cost_usd)
         .sum::<f64>()
         + 0.0;
-    Some(Comparison::new(s.server.clone()?, local))
+    Some(Comparison::new(figure, local))
 }
 
 /// The line for the 5 hour and weekly windows when none is known. A plan
@@ -1394,6 +1404,42 @@ mod tests {
             text.contains("server billed figure was fetched 10m ago"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn a_fresh_server_figure_beats_a_stale_cache_and_the_manual_budget() {
+        let s = Sources {
+            server: Some(server_at(NOW - 60, 150_000, None)),
+            account: cache(7 * HOUR, spend(500.0, Some(120.0)), None),
+            budgets: vec![(LimitPeriod::Monthly, 100.0)],
+            ..Sources::default()
+        };
+
+        assert!(matches!(
+            monthly(&s, NOW),
+            Monthly::Server { fresh: true, .. }
+        ));
+    }
+
+    #[test]
+    fn the_comparison_ignores_local_spend_after_the_figure_was_fetched() {
+        let s = Sources {
+            server: Some(server_at(NOW - 5 * HOUR, 150_000, Some(90_000))),
+            ..Sources::default()
+        };
+        let events = [cost(NOW - 6 * HOUR, 900.0), cost(NOW - HOUR, 400.0)];
+
+        let c = compare_server(&s, &events, NOW).unwrap().unwrap();
+
+        assert_eq!(c.local_estimate_usd, 900.0);
+        assert!(!c.disagrees);
+    }
+
+    #[test]
+    fn the_month_is_the_utc_month_in_any_zone() {
+        assert_eq!(utc_month_start(MONTH_START), MONTH_START);
+        assert_eq!(utc_month_start(MONTH_START - 1), MONTH_START - 31 * 86_400);
+        assert_eq!(utc_month_start(NOW), MONTH_START);
     }
 
     #[test]
