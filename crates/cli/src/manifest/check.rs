@@ -17,19 +17,16 @@
 use std::path::{Path, PathBuf};
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 18] = [
+const ALLOW_FILES: [&str; 15] = [
     ".gitignore",
     "CHANGELOG.md",
-    "intents.json",
     "breaking-changes.json",
     "README.md",
     "LICENSE",
     "NOTICE",
-    "Brewfile",
     "justfile",
     "install.sh",
     "install-pbtop.sh",
-    "settings.shared.json",
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
@@ -40,7 +37,7 @@ const ALLOW_FILES: [&str; 18] = [
 
 /// Top-level directories any tracked file may live under.
 const ALLOW_DIRS: [&str; 7] = [
-    "prompts", "plugins", "scripts", "docs", ".github", "crates", ".cargo",
+    "seed", "plugins", "scripts", "docs", ".github", "crates", ".cargo",
 ];
 
 /// Belt-and-suspenders: the owner's personal settings.json must never track,
@@ -132,10 +129,14 @@ mod tests {
     /// The plugin contract files and the scripts folder are allowlisted.
     #[test]
     fn the_plugin_contract_files_are_allowlisted() {
-        let tracked: Vec<String> = ["intents.json", "CHANGELOG.md", "scripts/check-intents.sh"]
-            .iter()
-            .map(|p| (*p).to_string())
-            .collect();
+        let tracked: Vec<String> = [
+            "plugins/intents.json",
+            "CHANGELOG.md",
+            "scripts/check-intents.sh",
+        ]
+        .iter()
+        .map(|p| (*p).to_string())
+        .collect();
         assert!(violations(&tracked).is_empty());
     }
 
@@ -214,9 +215,9 @@ mod tests {
             ".gitignore".to_string(),
             "README.md".to_string(),
             "LICENSE".to_string(),
-            "settings.shared.json".to_string(),
+            "seed/settings.shared.json".to_string(),
             "scripts/check-links.sh".to_string(),
-            "prompts/system.md".to_string(),
+            "seed/prompts/system.md".to_string(),
             "docs/index.md".to_string(),
             ".github/workflows/ci.yml".to_string(),
         ];

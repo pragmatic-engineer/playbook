@@ -110,9 +110,9 @@ fn seed_skeleton(dir: &Path) {
     add_file(dir, ".gitignore");
     add_file(dir, "README.md");
     add_file(dir, "LICENSE");
-    add_file(dir, "settings.shared.json");
+    add_file(dir, "seed/settings.shared.json");
     add_file(dir, "scripts/check-links.sh");
-    add_file(dir, "prompts/system.md");
+    add_file(dir, "seed/prompts/system.md");
     add_file(dir, "docs/index.md");
     add_file(dir, ".github/workflows/ci.yml");
 }

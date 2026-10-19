@@ -44,7 +44,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The repo checkout root, standing in for `CLAUDE_PLUGIN_ROOT` on a real
-/// install, matching `tests/init_run.rs::self_root`.
+/// install, matching `tests/init_run.rs::checkout_root`.
 fn self_root() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
 }

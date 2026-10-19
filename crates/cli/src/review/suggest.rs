@@ -130,7 +130,7 @@ struct Pats {
 }
 
 static PATS: LazyLock<Pats> = LazyLock::new(|| Pats {
-    payload: static_regex(r"^(plugins/[^/]+/(commands|skills|agents|hooks)/|prompts/)"),
+    payload: static_regex(r"^(plugins/[^/]+/(commands|skills|agents|hooks)/|(seed/)?prompts/)"),
     test: static_regex(
         r"(^|/)(tests?|__tests__|spec|fixtures)/|(_test|_spec)\.[a-z]+$|\.(test|spec)\.[a-z]+$",
     ),

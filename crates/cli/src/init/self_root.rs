@@ -9,9 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
-const EMBEDDED_SETTINGS: &str = include_str!("../../../../settings.shared.json");
-const EMBEDDED_PROMPT: &str = include_str!("../../../../prompts/SYSTEM_PROMPT.md");
-const EMBEDDED_BREWFILE: &str = include_str!("../../../../Brewfile");
+const EMBEDDED_SETTINGS: &str = include_str!("../../../../seed/settings.shared.json");
+const EMBEDDED_PROMPT: &str = include_str!("../../../../seed/prompts/SYSTEM_PROMPT.md");
+const EMBEDDED_BREWFILE: &str = include_str!("../../../../seed/Brewfile");
 
 /// True when `root` holds the two files `init` seeds from. The skills plugin
 /// does not ship them (the hooks plugin and this binary do), so a plugin root

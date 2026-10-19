@@ -49,9 +49,15 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The repo checkout root, where `settings.shared.json` lives, standing in for
-/// `CLAUDE_PLUGIN_ROOT` on a real install.
+/// The checkout's `seed/` folder, where `settings.shared.json` lives: the
+/// seed root `init::run::run` reads.
 fn self_root() -> PathBuf {
+    PathBuf::from(env!("PLAYBOOK_REPO_ROOT")).join("seed")
+}
+
+/// The repo checkout root, standing in for `CLAUDE_PLUGIN_ROOT` on a real
+/// install. Setup finds the seed in its `seed/` folder.
+fn checkout_root() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
 }
 
@@ -883,7 +889,7 @@ fn binary_malformed_settings_json_exits_non_zero() {
     let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
         .args(["setup", "--yes"])
         .env("HOME", &home)
-        .env("CLAUDE_PLUGIN_ROOT", self_root())
+        .env("CLAUDE_PLUGIN_ROOT", checkout_root())
         .env("SHELL", "/bin/bash")
         .output()
         .expect("playbook binary should spawn");
@@ -913,7 +919,7 @@ fn binary_clean_init_exits_zero_and_is_idempotent() {
         Command::new(env!("CARGO_BIN_EXE_playbook"))
             .args(["setup", "--yes"])
             .env("HOME", &home)
-            .env("CLAUDE_PLUGIN_ROOT", self_root())
+            .env("CLAUDE_PLUGIN_ROOT", checkout_root())
             .env("SHELL", "/bin/bash")
             .output()
             .expect("playbook binary should spawn")

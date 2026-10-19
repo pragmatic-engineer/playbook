@@ -30,11 +30,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The repo checkout root, where `prompts/SYSTEM_PROMPT.md` and everything
-/// else `init::run::run` reads actually live, matching the helper of the
-/// same name in `tests/init_run.rs`.
+/// The checkout's `seed/` folder, where `prompts/SYSTEM_PROMPT.md` and the
+/// rest of what `init::run::run` reads live, matching the helper of the same
+/// name in `tests/init_run.rs`.
 fn self_root() -> PathBuf {
-    PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
+    PathBuf::from(env!("PLAYBOOK_REPO_ROOT")).join("seed")
 }
 
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);

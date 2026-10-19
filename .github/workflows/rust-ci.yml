@@ -71,7 +71,7 @@ jobs:
   #
   # Docs-only means every changed path is a root policy file (README.md,
   # CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, CHANGELOG.md) or a *.md
-  # under docs/. prompts/, hooks/ and .github/ are never docs-only: tests
+  # under docs/. seed/, hooks/ and .github/ are never docs-only: tests
   # read them.
   changes:
     runs-on: ubuntu-latest
@@ -293,7 +293,7 @@ jobs:
         if: env.LANE == 'true'
         run: |
           cargo build
-          ./target/debug/playbook settings check settings.shared.json .
+          ./target/debug/playbook settings check seed/settings.shared.json .
 
       # Moved out of shell-ci with the port, same reasoning: the manifest
       # validator is now a subcommand too, so it needs the binary already
@@ -572,7 +572,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: smoke-bin/playbook
-          key: smoke-bin-v1-${{ matrix.target }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo/**', 'crates/**', 'Brewfile', 'settings.shared.json', 'prompts/**', 'breaking-changes.json', 'plugins/playbook/skills/*/SKILL.md', '.github/workflows/rust-ci.yml') }}
+          key: smoke-bin-v1-${{ matrix.target }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo/**', 'crates/**', 'seed/**', 'breaking-changes.json', 'plugins/playbook/skills/*/SKILL.md', '.github/workflows/rust-ci.yml') }}
 
       # Every step from here to the cargo save runs only when the binary was
       # not restored, and carries the same `if`.
