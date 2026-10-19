@@ -41,7 +41,10 @@ pub fn read_facts(dir: &Path) -> io::Result<Vec<ClaudeFact>> {
         let Ok(content) = fs::read_to_string(&path) else {
             continue;
         };
-        let hash = format!("{:x}", Sha256::digest(content.as_bytes()));
+        let hash: String = Sha256::digest(content.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
         facts.push(ClaudeFact {
             file_name: name.to_string(),
             content,
