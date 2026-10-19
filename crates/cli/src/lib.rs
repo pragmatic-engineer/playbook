@@ -8,7 +8,6 @@
 pub mod adr;
 pub mod agents;
 pub mod atlassian;
-pub mod breaking;
 pub mod brief;
 pub mod cc;
 pub mod ci;
@@ -379,24 +378,6 @@ pub enum Command {
         /// The version the install script replaced, for --print-notes
         #[arg(long, hide = true, value_name = "VERSION", requires = "print_notes")]
         from: Option<String>,
-    },
-    /// List the breaking changes this binary knows about
-    ///
-    /// Reads the record built into this binary (ADR 0035). With `--since`, it
-    /// lists the playbook entries newer than that version, up to this one.
-    /// Without it, it lists every entry for every component: playbook, plugin
-    /// and telemetry. `playbook update` runs it with `--json` on the new
-    /// binary to show what an upgrade crosses. Prints nothing, or `[]` with
-    /// `--json`, when there is nothing to list.
-    ///
-    /// Example: `playbook breaking --since 0.25.0`
-    Breaking {
-        /// List only the playbook entries newer than this version
-        #[arg(long)]
-        since: Option<String>,
-        /// Print the entries as a JSON list
-        #[arg(long)]
-        json: bool,
     },
     /// Print the installed version, same as `--version`
     Version,

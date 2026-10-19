@@ -9,8 +9,8 @@ marketplace, as the section on the release workflow describes. The tap also
 checks every 30 minutes for a newer release and bumps a formula itself when the
 `downstream` job has not done it within an hour.
 
-A release attaches ten assets (two per target), `release-notes.json`,
-`breaking-changes.json` and `SHA256SUMS`, which lists the other twelve. It
+A release attaches ten assets (two per target), `release-notes.json` and
+`SHA256SUMS`, which lists the other eleven. It
 builds no plugin archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as
 described next.
 
@@ -73,7 +73,7 @@ commit by hand, and run the workflow again with `version=X.Y.Z`: it starts at
 `publish` and tests the tag.
 
 After the tag, `draft` creates a draft release with the notes and attaches
-`release-notes.json` and `breaking-changes.json`. `build` compiles the five
+`release-notes.json`. `build` compiles the five
 targets with `--locked` and attaches two assets per target: the `playbook`
 binary and `pbtop-X.Y.Z-<target>.tar.gz` with `pbtop` alone. No release
 carries the `playbook-telemetry` archive, which
@@ -124,19 +124,12 @@ Conventional Commits since the previous `v` tag that touch the playbook
 paths, the plugin included (ADR 0037). The sections are Breaking changes,
 Features, Fixes, Performance and Other changes, in that order, and an empty one
 is left out. The release commit itself is left out. The same notes go into
-`release-notes.json`, which `SHA256SUMS` lists and the workflow attests. The
-body starts with the upgrade note in `.github/release-notes-upgrade.md`. When
-most users have upgraded from the `playbook-hooks` plugin, delete the file and
-the line in the `body` mode of `scripts/release-notes.sh` that prints it.
+`release-notes.json`, which `SHA256SUMS` lists and the workflow attests.
 
-`breaking-changes.json` is still attached in the 0.35 line, since a 0.34
-binary that updates itself reads it, and asks the new binary for
-`playbook breaking`, before it holds or shows a release (ADR 0037). 0.35.0
-reads `release-notes.json` instead, so 0.36.0 removes the file, the asset
-and the command. No check fails a release for a breaking change: the notes
-list the commits marked breaking first. Until 0.36.0, a breaking change to
-playbook also gets an entry in `breaking-changes.json`, so automatic
-updates from 0.34 hold the release.
+No check fails a release for a breaking change: the notes list the commits
+marked breaking first. Releases no longer carry `breaking-changes.json`
+(ADR 0048). A 0.34 binary, the last that read it, treats the missing asset
+as a release with no breaking changes.
 
 ## Credentials
 
@@ -203,5 +196,4 @@ no release of its own. `playbook-telemetry` uses the workspace version, and its
 | playbook | `playbook-<version>-<target>`, the raw binary |
 | pbtop | `pbtop-<version>-<target>.tar.gz` holding `pbtop` alone |
 
-Every release also carries `release-notes.json`, `breaking-changes.json` and
-`SHA256SUMS`. The Homebrew tap maps each formula to its asset.
+Every release also carries `release-notes.json` and `SHA256SUMS`. The Homebrew tap maps each formula to its asset.

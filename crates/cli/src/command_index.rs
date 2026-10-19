@@ -95,7 +95,6 @@ pub(crate) const META: &[Meta] = &[
     ro("agents variants"),
     ro("atlassian").purpose("Check the Atlassian tools the `playbook:atlassian` skill uses"),
     ro("atlassian check").purpose("Check the `acli` version and whether `twg` is installed"),
-    ro("breaking"),
     user("cc"),
     user("cc bust-cache"),
     user("cc clean").purpose("Launcher mode: clean up and resume a session"),
