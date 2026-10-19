@@ -762,6 +762,10 @@ fn a_file_touched_this_session_surfaces_its_anchored_fact_even_if_unmentioned() 
         context.contains("TOUCHEDFILEBODY"),
         "a fact anchored to a file touched earlier this session should surface: {context}"
     );
+    assert!(
+        !context.contains("Memory:"),
+        "a touched-file match is strong, so no weak hint: {context}"
+    );
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -828,7 +832,7 @@ fn corrupted_anchor_index_degrades_to_at_most_a_hint_not_a_crash() {
     let context = additional_context(&output);
     assert!(!context.contains("### "), "no fact body from garbage rows");
     assert!(
-        context.is_empty() || context.starts_with("Memory: no fact matched"),
+        context.starts_with("Memory: no fact matched"),
         "a corrupted index is silent or one hint line, never garbage: {context}"
     );
 
@@ -1302,7 +1306,7 @@ fn an_unreadable_hint_counter_means_no_hint_and_a_clean_exit() {
 }
 
 #[test]
-fn an_unwritable_hint_counter_keeps_the_weak_facts_but_drops_the_hint() {
+fn an_unreadable_hint_counter_keeps_the_weak_facts_but_drops_the_hint() {
     // Arrange
     let home = scratch_home("hint-counter-weak");
     write_named_facts(&home, &[("tidy-notes", "Covers the gizmo setup")]);

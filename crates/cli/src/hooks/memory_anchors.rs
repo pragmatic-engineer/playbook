@@ -10,7 +10,9 @@
 //! the matched facts' BODIES (not just names), deduped per session. The
 //! edit event emits nothing on no match. The prompt event prints one hint
 //! line (at most 5 per session) when a prompt with searchable words matches
-//! no fact or only weak ones, and nothing extra on a strong match. Neither
+//! no fact or only weak ones, and nothing extra on a strong match. It stays
+//! silent when the anchor index is empty or when every match was already
+//! shown earlier in the session. Neither
 //! ever blocks. `PreToolUse` ports
 //! the retired shell original; `UserPromptSubmit` has no python precedent.
 //!
@@ -455,6 +457,16 @@ fn token_matches(token: &str, text: &str) -> bool {
     })
 }
 
+/// Whether `token` sits in `text` with a non-alphanumeric character or an
+/// edge on both sides, so "re-run" does not count inside "pre-run-hook".
+fn contains_at_boundary(text: &str, token: &str) -> bool {
+    text.match_indices(token).any(|(i, m)| {
+        let before = text[..i].chars().next_back();
+        let after = text[i + m.len()..].chars().next();
+        before.is_none_or(|c| !c.is_alphanumeric()) && after.is_none_or(|c| !c.is_alphanumeric())
+    })
+}
+
 /// A fact row that matched the prompt or a touched file. `strong` marks a
 /// match specific enough to trust: a hyphenated name token, two distinct name
 /// tokens, or a touched-file anchor. Anything else is weak.
@@ -482,13 +494,20 @@ fn prompt_token_matches(idx_contents: &str, tokens: &[String]) -> Vec<RecallMatc
         let name = cols.get(2).copied().unwrap_or("").to_lowercase();
         let desc = cols.get(3).copied().unwrap_or("").to_lowercase();
         let mut score = 0;
-        let mut name_hits = 0;
+        let mut name_hit_tokens: Vec<&str> = Vec::new();
         let mut hyphenated_name_hit = false;
         for token in tokens {
             if token_matches(token, &name) {
                 score += NAME_HIT_SCORE;
-                name_hits += 1;
-                hyphenated_name_hit |= token.contains('-');
+                // Tokens that extend one another ("hook", "hooks") hit one
+                // concept, so only unrelated tokens count toward strength.
+                if !name_hit_tokens
+                    .iter()
+                    .any(|t| t.starts_with(token.as_str()) || token.starts_with(t))
+                {
+                    name_hit_tokens.push(token);
+                }
+                hyphenated_name_hit |= token.contains('-') && contains_at_boundary(&name, token);
             } else if token_matches(token, &desc) {
                 score += 1;
             }
@@ -503,7 +522,7 @@ fn prompt_token_matches(idx_contents: &str, tokens: &[String]) -> Vec<RecallMatc
         seen_from.insert(from_id);
         scored.push(RecallMatch {
             score,
-            strong: hyphenated_name_hit || name_hits >= STRONG_NAME_TOKENS,
+            strong: hyphenated_name_hit || name_hit_tokens.len() >= STRONG_NAME_TOKENS,
             row: cols.iter().map(|s| s.to_string()).collect(),
         });
     }
@@ -513,7 +532,7 @@ fn prompt_token_matches(idx_contents: &str, tokens: &[String]) -> Vec<RecallMatc
 
 /// The one-line note for a prompt that found no fact (`weak == false`) or only
 /// weak ones. It names the searched terms, the repo's fact folder to grep, and
-/// the capture step. Bounded by `HINT_CAP_CHARS` whatever the terms or slug.
+/// the capture step. Bounded by `MAX_HINT_TERMS_CHARS` and `MAX_HINT_REPO_CHARS`, so it stays under 400 characters whatever the terms or slug.
 fn recall_hint(terms: &[String], repo: &str, weak: bool) -> String {
     let joined = terms
         .iter()
@@ -1132,6 +1151,33 @@ mod tests {
         // Assert
         assert!(two_tokens[0].strong);
         assert!(hyphenated[0].strong);
+    }
+
+    #[test]
+    fn tokens_that_extend_one_another_count_as_one_name_hit() {
+        // Arrange
+        let index = "\tg/a\tpre-run-hooks-guide\tA guide\t\ta.md\n";
+
+        // Act
+        let got = scored(index, "hook hooks");
+
+        // Assert
+        assert_eq!(got.len(), 1);
+        assert!(!got[0].strong);
+    }
+
+    #[test]
+    fn a_hyphenated_token_inside_a_longer_name_part_is_not_strong() {
+        // Arrange
+        let index = "\tg/a\tpre-run-hook\tA guide\t\ta.md\n";
+
+        // Act
+        let inside = scored(index, "re-run");
+        let whole = scored(index, "pre-run");
+
+        // Assert
+        assert!(!inside[0].strong);
+        assert!(whole[0].strong);
     }
 
     #[test]
