@@ -11,9 +11,12 @@
 
 use std::fmt::Write as _;
 
-/// The most tokens the printed map may cost. One token is counted as four
-/// bytes, the usual rough rule for English and shell text.
-pub const TOKEN_BUDGET: usize = 400;
+/// The most tokens the printed map may cost, about 1.2 KB. One token is
+/// counted as four bytes, the usual rough rule for English and shell text.
+pub const TOKEN_BUDGET: usize = 300;
+
+/// The last line of the map: where the full list of commands is.
+pub const FULL_LIST: &str = "Run `playbook commands` for the full list.";
 
 /// One intent and the command that serves it.
 pub struct Tool {
@@ -299,8 +302,9 @@ impl Tool {
 }
 
 /// The map as the hook prints it: one header line, then one line per
-/// command group with its verbs joined by `|`. Entries that share a group and
-/// the same trailing arguments merge into one line.
+/// command group with its verbs joined by `|`, then the `FULL_LIST` line.
+/// Entries that share a group and the same trailing arguments merge into one
+/// line.
 pub fn render() -> String {
     let mut out = String::from(
         "playbook tools: when an intent is covered here, run `playbook <line>`; otherwise use plain git, gh and file steps. Add --help for flags.\n",
@@ -331,6 +335,8 @@ pub fn render() -> String {
         }
         out.push('\n');
     }
+    out.push_str(FULL_LIST);
+    out.push('\n');
     out
 }
 
@@ -440,6 +446,18 @@ mod tests {
         );
         assert!(text.contains("\npr prepare|create|rules"), "{text}");
         assert!(text.contains("\nrun-context --command NAME"), "{text}");
+    }
+
+    #[test]
+    fn the_map_ends_with_the_pointer_to_the_full_list() {
+        let text = render();
+        assert!(text.ends_with(&format!("\n{FULL_LIST}\n")), "{text}");
+        assert!(text.len() <= 1200, "the map is {} bytes", text.len());
+    }
+
+    #[test]
+    fn the_full_list_command_exists() {
+        assert!(Cli::try_parse_from(["playbook", "commands"]).is_ok());
     }
 
     #[test]

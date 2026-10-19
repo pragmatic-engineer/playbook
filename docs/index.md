@@ -26,7 +26,7 @@ Task-oriented workflows.
 - [What setup installs](guides/06-what-init-installs.md): every change `playbook setup` makes, what stays on your machine, and how to undo each part.
 - [Reading documents](guides/07-reading-documents.md): read a PDF or Office file as cheaper text with the optional anydoc converter.
 - [Hook reference](reference/hooks.md): every hook setup wires, with its event, matcher, what it reads and writes, and how to turn it off.
-- [CLI and config reference](reference/cli-and-config.md): every command, flag and config key, generated from the code so it cannot drift.
+- [CLI and config reference](reference/cli-and-config.md): every command, flag and config key, generated from the code so it cannot drift. For a short list, run `playbook commands`.
 
 ## Authoring
 

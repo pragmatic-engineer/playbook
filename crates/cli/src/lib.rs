@@ -12,6 +12,7 @@ pub mod breaking;
 pub mod brief;
 pub mod cc;
 pub mod ci;
+pub mod command_index;
 pub use playbook_code as code;
 pub mod commit;
 pub mod common;
@@ -806,6 +807,22 @@ pub enum Command {
         #[command(subcommand)]
         sub: ToolsCommand,
     },
+    /// List every playbook command, what it does and who may run it
+    ///
+    /// Built from this binary's own command tree, so it lists only the
+    /// commands the binary has. One line per command, with its subcommands. A name
+    /// ending in `!` or a line marked `(user-only)` is for the user to run;
+    /// `(read-only)` runs freely. Give a group to list its subcommands with
+    /// their flags. Reads nothing and writes nothing.
+    ///
+    /// Example: `playbook commands pr`
+    Commands {
+        /// A command or group, such as `pr` or `worktree review`
+        group: Vec<String>,
+        /// Print one JSON object per command: command, purpose, access, args, subcommands, intents
+        #[arg(long)]
+        json: bool,
+    },
     /// ADR helpers
     Adr {
         #[command(subcommand)]
@@ -951,7 +968,11 @@ impl Command {
     pub fn is_hot_path(&self) -> bool {
         matches!(
             self,
-            Command::Hook { .. } | Command::Statusline | Command::Version | Command::Json { .. }
+            Command::Hook { .. }
+                | Command::Statusline
+                | Command::Version
+                | Command::Json { .. }
+                | Command::Commands { .. }
         )
     }
 

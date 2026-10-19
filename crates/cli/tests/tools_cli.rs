@@ -46,7 +46,7 @@ fn check_passes_when_the_map_is_within_budget() {
     let out = map(&["--check"]);
 
     assert!(out.status.success());
-    assert!(String::from_utf8_lossy(&out.stdout).contains("budget 400"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("budget 300"));
 }
 
 #[test]
