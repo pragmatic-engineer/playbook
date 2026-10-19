@@ -442,6 +442,15 @@ fn the_fact_format_is_still_shown_while_the_guard_is_off() {
 }
 
 #[test]
+fn an_unrecognized_environment_value_falls_back_to_the_stored_key() {
+    let home = scratch_home("env-other");
+
+    let out = run_in_home(&bash(DENIED_COMMAND), &home, Some("true"));
+
+    assert_eq!(denial(&out), None, "{out}");
+}
+
+#[test]
 fn the_model_cannot_turn_the_guard_off_with_config_set() {
     let (out, _, _) = run(
         &bash("playbook config set --global hooks.policyGuard.enabled false"),

@@ -385,7 +385,13 @@ pub(crate) fn policy_guard_step(paths: &InitPaths) -> StepReport {
     use crate::hooks::policy_guard::{stored_enabled, ENABLED_KEY};
     const PART: &str = "policy-guard";
     if !paths.policy_guard {
-        return StepReport::skipped(PART, "not requested; pass --policy-guard to turn it on");
+        let detail = match stored_enabled(&paths.home) {
+            true => format!(
+                "not requested; {ENABLED_KEY} stays true, set it to false to turn the guard off"
+            ),
+            false => "not requested; pass --policy-guard to turn it on".to_string(),
+        };
+        return StepReport::skipped(PART, detail);
     }
     if stored_enabled(&paths.home) {
         return StepReport::already_correct(PART, format!("{ENABLED_KEY} is already true"));

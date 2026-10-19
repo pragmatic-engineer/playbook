@@ -1692,3 +1692,49 @@ fn doctor_flags_a_collector_agent_left_under_the_old_label() {
         hints(&foreign)
     );
 }
+
+fn policy_guard_row(rows: &[Value]) -> &Value {
+    rows.iter()
+        .find(|r| r["message"].as_str().unwrap().starts_with("policy guard"))
+        .expect("a policy guard row")
+}
+
+#[test]
+fn doctor_reports_the_policy_guard_as_off_until_the_key_is_true() {
+    // Arrange
+    let off = Box::new("pg-off");
+    off.settings("{}");
+    let on = Box::new("pg-on");
+    on.settings("{}");
+    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args([
+            "config",
+            "set",
+            "--global",
+            "hooks.policyGuard.enabled",
+            "true",
+        ])
+        .env("HOME", on.home())
+        .current_dir(on.home())
+        .output()
+        .unwrap();
+    assert!(set.status.success());
+
+    // Act
+    let off = off.run_with_env(&[]);
+    let on = on.run_with_env(&[]);
+
+    // Assert
+    let row = policy_guard_row(&off);
+    assert_eq!(row["level"], "INFO");
+    assert!(row["hint"]
+        .as_str()
+        .unwrap()
+        .contains("hooks.policyGuard.enabled true"));
+    let row = policy_guard_row(&on);
+    assert_eq!(row["level"], "PASS");
+    assert!(row["hint"]
+        .as_str()
+        .unwrap()
+        .contains("hooks.policyGuard.enabled false"));
+}

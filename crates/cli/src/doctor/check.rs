@@ -790,11 +790,6 @@ fn marker_endpoint(home: &Path) -> Option<String> {
 
 const TELEMETRY_SETUP_FIX: &str = "run: playbook setup --only telemetry";
 
-/// The `attribution` key in the user's settings.json (ADR 0042). With
-/// attribution OFF, the default: ok when every key holds the off value, a
-/// warning with the fix when a key is missing. With ON chosen
-/// (`attribution.enabled` true): ok when no key holds the off value. A key
-/// with the user's own value is info.
 /// The policy guard is optional and off by default, so off is an Info row.
 fn policy_guard_row(env: &Env) -> Row {
     use crate::hooks::policy_guard::{stored_enabled, ENABLED_KEY};
@@ -819,6 +814,11 @@ fn policy_guard_row(env: &Env) -> Row {
     }
 }
 
+/// The `attribution` key in the user's settings.json (ADR 0042). With
+/// attribution OFF, the default: ok when every key holds the off value, a
+/// warning with the fix when a key is missing. With ON chosen
+/// (`attribution.enabled` true): ok when no key holds the off value. A key
+/// with the user's own value is info.
 fn attribution_row(env: &Env) -> Row {
     use crate::init::attribution::{self, State};
     let settings = env.settings();

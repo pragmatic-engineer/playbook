@@ -9,7 +9,7 @@ It is a guard against an agent drifting, not a security boundary. It reads the t
 | Question | Answer |
 | :- | :- |
 | Is it on after a fresh install? | No. `playbook setup` asks whether to turn it on, and the default answer is no. `--yes` leaves it off. |
-| Is the hook still in `settings.json`? | Yes. The entries `playbook hook policy-guard` stay wired on `Bash` and on `Edit\|Write`, so you can switch the guard on and off without touching `settings.json`. While it is off the hook denies nothing. It still shows the memory fact format when a fact file is written to playbook's store, which is a hint and not a denial. |
+| Is the hook still in `settings.json`? | Yes. The entries `playbook hook policy-guard` stay wired on `Bash` and on `Edit\|Write`, so you can switch the guard on and off without touching `settings.json`. While it is off the hook denies nothing. It still shows the memory fact format when a fact file is written to playbook's store, which is a hint and not a denial. `POLICY_GUARD=0` drops that hint too. |
 | What happens on upgrade? | The guard is on only if you set `hooks.policyGuard.enabled` to true yourself (or answered yes in setup). An install that never stored the key had the guard on by default before, and now has it off. Nothing is migrated and nothing is deleted. |
 | Why is it off? | It blocked ordinary work: any Edit or Write on `settings.json` or `settings.local.json` under a `.claude` folder, including a project's own `.claude/settings.json`, and any write to Claude Code's own memory folders, even with `memory.source` set to `both`, which leaves Claude Code's auto memory on. You decide whether the trade is worth it. |
 
@@ -116,8 +116,9 @@ A protected config key starts with `Matched rule: ...` and names the rule that m
 - **Claude Code auto memory.** The memory rule denies writes to `~/.claude/projects/<project>/memory/` even when `memory.source` is `both`, which keeps Claude Code's auto memory on. With the guard on, Claude Code's own memory writes through the Edit or Write tools are denied. With it off, both stores work.
 - **Settings through the binary only.** With the guard on, a model that needs a settings change has to ask you. `playbook config set` works for playbook keys, but not for the protected ones.
 - **Text match, not meaning.** A command that names a protected path and has a redirect can be denied even when it writes somewhere else, and a command that builds the path at run time passes.
+- **A broken config store turns it off.** The key is read on every call. If the store cannot be read, the guard counts as off and allows the call. `playbook doctor` shows the state.
 - **It needs the hook.** Removing the `policy-guard` entries from `settings.json` (or `playbook uninstall`) removes the guard whatever the key says. `playbook setup --only hooks` puts them back.
-- **The model cannot turn it on or off.** The key is protected while the guard is on. While it is off, the model can set it, so ask for the guard to be on only when you mean it.
+- **The model cannot turn it off while it is on.** The key is protected while the guard is on. While it is off, the model can set it, so ask for the guard to be on only when you mean it.
 - **`POLICY_GUARD` is shared.** An exported `POLICY_GUARD=1` in your shell turns the guard on for every session that shell starts, whatever the key says.
 
 ## See also

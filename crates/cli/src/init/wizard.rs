@@ -88,7 +88,7 @@ pub fn decline_line(id: &str) -> &'static str {
         "collector-service" => "No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`.",
         "short-name" => "No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing.",
         "disk-ballast" => "No ballast is written. A full disk then needs a cleanup from outside the session. `playbook disk reserve` writes it later.",
-        "policy-guard" => "The policy guard stays off, the default: its hook entry allows every call. Turn it on later with `playbook config set --global hooks.policyGuard.enabled true`.",
+        "policy-guard" => "The policy guard setting is not changed. It is off by default, and its hook entry allows every call while off. A guard you turned on stays on until `hooks.policyGuard.enabled` is set to false. Turn it on later with `playbook config set --global hooks.policyGuard.enabled true`.",
         "attribution" => "Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link.",
         _ => "Nothing changes for this part.",
     }

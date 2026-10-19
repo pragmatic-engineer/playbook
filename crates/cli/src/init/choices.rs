@@ -80,7 +80,7 @@ pub struct Flags {
     /// Turn the policy guard on (`hooks.policyGuard.enabled`): it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
     #[arg(long, overrides_with = "no_policy_guard")]
     pub policy_guard: bool,
-    /// Leave the policy guard off, the default
+    /// Do not turn the policy guard on; it is off by default and a stored choice is not changed
     #[arg(long, overrides_with = "policy_guard")]
     pub no_policy_guard: bool,
     #[arg(
@@ -694,7 +694,7 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.path);
-        assert_eq!(asked.len(), 7, "{asked:?}");
+        assert_eq!(asked.len(), 8, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| !q.contains("hooks") && q != catalog::question("path")));
@@ -737,7 +737,6 @@ mod tests {
         let flag = Flags {
             yes: true,
             disk_ballast: true,
-            policy_guard: true,
             ..Flags::default()
         };
         assert!(resolve(&flag, false, true, &mut never).disk_ballast);

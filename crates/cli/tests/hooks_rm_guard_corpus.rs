@@ -192,7 +192,7 @@ impl Tree {
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_DATA_HOME")
             .env_remove("XDG_STATE_HOME")
-            .env_remove("POLICY_GUARD")
+            .env("POLICY_GUARD", "1")
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .current_dir(&cwd)

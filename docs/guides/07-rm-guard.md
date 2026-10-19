@@ -168,7 +168,7 @@ Each denied target is listed with the rule that matched:
 | option that is always blocked | `--no-preserve-root`. |
 | path that cannot be resolved | A link chain too deep to follow, a link that cannot be read, or a working folder that is gone. |
 
-For a path outside the roots, the message gives the exact command that keeps your current roots and adds the folder that holds the target. It offers this only for a folder inside your home whose first folder under home does not start with a dot, so it never suggests `/etc` or `~/.ssh`. The model cannot change the key, so it asks you to run the command yourself.
+For a path outside the roots, the message gives the exact command that keeps your current roots and adds the folder that holds the target. It offers this only for a folder inside your home whose first folder under home does not start with a dot, so it never suggests `/etc` or `~/.ssh`. With the policy guard on, the model cannot change the key, so it asks you to run the command yourself.
 
 ## Checking a command
 

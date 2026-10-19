@@ -324,7 +324,6 @@ fn the_disk_ballast_part_writes_nothing_unless_chosen_and_keeps_an_existing_ball
     write_text(&ballast, "already here");
     let on = run(&InitPaths {
         disk_ballast: true,
-        policy_guard: true,
         ..base_paths(&home)
     });
     let step = find_step(&on, "disk-ballast");
@@ -382,7 +381,6 @@ fn a_yes_on_a_disk_short_of_space_is_skipped_and_writes_nothing() {
 
     let outcome = run(&InitPaths {
         disk_ballast: true,
-        policy_guard: true,
         ..base_paths(&home)
     });
 
@@ -402,7 +400,6 @@ fn only_disk_ballast_runs_that_step_and_not_the_hooks() {
         hooks: false,
         statusline: false,
         disk_ballast: true,
-        policy_guard: true,
         ..base_paths(&home)
     });
     let names: Vec<_> = only.steps.iter().map(|s| s.name).collect();
