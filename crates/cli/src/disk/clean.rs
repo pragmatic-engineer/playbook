@@ -537,6 +537,49 @@ pub fn try_lock(_file: &std::fs::File) -> bool {
     false
 }
 
+/// Removes the `cargo-<name>-<hash>` target folder of a worktree that was just
+/// removed (ADR 0047 decision 7), with the cleanup's checks but no idle
+/// time, since the worktree it built for is gone: it must be a cargo target
+/// folder directly under `root`, outside protected data, named by no
+/// running process, and free of build locks, which stay held while it goes.
+/// Returns a line to report, or `None` when there is no such folder.
+pub fn remove_worktree_target(home: &Path, root: &Path, worktree: &Path) -> Option<String> {
+    remove_target_with(home, root, worktree, &process_args())
+}
+
+/// [`remove_worktree_target`] with the command lines of running processes.
+fn remove_target_with(home: &Path, root: &Path, worktree: &Path, args: &str) -> Option<String> {
+    let target = targets::target_for(root, worktree)?;
+    std::fs::symlink_metadata(&target).ok()?;
+    let shown = target.display();
+    let keep = unsafe_target(root, &target, &protected(home))
+        .or_else(|| (!is_cargo_target(&target)).then(|| "not a cargo target folder".to_string()))
+        .or_else(|| named_by_a_process(&target, args));
+    if let Some(why) = keep {
+        return Some(format!("kept target folder {shown}: {why}"));
+    }
+    let Some(_locks) = take_locks(&target) else {
+        return Some(format!(
+            "kept target folder {shown}: a cargo build holds its lock"
+        ));
+    };
+    let bytes = size::allocated(&target);
+    // Moved aside first, so a build that starts now on a profile whose lock
+    // was not taken gets a fresh folder at the old path. A failed delete
+    // leaves a `cargo-` folder that `disk clean` finds later.
+    let name = target.file_name()?.to_string_lossy();
+    let aside = root.join(format!(
+        "{}removing-{}-{name}",
+        targets::TARGET_PREFIX,
+        std::process::id()
+    ));
+    let removed = std::fs::rename(&target, &aside).and_then(|()| std::fs::remove_dir_all(&aside));
+    Some(match removed {
+        Ok(()) => format!("removed target folder {shown} ({})", size::gb(bytes)),
+        Err(e) => format!("could not remove target folder {shown}: {e}"),
+    })
+}
+
 /// Whether an automatic cleanup should run: `disk.autoCleanup` is on and
 /// the tightest volume is below `disk.warnFreeGb`.
 pub fn auto_due(home: &Path, cwd: &Path) -> bool {
@@ -807,6 +850,62 @@ mod tests {
     }
 
     #[test]
+    fn a_removed_worktree_takes_its_free_target_folder_along() {
+        use std::os::unix::io::AsRawFd;
+        let f = fixture("worktree-target");
+        let root = f.root.join("worktrees");
+        let home = &f.env.home;
+        let of = |name: &str| targets::target_for(&root, &root.join(name)).unwrap();
+        let remove =
+            |name: &str, args: &str| remove_target_with(home, &root, &root.join(name), args);
+        assert_eq!(remove("none", ""), None);
+
+        target(&of("done"));
+        target(&of("other"));
+        let line = remove("done", "").unwrap();
+        assert!(line.starts_with("removed target folder"), "{line}");
+        assert!(!of("done").exists());
+        assert!(of("other").exists(), "a sibling folder stays");
+        assert_eq!(targets::target_dirs(&root), vec![of("other")]);
+
+        write(&of("plain").join("notes.txt"));
+        let line = remove("plain", "").unwrap();
+        assert!(line.contains("not a cargo target folder"), "{line}");
+        assert!(of("plain").join("notes.txt").exists());
+
+        let running = format!("cargo build --target-dir {}", of("other").display());
+        let line = remove("other", &running).unwrap();
+        assert!(line.contains("kept target folder"), "{line}");
+        assert!(of("other").exists());
+
+        let busy = of("busy");
+        target(&busy);
+        let lock = busy.join("debug/.cargo-lock");
+        write(&lock);
+        let held = fs::File::open(&lock).unwrap();
+        // SAFETY: `held` stays open until it is dropped below.
+        assert_eq!(unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX) }, 0);
+        let line = remove("busy", "").unwrap();
+        assert!(line.contains("a cargo build holds its lock"), "{line}");
+        assert!(busy.exists());
+        drop(held);
+
+        std::os::unix::fs::symlink(f.root.join("tmp"), of("link")).unwrap();
+        let line = remove("link", "").unwrap();
+        assert!(line.contains("a symlink"), "{line}");
+        assert!(f.root.join("tmp").exists());
+
+        let holder = of("holder");
+        target(&holder);
+        let inner_home = holder.join("h");
+        write(&inner_home.join(".config/playbook/memory/fact.md"));
+        let line = remove_target_with(&inner_home, &root, &root.join("holder"), "").unwrap();
+        assert!(line.contains("protected playbook data"), "{line}");
+        assert!(holder.exists());
+        fs::remove_dir_all(&f.root).unwrap();
+    }
+
+    #[test]
     fn keeps_a_target_whose_build_lock_is_held() {
         use std::os::unix::io::AsRawFd;
         let f = fixture("locked");
@@ -960,7 +1059,16 @@ mod tests {
         assert!(matches!(first, Lock::Held(_)));
         assert!(matches!(lock(&f.env.home), Lock::Busy));
         drop(first);
-        assert!(matches!(lock(&f.env.home), Lock::Held(_)));
+        // A child that another test forks shares the lock until it execs,
+        // so the lock may come back a moment after the drop.
+        let again = (0..50).any(|_| {
+            let held = matches!(lock(&f.env.home), Lock::Held(_));
+            if !held {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            held
+        });
+        assert!(again, "the lock comes back once dropped");
         let missing = f.root.join("no-home");
         assert!(matches!(lock(&missing), Lock::Unavailable(_)));
         fs::remove_dir_all(&f.root).unwrap();

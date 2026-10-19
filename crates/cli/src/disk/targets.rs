@@ -3,7 +3,7 @@
 
 //! Where worktrees and per-agent cargo target folders live (ADR 0047
 //! decision 7). An agent building in worktree `<name>` uses
-//! `<worktrees root>/cargo-<name>` as its `CARGO_TARGET_DIR`.
+//! `<worktrees root>/cargo-<name>-<hash>` as its `CARGO_TARGET_DIR`.
 
 use std::path::{Path, PathBuf};
 
@@ -46,10 +46,30 @@ pub fn target_dirs(root: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-/// The target folder that belongs to the worktree at `worktree`.
+/// The target folder that belongs to the worktree at `worktree`:
+/// `cargo-<folder name>-<hash>`, where the hash comes from the full path, so
+/// two worktrees with the same folder name in different repos or plans
+/// never share one. The parent is resolved, since the worktree itself may
+/// already be gone when its folder is removed.
 pub fn target_for(root: &Path, worktree: &Path) -> Option<PathBuf> {
-    let name = worktree.file_name()?.to_string_lossy();
-    Some(root.join(format!("{TARGET_PREFIX}{name}")))
+    use sha2::{Digest, Sha256};
+    let name = worktree.file_name()?;
+    let full = worktree
+        .parent()
+        .and_then(|p| p.canonicalize().ok())
+        .map_or_else(|| worktree.to_path_buf(), |p| p.join(name));
+    let digest = Sha256::digest(full.as_os_str().as_encoded_bytes());
+    let hash: String = digest[..4].iter().map(|b| format!("{b:02x}")).collect();
+    Some(root.join(format!("{TARGET_PREFIX}{}-{hash}", name.to_string_lossy())))
+}
+
+/// The warning for more than `max` cargo target folders, or `None`.
+pub fn too_many_warning(count: usize, max: u64) -> Option<String> {
+    (count as u64 > max).then(|| {
+        format!(
+            "{count} cargo target folders exist, more than disk.maxTargetDirs ({max}). `playbook disk clean` removes idle ones."
+        )
+    })
 }
 
 /// How deep below a scan root [`find_cargo_targets`] looks.
@@ -139,6 +159,32 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn worktrees_with_one_folder_name_get_different_target_folders() {
+        let root =
+            std::env::temp_dir().join(format!("pb-disk-target-for-{}", crate::testing::run_id()));
+        fs::create_dir_all(root.join("app/fix-x")).unwrap();
+        fs::create_dir_all(root.join("lib")).unwrap();
+        let app = target_for(&root, &root.join("app/fix-x")).unwrap();
+        let lib = target_for(&root, &root.join("lib/fix-x")).unwrap();
+        assert_ne!(app, lib);
+        assert_eq!(app.parent(), Some(root.as_path()));
+        let name = app.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.starts_with("cargo-fix-x-") && name.len() == "cargo-fix-x-".len() + 8,
+            "{name}"
+        );
+        fs::remove_dir_all(root.join("app/fix-x")).unwrap();
+        assert_eq!(
+            target_for(&root, &root.join("app/fix-x")).unwrap(),
+            app,
+            "same after removal"
+        );
+        assert_eq!(too_many_warning(4, 4), None);
+        assert!(too_many_warning(5, 4).is_some_and(|w| w.contains("playbook disk clean")));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn lists_only_cargo_folders_and_skips_links() {
         let root =
             std::env::temp_dir().join(format!("pb-disk-targets-{}", crate::testing::run_id()));
@@ -195,12 +241,14 @@ mod tests {
     }
 
     #[test]
-    fn a_worktree_maps_to_its_cargo_folder() {
+    fn a_worktree_maps_to_a_stable_cargo_folder() {
         let root = Path::new("/w/.worktrees");
+        let wt = Path::new("/w/.worktrees/playbook/fix-x");
         assert_eq!(
-            target_for(root, Path::new("/w/.worktrees/playbook/fix-x")),
-            Some(root.join("cargo-fix-x"))
+            target_for(root, wt),
+            Some(root.join("cargo-fix-x-85604e51"))
         );
+        assert_eq!(target_for(root, Path::new("/")), None);
     }
 
     #[test]
