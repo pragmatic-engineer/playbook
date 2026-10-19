@@ -4,14 +4,6 @@ How to use and extend this Claude Code config. The [README](../README.md) covers
 
 Read them in order, or jump to what you need.
 
-## Concepts
-
-Why the foundations work the way they do.
-
-- [The system prompt](concepts/01-system-prompt.md): what the custom prompt defines, and why a custom prompt behaves better than the default.
-- [The memory system](concepts/02-memory-system.md): the global, org, and project fact store, typed edges, and how it feeds the commands.
-- [Why the pieces are shaped this way](concepts/03-why-the-pieces-are-shaped-this-way.md): why commands, skills, agents and hooks are separate, why each model and effort level was chosen, and where to change them.
-
 ## Guides
 
 Task-oriented workflows.
@@ -20,13 +12,19 @@ Task-oriented workflows.
 - [Plan and implement](guides/01-plan-and-implement.md): design with `/playbook:plan`, build with `/playbook:implement`, fix a small bug with `/playbook:fix`.
 - [Review and PR flow](guides/02-review-and-pr-flow.md): commit, review, and work through feedback.
 - [Decisions and memory](guides/03-decisions-and-memory.md): record choices with `/playbook:adr`, build project knowledge with `/playbook:learn-project`.
-- [Config keys](guides/04-config-keys.md): every `playbook config` key with its default, allowed values and what it does.
-- [The rm guard](guides/08-rm-guard.md): what the guard reads as a deletion, the roots it allows per OS, what stays blocked and how to add a root.
-- [Auto mode](guides/05-auto-mode.md): run commands without questions, with a spend cap.
-- [What setup installs](guides/06-what-init-installs.md): every change `playbook setup` makes, what stays on your machine, and how to undo each part.
-- [Reading documents](guides/07-reading-documents.md): read a PDF or Office file as cheaper text with the optional anydoc converter.
-- [Hook reference](reference/hooks.md): every hook setup wires, with its event, matcher, what it reads and writes, and how to turn it off.
+- [Auto mode](guides/04-auto-mode.md): run commands without questions, with a spend cap.
+- [What setup installs](guides/05-what-setup-installs.md): every change `playbook setup` makes, what stays on your machine, and how to undo each part.
+- [Reading documents](guides/06-reading-documents.md): read a PDF or Office file as cheaper text with the optional anydoc converter.
+- [The rm guard](guides/07-rm-guard.md): what the guard reads as a deletion, the roots it allows per OS, what stays blocked and how to add a root.
+
+## Reference
+
+Pages to look things up in.
+
+- [Config keys](reference/config-keys.md): every `playbook config` key with its default, allowed values and what it does.
 - [CLI and config reference](reference/cli-and-config.md): every command, flag and config key, generated from the code so it cannot drift. For a short list, run `playbook commands`.
+- [Hook reference](reference/hooks.md): every hook setup wires, with its event, matcher, what it reads and writes, and how to turn it off.
+- [Policy table](reference/policy-table.md): the model and effort each agent and command runs at.
 
 ## Authoring
 
@@ -37,7 +35,7 @@ Extend the config.
 
 ## Internals
 
-How the machine works.
+How the machine works, and why it is shaped this way.
 
 - [Launcher and hooks](internals/01-launcher-and-hooks.md): the `playbook cc` launcher and the hook lifecycle.
 - [Model routing and memory](internals/02-model-routing-and-memory.md): tiers, effort policy, `playbook route` and the memory graph.
@@ -50,6 +48,9 @@ How the machine works.
 - [Sessions](internals/09-sessions.md): `playbook sessions`, the read only list of recent sessions with repo, branch, worktree, PR, state, context size and cost, and what it never does.
 - [Document conversion benchmark](internals/10-document-conversion-benchmark.md): the measurement behind the `docs.convert` default.
 - [Data folder](internals/11-data-folder.md): the one folder that holds every database, what each file is, how older files move in, and how to clean up.
+- [The system prompt](internals/12-system-prompt.md): what the custom prompt defines, and why a custom prompt behaves better than the default.
+- [The memory system](internals/13-memory-system.md): the global, org, and project fact store, typed edges, and how it feeds the commands.
+- [Why the pieces are shaped this way](internals/14-why-the-pieces-are-shaped-this-way.md): why commands, skills, agents and hooks are separate, why each model and effort level was chosen, and where to change them.
 
 ## Decisions
 

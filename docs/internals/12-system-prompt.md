@@ -56,6 +56,6 @@ Prompt changes don't apply to resumed sessions. Start fresh with `playbook cc fr
 
 ## See also
 
-- [Memory system](02-memory-system.md)
+- [Memory system](13-memory-system.md)
 - [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md)
-- [Docs index](../index.md)
+- [Docs index](../README.md)

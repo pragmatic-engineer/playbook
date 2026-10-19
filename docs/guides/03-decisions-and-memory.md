@@ -51,7 +51,7 @@ The result: one fact file per topic in `~/.config/playbook/memory/<owner>/<repo>
 
 ## The memory model
 
-One store, three scopes. For the design, see [the memory system](../concepts/02-memory-system.md).
+One store, three scopes. For the design, see [the memory system](../internals/13-memory-system.md).
 
 **Global**: flat files directly in `~/.config/playbook/memory/`. Facts that apply across all repos, like preferences, cross-project conventions, and external pointers.
 
@@ -139,6 +139,6 @@ All fact filenames use kebab-case. Commands enforce this at write time.
 ## See also
 
 - [Plan and Implement](01-plan-and-implement.md): implementing a blueprint or plan.
-- [The memory system](../concepts/02-memory-system.md): the rationale and full design behind memory.
+- [The memory system](../internals/13-memory-system.md): the rationale and full design behind memory.
 - [Internals: Model Routing and Memory](../internals/02-model-routing-and-memory.md): the memory graph internals and edge resolution.
-- [Docs index](../index.md).
+- [Docs index](../README.md).

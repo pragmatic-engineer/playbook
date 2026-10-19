@@ -1,6 +1,6 @@
 # Install
 
-To see every change `playbook setup` makes before you agree to it, read [What setup installs](06-what-init-installs.md) and the [hook reference](../reference/hooks.md).
+To see every change `playbook setup` makes before you agree to it, read [What setup installs](05-what-setup-installs.md) and the [hook reference](../reference/hooks.md).
 
 Releases up to v0.34.0 have only the old name (older versions: `playbook init`). It takes the same flags, and it still works on newer releases ([ADR-0040](../adr/0040-rename-init-to-setup.md)).
 
@@ -87,7 +87,7 @@ brew install pragmatic-engineer/tap/pbtop
 
 Type `pbtop`, `pbtop --summary`, `pbtop --json` or `pbtop --range 30d`. The [crate README](../../crates/telemetry/README.md) covers `cargo` builds. The `playbook-telemetry` command and formula are retired ([ADR 0041](../adr/0041-retire-playbook-telemetry.md)): with Homebrew, run `brew uninstall playbook-telemetry && brew install pbtop`, and change a script that calls `playbook-telemetry` to call `pbtop` with the same arguments. Everything stays on your machine.
 
-The tool shares its data with playbook: the database is `~/.config/playbook/data/usage.db` and the settings are the `usage.*` keys in `~/.config/playbook/data/config.db`. See [Config keys](04-config-keys.md).
+The tool shares its data with playbook: the database is `~/.config/playbook/data/usage.db` and the settings are the `usage.*` keys in `~/.config/playbook/data/config.db`. See [Config keys](../reference/config-keys.md).
 
 ### Without `curl | bash`
 
@@ -252,5 +252,5 @@ Edits to `settings.json` or hooks take effect in a fresh session only. Run `play
 ## See also
 
 - [Launcher and hooks](../internals/01-launcher-and-hooks.md)
-- [The system prompt](../concepts/01-system-prompt.md)
-- [Docs index](../index.md)
+- [The system prompt](../internals/12-system-prompt.md)
+- [Docs index](../README.md)

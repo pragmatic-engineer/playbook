@@ -35,7 +35,7 @@ When `package-lock.json` hashes match between the base repo and the worktree, `n
 
 A repo nobody opens is swept by neither trigger. That is a known limit. Fixing it needs an OS scheduler, which nothing here uses.
 
-Settings: `worktreeCleanup.enabled`, `worktreeCleanup.staleAfterDays` and `worktreeCleanup.conflictGracePeriodDays`. See [Config keys](../guides/04-config-keys.md).
+Settings: `worktreeCleanup.enabled`, `worktreeCleanup.staleAfterDays` and `worktreeCleanup.conflictGracePeriodDays`. See [Config keys](../reference/config-keys.md).
 
 ## Claude Code worktree hooks
 
@@ -54,4 +54,4 @@ If anything fails, the hook says why on stderr and falls back to `<repo>/.claude
 ## See also
 
 - [Launcher and hooks](01-launcher-and-hooks.md): the `playbook cc` launcher that sets up the worktree.
-- [Docs index](../index.md)
+- [Docs index](../README.md)

@@ -83,7 +83,7 @@ It runs on Sonnet and never edits files itself. It hands each Work Unit to a sub
 
 ### Auto
 
-`--auto` picks the recommended strategy, runs every Segment, and opens the PR set once the adversarial review passes. A gate FAIL blocks unless you pass `--force`. Auto never force-pushes, and it never picks the `land` boundary, so `--boundary=land` must be explicit. See [Auto mode](../guides/05-auto-mode.md).
+`--auto` picks the recommended strategy, runs every Segment, and opens the PR set once the adversarial review passes. A gate FAIL blocks unless you pass `--force`. Auto never force-pushes, and it never picks the `land` boundary, so `--boundary=land` must be explicit. See [Auto mode](../guides/04-auto-mode.md).
 
 ## Fix a small bug
 
@@ -121,4 +121,4 @@ With the stacked default, S1 runs on `feat/json-export-s1` off main: WU-0 first,
 
 - [Decisions and memory](../guides/03-decisions-and-memory.md): when to route to `/playbook:adr`.
 - [Review and PR flow](02-review-and-pr-flow.md): reviewing the branch afterward.
-- [Docs index](../index.md)
+- [Docs index](../README.md)

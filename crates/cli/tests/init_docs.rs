@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const REFERENCE: &str = "docs/reference/hooks.md";
-const GUIDE: &str = "docs/guides/06-what-init-installs.md";
+const GUIDE: &str = "docs/guides/05-what-setup-installs.md";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
@@ -137,10 +137,10 @@ fn the_guide_states_the_real_hook_counts() {
 
 #[test]
 fn the_new_pages_are_linked_from_the_readme_the_index_and_the_install_guide() {
-    for file in ["README.md", "docs/index.md", "docs/guides/00-install.md"] {
+    for file in ["README.md", "docs/README.md", "docs/guides/00-install.md"] {
         let text = read(file);
         assert!(
-            text.contains("06-what-init-installs.md"),
+            text.contains(GUIDE.trim_start_matches("docs/guides/")),
             "{file} does not link to the guide"
         );
         assert!(

@@ -41,7 +41,7 @@ On a match, the hook emits a prompt context message reminding Claude the session
 
 ### Effort policy
 
-The reasoning is in [Why the pieces are shaped this way](../concepts/03-why-the-pieces-are-shaped-this-way.md).
+The reasoning is in [Why the pieces are shaped this way](../internals/14-why-the-pieces-are-shaped-this-way.md).
 
 Effort is a second dial next to the model tier. Agents, commands and skills accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, the launcher renders tier variants for the session (see [Authoring agents](../authoring/02-authoring-agents.md)) and the orchestrator picks by name. To compare settings on real inputs, run `playbook eval bench`.
 
@@ -77,7 +77,7 @@ Dispatch granularity was benched with tools. `playbook eval bench --cases crates
 
 ### Policy table: every component
 
-The table of every agent, command and skill with the model and effort in its file, and why, now lives in [`docs/policy-table.md`](../policy-table.md). A test there keeps it equal to the frontmatter.
+The table of every agent, command and skill with the model and effort in its file, and why, now lives in [`docs/reference/policy-table.md`](../reference/policy-table.md). A test there keeps it equal to the frontmatter.
 
 ### Effort cap per model
 
@@ -205,7 +205,7 @@ Traversal depth is 1 for all edge types except `supersedes`, which is followed f
 
 - [Decisions and Memory](../guides/03-decisions-and-memory.md): using memory day-to-day and the `/playbook:learn-project` command.
 - [Launcher and hooks](01-launcher-and-hooks.md): the `playbook cc` launcher that sets the session model.
-- [Docs index](../index.md)
+- [Docs index](../README.md)
 
 ## Forks versus fresh subagents
 

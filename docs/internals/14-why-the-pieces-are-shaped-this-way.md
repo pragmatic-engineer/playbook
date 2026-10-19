@@ -89,10 +89,10 @@ Hooks are the safety layer, so they must be fast, must not depend on a script on
 | Layer | Answers |
 |---|---|
 | README | What is this, and how do I install and start? |
-| Concepts | Why is it built this way? (this page, the system prompt, memory) |
 | Guides | How do I do a task end to end? |
+| Reference | Where do I look up a key, a flag or a hook? |
 | Authoring | How do I add or change a piece? |
-| Internals | How does it work underneath? |
+| Internals | How does it work underneath, and why is it built this way? (this page, the system prompt, memory) |
 | ADRs | Why did we choose this over the alternatives, and when? |
 
 When you want to know why something is the way it is, start with this page, then follow its links, then check the ADR in `docs/adr/` that names the decision.
@@ -104,6 +104,6 @@ When you want to know why something is the way it is, start with this page, then
 | Which model a command or agent uses | The `model:` line in its file, then [Model routing](../internals/02-model-routing-and-memory.md) |
 | How hard it thinks | The `effort:` line in its file, or ask `playbook effort resolve agents <name>` for the variant |
 | The most effort anything may use | `playbook effort <level>` |
-| How far the PR flow goes | [Config keys](../guides/04-config-keys.md) |
-| Whether playbook asks or decides | `playbook mode`, and the [auto mode guide](../guides/05-auto-mode.md) |
+| How far the PR flow goes | [Config keys](../reference/config-keys.md) |
+| Whether playbook asks or decides | `playbook mode`, and the [auto mode guide](../guides/04-auto-mode.md) |
 | What a hook blocks | [Launcher and hooks](../internals/01-launcher-and-hooks.md) |

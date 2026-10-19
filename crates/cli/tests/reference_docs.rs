@@ -20,6 +20,7 @@ use std::path::PathBuf;
 
 const PAGE: &str = "docs/reference/cli-and-config.md";
 const REGEN: &str = "UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs";
+const CONFIG_KEYS: &str = "docs/reference/config-keys.md";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_REPO_ROOT"))
@@ -110,12 +111,12 @@ fn config_table() -> String {
             || match default_value(key) {
                 Some(Value::Bool(_)) => "`true`, `false`".to_string(),
                 Some(Value::Number(_)) => {
-                    "a number, see the config keys guide for the range".to_string()
+                    "a number, see the config keys page for the range".to_string()
                 }
                 _ if key.starts_with("models.") => {
                     "empty, or `claude-<tier>-<major>[-<minor>]` for that tier".to_string()
                 }
-                _ => "see the config keys guide".to_string(),
+                _ => "see the config keys page".to_string(),
             },
             |vals| {
                 vals.iter()
@@ -154,7 +155,7 @@ pub fn generate() -> String {
          Regenerate with: UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs -->\n\n\
          This page lists every `playbook` command, flag and config key. It is generated from the\n\
          clap definitions and the config key table, and a test fails when it is out of date.\n\
-         For what each key means and when to change it, read the [config keys guide](../guides/04-config-keys.md).\n\
+         For what each key means and when to change it, read the [config keys page](config-keys.md).\n\
          For one line per command and who may run it, run `playbook commands`.\n\n\
          ## Config keys\n\n\
          Set a key with `playbook config set <key> <value>` and read it with `playbook config get <key>`.\n\n",
@@ -187,12 +188,12 @@ fn the_generated_output_is_deterministic() {
 }
 
 #[test]
-fn every_known_key_is_explained_in_the_config_keys_guide() {
-    let guide = fs::read_to_string(root().join("docs/guides/04-config-keys.md")).unwrap();
+fn every_known_key_is_explained_in_the_config_keys_page() {
+    let guide = fs::read_to_string(root().join(CONFIG_KEYS)).unwrap();
     for key in KNOWN_KEYS {
         assert!(
             guide.contains(&format!("`{key}`")),
-            "docs/guides/04-config-keys.md does not explain the config key `{key}`"
+            "{CONFIG_KEYS} does not explain the config key `{key}`"
         );
     }
     assert!(
@@ -203,7 +204,7 @@ fn every_known_key_is_explained_in_the_config_keys_guide() {
 
 #[test]
 fn the_page_is_linked_from_the_index_and_the_readme() {
-    for file in ["docs/index.md", "README.md"] {
+    for file in ["docs/README.md", "README.md"] {
         let text = fs::read_to_string(root().join(file)).unwrap();
         assert!(
             text.contains("reference/cli-and-config.md"),

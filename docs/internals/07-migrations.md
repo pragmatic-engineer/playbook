@@ -87,4 +87,4 @@ Playbook does not overwrite a file you edited. It leaves it, prints a warning, a
 4. Add a test next to the existing ones in that file. A dev build skips a `next` migration, so the test calls it directly or passes a version to `shipped`.
 5. A change that needs the user is a breaking change: mark its commit with `!` or a `BREAKING CHANGE:` footer that says what to do ([ADR 0037](../adr/0037-release-notes-from-conventional-commits.md)).
 
-See also: [Launcher and hooks](01-launcher-and-hooks.md), [Docs index](../index.md).
+See also: [Launcher and hooks](01-launcher-and-hooks.md), [Docs index](../README.md).

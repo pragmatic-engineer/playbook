@@ -1,7 +1,7 @@
 # Policy table
 
 This table lists every agent, command and skill with the model and effort in its
-file, and why. The test `checks/tests/policy_table.rs` reads the frontmatter of
+file, and why. The test `crates/plugin-checks/tests/policy_table.rs` reads the frontmatter of
 `plugins/playbook/agents`, `commands` and `skills` and fails when a row and its
 file disagree, or when a component has no row. The reasons come from the bench
 rounds recorded in the playbook repository (`docs/internals/02-model-routing-and-memory.md`

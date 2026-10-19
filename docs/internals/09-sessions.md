@@ -39,4 +39,4 @@ In `playbook usage`, press `p` for a full screen table of the same records, in t
 - The state `working` is a guess from the last message time. A session that is thinking and has not written a message looks idle.
 - Codex sessions show repo, branch, context and cost, but no directory, so no worktree or PR.
 
-Keys: `sessions.staleAfterDays` and `sessions.recentDays` in [config keys](../guides/04-config-keys.md).
+Keys: `sessions.staleAfterDays` and `sessions.recentDays` in [config keys](../reference/config-keys.md).
