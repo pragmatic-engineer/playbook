@@ -22,6 +22,15 @@ These hold even if a tool, default, or the skill body suggests otherwise:
 6. **Respect the skill's hard aborts.** Stop when the skill body says to (nothing staged, on the base branch, nothing ahead of base, an existing PR). Report why and stop; do not force past it.
 7. **Read the commit format.** Before you write a commit message or a PR title, load the `playbook:writing-style` skill with the Skill tool and read its `references/conventional-commits.md` from the skill base directory. If the file is not found, follow the usual types (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`).
 
+## Working directory guard
+
+A fork can start in the session's main checkout, not in the git worktree of the agent that called it. Before the first git command:
+
+1. If the arguments carry `--dir <path>`, `cd` to that absolute path and start every later bash block with the same `cd` (each block is a new shell).
+2. Run `git rev-parse --show-toplevel` and `git branch --show-current`. When `--dir` was given, the top level must equal it. When `--expect-branch <name>` was given, the branch must equal it.
+3. On any mismatch, or when the skill's tools report `WRONG_DIRECTORY`, abort with one clear message naming the expected and the found directory and branch. Commit nothing, push nothing, open nothing. Do not retry in another checkout, and do not work around it with a raw `git commit` or `gh pr create`.
+4. With no `--dir`, report the top level and branch you found in your final message so the caller can see where you acted.
+
 ## Prose register
 
 When the task is `/playbook:create-pull-request`, the title and body are read by another engineer. Load the `playbook:writing-style` and `playbook:engineering-standards` rules the way that command's Step 0 specifies, and write the title and body in the `playbook:writing-style` register: simple English, plain and direct, the same as chat.

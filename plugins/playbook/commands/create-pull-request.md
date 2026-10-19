@@ -1,7 +1,7 @@
 ---
 description: Use when a branch is ready to open as a pull request. Runs pre-flight checks and opens a draft PR with a conventional title.
 allowed-tools: Bash, Read, Skill
-argument-hint: "[--help] [--ready] [--base <branch>] [--ticket <ID>] [--issue <N>] [--dir <path>] [--auto] [--ask]"
+argument-hint: "[--help] [--ready] [--base <branch>] [--ticket <ID>] [--issue <N>] [--dir <path>] [--expect-branch <name>] [--auto] [--ask]"
 context: fork
 agent: playbook:git
 ---
@@ -31,6 +31,7 @@ Read these from `$ARGUMENTS` once and remember them. `--base`, `--ticket`, and `
 - `--ticket <ID>` → force the ticket key, skipping auto-detect (`none` turns every ticket rule off). Use it in Steps 1 and 4.
 - `--issue <N>` → the GitHub issue this PR handles. Use it in Step 4.
 - `--dir <path>` → publish the branch checked out in this directory. A caller that names a directory or branch outside the shell's current directory (for example `/playbook:implement` publishing a Segment that lives in a git worktree) passes it here. Use it in Steps 1 and 4 (pass it to a tool, or `cd` into it at the top of every plain shell block). A forked shell can reset to the main checkout between calls, so without `--dir` the command acts on whatever repo the shell is in.
+- `--expect-branch <name>` → the branch the caller is on. Before Step 1, `cd` into `--dir` and check that `git rev-parse --show-toplevel` is that directory and `git branch --show-current` is this branch. On a mismatch stop with `WRONG_DIRECTORY: expected <dir> on <branch>, found <toplevel> on <branch>` and open nothing. Pass it to `pr prepare` and `pr create` too. A caller in a git worktree always passes `--dir` (its `git rev-parse --show-toplevel`) and `--expect-branch`.
 - `--auto` or `--ask` → set the run mode for this run. Step 0 reads it.
 - `--help` → print the argument-hint line from this file's frontmatter and stop.
 
@@ -64,7 +65,7 @@ The PR title and body are read by another engineer, so they follow `playbook:wri
 
 ## Step 1: Prepare (version check, pre-flight, diff, ticket)
 
-Resolve the branch and the base, run the pre-flight checks, gather the diff and detect the ticket. Intent: pr-prepare. If the session's tool map lists it, use that command with only the flags the caller gave (`--base`, `--ticket`, `--dir`). It resolves the base (flag, then the repo default, then `main`), refuses to run on the base branch, with nothing ahead of it, or over 1500 changed lines, and prints:
+Resolve the branch and the base, run the pre-flight checks, gather the diff and detect the ticket. Intent: pr-prepare. If the session's tool map lists it, use that command with only the flags the caller gave (`--base`, `--ticket`, `--dir`, `--expect-branch`). It resolves the base (flag, then the repo default, then `main`), refuses to run on the base branch, with nothing ahead of it, or over 1500 changed lines, and prints:
 
 - `branch=`, `state_dir=`, `base=<branch> (source: ...)`, and `commits_ahead= changed_lines= dirty_files= test_files_touched=`.
 - A `VERDICT` line each for dirty files, size, and tests.
@@ -154,7 +155,7 @@ cat > "<state_dir>/pr-body.md" <<'PRBODY_EOF'
 PRBODY_EOF
 ```
 
-Then push and open the PR. Intent: pr-create. If the session's tool map lists it, use that command with the title, `--body-file "<state_dir>/pr-body.md"`, `--base <base from Step 1>`, `--ticket` and `--issue` when known, and `--dir` when given. It reads `pr.draft` itself, so do not add a draft flag. It checks the body against the template and length cap, the issue clause, the ticket on the first line, the ticket in the title and commit scopes (a stacked PR is refused without it), the title length and the attribution and dash rules, then pushes, confirms the remote carries your HEAD, opens the PR (or reuses the open one) and corrects its base. If it refuses with a list of problems, nothing was pushed or created: fix the title or body (or amend the named commit) and run it again. Otherwise do this, stopping at the first failure:
+Then push and open the PR. Intent: pr-create. If the session's tool map lists it, use that command with the title, `--body-file "<state_dir>/pr-body.md"`, `--base <base from Step 1>`, `--ticket` and `--issue` when known, `--dir` and `--expect-branch` when given. It reads `pr.draft` itself, so do not add a draft flag. It checks the body against the template and length cap, the issue clause, the ticket on the first line, the ticket in the title and commit scopes (a stacked PR is refused without it), the title length and the attribution and dash rules, then pushes, confirms the remote carries your HEAD, opens the PR (or reuses the open one) and corrects its base. If it refuses with a list of problems, nothing was pushed or created: fix the title or body (or amend the named commit) and run it again. Otherwise do this, stopping at the first failure:
 
 1. Refuse when anything is staged (`git diff --cached --quiet` fails): report the staged files and stop, and do not rewrite the title or body.
 2. Check by hand: the title is at most 72 characters; the body follows Step 3 and is under 1200 characters; the key (when known) is on the first body line and in the scope of the title and every commit; a handled issue has its `Closes #N` or `Refs #N`; the title and body have no em or en dash outside code; the title, the body and every message in `git log origin/<base>..HEAD` carry no AI attribution. If any fails, fix the title or body (or say which commit to amend) and check again. This check is advisory: no tool backs it.

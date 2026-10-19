@@ -572,3 +572,73 @@ fn the_scope_rule_set_to_block_refuses_a_branch_that_is_not_stacked() {
     assert!(!o.status.success());
     assert!(err(&o).contains("`feat(PROJ-9): add c`"), "{}", err(&o));
 }
+
+// worktree cwd guard
+
+const WRONG_DIRECTORY: &str = "WRONG_DIRECTORY";
+
+impl Repo {
+    /// A linked worktree on a new branch, the way an implementation agent
+    /// works, while the main checkout stays on `feat`.
+    fn worktree(&self, branch: &str) -> PathBuf {
+        let wt = self.root.join(format!("wt-{branch}"));
+        git(
+            &self.work,
+            &["worktree", "add", "-q", "-b", branch, wt.to_str().unwrap()],
+        );
+        wt
+    }
+}
+
+#[test]
+fn prepare_with_dir_acts_on_the_worktree_not_the_shell_checkout() {
+    let r = Repo::new("wtdir");
+    let wt = r.worktree("agent");
+    fs::write(wt.join("w.txt"), "w\n").unwrap();
+    git(&wt, &["add", "w.txt"]);
+    let o = r.pb(
+        &[
+            "commit",
+            "prepare",
+            "--dir",
+            wt.to_str().unwrap(),
+            "--expect-branch",
+            "agent",
+        ],
+        "",
+    );
+    let t = out(&o);
+    assert!(t.starts_with("BRANCH=agent"), "{t} {}", err(&o));
+    assert!(t.contains("A\tw.txt"), "{t}");
+}
+
+#[test]
+fn prepare_aborts_when_the_branch_is_not_the_reported_one() {
+    let r = Repo::new("wtguard");
+    let _wt = r.worktree("agent");
+    r.stage("b.txt", "b\n");
+    let o = r.pb(&["commit", "prepare", "--expect-branch", "agent"], "");
+    assert!(!o.status.success());
+    assert!(err(&o).contains(WRONG_DIRECTORY), "{}", err(&o));
+    assert!(err(&o).contains("'feat'"), "{}", err(&o));
+}
+
+#[test]
+fn run_aborts_on_the_wrong_branch_and_commits_nothing() {
+    let r = Repo::new("wtrun");
+    let _wt = r.worktree("agent");
+    r.stage("b.txt", "b\n");
+    let before = git(&r.work, &["rev-parse", "HEAD"]);
+    let o = r.pb(&["commit", "run", "--expect-branch", "agent"], "feat: x\n");
+    assert!(!o.status.success());
+    assert!(err(&o).contains(WRONG_DIRECTORY), "{}", err(&o));
+    assert_eq!(git(&r.work, &["rev-parse", "HEAD"]), before);
+}
+
+#[test]
+fn a_missing_dir_is_a_hard_error() {
+    let r = Repo::new("wtbad");
+    let o = r.pb(&["commit", "prepare", "--dir", "/nonexistent-pb-dir"], "");
+    assert!(!o.status.success());
+    assert!(err(&o).contains("--dir"), "{}", err(&o));
+}

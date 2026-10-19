@@ -1149,8 +1149,14 @@ fn main() {
         Command::Pr { sub } => {
             let gh = pr::shared::RealGhClient;
             match sub {
-                PrCommand::Prepare { base, ticket, dir } => {
+                PrCommand::Prepare {
+                    base,
+                    ticket,
+                    dir,
+                    expect_branch,
+                } => {
                     enter_dir("pr prepare", dir.as_deref());
+                    guard_pr_branch("pr prepare", expect_branch.as_deref());
                     match pr::prepare::run(&gh, base.as_deref(), ticket.as_deref()) {
                         Ok(output) => println!("{output}"),
                         Err(err) => {
@@ -1166,10 +1172,12 @@ fn main() {
                     dir,
                     ticket,
                     issue,
+                    expect_branch,
                 } => {
                     // A relative body path is relative to where the caller ran.
                     let body_file = absolute_from_cwd(&body_file);
                     enter_dir("pr create", dir.as_deref());
+                    guard_pr_branch("pr create", expect_branch.as_deref());
                     let slug = common::repo_slug();
                     let repo_slug = (!slug.is_empty()).then_some(slug.as_str());
                     let draft = pr::create::draft_setting(&common::home_dir(), repo_slug);
@@ -1833,15 +1841,26 @@ fn main() {
             }
         }
         Command::Commit { sub } => {
+            let (dir_arg, expect_branch) = match &sub {
+                CommitCommand::Prepare {
+                    dir, expect_branch, ..
+                }
+                | CommitCommand::Run {
+                    dir, expect_branch, ..
+                } => (dir.clone(), expect_branch.clone()),
+            };
+            enter_dir("commit", dir_arg.as_deref());
             let dir = std::env::current_dir().unwrap_or_default();
             match sub {
-                CommitCommand::Prepare { all, update, amend } => {
+                CommitCommand::Prepare {
+                    all, update, amend, ..
+                } => {
                     let opts = commit::prepare::Options {
                         stage_all: all,
                         stage_update: update,
                         amend,
                     };
-                    match commit::prepare::run(&dir, opts) {
+                    match commit::prepare::run(&dir, opts, expect_branch.as_deref()) {
                         Ok(text) => println!("{text}"),
                         Err(err) => {
                             eprintln!("ERROR: {err}");
@@ -1856,6 +1875,7 @@ fn main() {
                     no_signoff,
                     no_type_check,
                     no_prose_check,
+                    ..
                 } => {
                     let (path, temp) = match message_file {
                         Some(p) => (p, false),
@@ -1884,7 +1904,8 @@ fn main() {
                         no_type_check,
                         no_prose_check,
                     };
-                    let result = commit::run::run(&dir, &path, opts, signoff_on);
+                    let result =
+                        commit::run::run(&dir, &path, opts, signoff_on, expect_branch.as_deref());
                     if temp {
                         let _ = std::fs::remove_file(&path);
                     }
@@ -2692,6 +2713,16 @@ fn absolute_from_cwd(path: &str) -> String {
 fn enter_dir(label: &str, dir: Option<&str>) {
     let Some(dir) = dir else { return };
     if let Err(err) = pr::shared::enter_dir(dir) {
+        eprintln!("{label}: {err}");
+        std::process::exit(1);
+    }
+}
+
+/// Exits 1 with WRONG_DIRECTORY when the current directory is not on the
+/// branch the caller reported.
+fn guard_pr_branch(label: &str, expected: Option<&str>) {
+    let dir = std::env::current_dir().unwrap_or_default();
+    if let Err(err) = commit::guard_branch(&dir, expected) {
         eprintln!("{label}: {err}");
         std::process::exit(1);
     }

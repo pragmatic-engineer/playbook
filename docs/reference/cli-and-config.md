@@ -366,6 +366,8 @@ Refuses the repo's default branch. Prints `NO_STAGED_CHANGES` when there is noth
 - `-A`: Stage everything first (`git add -A`)
 - `-u`: Stage tracked changes first (`git add -u`)
 - `-a`: Replace the last commit
+- `--dir <DIR>`: Work in this directory instead of the current one (pass the worktree root, `git rev-parse --show-toplevel`)
+- `--expect-branch <EXPECT_BRANCH>`: Stop with WRONG_DIRECTORY when HEAD is not on this branch
 
 ### `playbook commit run`
 
@@ -379,6 +381,8 @@ Reads the message from stdin, or from `--message-file`. Adds a sign-off per `com
 - `--no-signoff`: Leave the sign-off trailer off
 - `--no-type-check`: Skip the check that the commit type fits the files (a docs-only change is not `feat`, a lock-file bump is not `fix`)
 - `--no-prose-check`: Skip the prose check (a dash, a curly quote, a banned word or a contrast phrase in the message)
+- `--dir <DIR>`: Work in this directory instead of the current one (pass the worktree root, `git rev-parse --show-toplevel`)
+- `--expect-branch <EXPECT_BRANCH>`: Stop with WRONG_DIRECTORY when HEAD is not on this branch
 
 ### `playbook config`
 
@@ -1111,6 +1115,7 @@ Opens a draft unless the `pr.draft` setting is `false`.
 - `--dir <DIR>`: Work in this directory instead of the current one
 - `--ticket <TICKET>`: Ticket key for the branch (`none` turns the ticket rules off)
 - `--issue <ISSUE>`: GitHub issue number the PR handles
+- `--expect-branch <EXPECT_BRANCH>`: Stop with WRONG_DIRECTORY when HEAD is not on this branch
 
 ### `playbook pr land-wait`
 
@@ -1141,6 +1146,7 @@ Finds the branch and base, checks the repo is ready, writes the diff to a scratc
 - `--base <BASE>`: Base branch for the PR (default: the repo's default branch)
 - `--ticket <TICKET>`: Ticket id to cite (default: one found in the branch name)
 - `--dir <DIR>`: Work in this directory instead of the current one
+- `--expect-branch <EXPECT_BRANCH>`: Stop with WRONG_DIRECTORY when HEAD is not on this branch
 
 ### `playbook pr reply`
 

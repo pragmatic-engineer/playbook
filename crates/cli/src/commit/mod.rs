@@ -30,6 +30,24 @@ fn git_with(dir: &Path, args: &[&str], timeout: Duration) -> Option<Output> {
     run_with_timeout(&mut command, timeout)
 }
 
+/// Stops a run that landed on the wrong branch. A forked command can start in
+/// the session checkout instead of the worktree its caller works in, and then
+/// it commits or opens a PR for the wrong branch. `expected` is the branch the
+/// caller reported; `None` skips the check.
+pub fn guard_branch(dir: &Path, expected: Option<&str>) -> Result<(), String> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let actual = current_branch(dir);
+    if actual == expected {
+        return Ok(());
+    }
+    Err(format!(
+        "WRONG_DIRECTORY: the caller reported branch '{expected}' but {} is on '{actual}'. Nothing was changed. Pass the worktree root with --dir (git rev-parse --show-toplevel in the caller) and run again.",
+        dir.display()
+    ))
+}
+
 /// Runs `git` in `dir`, giving up after [`GIT_TIMEOUT`].
 pub(crate) fn git_in(dir: &Path, args: &[&str]) -> Option<Output> {
     git_with(dir, args, GIT_TIMEOUT)

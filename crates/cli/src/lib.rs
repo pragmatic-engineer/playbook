@@ -1344,6 +1344,9 @@ pub enum PrCommand {
         /// Work in this directory instead of the current one
         #[arg(long)]
         dir: Option<String>,
+        /// Stop with WRONG_DIRECTORY when HEAD is not on this branch
+        #[arg(long)]
+        expect_branch: Option<String>,
     },
     /// Push the branch and open a PR from a drafted title and body
     ///
@@ -1367,6 +1370,9 @@ pub enum PrCommand {
         /// GitHub issue number the PR handles
         #[arg(long)]
         issue: Option<String>,
+        /// Stop with WRONG_DIRECTORY when HEAD is not on this branch
+        #[arg(long)]
+        expect_branch: Option<String>,
     },
     /// Choose a quick or deep self-review for a PR
     ///
@@ -1675,6 +1681,13 @@ pub enum CommitCommand {
         /// Replace the last commit
         #[arg(short = 'a')]
         amend: bool,
+        /// Work in this directory instead of the current one (pass the
+        /// worktree root, `git rev-parse --show-toplevel`)
+        #[arg(long)]
+        dir: Option<String>,
+        /// Stop with WRONG_DIRECTORY when HEAD is not on this branch
+        #[arg(long)]
+        expect_branch: Option<String>,
     },
     /// Commit, rebase when behind, and push
     ///
@@ -1702,6 +1715,13 @@ pub enum CommitCommand {
         /// contrast phrase in the message)
         #[arg(long)]
         no_prose_check: bool,
+        /// Work in this directory instead of the current one (pass the
+        /// worktree root, `git rev-parse --show-toplevel`)
+        #[arg(long)]
+        dir: Option<String>,
+        /// Stop with WRONG_DIRECTORY when HEAD is not on this branch
+        #[arg(long)]
+        expect_branch: Option<String>,
     },
 }
 

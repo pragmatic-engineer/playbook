@@ -1,7 +1,7 @@
 ---
 description: Use when committing staged changes and pushing. Stages, formats, makes a signed commit, and pushes.
 allowed-tools: Bash, Read, Skill
-argument-hint: "[--all|-A] [--update|-u] [--amend|-a] [--no-signoff] [--auto] [--ask]"
+argument-hint: "[--all|-A] [--update|-u] [--amend|-a] [--no-signoff] [--dir <path>] [--expect-branch <name>] [--auto] [--ask]"
 context: fork
 agent: playbook:git
 ---
@@ -30,6 +30,9 @@ Parse these from `$ARGUMENTS`. Each bash block below runs in its **own shell**, 
 
 - `--no-signoff` → leave the `Signed-off-by` trailer off this commit, on purpose, in Step 4.
 
+- `--dir <path>` → the absolute worktree root to commit in (the caller's `git rev-parse --show-toplevel`). A fork can start in the session's checkout instead of the caller's worktree, so a caller in a git worktree always passes it. Pass it to both tools (`commit prepare`, `commit run`), or `cd` into it at the top of every plain shell block.
+- `--expect-branch <name>` → the branch the caller is on. When HEAD is on another branch, stop; the tools abort with `WRONG_DIRECTORY`.
+
 Combined flags are fine: `-Au`, `-a -u`, etc. No flags means commit only what is already staged. There is no confirmation gate; the flow always runs to completion.
 
 ## Execution rules
@@ -42,6 +45,10 @@ Combined flags are fine: `-Au`, `-a -u`, etc. No flags means commit only what is
 6. Never skip hooks (`--no-verify`, `--no-gpg-sign`). Never put AI attribution (a `Co-Authored-By` for an AI, a "Generated with" line) in a commit message. When the `commit-message-sanitizer` hook is installed, it also removes such lines before the commit runs; it never blocks.
 7. Never amend automatically: only when `AMEND_COMMIT=true`.
 8. Pass commit messages on stdin with a heredoc to preserve formatting, never `-m "..."` for multi-line.
+
+## Directory check, before everything
+
+Do this before anything else. If `--dir` was given, `cd` there (every bash block starts with the same `cd`, each runs in its own shell). Then verify with `git rev-parse --show-toplevel` that the shell is in that directory, and with `git branch --show-current` that the branch equals `--expect-branch` when given. On a mismatch, stop with one line, `WRONG_DIRECTORY: expected <dir> on <branch>, found <toplevel> on <branch>`, and commit nothing. Never fall back to another checkout, and never tell the caller to commit by hand. Pass `--dir` and `--expect-branch` to `commit prepare` and `commit run` too.
 
 ## Step 0: Read the run mode
 
@@ -56,7 +63,7 @@ In auto mode this command never force-pushes and never uses a forced lease. When
 
 ## Step 1: Stage, format, emit context
 
-Stage, format and gather the diff. Intent: commit-prepare. If the session's tool map lists it, use that command with `-A`, `-u` and `-a` as the flags above ask. It prints `NO_STAGED_CHANGES` when nothing is staged (unless amending), else `BRANCH=`, the changed files, `---DIFF_START---` and the diff. Otherwise do this:
+Stage, format and gather the diff. Intent: commit-prepare. If the session's tool map lists it, use that command with `-A`, `-u` and `-a` as the flags above ask, plus `--dir` and `--expect-branch` when given. It prints `NO_STAGED_CHANGES` when nothing is staged (unless amending), else `BRANCH=`, the changed files, `---DIFF_START---` and the diff. Otherwise do this:
 
 1. Find the default branch: `git symbolic-ref --short refs/remotes/origin/HEAD` without the `origin/` prefix, else `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`, else `main`. If `git branch --show-current` is that branch, `main` or `master`, stop with: "HEAD is on '<branch>', the repo's default/protected branch. This skill never commits there. Create a feature branch first (e.g. git checkout -b <name>) and re-run." This holds under any flag, even `-y`.
 2. Stage: `git add -A` for `-A`, `git add -u` for `-u`.
@@ -107,7 +114,7 @@ Generated commit message:
 
 ## Step 4: Commit, rebase, push, verify
 
-Commit, rebase and push. Intent: commit-run. If the session's tool map lists it, use that command with `-a` when amending, its auto option in auto mode and `--no-signoff` when passed. Feed it the message from Step 2 on stdin through a quoted heredoc (`<<'MSG'`), so its formatting is kept. It prints `Pushed: <commit> -> origin/<branch>` on success, and `PARKED` when auto mode would need a force. Otherwise do this, stopping at the first failure:
+Commit, rebase and push. Intent: commit-run. If the session's tool map lists it, use that command with `--dir` and `--expect-branch` when given, `-a` when amending, its auto option in auto mode and `--no-signoff` when passed. Feed it the message from Step 2 on stdin through a quoted heredoc (`<<'MSG'`), so its formatting is kept. It prints `Pushed: <commit> -> origin/<branch>` on success, and `PARKED` when auto mode would need a force. Otherwise do this, stopping at the first failure:
 
 1. Write the message to a file in the scratchpad through a quoted heredoc.
 2. Commit with `git commit [--amend] [--signoff] [--gpg-sign] --file <file>`. Add `--signoff` unless `--no-signoff` was passed, the `commit.signOff` setting is `false` (read it when the tool map lists config-get; the default is `true`), the message already has a `Signed-off-by` line, or an executable `prepare-commit-msg` or `commit-msg` hook writes one itself (a hook that only checks for the trailer does not count). Add `--gpg-sign` whenever `git config --get user.signingkey` prints a key. If the commit fails (a hook), stop and push nothing.
