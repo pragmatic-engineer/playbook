@@ -5,12 +5,18 @@
 //! `~/.claude/hooks/` that no longer exists (ADR 0034 decision 9). Older
 //! installs placed those scripts; the binary runs the hooks now, so a missing
 //! script means the entry is dead and fails on every event. An entry whose
-//! script still exists is the user's own and stays.
+//! script still exists is the user's own and stays. The `playbook hook` entry
+//! of a hook the binary no longer has (`RETIRED_HOOKS`) is dead too.
 
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
 
 const INTERPRETERS: [&str; 3] = ["bash", "sh", "python3"];
+
+/// Commands of hooks playbook wrote once and removed. Their entries are dead
+/// even though no script is missing. The disk guard went in 0.38.0 and was
+/// removed again.
+const RETIRED_HOOKS: [&str; 1] = ["playbook hook disk-guard"];
 
 /// Characters that make a command more than one program run, so a missing
 /// first script does not make the whole entry dead.
@@ -58,9 +64,11 @@ fn unquote(token: &str) -> Option<&str> {
     Some(token)
 }
 
-/// Whether `command` runs a script under a Claude `hooks` folder that is gone.
+/// Whether `command` runs a script under a Claude `hooks` folder that is gone,
+/// or is the entry of a retired hook.
 pub fn is_dead(command: &str, home: &Path, claude_home: &Path) -> bool {
-    hook_script(command, home, claude_home).is_some_and(|script| !script.exists())
+    RETIRED_HOOKS.contains(&command.trim())
+        || hook_script(command, home, claude_home).is_some_and(|script| !script.exists())
 }
 
 /// The dead hook commands in `settings`, each once, in file order.
@@ -185,6 +193,14 @@ mod tests {
         ] {
             assert!(is_dead(cmd, &home, &ch), "{cmd}");
         }
+    }
+
+    #[test]
+    fn the_entry_of_a_retired_hook_is_dead_and_a_live_hook_is_not() {
+        let (home, ch) = setup("dead-retired");
+        assert!(is_dead("playbook hook disk-guard", &home, &ch));
+        assert!(!is_dead("playbook hook policy-guard", &home, &ch));
+        assert!(!is_dead("playbook hook disk-guard-extra", &home, &ch));
     }
 
     #[test]

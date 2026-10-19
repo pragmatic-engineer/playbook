@@ -102,14 +102,7 @@ pub fn run(payload: &Payload) {
     }
 
     let (mut system_message, mut extra_context) = check_config_drift(payload, &dir, &home);
-    let claude_home = crate::disk::status::claude_home(&home_dir());
-    let disk_line = crate::hooks::disk_guard::wired(&claude_home)
-        .then(|| crate::hooks::disk_guard::session_start(payload, headless))
-        .flatten();
-    if let Some(line) = &disk_line {
-        push_context(&mut extra_context, line);
-    }
-    for line in heal_line(&home).into_iter().chain(disk_line) {
+    if let Some(line) = heal_line(&home) {
         if !system_message.is_empty() {
             system_message.push('\n');
         }

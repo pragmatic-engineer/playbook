@@ -82,9 +82,6 @@ fn reason(slug: &str) -> Option<&'static str> {
         migrate::PROMPT_DEFAULT_MIGRATION => {
             "pb cc sessions start without the playbook system prompt until it is installed or turned off"
         }
-        migrate::DISK_GUARD_MIGRATION => {
-            "builds keep running when the disk is almost full, until the guard hook is added"
-        }
         "other-playbook-plugins" => "hooks and skills run twice in every session",
         PLUGIN_RANGE => "skills and commands may call binary features that work differently in this version",
         PLUGIN_NEEDS_BINARY => "skills from this plugin call binary features this version does not have",

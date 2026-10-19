@@ -404,20 +404,6 @@ fn fires(f: &Fire, name: &str) -> bool {
             .1
             .is_empty()
         }
-        "disk-guard" => {
-            let home = f.home.clone();
-            run_hook(
-                &f.playbook,
-                name,
-                r#"{"tool_name":"Bash","tool_input":{"command":"cargo build"}}"#,
-                &home,
-                &home,
-                &[("PLAYBOOK_TEST_DISK_FREE_GB", "1")],
-                &[],
-            )
-            .1
-            .contains("\"permissionDecision\":\"deny\"")
-        }
         "no-slop-guard" => {
             let home = f.home.clone();
             let cmd = "git commit -m \"x \u{2014} y\"";

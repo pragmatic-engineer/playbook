@@ -2270,6 +2270,10 @@ pub enum HookName {
     ContextHygiene,
     DocReadHint,
     UsageWarm,
+    /// Retired with the disk guard. A `settings.json` entry written by
+    /// 0.38.0 still runs it until `playbook setup --hooks` removes the
+    /// entry, so it exits 0 and does nothing.
+    #[value(hide = true)]
     DiskGuard,
     /// Kept so a playbook-hooks plugin cached on disk from an older release
     /// still exits 0 on SessionStart. Does nothing. Remove it once those
