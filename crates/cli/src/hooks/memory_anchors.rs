@@ -87,6 +87,12 @@ const STRONG_NAME_TOKENS: usize = 2;
 /// Score of a name hit; a description hit scores one.
 const NAME_HIT_SCORE: usize = 2;
 
+/// Score of a fact alias found in the prompt.
+const ALIAS_HIT_SCORE: usize = 2;
+
+/// Index column that holds the fact file, relative to the memory root.
+const FACT_FILE_COLUMN: usize = 5;
+
 /// Score of a prompt word that names the crate folder of an anchor.
 const PATH_HIT_SCORE: usize = 2;
 
@@ -480,6 +486,8 @@ struct PromptQuery {
     tokens: Vec<String>,
     /// Words that name a crate, for matching the crate folder of an anchor.
     path_tokens: Vec<String>,
+    /// The whole prompt, lowercased, for matching aliases as phrases.
+    lower: String,
 }
 
 impl PromptQuery {
@@ -487,8 +495,63 @@ impl PromptQuery {
         Self {
             tokens: prompt_tokens(prompt),
             path_tokens: prompt_path_tokens(prompt),
+            lower: prompt.to_lowercase(),
         }
     }
+}
+
+/// Index column that holds the fact aliases, joined with `ALIAS_SEPARATOR`.
+/// Older rows have six columns and no aliases.
+const ALIAS_COLUMN: usize = 6;
+
+/// Joins the aliases of one fact inside the alias column.
+const ALIAS_SEPARATOR: char = '|';
+
+/// Whether any alias in `aliases` appears in the lowercased `prompt` as a
+/// whole word or phrase, so "pbcode" does not match "pbcodex".
+fn alias_in_prompt(aliases: &str, prompt: &str) -> bool {
+    aliases
+        .split(ALIAS_SEPARATOR)
+        .any(|a| !a.is_empty() && contains_at_boundary(prompt, a))
+}
+
+/// Add the alias column to each index row. Reads each fact file once; a file
+/// that is missing or has no `aliases:` leaves the column empty.
+fn append_alias_column(rows: Vec<String>, mem_dir: &Path) -> Vec<String> {
+    let mut cache: HashMap<String, String> = HashMap::new();
+    rows.into_iter()
+        .map(|row| {
+            let file = row.split('\t').nth(FACT_FILE_COLUMN).unwrap_or("");
+            let aliases = cache
+                .entry(file.to_string())
+                .or_insert_with(|| read_alias_cell(mem_dir, file))
+                .clone();
+            format!("{row}\t{aliases}")
+        })
+        .collect()
+}
+
+/// The aliases of one fact file as an index cell: lowercased, whitespace
+/// folded (so no tab, newline or separator survives), joined with `|`.
+fn read_alias_cell(mem_dir: &Path, file: &str) -> String {
+    if file.is_empty() {
+        return String::new();
+    }
+    let Ok(content) = fs::read_to_string(mem_dir.join(file)) else {
+        return String::new();
+    };
+    crate::hooks::rebuild_memory_graph::fact_aliases(&content)
+        .iter()
+        .map(|a| {
+            a.to_lowercase()
+                .replace(ALIAS_SEPARATOR, " ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|a| !a.is_empty())
+        .collect::<Vec<_>>()
+        .join(&ALIAS_SEPARATOR.to_string())
 }
 
 /// Words directly before `crate` or `crates`, stopwords included ("code" in
@@ -574,6 +637,12 @@ fn prompt_token_matches(idx_contents: &str, query: &PromptQuery) -> Vec<RecallMa
         if path_hit {
             score += PATH_HIT_SCORE;
         }
+        let alias_hit = cols
+            .get(ALIAS_COLUMN)
+            .is_some_and(|aliases| alias_in_prompt(aliases, &query.lower));
+        if alias_hit {
+            score += ALIAS_HIT_SCORE;
+        }
         if score == 0 {
             continue;
         }
@@ -584,7 +653,10 @@ fn prompt_token_matches(idx_contents: &str, query: &PromptQuery) -> Vec<RecallMa
         seen_from.insert(from_id);
         scored.push(RecallMatch {
             score,
-            strong: path_hit || hyphenated_name_hit || name_hit_tokens.len() >= STRONG_NAME_TOKENS,
+            strong: path_hit
+                || alias_hit
+                || hyphenated_name_hit
+                || name_hit_tokens.len() >= STRONG_NAME_TOKENS,
             row: cols.iter().map(|s| s.to_string()).collect(),
         });
     }
@@ -886,7 +958,7 @@ fn compute_index_rows(mem_dir: &Path, repo: &str) -> Vec<String> {
     let neigh = collect_neighbours(&edges, &byid, &inscope);
     let mut rows = collect_anchor_rows(&edges, &byid, &inscope, &neigh);
     append_unanchored_fact_rows(&nodes, &inscope, &mut rows);
-    rows
+    append_alias_column(rows, mem_dir)
 }
 
 /// A fact with no `anchors` edge still needs a row, or `run_prompt`'s
@@ -1166,6 +1238,67 @@ mod tests {
         // "cod" is a prefix of the crate "code"
         let got = scored(PATH_INDEX, "cod crate");
         assert!(got.iter().all(|m| !m.strong));
+    }
+
+    /// Same shape as `PATH_INDEX` plus a seventh column of aliases.
+    const ALIAS_INDEX: &str =
+        "crates/code/\tproject/a\tcode-index\tsource index\t\ta.md\tpbcode|pb code\n\
+        \tproject/b\tunrelated-fact\tsomething else\t\tb.md\t\n\
+        \tproject/c\tsix-columns\tno alias column here\t\tc.md\n";
+
+    #[test]
+    fn an_alias_in_the_prompt_is_a_strong_match() {
+        for prompt in ["what does pbcode do", "the pb code crate", "PBCODE?"] {
+            let got = scored(ALIAS_INDEX, prompt);
+            assert_eq!(got[0].row[1], "project/a", "{prompt}");
+            assert!(got[0].strong, "{prompt}");
+        }
+    }
+
+    #[test]
+    fn an_alias_matches_on_word_boundaries_only() {
+        let got = scored(ALIAS_INDEX, "what does pbcodex do");
+        assert!(got.iter().all(|m| m.row[1] != "project/a"));
+        let got = scored(ALIAS_INDEX, "the xpb code");
+        assert!(got.iter().all(|m| m.row[1] != "project/a"));
+    }
+
+    #[test]
+    fn a_six_column_row_still_parses_and_scores() {
+        let got = scored(ALIAS_INDEX, "tell me about six-columns");
+        assert_eq!(got[0].row[1], "project/c");
+        assert!(got[0].strong);
+    }
+
+    #[test]
+    fn an_empty_alias_column_matches_nothing() {
+        let got = scored(ALIAS_INDEX, "something");
+        assert!(got.iter().all(|m| !m.strong));
+    }
+
+    #[test]
+    fn a_missing_fact_file_leaves_the_alias_column_empty() {
+        let dir = std::env::temp_dir().join(format!("pb-alias-missing-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let rows = vec!["a\tg/a\tn\td\t\tmissing.md".to_string()];
+        let got = append_alias_column(rows, &dir);
+        assert_eq!(got, vec!["a\tg/a\tn\td\t\tmissing.md\t"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_alias_column_holds_lowercased_aliases_without_tabs() {
+        let dir = std::env::temp_dir().join(format!("pb-alias-read-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("f.md"),
+            "---\nname: f\naliases: [PBCode, pb | code]\n---\nbody\n",
+        )
+        .unwrap();
+        let rows = vec!["a\tg/a\tn\td\t\tf.md".to_string()];
+        let got = append_alias_column(rows, &dir);
+        assert_eq!(got, vec!["a\tg/a\tn\td\t\tf.md\tpbcode|pb code"]);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn terms(words: &[&str]) -> Vec<String> {

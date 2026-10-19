@@ -639,6 +639,42 @@ fn prompt_mentions_a_fact_by_name_surfaces_its_body_not_just_its_name() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// A fact with `aliases: [pbcode]` in its frontmatter is recalled by a prompt
+/// that uses only the alias, and the recall is strong (no weak hint).
+#[test]
+fn a_fact_alias_in_the_prompt_recalls_the_fact() {
+    // Arrange
+    let home = scratch_home("prompt-alias");
+    let graph = json!({
+        "nodes": [
+            {"id": "global/idx-fact", "file": "idx-fact.md", "scope": "global",
+             "type": "reference", "name": "source-index-notes",
+             "description": "How the symbol store is laid out."}
+        ],
+        "edges": []
+    })
+    .to_string();
+    write_graph(&home, &graph);
+    write_fact_body(
+        &home,
+        "idx-fact.md",
+        "---\nname: source-index-notes\naliases: [pbcode]\n---\n\nALIASBODYMARKER\n",
+    );
+
+    // Act
+    let output = run_prompt_hook(&home, "explain pbcode", "p-alias");
+
+    // Assert
+    let context = additional_context(&output);
+    assert!(context.contains("ALIASBODYMARKER"), "{context}");
+    assert!(
+        !context.contains("Memory:"),
+        "an alias hit is strong: {context}"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// Refinement pass finding: the `.prompt` empty, fall back to `.user_prompt`
 /// branch (added defensively because the official docs and this repo's own
 /// live code disagree on the field name, see the blueprint's resolved open
