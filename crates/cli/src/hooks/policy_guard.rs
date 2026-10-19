@@ -139,7 +139,7 @@ const CONFIG_SET_REASON: &str =
     protected_reason!("`playbook config set`, `unset`, `import` or `edit` of a protected key");
 
 const CONFIG_STORE_REASON: &str =
-    protected_reason!("a write to playbook's config database or a config file");
+    protected_reason!("a write to playbook's config database a config file or the memory store (write a fact with the Write tool)");
 
 const SAFE_ROOTS_ENV_REASON: &str =
     protected_reason!("an inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=` assignment");
@@ -164,7 +164,7 @@ const SETTINGS_EDIT_REASON: &str = concat!(
     settings_reason_tail!()
 );
 
-const MEMORY_REASON: &str = "Claude Code's own memory is off limits here. Save the fact in playbook's store instead: ~/.config/playbook/memory/ for a global fact, <owner>/<repo>/ under it for a project fact.";
+const MEMORY_REASON: &str = "Claude Code's own memory is off limits here. Save the fact in playbook's store instead, with the Write tool: ~/.config/playbook/memory/ for a global fact, <owner>/<repo>/ under it for a project fact.";
 
 pub fn run(payload: &Payload) {
     if std::env::var("POLICY_GUARD").as_deref() == Ok("0") {
@@ -331,6 +331,17 @@ fn names_config_store(word: &str, home: &str) -> bool {
                 Path::new(&expanded).components().count() - root.components().count(),
                 1 | 2
             ))
+}
+
+/// Whether `word` is a path inside playbook's memory store, the facts the
+/// model writes with the Write tool.
+fn names_memory_store(word: &str, home: &str) -> bool {
+    if home.is_empty() {
+        return false;
+    }
+    let memory = crate::common::paths::playbook_root_from(Path::new(home)).join("memory");
+    let lower = |p: &Path| PathBuf::from(p.to_string_lossy().to_lowercase());
+    lower(&lexical(Path::new(&expand_home(word, home)))).starts_with(lower(&memory))
 }
 
 /// Whether `path` is a Claude Code settings file: `settings*.json` directly
@@ -1115,7 +1126,13 @@ mod tests {
             Some(MEMORY_REASON)
         );
         assert_eq!(deny("ls ~/.claude/projects/p/memory"), None);
-        assert_eq!(deny("cp a.md ~/.config/playbook/memory/a.md"), None);
+        // A fact goes into playbook's store with the Write tool, which shows
+        // the fact format, not with a shell copy.
+        assert_eq!(
+            deny("cp a.md ~/.config/playbook/memory/a.md"),
+            Some(CONFIG_STORE_REASON)
+        );
+        assert_eq!(deny("cat ~/.config/playbook/memory/a.md"), None);
     }
 
     #[test]
