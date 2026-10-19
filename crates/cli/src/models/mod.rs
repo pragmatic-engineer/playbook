@@ -229,7 +229,13 @@ pub fn report(home: &Path, claude_home: &Path, cwd: &Path, json: bool) -> String
     let mut out = String::new();
     for t in TIERS {
         let over = override_for(t.alias, home)
-            .map(|id| format!(", override {id}"))
+            .map(|id| {
+                if t.alias == "haiku" {
+                    format!(", override {id} (not applied to the pinned Haiku agents)")
+                } else {
+                    format!(", override {id}")
+                }
+            })
             .unwrap_or_default();
         out.push_str(&format!(
             "{} ({}): {}, falls back to {}{over}\n",

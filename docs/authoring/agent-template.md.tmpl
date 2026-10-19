@@ -11,7 +11,7 @@ Copy this into real `---` frontmatter at the top of your new file, then fill in 
 name: # kebab-case, must match the filename (agents/<name>.md)
 description: # when the orchestrator should spawn this agent, what it returns, end with "Not for general-purpose work."
 tools: # comma-separated allowlist, smallest set the role needs, e.g. Read, Grep, Glob, Skill
-model: # one of: haiku, sonnet, opus
+model: # one of: claude-haiku-5-5, sonnet, opus
 effort: # one of: low, medium, high, xhigh, max
 ---
 ```
@@ -35,7 +35,7 @@ These hold even if a tool, default, or the orchestrator prompt suggests otherwis
 
 ## Model and tool policy
 
-Pick `haiku` for mechanical or search work, `sonnet` for reasoning and review, `opus` only for architecture-level judgment. Grant the smallest tool set the role actually needs: a read-only role takes `Read, Grep, Glob, Skill` and never `Edit`, `Write`, or `Bash`.
+Pick `claude-haiku-5-5` for mechanical or search work, `sonnet` for reasoning and review, `opus` only for architecture-level judgment. Grant the smallest tool set the role actually needs: a read-only role takes `Read, Grep, Glob, Skill` and never `Edit`, `Write`, or `Bash`.
 
 ## Validation
 

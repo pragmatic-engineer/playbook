@@ -548,6 +548,11 @@ mod tests {
             )
         };
         assert!(check(crate::models::HAIKU_PIN).is_empty());
+        assert!(check("sonnet").is_empty());
+        assert!(check("opus").is_empty());
+        assert!(check("claude-sonnet-5-5")
+            .iter()
+            .any(|v| v.contains("is not one of")));
         assert!(check("haiku")
             .iter()
             .any(|v| v.contains("model 'haiku' is not one of")));

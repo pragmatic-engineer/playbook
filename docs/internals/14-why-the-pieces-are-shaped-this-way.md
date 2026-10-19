@@ -41,7 +41,7 @@ The rule is: spend on judgment, save on routine.
 - **Haiku** runs `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer` and `analyst`. The first five apply a decision someone else already made, or classify with a safe fallback, and a wrong answer is cheap to detect and rerun. The last three ran on Haiku after the same bench showed no meaningful loss on real playbook code.
 - **Opus** runs design (`/playbook:plan`, `/playbook:adr`), every `reviewer`, and the `auditor`. A missed finding in a review, or a weak design, costs far more than the extra tokens.
 
-Plugin files name only the alias. `playbook cc` resolves each to the 5.5 model and passes the previous generation as a fallback. The table, the overrides (`models.<alias>`) and the routing details, including the hook that nudges design prompts toward Opus, are in [Model routing and memory](../internals/02-model-routing-and-memory.md).
+Plugin files name the alias, except the seven Haiku agents, which pin `claude-haiku-5-5` so they stay on 5.5 under plain `claude` too. `playbook cc` resolves each to the 5.5 model and passes the previous generation as a fallback. The table, the overrides (`models.<alias>`) and the routing details, including the hook that nudges design prompts toward Opus, are in [Model routing and memory](../internals/02-model-routing-and-memory.md).
 
 ## Why effort is a second dial
 

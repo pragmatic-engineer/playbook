@@ -107,7 +107,7 @@ The ceilings the patch works inside already exist (`maxEffortLevel` and `effort.
 
 ### Model tiers and the 5.5 rule
 
-Every model playbook picks is the 5.5 generation. Plugin files name a tier by alias (`sonnet`, `opus`) and never pin a model id, with one exception: the seven Haiku agents (analyst, cheap-checker, collector, fact-checker, git, review-triage, test-reviewer) pin `claude-haiku-5-5` in their `model:` field, so they run on 5.5 under plain `claude` as well as `playbook cc`. Haiku commands (`setup`, `doctor`, `session-handoff`, `session-start`) still use the `haiku` alias. If the pinned ID is unavailable, plain `claude` fails with `model_not_found` (404); under `playbook cc`, `--fallback-model claude-haiku-4-5` runs the agent on 4.5. Claude Code resolves each alias to the newest model the provider offers (on the Anthropic API that is the 5.5 model).
+Every model playbook picks is the 5.5 generation. Plugin files name a tier by alias (`sonnet`, `opus`) and never pin a model id, with one exception: the seven Haiku agents (analyst, cheap-checker, collector, fact-checker, git, review-triage, test-reviewer) pin `claude-haiku-5-5` in their `model:` field, so they run on 5.5 under plain `claude` as well as `playbook cc`. Haiku commands (`setup`, `doctor`, `session-handoff`, `session-start`) still use the `haiku` alias. If the pinned ID is unavailable, plain `claude` fails with `model_not_found` (404); under `playbook cc` the session fallback chain applies (measured with a Haiku only chain, `--fallback-model claude-haiku-4-5`, where the agent ran on 4.5). Bedrock and Vertex accounts that rely on `models.haiku` to map the alias to a provider ID should run through `playbook cc` and check the chain with `playbook doctor models`. Claude Code resolves each alias to the newest model the provider offers (on the Anthropic API that is the 5.5 model).
 
 | Tier | Alias | Preferred (5.5) | Falls back to |
 |---|---|---|---|
@@ -125,7 +125,7 @@ Measured on Claude Code 2.1.293 (2026-10-09): all six ids answer, and the aliase
 
 `playbook doctor models` (add `--json`) prints the table, any override, the chain `playbook cc` passes, whether your own fallback replaces it, and whether the effort in force trimmed the chain.
 
-a test fails when an agent, command, skill, prompt, output style, workflow or `settings.shared.json` names a model id outside this table, or when an agent uses anything but a tier alias.
+A test fails when an agent, command, skill, prompt, output style, workflow or `settings.shared.json` names a model id outside this table, or when an agent breaks the agent rule: Sonnet and Opus agents use the alias, and Haiku agents pin `claude-haiku-5-5`.
 
 ## Memory Protocol
 
