@@ -23,7 +23,7 @@ The guard does not follow `cd`, variables, subshells (`$(...)`, backticks), `fin
 
 Before 2026-10-19 the guard judged every target against a set of safe roots, followed `cd` and variables, and kept a deny set of system, credential and playbook paths. It denied too many harmless commands and cost more in support than it saved. The parser, the roots and the config key `hooks.rmGuard.allowedRoots` are gone. A stored `hooks.rmGuard.allowedRoots` value stays in the store and is ignored for one release, `config import` skips it, and `config set` no longer takes it. The first command after the upgrade prints one notice about this.
 
-With `defaultMode` set to `auto` in the seed settings, the guard no longer catches a deletion of a project folder, your `~/.ssh`, your memory store or `config.db`. Only Claude Code's own permission handling and your deny rules in settings.json stand between the model and those paths. To keep a path safe, add a `Bash(rm:*)` deny or ask rule for it in your Claude Code settings.
+With `defaultMode` set to `auto` in the seed settings, the guard no longer catches a deletion of a project folder, your `~/.ssh`, your memory store or `config.db`. Only Claude Code's own permission handling and your deny rules in settings.json stand between the model and those paths. To keep a path safe, add a deny or ask rule that names that path in your Claude Code settings.
 
 `playbook disk clean` keeps its own list of protected playbook data and does not depend on the guard.
 
