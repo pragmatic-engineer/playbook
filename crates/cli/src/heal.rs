@@ -214,12 +214,17 @@ impl Outcome {
     /// report. The items that need the user go through `crate::pending`.
     pub fn line(&self) -> Option<String> {
         let mut parts = Vec::new();
-        if !self.changed.is_empty() {
+        let (notices, files): (Vec<_>, Vec<_>) = self
+            .changed
+            .iter()
+            .partition(|step| step.name == crate::init::migrate::POLICY_GUARD_NOTICE_STEP);
+        if !files.is_empty() {
             parts.push(format!(
                 "updated {} of its own files after the upgrade",
-                self.changed.len()
+                files.len()
             ));
         }
+        parts.extend(notices.iter().map(|step| step.detail.clone()));
         if !self.failed.is_empty() {
             parts.push(format!(
                 "{} migration(s) failed: run `playbook migrate`",
@@ -1203,6 +1208,21 @@ mod tests {
             text.contains("    Fix: playbook setup --statusline\n"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_heal_line_shows_the_policy_guard_notice_in_full_and_does_not_count_it() {
+        let out = Outcome {
+            changed: vec![StepReport::wired(
+                crate::init::migrate::POLICY_GUARD_NOTICE_STEP,
+                "the policy guard is now off by default; run: playbook config set --global hooks.policyGuard.enabled true",
+            )],
+            recorded: true,
+            ..Outcome::default()
+        };
+        let line = out.line().expect("a line");
+        assert!(line.contains("hooks.policyGuard.enabled true"), "{line}");
+        assert!(!line.contains("updated 1 of its own files"), "{line}");
     }
 
     #[test]
