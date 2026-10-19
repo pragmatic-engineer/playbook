@@ -724,3 +724,33 @@ fn attribution_on_removes_only_the_off_values_and_yes_keeps_it_on() {
     );
     assert_eq!(after_yes, after_on, "--yes keeps the stored ON");
 }
+
+#[test]
+fn the_old_attribution_flags_still_work() {
+    // Arrange
+    let sb = Sandbox::new("attribution-old");
+    sb.write(
+        ".claude/settings.json",
+        "{\"attribution\":{\"commit\":\"mine\"}}\n",
+    );
+
+    // Act
+    sb.init_raw(
+        "/bin/bash",
+        &["--only", "attribution-off", "--attribution-off"],
+    );
+    let off = attribution_of(&sb);
+    sb.init_raw(
+        "/bin/bash",
+        &["--only", "attribution-off", "--no-attribution-off"],
+    );
+    let on = attribution_of(&sb);
+
+    // Assert
+    assert_eq!(
+        off,
+        serde_json::json!({"commit": "", "pr": "", "sessionUrl": false}),
+        "--attribution-off is --no-attribution, which replaces your own value"
+    );
+    assert_eq!(on, Value::Null, "--no-attribution-off is --attribution");
+}

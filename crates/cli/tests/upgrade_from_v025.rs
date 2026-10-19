@@ -199,7 +199,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     );
     for message in [&first, &second] {
         for part in [
-            "4 change(s) to your settings or shell files need `playbook setup` and `playbook setup --hooks` and `playbook setup --only attribution` and `playbook setup --statusline`",
+            "3 change(s) to your settings or shell files need `playbook setup` and `playbook setup --hooks` and `playbook setup --statusline`",
             "2 item(s) need you: run `playbook migrate`",
         ] {
             assert!(message.contains(part), "{message}");
@@ -212,10 +212,13 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
         "claude plugin update playbook@pragmatic-engineer",
         "orphaned-plugin-caches: 1 old plugin folder(s)",
         "(run `playbook setup --hooks`)",
-        "(run `playbook setup --only attribution`)",
     ] {
         assert!(report.contains(line), "{report}");
     }
+    assert!(
+        !report.contains("attribution-off"),
+        "the item is retired: {report}"
+    );
     assert_eq!(h.user_files(), user_files);
 
     // Act: the user runs init.

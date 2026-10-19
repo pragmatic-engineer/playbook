@@ -21,8 +21,10 @@ const SKILL_KEY_PREFIX: &str = "skill:";
 pub const STATUSLINE_MIGRATION: &str = "statusline-rust-command";
 /// The `Consent` migration `init` skips when the user declines the hooks.
 pub const DEAD_HOOKS_MIGRATION: &str = "dead-hook-scripts";
-/// The `Consent` item for the attribution-off part (ADR 0042).
-pub const ATTRIBUTION_MIGRATION: &str = "attribution-off";
+/// The `Consent` item 0.36.0 and 0.37.0 shipped for the attribution part,
+/// retired with ADR 0042's amendment. A record that names it, by slug or as
+/// `0015-attribution-off`, still loads, and the id is ignored.
+pub const RETIRED_ATTRIBUTION_MIGRATION: &str = "attribution-off";
 /// The `Consent` item for the collector-service part (ADR 0043).
 pub const COLLECTOR_SERVICE_MIGRATION: &str = "collector-service";
 /// The `Owned` move of stored auto budgets off the old $5 default (ADR 0028).
@@ -315,16 +317,6 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Manual,
             scope: Scope::Owned,
             run: orphaned_plugin_caches,
-        },
-        Migration {
-            id: ATTRIBUTION_MIGRATION,
-            since: "0.36.0",
-            kind: Kind::Idempotent,
-            scope: Scope::Consent {
-                check: attribution_pending,
-                command: crate::init::attribution::COMMAND,
-            },
-            run: attribution_by_setup,
         },
         Migration {
             id: COLLECTOR_SERVICE_MIGRATION,
@@ -657,23 +649,6 @@ fn auto_budget_defaults(ctx: &Ctx) -> Outcome {
             moved.join(", ")
         ),
     ))
-}
-
-/// `attribution` keys missing from settings.json (ADR 0042), unless the user
-/// said no. Only reported: the hook and the first run step name the command,
-/// and the setup part writes the key after its question.
-fn attribution_pending(ctx: &Ctx) -> Option<String> {
-    let settings = ctx.claude_home.join("settings.json");
-    settings
-        .is_file()
-        .then(|| crate::init::attribution::pending(&ctx.home, &settings))
-        .flatten()
-}
-
-/// Setup's attribution-off part writes the key, because only it knows the
-/// answer to the question. The registry entry carries the check.
-fn attribution_by_setup(_: &Ctx) -> Outcome {
-    Outcome::Quiet
 }
 
 /// Hook entries whose `~/.claude/hooks/` script is gone (ADR 0034 decision
@@ -1658,6 +1633,34 @@ mod tests {
     }
 
     #[test]
+    fn a_record_that_names_the_retired_attribution_item_still_loads() {
+        // Arrange: a 0.37.0 record with the retired item under both ids, and
+        // settings with no attribution key, which its check used to report.
+        let h = home("retired-attribution");
+        let old = "applied 0015-attribution-off".to_string();
+        let slug = format!("applied {RETIRED_ATTRIBUTION_MIGRATION}");
+        write_state(&h, &[old, slug]).unwrap();
+        fs::create_dir_all(h.join(".claude")).unwrap();
+        fs::write(h.join(".claude/settings.json"), r#"{"model":"x"}"#).unwrap();
+
+        // Act
+        let report = run_owned(&ctx(&h), 0, None);
+        let plan = plan(&ctx(&h)).expect("the record reads");
+        let open = open_items(&ctx(&h), None);
+
+        // Assert
+        assert!(!report.failed, "{:?}", report.warnings);
+        assert!(registry()
+            .iter()
+            .all(|m| m.id != RETIRED_ATTRIBUTION_MIGRATION));
+        assert!(plan.iter().all(|p| p.id != RETIRED_ATTRIBUTION_MIGRATION));
+        assert!(open.iter().all(|i| i.id != RETIRED_ATTRIBUTION_MIGRATION));
+        let rows = rows(&h);
+        assert!(rows.contains(&"migrations/applied/0015-attribution-off=1".to_string()));
+        assert!(rows.contains(&"migrations/applied/attribution-off=1".to_string()));
+    }
+
+    #[test]
     fn applying_a_migration_with_an_old_number_writes_both_rows() {
         // Arrange: a home from 0.35 that never ran the budget migration.
         let h = home("both-rows");
@@ -1798,7 +1801,10 @@ mod tests {
                 format!("{:04}-{slug}", i + 1),
                 "the table keeps release order"
             );
-            assert!(slugs.contains(&slug), "{old} names no migration");
+            assert!(
+                slugs.contains(&slug) || slug == RETIRED_ATTRIBUTION_MIGRATION,
+                "{old} names no migration"
+            );
             assert_eq!(legacy_id(slug), Some(*old));
         }
         assert!(slugs
@@ -2319,7 +2325,7 @@ mod tests {
 
         // Assert
         assert_eq!(at_034.len(), 14, "{at_034:?}");
-        assert!(!at_034.contains(&ATTRIBUTION_MIGRATION));
+        assert!(!at_034.contains(&COLLECTOR_SERVICE_MIGRATION));
         assert!(at_037.contains(&PROMPT_DEFAULT_MIGRATION));
         let unreleased: Vec<&str> = registry()
             .iter()

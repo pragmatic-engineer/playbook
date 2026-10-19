@@ -1432,6 +1432,21 @@ fn attribution_row(rows: &[Value]) -> &Value {
         .expect("an attribution row")
 }
 
+/// Stores attribution ON, as `playbook setup --attribution` does.
+fn choose_attribution_on(b: &Box) {
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["config", "set", "attribution.enabled", "true"])
+        .env("HOME", b.home())
+        .current_dir(b.home())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 #[test]
 fn doctor_reports_the_attribution_key_ok_missing_or_your_own() {
     // Arrange
@@ -1455,13 +1470,16 @@ fn doctor_reports_the_attribution_key_ok_missing_or_your_own() {
     let row = attribution_row(&missing);
     assert_eq!(row["level"], "WARN");
     assert!(
-        row["message"].as_str().unwrap().contains("pr, sessionUrl"),
+        row["message"]
+            .as_str()
+            .unwrap()
+            .contains("attribution.pr, attribution.sessionUrl"),
         "{row}"
     );
     assert!(row["hint"]
         .as_str()
         .unwrap()
-        .contains("playbook setup --only attribution "));
+        .starts_with("run: playbook setup --only attribution "));
     let row = attribution_row(&custom);
     assert_eq!(row["level"], "INFO");
     assert!(row["hint"]
@@ -1477,6 +1495,41 @@ fn doctor_reports_the_attribution_key_ok_missing_or_your_own() {
             .contains("your own values stay"),
         "{row}"
     );
+}
+
+#[test]
+fn doctor_passes_attribution_on_by_choice_and_warns_when_off_values_remain() {
+    // Arrange
+    let on = Box::new("attr-on");
+    on.settings(r#"{"model":"opus"}"#);
+    let left = Box::new("attr-on-left");
+    left.settings(r#"{"attribution":{"commit":"","sessionUrl":true}}"#);
+    let mine = Box::new("attr-on-mine");
+    mine.settings(r#"{"attribution":{"commit":"custom"}}"#);
+    for b in [&on, &left, &mine] {
+        choose_attribution_on(b);
+    }
+
+    // Act
+    let on = on.run_with_env(&[]);
+    let left = left.run_with_env(&[]);
+    let mine = mine.run_with_env(&[]);
+
+    // Assert
+    let row = attribution_row(&on);
+    assert_eq!(row["level"], "PASS", "{row}");
+    assert!(row["message"]
+        .as_str()
+        .unwrap()
+        .starts_with("attribution ON"));
+    let row = attribution_row(&left);
+    assert_eq!(row["level"], "WARN", "{row}");
+    assert!(row["message"]
+        .as_str()
+        .unwrap()
+        .contains("attribution.commit still holds"));
+    assert_eq!(row["hint"], "run: playbook setup --only attribution");
+    assert_eq!(attribution_row(&mine)["level"], "INFO");
 }
 
 #[test]

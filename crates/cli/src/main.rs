@@ -386,7 +386,8 @@ fn main() {
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
         Command::Setup { flags } | Command::Init { flags } if flags.explain.is_some() => {
-            init::choices::note_retired(&flags);
+            let mut flags = flags;
+            init::choices::map_and_note(&mut flags);
             let which = flags.explain.as_ref().and_then(|w| w.as_deref());
             let named: Vec<String> = init::choices::only_parts(&flags)
                 .into_iter()
@@ -411,7 +412,8 @@ fn main() {
             }
         }
         Command::Setup { flags } | Command::Init { flags } => {
-            init::choices::note_retired(&flags);
+            let mut flags = flags;
+            init::choices::map_and_note(&mut flags);
             let security_config = config::resolve("security.defaults", &common::home_dir(), None)
                 .map(|(value, _)| value.as_bool().unwrap_or(false))
                 .unwrap_or(false);

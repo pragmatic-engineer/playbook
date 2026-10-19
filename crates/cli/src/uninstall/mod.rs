@@ -204,8 +204,9 @@ fn settings_step(
     // Setup may have written it, but the user may also want it: say so, keep it.
     if crate::init::attribution::state(&path) == crate::init::attribution::State::Off {
         report.lines.push(format!(
-            "kept the attribution key in {}; delete it by hand to get Claude Code's attribution back",
-            path.display()
+            "kept the attribution key in {}; to get Claude Code's attribution back, run `{}` before you uninstall, or delete the key by hand",
+            path.display(),
+            crate::init::attribution::ON_COMMAND
         ));
     }
     match wire::unwire_at(&path, &opts.home, stamp, opts.dry_run) {
