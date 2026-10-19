@@ -7,8 +7,11 @@
 //! their `depends_on` and `contradicts` neighbours, as `additionalContext`
 //! before the edit lands. `UserPromptSubmit` (ADR 0008 WU-0): match prompt
 //! text and this-session touched files against the same index, injecting
-//! the matched facts' BODIES (not just names), deduped per session. Both
-//! emit nothing on no match. Neither ever blocks. `PreToolUse` ports
+//! the matched facts' BODIES (not just names), deduped per session. The
+//! edit event emits nothing on no match. The prompt event prints one hint
+//! line (at most 5 per session) when a prompt with searchable words matches
+//! no fact or only weak ones, and nothing extra on a strong match. Neither
+//! ever blocks. `PreToolUse` ports
 //! the retired shell original; `UserPromptSubmit` has no python precedent.
 //!
 //! Performance: `PreToolUse` fires on every single Edit and Write, so it
@@ -54,6 +57,36 @@ const BODY_CAP_CHARS: usize = 1500;
 
 /// Hard ceiling for one prompt's whole recall message.
 const PROMPT_RECALL_CAP_CHARS: usize = 5000;
+
+/// Most searched terms a recall hint names.
+const MAX_HINT_TERMS: usize = 6;
+
+/// Longest single term in a recall hint, in characters.
+const MAX_HINT_TERM_CHARS: usize = 30;
+
+/// Longest joined term list in a recall hint, in characters.
+const MAX_HINT_TERMS_CHARS: usize = 100;
+
+/// Longest repo slug in a recall hint's folder path, in characters.
+const MAX_HINT_REPO_CHARS: usize = 80;
+
+/// Session file holding one line per recall hint already emitted.
+const HINTS_FILE: &str = "prompt-recall-hints.tsv";
+
+/// The line written to `HINTS_FILE` for each emitted hint.
+const HINT_MARK: &str = "hint";
+
+/// Most recall hints one session may receive.
+const MAX_HINTS_PER_SESSION: usize = 5;
+
+/// Distinct prompt tokens that must hit a fact's name for a strong match.
+const STRONG_NAME_TOKENS: usize = 2;
+
+/// Score of a name hit; a description hit scores one.
+const NAME_HIT_SCORE: usize = 2;
+
+/// Score of a fact anchored to a file touched this session.
+const TOUCHED_FILE_SCORE: usize = 1;
 
 /// Hard ceiling for the `PreToolUse:Edit` anchor message, in characters. The
 /// message repeated on every edit and averaged about 1,600 characters, so it is
@@ -226,7 +259,8 @@ fn run_prompt(payload: &Payload, dir: &str) {
     }
 
     let root = git_toplevel();
-    let mut matches = prompt_token_matches(&contents, &prompt);
+    let tokens = prompt_tokens(&prompt);
+    let mut matches = prompt_token_matches(&contents, &tokens);
     let index = AnchorIndex::parse(&contents);
     for touched_abs in touched_paths(dir) {
         let relpath = repo_relative_path(&root, &touched_abs);
@@ -235,15 +269,17 @@ fn run_prompt(payload: &Payload, dir: &str) {
         }
         for row in index.matching_rows(&relpath) {
             let from_id = row.get(1).cloned().unwrap_or_default();
-            if !matches
-                .iter()
-                .any(|m: &Vec<String>| m.get(1) == Some(&from_id))
-            {
-                matches.push(row);
+            if !matches.iter().any(|m| m.row.get(1) == Some(&from_id)) {
+                matches.push(RecallMatch {
+                    score: TOUCHED_FILE_SCORE,
+                    strong: true,
+                    row,
+                });
             }
         }
     }
     if matches.is_empty() {
+        emit_zero_match_hint(dir, &tokens);
         return;
     }
 
@@ -258,9 +294,10 @@ fn run_prompt(payload: &Payload, dir: &str) {
 
     let mut newly_seen = Vec::new();
     let mut entries: Vec<String> = Vec::new();
+    let mut unreadable = false;
     let mut used_chars = 0;
     let staleness_deadline = Instant::now() + STALENESS_BUDGET;
-    for row in &matches {
+    for RecallMatch { row, .. } in &matches {
         if newly_seen.len() >= room {
             break;
         }
@@ -277,6 +314,7 @@ fn run_prompt(payload: &Payload, dir: &str) {
         // A deleted or unreadable fact file is skipped, not fatal: the rest
         // of the matches still get their chance.
         let Some(body) = read_fact_body(&file) else {
+            unreadable = true;
             continue;
         };
         // Past budget: skip the staleness check, not the recall itself.
@@ -295,6 +333,10 @@ fn run_prompt(payload: &Payload, dir: &str) {
         newly_seen.push(from_id);
     }
     if entries.is_empty() {
+        // Matches existed but none could be read: the model got nothing.
+        if unreadable {
+            emit_zero_match_hint(dir, &tokens);
+        }
         return;
     }
 
@@ -306,11 +348,43 @@ fn run_prompt(payload: &Payload, dir: &str) {
     memory_signals::bump_hits(&mem_dir(), &newly_seen);
 
     append_seen(&seen_path, &newly_seen);
-    let msg = format!(
+    let mut msg = format!(
         "Recalled from memory, matching this prompt:\n\n{}",
         entries.join("\n\n")
     );
+    // Strength is judged over every match, so a strong fact shown on an
+    // earlier prompt still keeps the weak hint away.
+    if !tokens.is_empty() && !matches.iter().any(|m| m.strong) {
+        let hint = recall_hint(&tokens, &repo_slug(), true);
+        let fits = msg.chars().count() + 2 + hint.chars().count() <= PROMPT_RECALL_CAP_CHARS;
+        if fits && reserve_hint_slot(dir) {
+            msg.push_str("\n\n");
+            msg.push_str(&hint);
+        }
+    }
     emit_prompt_context(&msg);
+}
+
+/// Prints the zero-match hint when the prompt has searchable terms and the
+/// session still has hint budget. Silent otherwise.
+fn emit_zero_match_hint(dir: &str, tokens: &[String]) {
+    if tokens.is_empty() || !reserve_hint_slot(dir) {
+        return;
+    }
+    emit_prompt_context(&recall_hint(tokens, &repo_slug(), false));
+}
+
+/// Counts one hint against the session budget. Fails closed: false when the
+/// budget is spent, the counter cannot be read, or the new line cannot be
+/// written, so a broken counter can never let hints repeat without bound.
+fn reserve_hint_slot(dir: &str) -> bool {
+    let path = Path::new(dir).join(HINTS_FILE);
+    let used = match fs::read_to_string(&path) {
+        Ok(text) => text.lines().count(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(_) => return false,
+    };
+    used < MAX_HINTS_PER_SESSION && try_append_seen(&path, &[HINT_MARK.to_string()])
 }
 
 /// One recalled fact: its name, its description, then the body, cut at
@@ -381,16 +455,24 @@ fn token_matches(token: &str, text: &str) -> bool {
     })
 }
 
+/// A fact row that matched the prompt or a touched file. `strong` marks a
+/// match specific enough to trust: a hyphenated name token, two distinct name
+/// tokens, or a touched-file anchor. Anything else is weak.
+struct RecallMatch {
+    score: usize,
+    strong: bool,
+    row: Vec<String>,
+}
+
 /// Rows whose name or description matches a prompt token, best first: each
 /// distinct token that hits counts one, two when it hits the name. Ties keep
 /// index order. Deduplicated by from_id, same as `matching_rows`.
-fn prompt_token_matches(idx_contents: &str, prompt: &str) -> Vec<Vec<String>> {
-    let tokens = prompt_tokens(prompt);
+fn prompt_token_matches(idx_contents: &str, tokens: &[String]) -> Vec<RecallMatch> {
     if tokens.is_empty() {
         return Vec::new();
     }
 
-    let mut scored: Vec<(usize, Vec<String>)> = Vec::new();
+    let mut scored: Vec<RecallMatch> = Vec::new();
     let mut seen_from: HashSet<String> = HashSet::new();
     for line in idx_contents.lines() {
         if line.is_empty() {
@@ -399,16 +481,18 @@ fn prompt_token_matches(idx_contents: &str, prompt: &str) -> Vec<Vec<String>> {
         let cols: Vec<&str> = line.split('\t').collect();
         let name = cols.get(2).copied().unwrap_or("").to_lowercase();
         let desc = cols.get(3).copied().unwrap_or("").to_lowercase();
-        let score: usize = tokens
-            .iter()
-            .map(|t| {
-                if token_matches(t, &name) {
-                    2
-                } else {
-                    usize::from(token_matches(t, &desc))
-                }
-            })
-            .sum();
+        let mut score = 0;
+        let mut name_hits = 0;
+        let mut hyphenated_name_hit = false;
+        for token in tokens {
+            if token_matches(token, &name) {
+                score += NAME_HIT_SCORE;
+                name_hits += 1;
+                hyphenated_name_hit |= token.contains('-');
+            } else if token_matches(token, &desc) {
+                score += 1;
+            }
+        }
         if score == 0 {
             continue;
         }
@@ -417,10 +501,46 @@ fn prompt_token_matches(idx_contents: &str, prompt: &str) -> Vec<Vec<String>> {
             continue;
         }
         seen_from.insert(from_id);
-        scored.push((score, cols.iter().map(|s| s.to_string()).collect()));
+        scored.push(RecallMatch {
+            score,
+            strong: hyphenated_name_hit || name_hits >= STRONG_NAME_TOKENS,
+            row: cols.iter().map(|s| s.to_string()).collect(),
+        });
     }
-    scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-    scored.into_iter().map(|(_, row)| row).collect()
+    scored.sort_by_key(|m| std::cmp::Reverse(m.score));
+    scored
+}
+
+/// The one-line note for a prompt that found no fact (`weak == false`) or only
+/// weak ones. It names the searched terms, the repo's fact folder to grep, and
+/// the capture step. Bounded by `HINT_CAP_CHARS` whatever the terms or slug.
+fn recall_hint(terms: &[String], repo: &str, weak: bool) -> String {
+    let joined = terms
+        .iter()
+        .take(MAX_HINT_TERMS)
+        .map(|t| t.chars().take(MAX_HINT_TERM_CHARS).collect::<String>())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let joined: String = joined.chars().take(MAX_HINT_TERMS_CHARS).collect();
+    let slug: String = repo
+        .trim_matches('/')
+        .chars()
+        .take(MAX_HINT_REPO_CHARS)
+        .collect();
+    let folder = if slug.is_empty() {
+        "~/.config/playbook/memory/".to_string()
+    } else {
+        format!("~/.config/playbook/memory/{slug}/")
+    };
+    let lead = if weak {
+        "only weak matches for"
+    } else {
+        "no fact matched"
+    };
+    format!(
+        "Memory: {lead} \"{joined}\". Before you say you do not know, grep {folder} and the \
+         repo for these terms. If the answer comes from elsewhere, offer to save a fact."
+    )
 }
 
 /// Absolute paths touched this session, from `edits.jsonl`, in file order.
@@ -468,12 +588,20 @@ fn read_seen(path: &Path) -> HashSet<String> {
 /// the file on first write; a fresh session gets a fresh `session_dir`
 /// (keyed by `session_id`), so no explicit reset is needed.
 fn append_seen(path: &Path, ids: &[String]) {
-    let mut content = fs::read_to_string(path).unwrap_or_default();
-    for id in ids {
-        content.push_str(id);
-        content.push('\n');
-    }
-    let _ = fs::write(path, content);
+    let _ = try_append_seen(path, ids);
+}
+
+/// Like `append_seen` but reports whether the lines reached the file, for
+/// callers that must not act on a write that failed.
+fn try_append_seen(path: &Path, ids: &[String]) -> bool {
+    use std::io::Write;
+    let lines: String = ids.iter().map(|id| format!("{id}\n")).collect();
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(lines.as_bytes()))
+        .is_ok()
 }
 
 /// Reads a fact's markdown body from `~/.config/playbook/memory/<file>` (`file` is
@@ -825,6 +953,9 @@ fn write_index_atomically(idx_path: &Path, rows: &[String]) {
 mod tests {
     use super::*;
 
+    /// Ceiling for one recall hint, in characters (about 100 tokens).
+    const HINT_CAP_CHARS: usize = 400;
+
     #[test]
     fn cap_message_keeps_short_text_and_cuts_long_text_on_a_line() {
         assert_eq!(cap_message("a\nb", 600), "a\nb");
@@ -889,10 +1020,138 @@ mod tests {
         \tg/f\tthis-does-that\tWhat this does and what that does\t\tf.md\n";
 
     fn matched_names(prompt: &str) -> Vec<String> {
-        prompt_token_matches(RECALL_INDEX, prompt)
+        scored(RECALL_INDEX, prompt)
             .into_iter()
-            .map(|row| row[2].clone())
+            .map(|m| m.row[2].clone())
             .collect()
+    }
+
+    fn scored(index: &str, prompt: &str) -> Vec<RecallMatch> {
+        prompt_token_matches(index, &prompt_tokens(prompt))
+    }
+
+    fn terms(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    /// The text between the first pair of double quotes in `hint`.
+    fn quoted_terms(hint: &str) -> &str {
+        hint.split('"').nth(1).unwrap_or("")
+    }
+
+    #[test]
+    fn a_zero_match_hint_names_the_terms_the_folder_and_the_next_step() {
+        // Arrange
+        let words = terms(&["crate", "code"]);
+
+        // Act
+        let hint = recall_hint(&words, "pragmatic-engineer/playbook", false);
+
+        // Assert
+        assert!(hint.starts_with("Memory: no fact matched \"crate, code\""));
+        assert!(hint.contains("~/.config/playbook/memory/pragmatic-engineer/playbook/"));
+        assert!(hint.contains("grep"));
+        assert!(hint.contains("offer to save a fact"));
+        assert!(hint.chars().count() <= HINT_CAP_CHARS);
+    }
+
+    #[test]
+    fn a_hint_names_at_most_six_terms_and_stays_under_the_cap() {
+        // Arrange
+        let words: Vec<String> = (0..20).map(|n| format!("{n:x<40}")).collect();
+
+        // Act
+        let hint = recall_hint(&words, "pragmatic-engineer/playbook", false);
+
+        // Assert
+        assert!(quoted_terms(&hint).split(", ").count() <= MAX_HINT_TERMS);
+        assert!(hint.chars().count() <= HINT_CAP_CHARS);
+    }
+
+    #[test]
+    fn a_weak_hint_says_so() {
+        // Arrange
+        let words = terms(&["crate"]);
+
+        // Act
+        let hint = recall_hint(&words, "o/r", true);
+
+        // Assert
+        assert!(hint.starts_with("Memory: only weak matches for \"crate\""));
+    }
+
+    #[test]
+    fn a_very_long_repo_slug_cannot_push_the_hint_past_the_cap() {
+        // Arrange
+        let repo = format!("{}/{}", "o".repeat(300), "r".repeat(300));
+        let words: Vec<String> = (0..20).map(|n| format!("{n:x<40}")).collect();
+
+        // Act
+        let hint = recall_hint(&words, &repo, true);
+
+        // Assert
+        assert!(hint.chars().count() <= HINT_CAP_CHARS);
+        assert!(hint.ends_with("offer to save a fact."), "{hint}");
+    }
+
+    #[test]
+    fn an_empty_repo_slug_points_at_the_memory_root_without_a_double_slash() {
+        // Arrange
+        let words = terms(&["zebra"]);
+
+        // Act
+        let hint = recall_hint(&words, "", false);
+
+        // Assert
+        assert!(!hint.contains("memory//"), "{hint}");
+        assert!(hint.contains("grep ~/.config/playbook/memory/ and the repo"));
+    }
+
+    #[test]
+    fn one_plain_token_on_a_name_is_a_weak_match() {
+        // Arrange
+        let index = "\tg/a\trust-monorepo-crates-layout\tHow the workspace is laid out\t\ta.md\n";
+
+        // Act
+        let got = scored(index, "PB code crate");
+
+        // Assert
+        assert_eq!(got.len(), 1);
+        assert!(!got[0].strong);
+    }
+
+    #[test]
+    fn two_distinct_name_tokens_or_one_hyphenated_token_is_a_strong_match() {
+        // Arrange
+        let index = "\tg/a\talpha-beta-guide\tA guide\t\ta.md\n";
+
+        // Act
+        let two_tokens = scored(index, "alpha beta");
+        let hyphenated = scored(index, "alpha-beta-guide");
+
+        // Assert
+        assert!(two_tokens[0].strong);
+        assert!(hyphenated[0].strong);
+    }
+
+    #[test]
+    fn a_name_hit_scores_two_and_a_description_hit_scores_one() {
+        // Arrange / Act
+        let by_name = scored(RECALL_INDEX, "signing");
+        let by_description = scored(RECALL_INDEX, "signature");
+
+        // Assert
+        assert_eq!(by_name[0].score, 2);
+        assert_eq!(by_description[0].score, 1);
+    }
+
+    #[test]
+    fn a_description_only_match_is_weak() {
+        // Arrange / Act
+        let got = scored(RECALL_INDEX, "signature");
+
+        // Assert
+        assert!(!got[0].strong);
     }
 
     #[test]

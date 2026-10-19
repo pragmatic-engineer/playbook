@@ -766,11 +766,10 @@ fn a_file_touched_this_session_surfaces_its_anchored_fact_even_if_unmentioned() 
     let _ = fs::remove_dir_all(&home);
 }
 
-/// WU-0 scenario 4: no match emits nothing. Not a regression pin (both old
-/// and new code emit nothing here), a boundary test catching a malformed or
-/// empty-but-present block specifically.
+/// A prompt with searchable words and no matching fact gets one hint line, so
+/// the model can tell "searched, found nothing" from "did not search".
 #[test]
-fn prompt_with_no_match_emits_no_additional_context() {
+fn prompt_with_no_match_emits_a_hint_naming_the_searched_terms() {
     // Arrange
     let home = scratch_home("prompt-nomatch");
     write_graph(&home, BASE_GRAPH);
@@ -779,20 +778,18 @@ fn prompt_with_no_match_emits_no_additional_context() {
     let output = run_prompt_hook(&home, "completely unrelated words here", "p4");
 
     // Assert
-    assert_eq!(
-        stdout_of(&output),
-        "",
-        "a non-matching prompt should emit nothing, not an empty block"
-    );
+    let context = additional_context(&output);
+    assert!(context.starts_with("Memory: no fact matched"), "{context}");
+    assert!(context.contains("completely"), "{context}");
 
     let _ = fs::remove_dir_all(&home);
 }
 
 /// WU-0 scenario 5: a missing or corrupted anchor index degrades to
-/// silence, not a crash, matching this codebase's "never panics, degrades
+/// silence or one hint line, not a crash, matching this codebase's "never panics, degrades
 /// to say nothing" invariant.
 #[test]
-fn corrupted_anchor_index_degrades_to_silence_not_a_crash() {
+fn corrupted_anchor_index_degrades_to_at_most_a_hint_not_a_crash() {
     // Arrange: pre-plant a garbage index file. The cache is "built once and
     // reused" by file EXISTENCE, so a pre-existing garbage file is not
     // rebuilt, it must be tolerated on read instead.
@@ -828,10 +825,11 @@ fn corrupted_anchor_index_degrades_to_silence_not_a_crash() {
         Some(0),
         "a corrupted index should not crash the hook"
     );
-    assert_eq!(
-        stdout_of(&output),
-        "",
-        "a corrupted index should degrade to no additionalContext, not garbage output"
+    let context = additional_context(&output);
+    assert!(!context.contains("### "), "no fact body from garbage rows");
+    assert!(
+        context.is_empty() || context.starts_with("Memory: no fact matched"),
+        "a corrupted index is silent or one hint line, never garbage: {context}"
     );
 
     let _ = fs::remove_dir_all(&home);
@@ -1154,6 +1152,263 @@ fn recall_goes_quiet_after_nine_facts_in_one_session() {
 
     // Assert
     assert_eq!(counts, vec![3, 3, 3, 0, 0]);
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+// --- memory-anchors: recall hint on zero or weak match -----------------------
+
+/// Graph with one fact per `(name, description)`, bodies `BODY-<name>`.
+fn write_named_facts(home: &Path, facts: &[(&str, &str)]) {
+    let nodes: Vec<Value> = facts
+        .iter()
+        .map(|(name, desc)| {
+            json!({"id": format!("global/{name}"), "file": format!("{name}.md"),
+                   "scope": "global", "type": "feedback", "name": name,
+                   "description": desc})
+        })
+        .collect();
+    write_graph(home, &json!({"nodes": nodes, "edges": []}).to_string());
+    for (name, _) in facts {
+        write_fact_body(home, &format!("{name}.md"), &format!("BODY-{name}\n"));
+    }
+}
+
+fn session_file(home: &Path, session_id: &str, name: &str) -> PathBuf {
+    home.join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join(session_id)
+        .join(name)
+}
+
+const HINTS_FILE: &str = "prompt-recall-hints.tsv";
+
+#[test]
+fn a_prompt_that_hits_only_a_description_word_gets_the_fact_and_the_weak_hint() {
+    // Arrange
+    let home = scratch_home("hint-weak-description");
+    write_named_facts(&home, &[("tidy-notes", "Covers the gizmo setup")]);
+
+    // Act
+    let context = additional_context(&run_prompt_hook(&home, "gizmo", "h1"));
+
+    // Assert
+    assert!(context.contains("### tidy-notes"), "{context}");
+    assert!(context.contains("Memory: only weak matches"), "{context}");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_prompt_that_hits_one_plain_token_on_a_fact_name_gets_the_fact_and_the_weak_hint() {
+    // Arrange
+    let home = scratch_home("hint-weak-name-token");
+    write_named_facts(
+        &home,
+        &[("rust-monorepo-crates-layout", "How the workspace is split")],
+    );
+
+    // Act
+    let context = additional_context(&run_prompt_hook(&home, "PB code crate", "h2"));
+
+    // Assert
+    assert!(
+        context.contains("### rust-monorepo-crates-layout"),
+        "{context}"
+    );
+    assert!(context.contains("Memory: only weak matches"), "{context}");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_prompt_that_hits_a_fact_name_gets_no_hint() {
+    // Arrange
+    let home = scratch_home("hint-strong");
+    write_named_facts(&home, &[("guard-default-roots", "Roots fallback")]);
+
+    // Act
+    let context = additional_context(&run_prompt_hook(&home, "why guard-default-roots", "h3"));
+
+    // Assert
+    assert!(context.contains("### guard-default-roots"), "{context}");
+    assert!(!context.contains("Memory:"), "{context}");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn the_sixth_zero_match_prompt_in_a_session_gets_no_hint() {
+    // Arrange
+    let home = scratch_home("hint-session-cap");
+    write_graph(&home, BASE_GRAPH);
+    let prompts = [
+        "zebra", "yak", "walrus", "vulture", "urchin", "tapir", "newt",
+    ];
+
+    // Act
+    let contexts: Vec<String> = prompts
+        .iter()
+        .map(|p| additional_context(&run_prompt_hook(&home, p, "h4")))
+        .collect();
+
+    // Assert
+    let hinted = contexts.iter().filter(|c| c.starts_with("Memory:")).count();
+    assert_eq!(hinted, 5, "{contexts:?}");
+    assert!(contexts[5..].iter().all(String::is_empty), "{contexts:?}");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn matches_whose_fact_file_is_missing_get_the_zero_match_hint() {
+    // Arrange: the node exists, its body does not.
+    let home = scratch_home("hint-missing-body");
+    write_named_facts(&home, &[("ghost-fact", "A fact with no file")]);
+    fs::remove_file(
+        home.join(".config")
+            .join("playbook")
+            .join("memory")
+            .join("ghost-fact.md"),
+    )
+    .unwrap();
+
+    // Act
+    let context = additional_context(&run_prompt_hook(&home, "ghost-fact", "h5"));
+
+    // Assert
+    assert!(context.starts_with("Memory: no fact matched"), "{context}");
+    assert!(!context.contains("### "), "{context}");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn an_unreadable_hint_counter_means_no_hint_and_a_clean_exit() {
+    // Arrange: a directory where the counter file should be.
+    let home = scratch_home("hint-counter-unreadable");
+    write_graph(&home, BASE_GRAPH);
+    fs::create_dir_all(session_file(&home, "h6", HINTS_FILE)).unwrap();
+
+    // Act
+    let output = run_prompt_hook(&home, "zebra", "h6");
+
+    // Assert
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(additional_context(&output), "");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn an_unwritable_hint_counter_keeps_the_weak_facts_but_drops_the_hint() {
+    // Arrange
+    let home = scratch_home("hint-counter-weak");
+    write_named_facts(&home, &[("tidy-notes", "Covers the gizmo setup")]);
+    fs::create_dir_all(session_file(&home, "h7", HINTS_FILE)).unwrap();
+
+    // Act
+    let output = run_prompt_hook(&home, "gizmo", "h7");
+
+    // Assert
+    assert_eq!(output.status.code(), Some(0));
+    let context = additional_context(&output);
+    assert!(context.contains("### tidy-notes"), "{context}");
+    assert!(!context.contains("Memory:"), "{context}");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn no_hint_follows_once_the_session_fact_cap_is_reached() {
+    // Arrange: widget facts match by description only, so they are all weak.
+    let home = scratch_home("hint-after-fact-cap");
+    write_widget_facts(&home, 20);
+
+    // Act: three prompts use the nine-fact session budget.
+    let contexts: Vec<String> = (0..4)
+        .map(|_| additional_context(&run_prompt_hook(&home, "widgets misbehave", "h8")))
+        .collect();
+
+    // Assert
+    assert!(contexts[..3].iter().all(|c| c.contains("### widget-")));
+    assert_eq!(contexts[3], "");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_strong_fact_shown_earlier_suppresses_a_later_weak_hint() {
+    // Arrange: one strong fact and three weak ones, so the per-prompt cap of
+    // three leaves a weak fact for the second prompt.
+    let home = scratch_home("hint-strong-seen");
+    write_named_facts(
+        &home,
+        &[
+            ("alpha-beta-guide", "Plain notes"),
+            ("note-one", "Covers the gizmo setup"),
+            ("note-two", "Covers the gizmo setup"),
+            ("note-three", "Covers the gizmo setup"),
+        ],
+    );
+    let prompt = "alpha-beta-guide gizmo";
+
+    // Act
+    let first = additional_context(&run_prompt_hook(&home, prompt, "h9"));
+    let second = additional_context(&run_prompt_hook(&home, prompt, "h9"));
+
+    // Assert
+    assert!(first.contains("### alpha-beta-guide"), "{first}");
+    assert!(second.contains("### note-"), "{second}");
+    assert!(!first.contains("Memory:") && !second.contains("Memory:"));
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn the_hint_points_at_the_memory_root_when_the_repo_has_no_slug() {
+    // Arrange: the scratch repo has no origin remote.
+    let home = scratch_home("hint-empty-slug");
+    write_graph(&home, BASE_GRAPH);
+
+    // Act
+    let context = additional_context(&run_prompt_hook(&home, "zebra", "h10"));
+
+    // Assert
+    assert!(context.contains("grep ~/.config/playbook/memory/ and the repo"));
+    assert!(!context.contains("memory//"), "{context}");
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn the_hint_names_the_repo_fact_folder_and_stays_short_for_a_very_long_slug() {
+    // Arrange
+    let home = scratch_home("hint-long-slug");
+    write_graph(&home, BASE_GRAPH);
+    let owner = "o".repeat(200);
+    let name = "r".repeat(200);
+    set_origin(&home, &format!("https://github.com/{owner}/{name}.git"));
+    let prompt = (0..20)
+        .map(|n| format!("term{n}{}", "x".repeat(40)))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // Act
+    let context = additional_context(&run_prompt_hook(&home, &prompt, "h11"));
+
+    // Assert
+    assert!(context.starts_with("Memory: no fact matched"), "{context}");
+    assert!(
+        context.contains("~/.config/playbook/memory/ooo"),
+        "{context}"
+    );
+    assert!(
+        context.chars().count() <= 400,
+        "{}",
+        context.chars().count()
+    );
 
     let _ = fs::remove_dir_all(&home);
 }
