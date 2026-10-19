@@ -2,8 +2,9 @@
 
 - **Status:** Accepted
 - **Date created:** 2026-09-09
-- **Date modified:** 2026-09-09
+- **Date modified:** 2026-10-19
 - **Amends:** ADR 0004 (graph-first memory retrieval and triggered capture)
+- **Amended 2026-10-19:** the memory graph now lives in `~/.config/playbook/data/memory.db` (moved there in #925), not in `memory.graph.json` or `graph.json`. `playbook memory rebuild` rebuilds it and `playbook memory stats` shows what it holds. The fact files stay in `~/.config/playbook/memory/`. Paths below are as they were when this record was written.
 
 ## Context
 
