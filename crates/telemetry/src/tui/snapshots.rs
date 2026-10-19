@@ -954,7 +954,7 @@ fn tabbed(tab: usize) -> App {
 }
 
 #[test]
-fn the_charts_tab_stacks_the_two_charts_at_100x30() {
+fn the_charts_tab_stacks_the_three_charts_at_100x30() {
     let a = with_limits(
         tabbed(0),
         None,
@@ -1173,8 +1173,29 @@ fn the_burnup_panel_shows_the_windows_and_the_exceeded_limit() {
 fn the_burnup_chart_names_every_line_and_marks_the_crossings() {
     let (text, _) = draw_burnup("limit", Theme::Standard, 100, 30);
 
-    for glyph in ['\u{2588}', '\u{00b7}', '\u{2501}', '\u{25c6}', '\u{25b2}'] {
-        assert!(text.contains(glyph), "{glyph}\n{text}");
+    let legend = text
+        .lines()
+        .find(|l| l.contains("spent"))
+        .unwrap_or_default();
+    for part in [
+        "\u{2588} spent",
+        "\u{00b7} projected",
+        "\u{2501} limit",
+        "\u{2508} 80%",
+        "\u{2504} 50%",
+        "\u{25b2} crossing",
+        "\u{25c6} billed by the server",
+    ] {
+        assert!(legend.contains(part), "{part}\n{text}");
+    }
+    for glyph in [
+        '\u{2588}', '\u{00b7}', '\u{2501}', '\u{25c6}', '\u{25b2}', '\u{2504}', '\u{2508}',
+    ] {
+        assert!(
+            text.lines()
+                .any(|l| !l.contains("spent") && l.contains(glyph)),
+            "{glyph} is not drawn in the plot\n{text}"
+        );
     }
     assert!(
         text.contains("100% beyond") || text.contains("100% ~"),
@@ -1235,4 +1256,38 @@ fn the_charts_tab_draws_the_burnup_beside_the_other_charts_at_140x40() {
 
     assert!(text.contains("Burn-up"), "{text}");
     assert!(text.contains("5 hour window"), "{text}");
+}
+
+#[test]
+fn the_charts_tab_at_the_smallest_screen_shows_the_burnup_table() {
+    let a = with_limits(
+        tabbed(0),
+        None,
+        &[(LimitPeriod::Monthly, 100.0)],
+        Range::LastDays(30),
+    );
+
+    let text = draw(&a, 80, 24);
+
+    assert!(text.contains("Burn-up"), "{text}");
+    check("tab_charts_80x24", &text);
+}
+
+#[test]
+fn the_burnup_dates_follow_the_zone_of_its_days_not_the_global_zone() {
+    crate::tz::set(crate::tz::Zone::Fixed(-3 * 3_600));
+    let (b, limits) = burn_case("limit");
+    let b = crate::burnup::Burnup {
+        zone: crate::tz::Zone::Utc,
+        ..b
+    };
+    let pal = Theme::Mono.palette(ColorDepth::True);
+
+    let (text, _) = draw_with(100, 30, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+    });
+
+    assert!(text.contains("09-01"), "{text}");
+    assert!(!text.contains("08-31"), "{text}");
+    assert!(text.contains("spend this period, UTC"), "{text}");
 }

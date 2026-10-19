@@ -166,8 +166,8 @@ fn cells(b: &Burnup, plot: &Plot) -> Vec<Vec<Role>> {
 }
 
 /// `MM-DD` of a second, in the chosen zone.
-fn short(at: i64) -> String {
-    budget::stamp(at)[..5].to_string()
+fn short(b: &Burnup, at: i64) -> String {
+    b.zone.iso(at)[5..10].to_string()
 }
 
 /// The crossings as one line: `50% 01-11  80% 01-17  100% beyond`.
@@ -178,13 +178,27 @@ fn crossing_line(b: &Burnup) -> String {
     b.crossings
         .iter()
         .map(|c| match c.state {
-            CrossState::Crossed { at } => format!("{}% {} {MARKER}", c.pct, short(at)),
-            CrossState::Projected { at } => format!("{}% ~{} {MARKER}", c.pct, short(at)),
+            CrossState::Crossed { at } => format!("{}% {} {MARKER}", c.pct, short(b, at)),
+            CrossState::Projected { at } => format!("{}% ~{} {MARKER}", c.pct, short(b, at)),
             CrossState::Beyond { .. } => format!("{}% beyond", c.pct),
             CrossState::Unknown => format!("{}% too early", c.pct),
         })
         .collect::<Vec<_>>()
         .join("  ")
+}
+
+/// What each glyph draws.
+fn legend(b: &Burnup) -> String {
+    let mut parts = vec![
+        format!("{ACTUAL} spent"),
+        format!("{PROJECTION} projected"),
+        format!("{LIMIT_LINE} limit  {NEAR_LINE} 80%  {HALF_LINE} 50%"),
+        format!("{MARKER} crossing"),
+    ];
+    if b.billed.is_some() {
+        parts.push(format!("{BILLED} billed by the server"));
+    }
+    parts.join("  ")
 }
 
 /// The window percentages, when any window is known.
@@ -233,7 +247,7 @@ fn chart_lines(
         );
         out.push(Line::from(spans));
     }
-    let (first, last) = (short(b.start), short(b.end - 1));
+    let (first, last) = (short(b, b.start), short(b, b.end - 1));
     let gap = plot.width.saturating_sub(first.len() + last.len());
     out.push(Line::styled(
         format!("{:>w$}{first}{}{last}", "", " ".repeat(gap), w = GUTTER),
@@ -244,10 +258,7 @@ fn chart_lines(
         style(pal, pal.fg),
     ));
     out.push(Line::styled(
-        fit(
-            &format!("{ACTUAL} spent  {PROJECTION} projected  {LIMIT_LINE} limit  {BILLED} billed by the server"),
-            width,
-        ),
+        fit(&legend(b), width),
         style(pal, pal.inactive),
     ));
     if let Some(w) = windows {
@@ -267,6 +278,7 @@ pub(super) fn render_burnup(
     if area.height == 0 {
         return;
     }
+    let zone_label = b.map_or_else(crate::tz::label, |b| b.zone.label());
     let edge = style(pal, pal.box_cpu);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -280,7 +292,7 @@ pub(super) fn render_burnup(
             Line::from(vec![
                 Span::styled("\u{2524}", edge),
                 Span::styled(
-                    format!("spend this period, {}", crate::tz::label()),
+                    format!("spend this period, {zone_label}"),
                     style(pal, pal.fg),
                 ),
                 Span::styled("\u{251c}\u{2500}", edge),

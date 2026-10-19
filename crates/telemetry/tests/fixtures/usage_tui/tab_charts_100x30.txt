@@ -25,6 +25,6 @@
 │     $0 ███████···············                                                                    │
 │        09-01                                                                                09-30│
 │50% beyond  80% beyond  100% beyond                                                               │
-│█ spent  · projected  ━ limit  ◆ billed by the server                                             │
+│█ spent  · projected  ━ limit  ┈ 80%  ┄ 50%  ▲ crossing                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  Tab tab w week m month r range v view / filter h help q quit        updated 01:46:40 UTC, every 5s
