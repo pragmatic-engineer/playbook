@@ -80,7 +80,7 @@ pub fn run_with(home: &Path, mode: Mode, json: bool, seen: bool, plugin: bool) -
             };
             let items = items_of(home, &plan);
             // Planned only: no claim, no writes.
-            let skills_lines = if mode == Mode::DryRun {
+            let skills_lines = if plugin && mode == Mode::DryRun {
                 crate::skills_sync::refresh(home, true)
             } else {
                 Vec::new()

@@ -34,11 +34,17 @@ pub const TARGET_DIR: &str = ".agents/skills";
 
 const ALL_AGENTS: [Agent; 1] = [Agent::Codex];
 const RECORD_PREFIX: &str = "skills-sync/";
-const REFRESH_SUFFIX: &str = "refresh";
+/// The refresh claim lives beside the folder records and is not one.
+const REFRESH_KEY: &str = "refresh";
 const VERSION_FIELD: &str = "version ";
 
+/// The key prefix of every ownership row of `agent`.
+fn record_prefix(agent: Agent) -> String {
+    format!("{RECORD_PREFIX}{}/", agent.key())
+}
+
 fn refresh_key(agent: Agent) -> String {
-    format!("{RECORD_PREFIX}{}/{REFRESH_SUFFIX}", agent.key())
+    format!("{}{REFRESH_KEY}", record_prefix(agent))
 }
 
 /// What a refresh did: the report lines of every agent it handled, and
@@ -70,8 +76,7 @@ fn resolve_plugin(home: &Path) -> Option<(PathBuf, String)> {
 /// version. `false` when the agent has no records, so a first install stays
 /// an explicit `skills sync`.
 fn has_stale_records(root: &Path, agent: Agent, version: &str) -> bool {
-    let prefix = format!("{RECORD_PREFIX}{}/", agent.key());
-    let Ok(rows) = crate::state::list_read_only(root, &prefix) else {
+    let Ok(rows) = crate::state::list_read_only(root, &record_prefix(agent)) else {
         return false;
     };
     rows.iter()
@@ -108,6 +113,17 @@ fn claim_due(claim: Option<&str>, version: &str, now: u64) -> bool {
         State::Failed => age > FAILED_RETRY,
         State::Running => age > RUNNING_STALE,
     }
+}
+
+/// Reads the claim again and, unless a dry run, takes it. `false` when a
+/// refresh that finished since the caller's read left nothing due, or when
+/// another process took it first.
+fn try_claim(root: &Path, agent: Agent, version: &str, dry_run: bool, now: u64) -> bool {
+    let seen = read_claim(root, agent);
+    if !claim_due(seen.as_deref(), version, now) {
+        return false;
+    }
+    dry_run || take_claim(root, agent, seen.as_deref(), version, now)
 }
 
 /// Moves the claim from `seen` to `running` in one transaction, so of two
@@ -187,16 +203,7 @@ fn refresh_inner(home: &Path, dry_run: bool) -> Refreshed {
     }
     let rendered = plan::plan(&plugin).and_then(|targets| render_targets(&plugin, &targets));
     for agent in agents {
-        let seen = read_claim(&root, agent);
-        if !dry_run
-            && !take_claim(
-                &root,
-                agent,
-                seen.as_deref(),
-                &version,
-                crate::plugin_update::now(),
-            )
-        {
+        if !try_claim(&root, agent, &version, dry_run, crate::plugin_update::now()) {
             continue;
         }
         let (lines, clean) = match &rendered {
@@ -365,6 +372,36 @@ mod tests {
     const NOW: u64 = 1_000_000;
     const HOUR: u64 = 3600;
 
+    /// A home with a version 2.0.0 plugin installed and a codex folder
+    /// record written for 1.0.0, so a refresh is due until a claim says not.
+    fn refresh_fixture(tag: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let home = empty_home(tag);
+        let dir = home.join(".claude/plugins/cache/pragmatic-engineer/playbook/2.0.0");
+        fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
+        fs::create_dir_all(dir.join("skills")).unwrap();
+        fs::write(
+            dir.join(".claude-plugin/plugin.json"),
+            r#"{"name":"playbook","version":"2.0.0"}"#,
+        )
+        .unwrap();
+        fs::write(
+            home.join(".claude/plugins/installed_plugins.json"),
+            format!(
+                r#"{{"plugins":{{"playbook@pragmatic-engineer":[{{"scope":"user","installPath":"{}"}}]}}}}"#,
+                dir.display()
+            ),
+        )
+        .unwrap();
+        let root = crate::common::paths::playbook_root_from(&home);
+        crate::state::set(
+            &root,
+            "skills-sync/codex/playbook-fix",
+            "version 1.0.0\nstate done\n",
+        )
+        .unwrap();
+        (home, dir)
+    }
+
     #[test]
     fn the_refresh_claim_follows_the_marker_rules() {
         // Arrange
@@ -405,6 +442,68 @@ mod tests {
     }
 
     #[test]
+    fn a_claim_finished_since_the_read_is_not_taken_again() {
+        // Arrange
+        let root = empty_home("refresh-claim-finished");
+        crate::state::set(
+            &root,
+            &refresh_key(Agent::Codex),
+            &format!("2.0.0 done {NOW}"),
+        )
+        .unwrap();
+
+        // Act
+        let real = try_claim(&root, Agent::Codex, "2.0.0", false, NOW);
+        let dry = try_claim(&root, Agent::Codex, "2.0.0", true, NOW);
+
+        // Assert
+        assert!(!real && !dry);
+        assert_eq!(
+            read_claim(&root, Agent::Codex),
+            Some(format!("2.0.0 done {NOW}"))
+        );
+    }
+
+    #[test]
+    fn a_due_claim_is_taken_unless_it_is_a_dry_run() {
+        // Arrange
+        let root = empty_home("refresh-claim-due");
+
+        // Act
+        let dry = try_claim(&root, Agent::Codex, "2.0.0", true, NOW);
+        let unchanged = read_claim(&root, Agent::Codex);
+        let real = try_claim(&root, Agent::Codex, "2.0.0", false, NOW);
+
+        // Assert
+        assert!(dry && real);
+        assert_eq!(unchanged, None);
+        assert_eq!(
+            read_claim(&root, Agent::Codex),
+            Some(format!("2.0.0 running {NOW}"))
+        );
+    }
+
+    #[test]
+    fn the_hook_check_waits_a_day_after_a_failed_claim() {
+        // Arrange
+        let (home, _plugin) = refresh_fixture("refresh-needed");
+        let root = crate::common::paths::playbook_root_from(&home);
+        let now = crate::plugin_update::now();
+        let claim = |at: u64| format!("2.0.0 failed {at}");
+
+        // Act
+        crate::state::set(&root, &refresh_key(Agent::Codex), &claim(now)).unwrap();
+        let fresh = refresh_needed(&home);
+        let past = now - 24 * HOUR - 1;
+        crate::state::set(&root, &refresh_key(Agent::Codex), &claim(past)).unwrap();
+        let retry = refresh_needed(&home);
+
+        // Assert
+        assert!(!fresh);
+        assert!(retry);
+    }
+
+    #[test]
     fn only_records_for_another_version_are_stale() {
         // Arrange
         let root = empty_home("stale-records");
@@ -414,7 +513,13 @@ mod tests {
             "version 1.0.0\nstate done\n",
         )
         .unwrap();
-        crate::state::set(&root, &refresh_key(Agent::Codex), "9.9.9 done 1").unwrap();
+        // Would read as stale if the claim row were not filtered out.
+        crate::state::set(
+            &root,
+            &refresh_key(Agent::Codex),
+            "version 9.9.9\nstate done\n",
+        )
+        .unwrap();
 
         // Act
         let behind = has_stale_records(&root, Agent::Codex, "2.0.0");

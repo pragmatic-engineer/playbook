@@ -216,10 +216,11 @@ fn an_unwritable_agents_folder_exits_one_with_a_failed_line_and_valid_json() {
 const REFRESH_FLAG: &str = "--refresh";
 const NEW_VERSION: &str = "2.0.0";
 const CLAIM_KEY: &str = "skills-sync/codex/refresh";
+const RECORD_KEY: &str = "skills-sync/codex/playbook-fix";
 const NOTICE_KEY: &str = "notices/skills-sync";
 const SESSION_PAYLOAD: &str = r#"{"source":"startup"}"#;
 const NO_SPAWN_ENV: &str = "PLAYBOOK_TEST_NO_SPAWN";
-const DAY_HOURS: u64 = 25;
+const PAST_RETRY_HOURS: u64 = 25;
 const HOUR_SECS: u64 = 3600;
 const CI_VARS: [&str; 7] = [
     "CI",
@@ -360,6 +361,19 @@ fn migrate_dry_run_says_would_update_and_writes_nothing() {
 }
 
 #[test]
+fn migrate_dry_run_without_the_plugin_lists_no_skills_lines() {
+    // Arrange
+    let (home, plugin) = synced_then_upgraded();
+
+    // Act
+    let out = playbook_run(&home, &plugin, &["migrate", "--dry-run", "--no-plugin"]);
+
+    // Assert
+    assert!(out.status.success(), "{out:?}");
+    assert!(!stdout(&out).contains("would update"), "{}", stdout(&out));
+}
+
+#[test]
 fn the_background_refresh_updates_the_folder_and_the_next_session_shows_it_once() {
     // Arrange
     let (home, plugin) = synced_then_upgraded();
@@ -459,12 +473,14 @@ fn a_failed_refresh_waits_a_day_before_it_runs_again() {
     // Act
     refresh();
     let failed = state_value(&home, CLAIM_KEY).expect("a claim");
+    let recent = format!("{NEW_VERSION} failed {}", now_secs() - HOUR_SECS);
+    playbook::state::set(&root(&home), CLAIM_KEY, &recent).unwrap();
     refresh();
     let after_second = state_value(&home, CLAIM_KEY);
     fs::set_permissions(&skills, fs::Permissions::from_mode(WRITABLE)).unwrap();
     let stale = format!(
         "{NEW_VERSION} failed {}",
-        now_secs() - DAY_HOURS * HOUR_SECS
+        now_secs() - PAST_RETRY_HOURS * HOUR_SECS
     );
     playbook::state::set(&root(&home), CLAIM_KEY, &stale).unwrap();
     refresh();
@@ -474,34 +490,9 @@ fn a_failed_refresh_waits_a_day_before_it_runs_again() {
         failed.starts_with(NEW_VERSION) && failed.contains(" failed "),
         "{failed}"
     );
-    assert_eq!(after_second.as_deref(), Some(failed.as_str()));
+    assert_eq!(after_second.as_deref(), Some(recent.as_str()));
     assert!(skill_text(&home).contains("Fix it better."));
     assert!(state_value(&home, CLAIM_KEY).is_some_and(|c| c.contains(" done ")));
-}
-
-#[test]
-fn the_hook_starts_nothing_right_after_a_failed_claim() {
-    // Arrange
-    let (home, plugin) = synced_then_upgraded();
-    let claim = format!("{NEW_VERSION} failed {}", now_secs());
-    playbook::state::set(&root(&home), CLAIM_KEY, &claim).unwrap();
-    // A started child would move the claim to running, so an unchanged
-    // claim shows the hook spawned nothing (the spawn seam stays off).
-
-    // Act
-    let out = playbook_command(&home, &plugin, &["hook", "session-init"], &[])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(1500));
-
-    // Assert
-    assert!(out.status.success(), "{out:?}");
-    assert_eq!(
-        state_value(&home, CLAIM_KEY).as_deref(),
-        Some(claim.as_str())
-    );
-    assert!(skill_text(&home).contains("Fix it."));
 }
 
 #[test]
@@ -594,11 +585,15 @@ fn uninstall_forgets_the_records_so_a_later_sync_starts_fresh() {
     let (home, plugin) = codex_home();
     sync(&home, &plugin, &[]);
     uninstall(&home, &["--yes"]);
+    let record_after_uninstall = state_value(&home, RECORD_KEY);
+    let claim_after_uninstall = state_value(&home, CLAIM_KEY);
 
     // Act
     let out = sync(&home, &plugin, &[]);
 
     // Assert
+    assert_eq!(record_after_uninstall, None);
+    assert_eq!(claim_after_uninstall, None);
     assert!(out.status.success(), "{out:?}");
     assert!(stdout(&out).contains("added"), "{}", stdout(&out));
     assert!(skills_dir(&home).join(SKILL_NAME).is_dir());

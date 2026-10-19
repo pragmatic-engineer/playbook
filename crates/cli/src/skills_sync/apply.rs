@@ -6,7 +6,7 @@
 //! playbook wrote, as a hash per file, so a folder is replaced only while it
 //! still matches that record. See `docs/internals/15-codex-skills.md`.
 
-use super::Agent;
+use super::{record_prefix, Agent, REFRESH_KEY};
 use crate::common::atomic::{with_dir_lock_aged, LONG_LOCK_STALE_AGE};
 use crate::init::migrate::content_hash;
 use std::collections::BTreeMap;
@@ -21,9 +21,6 @@ const TMP_PREFIX: &str = ".playbook-tmp-";
 const OLD_PREFIX: &str = ".playbook-old-";
 /// A run takes seconds, so a leftover this old belongs to a dead run.
 const LEFTOVER_MAX_AGE: Duration = Duration::from_secs(600);
-/// The refresh claim lives beside the folder records and is not one.
-const REFRESH_KEY: &str = "refresh";
-const RECORD_PREFIX: &str = "skills-sync/";
 
 const SKIP_NOT_OURS: &str = "not written by playbook";
 const SKIP_EDITED: &str = "edited since the last sync";
@@ -317,8 +314,28 @@ pub struct Removed {
 
 /// Removes every synced folder whose files still match its record, then its
 /// record. An edited folder stays, and so does any record that still has a
-/// folder. A user's own folder has no record, so it is never visited.
+/// folder. A user's own folder has no record, so it is never visited. Holds
+/// the sync lock, so it never removes folders under a running sync.
 pub fn remove_synced(root: &Path, target_root: &Path, dry_run: bool) -> Removed {
+    // Without the folder there is nothing to race with, and no place for the lock.
+    if dry_run || !target_root.is_dir() {
+        return remove_all(root, target_root, dry_run);
+    }
+    let lock = target_root.join(LOCK_NAME);
+    // Fail-open helper: the closure only runs either way, the flag decides.
+    let (acquired, ()) = with_dir_lock_aged(&lock, 0, Duration::ZERO, LONG_LOCK_STALE_AGE, || ());
+    if !acquired {
+        return Removed {
+            lines: vec![format!("skipped, {SKIP_BUSY}")],
+            errors: Vec::new(),
+        };
+    }
+    let out = remove_all(root, target_root, dry_run);
+    let _ = fs::remove_dir(&lock);
+    out
+}
+
+fn remove_all(root: &Path, target_root: &Path, dry_run: bool) -> Removed {
     let mut out = Removed::default();
     for agent in super::ALL_AGENTS {
         let run = Run {
@@ -374,7 +391,7 @@ pub fn remove_synced(root: &Path, target_root: &Path, dry_run: bool) -> Removed 
 
 impl Run<'_> {
     fn prefix(&self) -> String {
-        format!("{RECORD_PREFIX}{}/", self.agent.key())
+        record_prefix(self.agent)
     }
 
     fn key(&self, name: &str) -> String {
@@ -956,6 +973,38 @@ mod tests {
         assert_eq!(report.lines[0], "skipped, another sync is running");
         assert!(!s.target.join(NAME).exists());
         assert!(record(&s, NAME).is_none());
+        assert!(s.target.join(LOCK_NAME).is_dir());
+    }
+
+    #[test]
+    fn remove_synced_takes_the_lock_and_releases_it() {
+        // Arrange
+        let s = setup("remove-locked");
+        sync(&s, V1, &[folder(NAME, "one")]);
+
+        // Act
+        let out = remove_synced(&s.data, &s.target, false);
+
+        // Assert
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+        assert!(!s.target.join(NAME).exists());
+        assert!(!s.target.join(LOCK_NAME).exists());
+    }
+
+    #[test]
+    fn remove_synced_skips_while_another_sync_holds_the_lock() {
+        // Arrange
+        let s = setup("remove-busy");
+        sync(&s, V1, &[folder(NAME, "one")]);
+        fs::create_dir_all(s.target.join(LOCK_NAME)).unwrap();
+
+        // Act
+        let out = remove_synced(&s.data, &s.target, false);
+
+        // Assert
+        assert_eq!(out.lines, vec!["skipped, another sync is running"]);
+        assert_eq!(skill_md(&s, NAME), "one");
+        assert!(record(&s, NAME).is_some());
         assert!(s.target.join(LOCK_NAME).is_dir());
     }
 }
