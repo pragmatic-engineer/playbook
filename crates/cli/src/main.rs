@@ -2787,12 +2787,9 @@ fn run_disk(sub: DiskCommand) {
                 std::process::exit(1);
             };
             let max = disk::policy::load(&home).max_target_dirs;
-            let count = disk::targets::target_dirs(&root).len() as u64;
-            if count > max {
-                eprintln!(
-                    "disk target-dir: {count} cargo target folders exist under {}, more than disk.maxTargetDirs ({max}). `playbook disk clean` removes idle ones",
-                    root.display()
-                );
+            let count = disk::targets::target_dirs(&root).len();
+            if let Some(warning) = disk::targets::too_many_warning(count, max) {
+                eprintln!("disk target-dir: {warning}");
             }
             println!("{}", target.display());
         }

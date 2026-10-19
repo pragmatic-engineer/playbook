@@ -2068,12 +2068,13 @@ pub enum DiskCommand {
     },
     /// Print the private cargo target folder for this worktree
     ///
-    /// Prints `<worktrees root>/cargo-<worktree name>`, the folder an agent
-    /// sets as `CARGO_TARGET_DIR` so each worktree builds into its own
-    /// target folder, which playbook removes with the worktree. Warns on
-    /// stderr when more than `disk.maxTargetDirs` target folders exist.
+    /// Prints `<worktrees root>/cargo-<worktree name>-<hash>`, the folder an
+    /// agent sets as `CARGO_TARGET_DIR` so each worktree builds into its own
+    /// target folder. `playbook worktree remove`, the sweep and the
+    /// worktree-remove hook delete it with the worktree. Warns on stderr when
+    /// more than `disk.maxTargetDirs` target folders exist.
     ///
-    /// Example: `export CARGO_TARGET_DIR="$(playbook disk target-dir)"`
+    /// Example: `CARGO_TARGET_DIR="$(playbook disk target-dir)" cargo test`
     TargetDir,
 }
 

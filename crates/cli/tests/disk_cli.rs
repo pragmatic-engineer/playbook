@@ -207,32 +207,34 @@ fn target_dir_names_the_private_folder_next_to_the_worktrees() {
     let init = std::process::Command::new("git")
         .args(["init", "-q"])
         .current_dir(&repo)
+        .env("HOME", &home)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .status()
         .unwrap();
     assert!(init.success());
-    let out = isolated::playbook_in(&home)
-        .args(["disk", "target-dir"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
+    let run = || {
+        isolated::playbook_in(&home)
+            .args(["disk", "target-dir"])
+            .current_dir(&repo)
+            .env_remove("WORKTREE_BASE_DIR")
+            .output()
+            .unwrap()
+    };
+    let out = run();
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let printed = stdout(&out);
-    assert!(
-        printed.trim_end().ends_with("/code/.worktrees/cargo-app"),
-        "{printed}"
-    );
+    let printed = stdout(&out).trim_end().to_string();
+    assert!(printed.contains("/code/.worktrees/cargo-app-"), "{printed}");
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("disk.maxTargetDirs"));
     for n in 0..5 {
         std::fs::create_dir_all(home.join(format!("code/.worktrees/cargo-{n}"))).unwrap();
     }
-    let many = isolated::playbook_in(&home)
-        .args(["disk", "target-dir"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
+    let many = run();
+    assert!(many.status.success());
+    assert_eq!(stdout(&many).trim_end(), printed);
     let err = String::from_utf8_lossy(&many.stderr);
     assert!(err.contains("more than disk.maxTargetDirs (4)"), "{err}");
 }
