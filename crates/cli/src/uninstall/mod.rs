@@ -203,10 +203,16 @@ fn settings_step(
     }
     // Setup may have written it, but the user may also want it: say so, keep it.
     if crate::init::attribution::state(&path) == crate::init::attribution::State::Off {
+        let how = match crate::init::attribution::held_off(&path).is_empty() {
+            true => "delete the key by hand".to_string(),
+            false => format!(
+                "run `{}` while playbook is still installed, or delete the key by hand",
+                crate::init::attribution::ON_COMMAND
+            ),
+        };
         report.lines.push(format!(
-            "kept the attribution key in {}; to get Claude Code's attribution back, run `{}` before you uninstall, or delete the key by hand",
-            path.display(),
-            crate::init::attribution::ON_COMMAND
+            "kept the attribution key in {}; to get Claude Code's attribution back, {how}",
+            path.display()
         ));
     }
     match wire::unwire_at(&path, &opts.home, stamp, opts.dry_run) {

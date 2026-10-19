@@ -209,13 +209,16 @@ pub fn map_deprecated(flags: &mut Flags) -> Vec<String> {
 }
 
 /// Maps the deprecated names, then prints the retired and deprecated notes
-/// when stderr is a terminal (ADR 0040).
+/// when stderr is a terminal (ADR 0040), and the `--no-attribution-off` note
+/// always.
 pub fn map_and_note(flags: &mut Flags) {
+    // `--no-attribution-off` now writes settings, so a script sees its note too.
+    let old_no = flags.no_attribution_off;
     let deprecated = map_deprecated(flags);
-    if io::stderr().is_terminal() {
-        for note in retired_notes(flags).into_iter().chain(deprecated) {
-            eprintln!("{note}");
-        }
+    let terminal = io::stderr().is_terminal();
+    let notes = retired_notes(flags).into_iter().chain(deprecated);
+    for note in notes.filter(|n| terminal || (old_no && n.contains("`--no-attribution-off`"))) {
+        eprintln!("{note}");
     }
 }
 
@@ -813,6 +816,35 @@ mod tests {
             "a no-op beside --only hooks, as in 0.37"
         );
         assert!(only_choices(&other).is_ok());
+    }
+
+    #[test]
+    fn clap_hides_the_old_attribution_flags_and_the_last_flag_wins() {
+        use clap::{CommandFactory, Parser};
+        #[derive(Parser)]
+        struct Setup {
+            #[command(flatten)]
+            flags: Flags,
+        }
+        let parse = |args: &[&str]| {
+            let mut flags = Setup::try_parse_from(args).unwrap().flags;
+            map_deprecated(&mut flags);
+            (flags.attribution, flags.no_attribution)
+        };
+
+        let help = Setup::command().render_long_help().to_string();
+
+        assert_eq!(
+            parse(&["s", "--attribution-off", "--attribution"]),
+            (true, false)
+        );
+        assert_eq!(
+            parse(&["s", "--attribution", "--attribution-off"]),
+            (false, true)
+        );
+        assert_eq!(parse(&["s", "--no-attribution-off"]), (true, false));
+        assert!(help.contains("--no-attribution"));
+        assert!(!help.contains("attribution-off"), "{help}");
     }
 
     #[test]

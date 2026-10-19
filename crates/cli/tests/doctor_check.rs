@@ -1480,6 +1480,10 @@ fn doctor_reports_the_attribution_key_ok_missing_or_your_own() {
         .as_str()
         .unwrap()
         .starts_with("run: playbook setup --only attribution "));
+    assert!(row["hint"]
+        .as_str()
+        .unwrap()
+        .contains("playbook setup --only attribution --attribution"));
     let row = attribution_row(&custom);
     assert_eq!(row["level"], "INFO");
     assert!(row["hint"]
@@ -1506,7 +1510,9 @@ fn doctor_passes_attribution_on_by_choice_and_warns_when_off_values_remain() {
     left.settings(r#"{"attribution":{"commit":"","sessionUrl":true}}"#);
     let mine = Box::new("attr-on-mine");
     mine.settings(r#"{"attribution":{"commit":"custom"}}"#);
-    for b in [&on, &left, &mine] {
+    let off = Box::new("attr-on-false");
+    off.settings(r#"{"attribution":false}"#);
+    for b in [&on, &left, &mine, &off] {
         choose_attribution_on(b);
     }
 
@@ -1514,6 +1520,7 @@ fn doctor_passes_attribution_on_by_choice_and_warns_when_off_values_remain() {
     let on = on.run_with_env(&[]);
     let left = left.run_with_env(&[]);
     let mine = mine.run_with_env(&[]);
+    let off = off.run_with_env(&[]);
 
     // Assert
     let row = attribution_row(&on);
@@ -1530,6 +1537,9 @@ fn doctor_passes_attribution_on_by_choice_and_warns_when_off_values_remain() {
         .contains("attribution.commit still holds"));
     assert_eq!(row["hint"], "run: playbook setup --only attribution");
     assert_eq!(attribution_row(&mine)["level"], "INFO");
+    let row = attribution_row(&off);
+    assert_eq!(row["level"], "INFO", "{row}");
+    assert!(row["message"].as_str().unwrap().contains("your own value"));
 }
 
 #[test]

@@ -161,7 +161,7 @@ fn removes_everything_init_placed_and_keeps_the_users_own_content() {
     );
     assert!(
         text(&out)
-            .contains("run `playbook setup --only attribution --attribution` before you uninstall"),
+            .contains("run `playbook setup --only attribution --attribution` while playbook is still installed"),
         "{}",
         text(&out)
     );

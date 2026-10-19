@@ -25,6 +25,11 @@ pub const DEAD_HOOKS_MIGRATION: &str = "dead-hook-scripts";
 /// retired with ADR 0042's amendment. A record that names it, by slug or as
 /// `0015-attribution-off`, still loads, and the id is ignored.
 pub const RETIRED_ATTRIBUTION_MIGRATION: &str = "attribution-off";
+
+/// Slugs taken out of the registry. A record row or pending id under one
+/// loads and is ignored. A retired slug is never given to a new migration,
+/// because old applied rows would mark that one as already run.
+pub const RETIRED_IDS: [&str; 1] = [RETIRED_ATTRIBUTION_MIGRATION];
 /// The `Consent` item for the collector-service part (ADR 0043).
 pub const COLLECTOR_SERVICE_MIGRATION: &str = "collector-service";
 /// The `Owned` move of stored auto budgets off the old $5 default (ADR 0028).
@@ -1650,9 +1655,7 @@ mod tests {
 
         // Assert
         assert!(!report.failed, "{:?}", report.warnings);
-        assert!(registry()
-            .iter()
-            .all(|m| m.id != RETIRED_ATTRIBUTION_MIGRATION));
+        assert!(registry().iter().all(|m| !RETIRED_IDS.contains(&m.id)));
         assert!(plan.iter().all(|p| p.id != RETIRED_ATTRIBUTION_MIGRATION));
         assert!(open.iter().all(|i| i.id != RETIRED_ATTRIBUTION_MIGRATION));
         let rows = rows(&h);
@@ -1802,7 +1805,7 @@ mod tests {
                 "the table keeps release order"
             );
             assert!(
-                slugs.contains(&slug) || slug == RETIRED_ATTRIBUTION_MIGRATION,
+                slugs.contains(&slug) || RETIRED_IDS.contains(&slug),
                 "{old} names no migration"
             );
             assert_eq!(legacy_id(slug), Some(*old));

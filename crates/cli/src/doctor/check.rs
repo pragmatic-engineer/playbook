@@ -793,47 +793,12 @@ const TELEMETRY_SETUP_FIX: &str = "run: playbook setup --only telemetry";
 fn attribution_row(env: &Env) -> Row {
     use crate::init::attribution::{self, State};
     let settings = env.settings();
-    let state = attribution::state(&settings);
-    if let State::Unreadable(why) = &state {
-        return Row::new("-", Level::Warn, format!("attribution: {why}"));
-    }
-    if matches!(state, State::OtherShape) {
-        return Row::new("-", Level::Info, attribution::OTHER_SHAPE);
-    }
-    let held = attribution::held_off(&settings);
-    if attribution::enabled(&env.home) {
-        return match (held.is_empty(), state) {
-            (false, _) => Row::new(
-                "-",
-                Level::Warn,
-                format!(
-                    "attribution ON is your choice ({} is true), and {} still holds the off value",
-                    attribution::KEY,
-                    attribution::names(&held)
-                ),
-            )
-            .hint(format!("run: {}", attribution::COMMAND)),
-            (true, State::Off) => Row::new(
-                "-",
-                Level::Info,
-                "attribution is false in settings.json, your own value, so Claude Code adds no attribution",
-            ),
-            (true, State::Open { custom, .. }) if !custom.is_empty() => Row::new(
-                "-",
-                Level::Info,
-                format!(
-                    "attribution ON is your choice; your own value for {}",
-                    attribution::names(&custom)
-                ),
-            ),
-            (true, _) => Row::new(
-                "-",
-                Level::Pass,
-                "attribution ON, your choice: Claude Code adds its trailer, generated-by line and session link",
-            ),
-        };
-    }
-    match state {
+    match attribution::state(&settings) {
+        State::Unreadable(why) => Row::new("-", Level::Warn, format!("attribution: {why}")),
+        State::OtherShape => Row::new("-", Level::Info, attribution::OTHER_SHAPE),
+        state if attribution::enabled(&env.home) => {
+            attribution_on_row(&state, &attribution::held_off(&settings))
+        }
         State::Open { missing, custom } if !missing.is_empty() => Row::new(
             "-",
             Level::Warn,
@@ -857,11 +822,51 @@ fn attribution_row(env: &Env) -> Row {
             ),
         )
         .hint(format!("for attribution OFF, run: {}", attribution::OFF_COMMAND)),
-        _ => Row::new(
+        State::Off => Row::new(
             "-",
             Level::Pass,
             "attribution OFF: commits and PRs get no Claude trailer, generated-by line or session link",
         ),
+    }
+}
+
+/// The attribution row when the user chose ON. `held` names the keys that
+/// still hold the off value.
+fn attribution_on_row(state: &crate::init::attribution::State, held: &[&str]) -> Row {
+    use crate::init::attribution::{self, State};
+    if !held.is_empty() {
+        return Row::new(
+            "-",
+            Level::Warn,
+            format!(
+                "attribution ON is your choice ({} is true), and {} still holds the off value",
+                attribution::KEY,
+                attribution::names(held)
+            ),
+        )
+        .hint(format!("run: {}", attribution::COMMAND));
+    }
+    match state {
+        State::Off => Row::new(
+            "-",
+            Level::Info,
+            "attribution is false in settings.json, your own value, so Claude Code adds no attribution",
+        ),
+        State::Open { custom, .. } if !custom.is_empty() => Row::new(
+            "-",
+            Level::Info,
+            format!(
+                "attribution ON is your choice; your own value for {}",
+                attribution::names(custom)
+            ),
+        ),
+        State::Open { .. } => Row::new(
+            "-",
+            Level::Pass,
+            "attribution ON, your choice: Claude Code adds its trailer, generated-by line and session link",
+        ),
+        State::OtherShape => Row::new("-", Level::Info, attribution::OTHER_SHAPE),
+        State::Unreadable(why) => Row::new("-", Level::Warn, format!("attribution: {why}")),
     }
 }
 

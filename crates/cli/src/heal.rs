@@ -894,10 +894,7 @@ mod tests {
         let out = run(&ctx(&home), Trigger::Hook, 1000);
 
         // Assert
-        assert!(read
-            .pending
-            .iter()
-            .all(|id| id == migrate::RETIRED_ATTRIBUTION_MIGRATION));
+        assert_eq!(read.pending, [migrate::RETIRED_ATTRIBUTION_MIGRATION; 2]);
         assert!(out.open.is_empty(), "{:?}", out.open);
         assert!(Record::read(&root(&home)).unwrap().pending.is_empty());
     }
