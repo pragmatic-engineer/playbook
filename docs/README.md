@@ -51,6 +51,7 @@ How the machine works, and why it is shaped this way.
 - [The system prompt](internals/12-system-prompt.md): what the custom prompt defines, and why a custom prompt behaves better than the default.
 - [The memory system](internals/13-memory-system.md): the global, org, and project fact store, typed edges, and how it feeds the commands.
 - [Why the pieces are shaped this way](internals/14-why-the-pieces-are-shaped-this-way.md): why commands, skills, agents and hooks are separate, why each model and effort level was chosen, and where to change them.
+- [Codex skills](internals/15-codex-skills.md): where `playbook skills sync` puts the playbook skills for Codex, how names, ownership and rendering work, and what Codex lacks.
 
 ## Decisions
 
