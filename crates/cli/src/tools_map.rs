@@ -452,7 +452,11 @@ mod tests {
     fn the_map_ends_with_the_pointer_to_the_full_list() {
         let text = render();
         assert!(text.ends_with(&format!("\n{FULL_LIST}\n")), "{text}");
-        assert!(text.len() <= 1200, "the map is {} bytes", text.len());
+        assert!(
+            text.len() <= TOKEN_BUDGET * 4,
+            "the map is {} bytes",
+            text.len()
+        );
     }
 
     #[test]

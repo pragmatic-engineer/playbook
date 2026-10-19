@@ -25,8 +25,9 @@ pub enum Access {
     /// Reads and prints. A model may run it at any time.
     ReadOnly,
     /// Writes the user's home or Claude Code settings, needs their consent,
-    /// spends money, or starts a session. Only the user runs it, typed with
-    /// `!` in the prompt.
+    /// runs a paid benchmark, or starts a session. Only the user runs it,
+    /// typed with `!` in the prompt. A command a skill runs as one of its
+    /// steps, such as a small model call, is not user-only.
     UserOnly,
 }
 
@@ -42,13 +43,13 @@ impl Access {
 }
 
 /// What the clap tree cannot say about one command.
-pub struct Meta {
+pub(crate) struct Meta {
     /// The command words after `playbook`, for example `disk clean`.
-    pub path: &'static str,
-    pub access: Access,
+    pub(crate) path: &'static str,
+    pub(crate) access: Access,
     /// Used instead of the doc comment's first sentence when that is too
     /// long or too vague for one line.
-    pub purpose: Option<&'static str>,
+    pub(crate) purpose: Option<&'static str>,
 }
 
 impl Meta {
@@ -86,7 +87,7 @@ const fn user(path: &'static str) -> Meta {
 
 /// One entry for every visible command and subcommand, sorted by path. A
 /// group's own entry describes the group when it runs with no subcommand.
-pub const META: &[Meta] = &[
+pub(crate) const META: &[Meta] = &[
     free("adr").purpose("Helpers for ADRs, such as the next free record number"),
     free("adr next"),
     ro("agents").purpose("Check agent definition files and their effort variants"),
@@ -96,7 +97,7 @@ pub const META: &[Meta] = &[
     ro("atlassian check").purpose("Check the `acli` version and whether `twg` is installed"),
     ro("breaking"),
     user("cc"),
-    free("cc bust-cache"),
+    user("cc bust-cache"),
     user("cc clean").purpose("Launcher mode: clean up and resume a session"),
     user("cc fresh").purpose("Launcher mode: start a fresh session"),
     user("cc launch"),
@@ -136,7 +137,7 @@ pub const META: &[Meta] = &[
     ro("doc").purpose("Read a PDF or Office file as text with anydoc"),
     ro("doc read"),
     ro("doc status"),
-    free("doctor").purpose("Check the playbook setup, or read one fact the check uses"),
+    user("doctor").purpose("Check the playbook setup, or read one fact the check uses"),
     ro("doctor check"),
     ro("doctor hook-commands"),
     ro("doctor hook-commands-for-event"),
@@ -177,7 +178,7 @@ pub const META: &[Meta] = &[
     ro("manifest"),
     ro("manifest check"),
     free("memory"),
-    free("memory context").purpose("Print the memory facts, edges and anchors in scope for a repo"),
+    ro("memory context").purpose("Print the memory facts, edges and anchors in scope for a repo"),
     ro("memory export"),
     user("memory import-claude"),
     free("memory rebuild"),
@@ -201,7 +202,7 @@ pub const META: &[Meta] = &[
     free("pr merge"),
     free("pr prepare"),
     free("pr reply"),
-    ro("pr review-triage"),
+    free("pr review-triage"),
     ro("pr rules"),
     ro("pr stack"),
     ro("prose"),
@@ -254,24 +255,32 @@ pub const META: &[Meta] = &[
 pub const LEGEND: &str = "playbook commands: one line per command. `(read-only)` runs freely. `(user-only)`, or a name ending in `!`, is for the user: never run it yourself, ask them to type it with `!`. `playbook commands <group>` gives flags, `playbook <command> --help` the details.";
 
 /// The entry for `path`, if any.
-pub fn meta(path: &str) -> Option<&'static Meta> {
+pub(crate) fn meta(path: &str) -> Option<&'static Meta> {
     META.iter().find(|m| m.path == path)
 }
 
-/// The visible subcommands of `cmd`, in `--help` order.
+/// The visible subcommands of `cmd`, in `--help` order. The reference page
+/// generator uses the same rule.
 pub fn visible(cmd: &Command) -> impl Iterator<Item = &Command> {
     cmd.get_subcommands()
         .filter(|s| !s.is_hide_set() && s.get_name() != "help")
 }
 
+/// The visible arguments of `cmd`, help and version left out. The reference
+/// page generator uses the same rule.
+pub fn visible_args(cmd: &Command) -> impl Iterator<Item = &Arg> {
+    cmd.get_arguments()
+        .filter(|a| !a.is_hide_set() && !matches!(a.get_id().as_str(), "help" | "version"))
+}
+
 /// One visible command with its path.
-pub struct Entry<'a> {
-    pub path: String,
-    pub cmd: &'a Command,
+pub(crate) struct Entry<'a> {
+    pub(crate) path: String,
+    pub(crate) cmd: &'a Command,
 }
 
 /// Every visible command under `cmd`, depth first, `cmd` itself excluded.
-pub fn walk<'a>(cmd: &'a Command, prefix: &str, out: &mut Vec<Entry<'a>>) {
+pub(crate) fn walk<'a>(cmd: &'a Command, prefix: &str, out: &mut Vec<Entry<'a>>) {
     for sub in visible(cmd) {
         let path = if prefix.is_empty() {
             sub.get_name().to_string()
@@ -295,7 +304,7 @@ pub fn tree() -> Command {
 
 /// The one-line purpose of a command: the override, or the first sentence of
 /// its doc comment.
-pub fn purpose(path: &str, cmd: &Command) -> String {
+pub(crate) fn purpose(path: &str, cmd: &Command) -> String {
     if let Some(text) = meta(path).and_then(|m| m.purpose) {
         return text.to_string();
     }
@@ -309,20 +318,23 @@ fn access(path: &str) -> Access {
     meta(path).map_or(Access::Default, |m| m.access)
 }
 
-/// Every runnable leaf below `path` (the command itself when it has none).
-fn leaves<'a>(path: &str, cmd: &'a Command) -> Vec<(String, &'a Command)> {
-    let mut all = Vec::new();
+/// Whether `cmd` has subcommands and also runs without one (`doctor --fix`,
+/// `cc`), so its own name counts as a command.
+fn runs_bare(cmd: &Command) -> bool {
+    visible(cmd).next().is_some() && !cmd.is_subcommand_required_set()
+}
+
+/// Every runnable name at or below `path`: the leaves, plus each group that
+/// also runs bare.
+fn runnable<'a>(path: &str, cmd: &'a Command) -> Vec<Entry<'a>> {
+    let mut all = vec![Entry {
+        path: path.to_string(),
+        cmd,
+    }];
     walk(cmd, path, &mut all);
-    let leaves: Vec<_> = all
-        .into_iter()
-        .filter(|e| visible(e.cmd).next().is_none())
-        .map(|e| (e.path, e.cmd))
-        .collect();
-    if leaves.is_empty() {
-        vec![(path.to_string(), cmd)]
-    } else {
-        leaves
-    }
+    all.into_iter()
+        .filter(|e| visible(e.cmd).next().is_none() || runs_bare(e.cmd))
+        .collect()
 }
 
 /// The tag a line ends with, from the access of every name it covers.
@@ -336,8 +348,12 @@ fn tag(accesses: &[Access]) -> &'static str {
     }
 }
 
-fn bang(access: Access) -> &'static str {
-    if access == Access::UserOnly {
+/// `!` when every runnable name at or below `path` is user-only.
+fn bang(path: &str, cmd: &Command) -> &'static str {
+    if runnable(path, cmd)
+        .iter()
+        .all(|e| access(&e.path) == Access::UserOnly)
+    {
         "!"
     } else {
         ""
@@ -349,51 +365,42 @@ fn bang(access: Access) -> &'static str {
 /// ends in `!`.
 fn overview_line(cmd: &Command) -> String {
     let name = cmd.get_name();
-    let subs: Vec<&Command> = visible(cmd).collect();
-    let mut covered: Vec<Access> = leaves(name, cmd).iter().map(|(p, _)| access(p)).collect();
-    // A group that also runs with no subcommand (`doctor --fix`, `cc`)
-    // counts as a name of its own.
-    if !subs.is_empty() && !cmd.is_subcommand_required_set() {
-        covered.push(access(name));
-    }
+    let covered: Vec<Access> = runnable(name, cmd)
+        .iter()
+        .map(|e| access(&e.path))
+        .collect();
     let tag = tag(&covered);
-    let mark = |path: &str| {
-        if tag.is_empty() {
-            bang(access(path))
-        } else {
-            ""
-        }
-    };
-    let runs_bare = !subs.is_empty() && !cmd.is_subcommand_required_set();
-    let mut line = format!("{name}{}", if runs_bare { mark(name) } else { "" });
-    if !subs.is_empty() {
-        let names: Vec<String> = subs
-            .iter()
-            .map(|s| {
-                let path = format!("{name} {}", s.get_name());
-                let all_user = leaves(&path, s)
-                    .iter()
-                    .all(|(p, _)| access(p) == Access::UserOnly);
-                let flag = if tag.is_empty() && all_user { "!" } else { "" };
-                format!("{}{flag}", s.get_name())
-            })
-            .collect();
+    let mixed = tag.is_empty();
+    let mut line = name.to_string();
+    if mixed && runs_bare(cmd) && access(name) == Access::UserOnly {
+        line.push('!');
+    }
+    let names: Vec<String> = visible(cmd)
+        .map(|s| {
+            let path = format!("{name} {}", s.get_name());
+            let flag = if mixed { bang(&path, s) } else { "" };
+            format!("{}{flag}", s.get_name())
+        })
+        .collect();
+    if !names.is_empty() {
         let _ = write!(line, " {}", names.join("|"));
     }
     let _ = write!(line, ": {}{tag}", purpose(name, cmd));
     line
 }
 
-/// One argument as usage text: `<NAME>`, `--flag` or `--flag <VALUE>`, in
-/// brackets when optional.
+/// One argument as usage text: `<NAME>`, `--flag` or `--flag <VALUE>`, with
+/// `...` when it takes several values, in brackets when optional.
 fn arg_text(arg: &Arg) -> String {
     let value = || {
         arg.get_value_names()
             .and_then(|v| v.first().map(ToString::to_string))
             .unwrap_or_else(|| arg.get_id().to_string().to_uppercase())
     };
+    let many = arg.get_num_args().is_some_and(|n| n.max_values() > 1);
+    let dots = if many { "..." } else { "" };
     let text = if arg.is_positional() {
-        format!("<{}>", value())
+        format!("<{}>{dots}", value())
     } else {
         let mut t = match (arg.get_long(), arg.get_short()) {
             (Some(long), _) => format!("--{long}"),
@@ -401,7 +408,7 @@ fn arg_text(arg: &Arg) -> String {
             (None, None) => arg.get_id().to_string(),
         };
         if arg.get_action().takes_values() {
-            let _ = write!(t, " <{}>", value());
+            let _ = write!(t, " <{}>{dots}", value());
         }
         t
     };
@@ -412,12 +419,9 @@ fn arg_text(arg: &Arg) -> String {
     }
 }
 
-/// The usage text of a command's own arguments, help and version left out.
-pub fn args(cmd: &Command) -> Vec<String> {
-    cmd.get_arguments()
-        .filter(|a| !a.is_hide_set() && !matches!(a.get_id().as_str(), "help" | "version"))
-        .map(arg_text)
-        .collect()
+/// The usage text of a command's own arguments.
+fn args(cmd: &Command) -> Vec<String> {
+    visible_args(cmd).map(arg_text).collect()
 }
 
 /// The detail line of one command: path, arguments, purpose and tag.
@@ -426,28 +430,48 @@ fn detail_line(path: &str, cmd: &Command) -> String {
     for a in args(cmd) {
         let _ = write!(line, " {a}");
     }
-    let tag = match access(path) {
-        Access::ReadOnly => " (read-only)",
-        Access::UserOnly => " (user-only)",
-        Access::Default => "",
-    };
-    let _ = write!(line, ": {}{tag}", purpose(path, cmd));
+    let _ = write!(line, ": {}{}", purpose(path, cmd), tag(&[access(path)]));
     line
 }
 
-/// Finds the command at `words` (for example `["worktree", "review"]`).
-fn find<'a>(root: &'a Command, words: &[String]) -> Option<&'a Command> {
+/// The longest run of visible commands that `words` starts with: the path,
+/// the command it ends on, and how many words it used.
+fn deepest<'a, S: AsRef<str>>(root: &'a Command, words: &[S]) -> (String, &'a Command, usize) {
     let mut cmd = root;
+    let mut path: Vec<&str> = Vec::new();
     for word in words {
-        cmd = visible(cmd).find(|s| s.get_name() == word)?;
+        match visible(cmd).find(|s| s.get_name() == word.as_ref()) {
+            Some(sub) => {
+                cmd = sub;
+                path.push(word.as_ref());
+            }
+            None => break,
+        }
     }
-    Some(cmd)
+    let used = path.len();
+    (path.join(" "), cmd, used)
+}
+
+/// Splits the `GROUP` words, so `"worktree review"` quoted as one argument
+/// works too, and finds the command they name.
+fn find<'a>(root: &'a Command, group: &[String]) -> Result<(String, &'a Command), String> {
+    let words: Vec<&str> = group.iter().flat_map(|g| g.split_whitespace()).collect();
+    let (path, cmd, used) = deepest(root, &words);
+    if used == words.len() {
+        Ok((path, cmd))
+    } else {
+        Err(format!(
+            "playbook commands: no command `{}`. Run `playbook commands` for the list.",
+            words.join(" ")
+        ))
+    }
 }
 
 /// The text `playbook commands [GROUP]` prints, or an error line.
 pub fn render(root: &Command, group: &[String]) -> Result<String, String> {
     let mut out = String::new();
-    if group.is_empty() {
+    let (path, cmd) = find(root, group)?;
+    if path.is_empty() {
         out.push_str(LEGEND);
         out.push('\n');
         let mut tops: Vec<&Command> = visible(root).collect();
@@ -458,8 +482,6 @@ pub fn render(root: &Command, group: &[String]) -> Result<String, String> {
         }
         return Ok(out);
     }
-    let path = group.join(" ");
-    let cmd = find(root, group).ok_or_else(|| unknown(&path))?;
     out.push_str(&detail_line(&path, cmd));
     out.push('\n');
     let mut below = Vec::new();
@@ -471,51 +493,30 @@ pub fn render(root: &Command, group: &[String]) -> Result<String, String> {
     Ok(out)
 }
 
-fn unknown(path: &str) -> String {
-    format!("playbook commands: no command `{path}`. Run `playbook commands` for the list.")
-}
-
 /// The intent ids of the tool map whose command is `path`.
 fn intents(root: &Command, path: &str) -> Vec<&'static str> {
     crate::tools_map::TOOLS
         .iter()
         .filter(|t| {
-            let words: Vec<String> = t.sample.split_whitespace().map(String::from).collect();
-            deepest(root, &words) == path
+            let words: Vec<&str> = t.sample.split_whitespace().collect();
+            deepest(root, &words).0 == path
         })
         .map(|t| t.intent)
         .collect()
 }
 
-/// The longest command path that `words` starts with.
-fn deepest(root: &Command, words: &[String]) -> String {
-    let mut cmd = root;
-    let mut path: Vec<&str> = Vec::new();
-    for word in words {
-        match visible(cmd).find(|s| s.get_name() == word) {
-            Some(sub) => {
-                cmd = sub;
-                path.push(word);
-            }
-            None => break,
-        }
-    }
-    path.join(" ")
-}
-
-/// `playbook commands --json [GROUP]`: one object per command, the stable
-/// form for tools.
+/// `playbook commands --json [GROUP]`: a JSON array with one object per
+/// command, the stable form for tools. `access` is null for a group that
+/// cannot run without a subcommand.
 pub fn render_json(root: &Command, group: &[String]) -> Result<String, String> {
+    let (prefix, base) = find(root, group)?;
     let mut entries = Vec::new();
-    let base = if group.is_empty() {
-        root
-    } else {
-        let path = group.join(" ");
-        let cmd = find(root, group).ok_or_else(|| unknown(&path))?;
-        entries.push(Entry { path, cmd });
-        cmd
-    };
-    let prefix = group.join(" ");
+    if !prefix.is_empty() {
+        entries.push(Entry {
+            path: prefix.clone(),
+            cmd: base,
+        });
+    }
     walk(base, &prefix, &mut entries);
     // Sorted by path, so a parent comes before its children and reordering
     // the enums does not change the output.
@@ -523,12 +524,18 @@ pub fn render_json(root: &Command, group: &[String]) -> Result<String, String> {
     let rows: Vec<serde_json::Value> = entries
         .iter()
         .map(|e| {
+            let subs: Vec<&str> = visible(e.cmd).map(Command::get_name).collect();
+            let access = if subs.is_empty() || runs_bare(e.cmd) {
+                serde_json::Value::from(access(&e.path).as_str())
+            } else {
+                serde_json::Value::Null
+            };
             serde_json::json!({
                 "command": e.path,
                 "purpose": purpose(&e.path, e.cmd),
-                "access": access(&e.path).as_str(),
+                "access": access,
                 "args": args(e.cmd),
-                "subcommands": visible(e.cmd).map(|s| s.get_name().to_string()).collect::<Vec<_>>(),
+                "subcommands": subs,
                 "intents": intents(root, &e.path),
             })
         })
@@ -602,7 +609,8 @@ mod tests {
     }
 
     /// Top-level purposes take 6 to 12 words and subcommand ones 3 to 14, so
-    /// each line stays short. A longer doc comment needs a purpose in META.
+    /// each line stays short and says something. A doc comment outside that
+    /// range needs a purpose in META.
     #[test]
     fn every_purpose_fits_one_short_line() {
         let mut bad = Vec::new();
@@ -616,7 +624,7 @@ mod tests {
         }
         assert!(
             bad.is_empty(),
-            "set a shorter purpose in META for:\n{}",
+            "set a purpose of the right length in META for:\n{}",
             bad.join("\n")
         );
     }
@@ -627,11 +635,12 @@ mod tests {
         let text = overview();
         let json = render_json(&root, &[]).unwrap();
         for name in ["init", "hook", "json"] {
-            assert!(root.find_subcommand(name).is_some_and(Command::is_hide_set));
-            assert!(
-                !text.lines().any(|l| l.starts_with(&format!("{name}:"))),
-                "{name} is listed:\n{text}"
-            );
+            let listed = text.lines().any(|l| {
+                [" ", ":", "!"]
+                    .iter()
+                    .any(|end| l.starts_with(&format!("{name}{end}")))
+            });
+            assert!(!listed, "{name} is listed:\n{text}");
             assert!(
                 !json.contains(&format!("\"command\": \"{name}\"")),
                 "{name} in json"
@@ -678,6 +687,8 @@ mod tests {
             "deps ensure",
             "effort apply",
             "mode auto",
+            "doctor",
+            "cc bust-cache",
         ] {
             assert_eq!(access(path), Access::UserOnly, "{path}");
         }
@@ -719,7 +730,12 @@ mod tests {
         assert!(text.contains("(user-only)"), "{text}");
         let nested = render(&root, &["worktree".into(), "review".into()]).unwrap();
         assert!(nested.contains("\nworktree review setup <"), "{nested}");
+        let quoted = render(&root, &["worktree review".to_string()]).unwrap();
+        assert_eq!(quoted, nested);
         assert!(render(&root, &["nope".to_string()]).is_err());
+        assert!(render(&root, &["pr".into(), "nope".into()]).is_err());
+        let cc = render(&root, &["cc".to_string()]).unwrap();
+        assert!(cc.starts_with("cc [<ARGS>...]: "), "{cc}");
     }
 
     #[test]
@@ -742,19 +758,24 @@ mod tests {
         let group: Vec<serde_json::Value> =
             serde_json::from_str(&render_json(&root, &["pr".to_string()]).unwrap()).unwrap();
         assert_eq!(group[0]["command"], "pr");
-        assert!(group
-            .iter()
-            .all(|r| r["command"].as_str().unwrap().starts_with("pr")));
+        assert!(group.iter().all(|r| {
+            let c = r["command"].as_str().unwrap();
+            c == "pr" || c.starts_with("pr ")
+        }));
+        assert_eq!(row("disk")["access"], serde_json::Value::Null);
+        assert_eq!(row("doctor")["access"], "user-only");
     }
 
     #[test]
     fn every_tool_map_intent_lands_on_a_command() {
         let root = tree();
         for tool in crate::tools_map::TOOLS {
-            let words: Vec<String> = tool.sample.split_whitespace().map(String::from).collect();
+            let words: Vec<&str> = tool.sample.split_whitespace().collect();
+            let own = format!("{} {}", tool.group, tool.verb);
+            let landed = deepest(&root, &words).0;
             assert!(
-                !deepest(&root, &words).is_empty(),
-                "{} lands on no command",
+                landed == tool.group || landed == own.trim(),
+                "{} lands on `{landed}`, not on its own command",
                 tool.intent
             );
         }

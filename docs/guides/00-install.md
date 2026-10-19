@@ -208,7 +208,7 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 ## Find a command
 
-`playbook commands` prints one line per command with its subcommands, what it does and who may run it. `(read-only)` commands only read. A `(user-only)` command, or a name ending in `!`, changes your home or Claude Code settings, needs your consent, spends money or starts a session, so a Claude session asks you to type it with `!` instead of running it. `playbook commands <group>`, such as `playbook commands pr`, lists the subcommands of one group with their flags, and `--json` prints the same for scripts. The list comes from the binary itself, so it names only the commands the binary has. Every flag is in the [CLI and config reference](../reference/cli-and-config.md).
+`playbook commands` prints one line per command with its subcommands, what it does and who may run it. `(read-only)` commands only read. A `(user-only)` command, or a name ending in `!`, changes your home or Claude Code settings, needs your consent, runs a paid benchmark or starts a session, so a Claude session asks you to type it with `!` instead of running it. `playbook commands <group>`, such as `playbook commands pr`, lists the subcommands of one group with their flags, and `--json` prints the same for scripts. The list comes from the binary itself, so it names only the commands the binary has. Every flag is in the [CLI and config reference](../reference/cli-and-config.md).
 
 ## Skills without the binary
 

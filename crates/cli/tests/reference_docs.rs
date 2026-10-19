@@ -8,6 +8,7 @@
 //! Regenerate with: `UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs`
 
 use clap::{Command, CommandFactory};
+use playbook::command_index::{visible, visible_args};
 use playbook::config::keys::{
     allowed_enum_values, default_value, EFFORT_COMPONENT_KINDS, KNOWN_KEYS,
 };
@@ -75,22 +76,13 @@ fn walk(cmd: &Command, path: &str, out: &mut String) {
         let text = about.to_string();
         let _ = writeln!(out, "{}\n", text.trim());
     }
-    let args: Vec<&clap::Arg> = cmd
-        .get_arguments()
-        .filter(|a| !a.is_hide_set() && !matches!(a.get_id().as_str(), "help" | "version"))
-        .collect();
+    let args: Vec<&clap::Arg> = visible_args(cmd).collect();
     for arg in args {
         let _ = writeln!(out, "{}", arg_line(arg));
     }
-    let mut subs: Vec<&Command> = cmd
-        .get_subcommands()
-        .filter(|s| !s.is_hide_set() && s.get_name() != "help")
-        .collect();
+    let mut subs: Vec<&Command> = visible(cmd).collect();
     subs.sort_by_key(|s| s.get_name().to_string());
-    if cmd
-        .get_arguments()
-        .any(|a| !a.is_hide_set() && !matches!(a.get_id().as_str(), "help" | "version"))
-    {
+    if visible_args(cmd).next().is_some() {
         out.push('\n');
     }
     if !subs.is_empty() {

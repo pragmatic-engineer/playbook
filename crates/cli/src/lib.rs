@@ -819,7 +819,7 @@ pub enum Command {
     Commands {
         /// A command or group, such as `pr` or `worktree review`
         group: Vec<String>,
-        /// Print one JSON object per command: command, purpose, access, args, subcommands, intents
+        /// Print a JSON array with one object per command: command, purpose, access, args, subcommands, intents
         #[arg(long)]
         json: bool,
     },
@@ -963,8 +963,10 @@ pub enum Command {
 impl Command {
     /// Commands that run many times a session or inside other commands:
     /// hooks, the status line, `version`, and
-    /// the hidden `json` helpers that hook scripts call. Steps that run before
-    /// a command (the first-run heal, the update check) skip them.
+    /// the hidden `json` helpers that hook scripts call. `commands` is here
+    /// too: it only prints the clap tree and reads nothing under home. Steps
+    /// that run before a command (the first-run heal, the update check) skip
+    /// them.
     pub fn is_hot_path(&self) -> bool {
         matches!(
             self,

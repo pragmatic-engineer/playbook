@@ -359,7 +359,7 @@ Built from this binary's own command tree, so it lists only the commands the bin
 Example: `playbook commands pr`
 
 - `<GROUP>`: A command or group, such as `pr` or `worktree review`
-- `--json`: Print one JSON object per command: command, purpose, access, args, subcommands, intents
+- `--json`: Print a JSON array with one object per command: command, purpose, access, args, subcommands, intents
 
 ### `playbook commit`
 
