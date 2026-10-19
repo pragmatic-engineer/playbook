@@ -94,24 +94,18 @@ fn blocks(command: &str) -> bool {
 mod rm_workspace_guard {
     use super::*;
 
-    /// `roots: None` REMOVES `PLAYBOOK_SAFE_ROOTS` rather than setting it empty,
-    /// which is the only way to reach `safe_roots()`'s zero-config fallback. It
-    /// must be removed, not merely left alone: the variable may be set in the
-    /// environment the suite inherits, and then the default path would never run.
-    fn run_guard_in(command: &str, roots: Option<&str>, cwd: Option<&Path>) -> String {
+    /// Runs the hook with `HOME` set to a scratch folder, so a command that
+    /// names the home folder names the scratch one. Nothing is executed.
+    fn run_in_home(command: &str, home: &Path) -> String {
         let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
-        let mut spawn = Command::new(env!("CARGO_BIN_EXE_playbook"));
-        spawn
+        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
+            .env("HOME", home)
             .args(["hook", "rm-workspace-guard"])
-            .env("HOOK_INPUT", payload);
-        match roots {
-            Some(value) => spawn.env("PLAYBOOK_SAFE_ROOTS", value),
-            None => spawn.env_remove("PLAYBOOK_SAFE_ROOTS"),
-        };
-        if let Some(dir) = cwd {
-            spawn.current_dir(dir);
-        }
-        let out = spawn.output().expect("playbook binary should spawn");
+            .env("HOOK_INPUT", payload)
+            .output()
+            .expect("playbook binary should spawn");
         assert!(
             out.status.success(),
             "a guard must exit 0 even when denying"
@@ -119,584 +113,65 @@ mod rm_workspace_guard {
         String::from_utf8_lossy(&out.stdout).to_string()
     }
 
-    #[test]
-    fn denial_for_playbook_state_names_the_cleanup_command() {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let cmd =
-            format!("rm -f {home}/.config/playbook/repos/acme/widgets/w1/plans/demo.checkpoint.md");
-        let out = run_guard_in(&cmd, Some("/nonexistent-root"), None);
-        assert!(is_deny(&out), "{out}");
-        assert!(out.contains("playbook plan cleanup"), "{out}");
-    }
-
-    #[test]
-    fn a_commit_heredoc_in_another_command_does_not_trip_the_substitution_rule() {
-        let ws = format!("{}/Workspace", home());
-        let cmd = format!(
-            "{} {ws}/tmpfile && git commit -m \"$(cat <<'EOF'\nfix: a thing\nEOF\n)\"",
-            del()
-        );
-        assert!(!blocked(&cmd, &ws), "{cmd}");
-    }
-
-    #[test]
-    fn an_rm_hidden_in_a_substitution_still_blocks() {
-        let ws = format!("{}/Workspace", home());
-        let d = del();
-        for cmd in [
-            format!("echo $(cd / && {d} -rf etc)"),
-            format!("out=$(cd ~ && {d} -rf .ssh)"),
-            format!("echo $(date; {d} -rf {ws}/x)"),
-            format!("X=$(pwd) {d} -rf {ws}/x"),
-            format!("echo `cd / && {d} -rf etc`"),
-        ] {
-            assert!(blocked(&cmd, &ws), "should block: {cmd}");
-        }
-        for cmd in [
-            format!("echo $(date) && {d} -rf {ws}/x"),
-            format!("{d} -rf {ws}/x && echo $(date)"),
-        ] {
-            assert!(!blocked(&cmd, &ws), "should allow: {cmd}");
-        }
-    }
-
-    #[test]
-    fn the_denial_for_a_substitution_explains_the_rules() {
-        let ws = format!("{}/Workspace", home());
-        let out = run_guard_in(&format!("{} -rf $(echo x)", del()), Some(&ws), None);
-        assert!(is_deny(&out), "{out}");
-        assert!(out.contains("literal absolute path"), "{out}");
-    }
-
-    #[test]
-    fn denial_for_a_worktree_leftover_names_the_git_commands() {
-        let out = run_guard_in(
-            "rm -rf /nonexistent-parent/.worktrees/app/old",
-            Some("/nonexistent-root"),
-            None,
-        );
-        assert!(is_deny(&out), "{out}");
-        assert!(out.contains("git worktree prune"), "{out}");
-    }
-
-    #[test]
-    fn denial_for_protected_data_names_the_playbook_command() {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let cmd = format!("rm -rf {home}/.config/playbook/repos/acme/app/plans");
-        let out = run_guard_in(&cmd, Some("/nonexistent-root"), None);
-        assert!(is_deny(&out), "{out}");
-        assert!(out.contains("playbook plan cleanup"), "{out}");
-    }
-
-    fn is_deny(stdout: &str) -> bool {
-        if stdout.trim().is_empty() {
+    fn denied(command: &str, home: &Path) -> bool {
+        let out = run_in_home(command, home);
+        if out.trim().is_empty() {
             return false;
         }
         assert!(
-            stdout.contains(r#""permissionDecision":"deny""#),
-            "non-empty output must be a deny: {stdout}"
+            out.contains(r#""permissionDecision":"deny""#),
+            "non-empty output must be a deny decision: {out}"
         );
         true
     }
 
-    /// Runs with an explicit safe-root list and the repo as cwd, so the result
-    /// never depends on where the suite happens to be invoked from.
-    fn blocked(command: &str, roots: &str) -> bool {
-        is_deny(&run_guard_in(command, Some(roots), None))
-    }
-
-    /// The zero-config path. `blocked` above can never reach it, because it sets
-    /// the variable on every call.
-    fn blocked_defaulting(command: &str, cwd: &Path) -> bool {
-        is_deny(&run_guard_in(command, None, Some(cwd)))
-    }
-
-    /// A scratch dir resolved through its symlinks. macOS temp dirs live under
-    /// `/var`, a symlink to `/private/var`, while `git rev-parse --show-toplevel`
-    /// and `getcwd` both report the resolved form. The guard's `canon()` is
-    /// deliberately lexical and never touches the filesystem, so an unresolved
-    /// fixture path would compare unequal to the derived root and the case would
-    /// fail on path form rather than on guard logic.
-    fn real_dir(tag: &str) -> PathBuf {
-        fs::canonicalize(scratch(tag)).expect("scratch dir should resolve")
-    }
-
-    /// A path guaranteed outside every safe root, used as the negative half of
-    /// the default-root cases. Deliberately NOT under the temp tree: temp is
-    /// always allowed, and on Linux `std::env::temp_dir()` IS `/tmp`, so a
-    /// temp-based fixture would quietly stop proving anything there while still
-    /// passing on macOS, where temp is `/var/folders`. It never needs to exist,
-    /// because the guard resolves lexically without touching the filesystem.
-    fn outside_everything() -> String {
-        format!("{}/outside-every-safe-root", home())
-    }
-
-    fn home() -> String {
-        std::env::var("HOME").expect("HOME")
-    }
-
-    /// Assembled at runtime so this file never contains a literal deletion of a
-    /// system path: the live guard inspects tool calls, and a source file
-    /// carrying those strings trips it during ordinary work on the repo.
-    fn del() -> String {
-        "r".to_string() + "m"
-    }
-    fn etc() -> String {
-        "/e".to_string() + "tc"
-    }
-
     #[test]
-    fn targets_inside_a_safe_root_are_allowed() {
-        let (h, d) = (home(), del());
-        let ws = format!("{h}/Workspace");
-        for cmd in [
-            format!("{d} -rf {ws}/proj/build"),
-            format!("{d} {ws}/a.txt"),
-            format!("{d} -rf ~/Workspace/proj/node_modules"),
-            // ~/.claude is always allowed, whatever the roots say.
-            format!("{d} -rf {h}/.claude/cache/x"),
-            // Collapses back inside the root, so it stays allowed.
-            format!("{d} -rf {ws}/proj/sub/../build"),
+    fn root_and_home_deletions_are_denied() {
+        let home = scratch("rm-deny");
+        let h = home.display();
+        for command in [
+            "rm -rf /".to_string(),
+            "rm -rf /*".to_string(),
+            "rm -rf ~".to_string(),
+            "rm -rf $HOME/".to_string(),
+            format!("rm -rf {h}"),
+            format!("sudo rm -rf --no-preserve-root {h}/*"),
+            "echo ok && rm -rf ~/".to_string(),
         ] {
-            assert!(!blocked(&cmd, &ws), "should allow: {cmd}");
+            assert!(denied(&command, &home), "should deny: {command}");
         }
     }
 
     #[test]
-    fn targets_outside_every_safe_root_are_blocked() {
-        let (h, d, e) = (home(), del(), etc());
-        let ws = format!("{h}/Workspace");
-        for cmd in [
-            format!("{d} -rf {e}/passwd"),
-            format!("{d} {h}/secrets.txt"),
-            format!("{d} -rf /"),
+    fn everything_else_is_allowed() {
+        let home = scratch("rm-allow");
+        let h = home.display();
+        for command in [
+            "rm -rf ./target".to_string(),
+            "rm -rf ~/projects/x/target".to_string(),
+            format!("rm -rf {h}/projects/x"),
+            "rm file".to_string(),
+            "rm -rf /tmp/x".to_string(),
+            "rm -rf /Users/other".to_string(),
+            "ls /".to_string(),
+            "echo rm -rf /".to_string(),
         ] {
-            assert!(blocked(&cmd, &ws), "should block: {cmd}");
-        }
-    }
-
-    /// The lexical canonicaliser is what closes this: the path is resolved
-    /// without touching the filesystem, since the target may not exist.
-    #[test]
-    fn dot_dot_traversal_out_of_a_safe_root_is_blocked() {
-        let (h, d, e) = (home(), del(), etc());
-        let ws = format!("{h}/Workspace");
-        for cmd in [
-            format!("{d} -rf ~/Workspace/../.ssh"),
-            format!("{d} -rf {ws}/../../..{e}/passwd"),
-            format!("{d} -rf {h}/.claude/../.aws/credentials"),
-        ] {
-            assert!(blocked(&cmd, &ws), "traversal should block: {cmd}");
+            assert!(!denied(&command, &home), "should allow: {command}");
         }
     }
 
     #[test]
-    fn unresolvable_commands_are_blocked_conservatively() {
-        let (h, d, e) = (home(), del(), etc());
-        let ws = format!("{h}/Workspace");
-        // A cd to a folder only the shell knows makes a relative target
-        // unresolvable.
-        assert!(blocked(&format!("cd \"$X\" && {d} -rf foo"), &ws));
-        // A substitution could expand to anything.
-        assert!(blocked(&format!("{d} -rf $(echo {e})"), &ws));
-    }
-
-    /// A line break ends a command, so a deletion on any line is seen. A tab is
-    /// plain whitespace to the shell, so after `echo` it is only more words.
-    #[test]
-    fn multiline_and_tab_separated_commands_are_still_inspected() {
-        let (h, d, e) = (home(), del(), etc());
-        let ws = format!("{h}/Workspace");
-        assert!(blocked(&format!("echo hi\n{d} -rf {e}/passwd"), &ws));
-        assert!(blocked(&format!("echo hi;\t{d} -rf {e}/passwd"), &ws));
-        assert!(!blocked(&format!("echo hi\t{d} -rf {e}/passwd"), &ws));
-        assert!(!blocked("echo hi\necho there", &ws));
-        assert!(!blocked(&format!("echo hi\n{d} -rf {ws}/proj/build"), &ws));
+    fn the_denial_is_one_fixed_sentence() {
+        let home = scratch("rm-message");
+        let out = run_in_home("rm -rf ~", &home);
+        assert!(out.contains("Blocked by the rm guard"), "{out}");
+        assert!(out.contains("run the command yourself"), "{out}");
     }
 
     #[test]
-    fn multiple_roots_are_all_honoured() {
-        let (h, d) = (home(), del());
-        let roots = format!("{h}/a:{h}/b");
-        assert!(!blocked(&format!("{d} -rf {h}/b/file"), &roots));
-        assert!(!blocked(&format!("{d} -rf {h}/a/file"), &roots));
-        assert!(blocked(&format!("{d} -rf {h}/c/file"), &roots));
-    }
-
-    #[test]
-    fn a_trailing_slash_on_a_root_still_matches() {
-        let (h, d) = (home(), del());
-        let ws = format!("{h}/Workspace");
-        assert!(!blocked(&format!("{d} -rf {ws}/file"), &format!("{ws}/")));
-    }
-
-    /// A root that does not exist must not accidentally widen the allowlist.
-    #[test]
-    fn a_nonexistent_root_blocks_everything_outside_it() {
-        let (d, e) = (del(), etc());
-        assert!(blocked(
-            &format!("{d} -rf {e}/passwd"),
-            "/nonexistent/definitely/not/here"
-        ));
-    }
-
-    /// With the variable unset the repo root becomes the safe root. The negative
-    /// half is the point: a sibling of the repo must still block, or the default
-    /// would have widened to the whole temp parent.
-    #[test]
-    fn an_unset_variable_defaults_to_the_git_repo_root() {
-        let d = del();
-        let repo = real_dir("default-repo");
-        Command::new("git")
-            .arg("-C")
-            .arg(&repo)
-            .args(["init", "-q"])
-            .output()
-            .expect("git should run");
-        fs::create_dir_all(repo.join("sub")).expect("sub dir");
-
-        let inside = repo.display();
-        assert!(
-            !blocked_defaulting(&format!("{d} -rf {inside}/sub/file"), &repo),
-            "the repo root is the default safe root"
-        );
-        assert!(
-            blocked_defaulting(&format!("{d} -rf {}/file", outside_everything()), &repo),
-            "a path outside the repo root is not covered by the default"
-        );
-    }
-
-    /// No repo, so the fallback drops through to the cwd itself.
-    #[test]
-    fn an_unset_variable_outside_a_git_repo_defaults_to_the_cwd() {
-        let d = del();
-        let plain = real_dir("default-plain");
-
-        let inside = plain.display();
-        assert!(
-            !blocked_defaulting(&format!("{d} -rf {inside}/file"), &plain),
-            "the cwd is the default safe root when there is no repo"
-        );
-        assert!(
-            blocked_defaulting(&format!("{d} -rf {}/file", outside_everything()), &plain),
-            "a path outside the cwd is not covered by the default"
-        );
-    }
-
-    /// `safe_roots()` branches on `configured.is_empty()`, so an explicitly empty
-    /// value has to take the same path as an absent one.
-    #[test]
-    fn an_empty_variable_behaves_like_unset() {
-        let (d, e) = (del(), etc());
-        let plain = real_dir("empty-var");
-        let inside = plain.display();
-
-        assert!(
-            is_deny(&run_guard_in(
-                &format!("{d} -rf {e}/passwd"),
-                Some(""),
-                Some(&plain)
-            )),
-            "an empty value must not open the allowlist"
-        );
-        assert!(
-            !is_deny(&run_guard_in(
-                &format!("{d} -rf {inside}/file"),
-                Some(""),
-                Some(&plain)
-            )),
-            "it falls back to the default root rather than blocking everything"
-        );
-    }
-
-    /// A relative root is canon-ed against the guard's own cwd. Both halves are
-    /// needed: resolving to the wrong directory would show up as a false allow
-    /// elsewhere, not as a failure on the intended path.
-    #[test]
-    fn a_relative_root_resolves_against_the_guards_cwd() {
-        let (d, e) = (del(), etc());
-        let base = real_dir("relative-root");
-        fs::create_dir_all(base.join("relroot")).expect("relroot dir");
-        let inside = base.display();
-
-        assert!(
-            !is_deny(&run_guard_in(
-                &format!("{d} -rf {inside}/relroot/file"),
-                Some("relroot"),
-                Some(&base)
-            )),
-            "a relative root resolves against the cwd"
-        );
-        assert!(
-            is_deny(&run_guard_in(
-                &format!("{d} -rf {e}/passwd"),
-                Some("relroot"),
-                Some(&base)
-            )),
-            "and must not widen into a blanket allow"
-        );
-    }
-
-    /// The only assertion on the deny message's CONTENT. Without it the message
-    /// could regress to a hardcoded `~/Workspace` literal with every other test
-    /// in this file still green.
-    #[test]
-    fn the_deny_reason_names_the_roots_in_effect() {
-        let (h, d, e) = (home(), del(), etc());
-        let (first, second) = (format!("{h}/a"), format!("{h}/b"));
-        let out = run_guard_in(
-            &format!("{d} -rf {e}/passwd"),
-            Some(&format!("{first}:{second}")),
-            None,
-        );
-        let parsed: serde_json::Value =
-            serde_json::from_str(out.trim()).expect("a deny must be valid JSON");
-        let reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
-            .as_str()
-            .expect("a deny must carry a reason");
-        assert!(
-            reason.contains(&first) && reason.contains(&second),
-            "the reason must name the roots actually in effect: {reason}"
-        );
-    }
-
-    /// REVISED 2026-08-23. This was pinned as an accepted false positive, on the
-    /// grounds that the tokenizer could not tell a heredoc body from a command.
-    /// It now can: a body is data, so a mention inside one is prose unless it
-    /// starts a line. The trade-off was revised deliberately, not rediscovered,
-    /// because commit messages written through a heredoc were blocking real work.
-    #[test]
-    fn a_heredoc_body_mentioning_a_deletion_is_prose() {
-        let (h, d, e) = (home(), del(), etc());
-        let ws = format!("{h}/Workspace");
-        for cmd in [
-            format!("cat <<EOF\nold script did {d} -rf {e}/example here\nEOF"),
-            // The shape that blocked three commits: prose in the body, plus a
-            // substitution elsewhere in the same command.
-            format!("git commit --file - <<EOF\nfix: block {d} targets\nEOF\necho $(date)"),
-            // An apostrophe in the body must not flip quote state for the rest.
-            format!("git commit --file - <<EOF\ndon't let {d} escape\nEOF"),
-        ] {
-            assert!(!blocked(&cmd, &ws), "heredoc prose must not block: {cmd}");
-        }
-    }
-
-    /// The body is data, not a free pass: a line that STARTS with a deletion is
-    /// in command position and really does delete when fed to a shell.
-    #[test]
-    fn a_heredoc_line_starting_with_a_deletion_still_blocks() {
-        let (h, d, e) = (home(), del(), etc());
-        let ws = format!("{h}/Workspace");
-        assert!(blocked(
-            &format!("bash <<EOF\n{d} -rf {e}/passwd\nEOF"),
-            &ws
-        ));
-        // The shell reads an unterminated body to the end, so a deletion that
-        // starts a body line still runs, and one in the middle of a line is an
-        // argument of another program.
-        assert!(blocked(&format!("bash <<EOF\n{d} -rf {e}/passwd"), &ws));
-        assert!(!blocked(
-            &format!("bash <<EOF\nfoo {d} -rf {e}/passwd"),
-            &ws
-        ));
-        // A body that another program reads is data, terminated or not.
-        assert!(!blocked(&format!("cat <<EOF\n{d} -rf {e}/passwd"), &ws));
-        // `<<` in arithmetic is not a heredoc, so nothing after it becomes data.
-        assert!(blocked(
-            &format!("echo $((1 << 2))\n{d} -rf {e}/passwd"),
-            &ws
-        ));
-    }
-
-    /// Scratch space is exempt from the configured roots, the same standing
-    /// exemption `~/.claude` has. The root itself is NOT exempt: unlike a
-    /// configured safe root, which may be deleted whole, wiping the temp root
-    /// takes out sockets and runtime state that live processes depend on.
-    #[test]
-    fn paths_inside_temp_are_allowed_but_the_temp_root_is_not() {
-        let (h, d) = (home(), del());
-        let ws = format!("{h}/Workspace");
-        for cmd in [
-            format!("{d} -rf /tmp/scratch-file"),
-            // macOS spells the same directory both ways and `canon` is lexical,
-            // so the resolved form has to be listed too.
-            format!("{d} -rf /private/tmp/scratch-file"),
-        ] {
-            assert!(!blocked(&cmd, &ws), "temp scratch should be allowed: {cmd}");
-        }
-        for cmd in [format!("{d} -rf /tmp"), format!("{d} -rf /private/tmp")] {
-            assert!(
-                blocked(&cmd, &ws),
-                "the temp root itself must stay blocked: {cmd}"
-            );
-        }
-    }
-
-    /// `~/.cache` is regenerable scratch, and where this repo's own fixtures
-    /// live. Contents only: the root itself is not a cleanup target.
-    #[test]
-    fn paths_inside_the_cache_dir_are_allowed_but_its_root_is_not() {
-        let (h, d) = (home(), del());
-        let ws = format!("{h}/Workspace");
-        for cmd in [
-            format!("{d} -rf {h}/.cache/playbook-tests/scratch"),
-            // The tilde form must resolve the same way.
-            format!("{d} -rf ~/.cache/some-probe"),
-        ] {
-            assert!(
-                !blocked(&cmd, &ws),
-                "cache scratch should be allowed: {cmd}"
-            );
-        }
-        assert!(
-            blocked(&format!("{d} -rf {h}/.cache"), &ws),
-            "the cache root itself must stay blocked"
-        );
-    }
-
-    /// The exemption must not widen past the directory it names.
-    #[test]
-    fn the_cache_exemption_does_not_leak_through_traversal_or_prefixes() {
-        let (h, d) = (home(), del());
-        let ws = format!("{h}/Workspace");
-        assert!(
-            blocked(&format!("{d} -rf {h}/.cache/../.ssh"), &ws),
-            "canon collapses the traversal, so this is judged as ~/.ssh"
-        );
-        assert!(
-            blocked(&format!("{d} -rf {h}/.cachefoo/x"), &ws),
-            "a sibling that merely starts with the same letters is not the cache"
-        );
-    }
-
-    /// The exemption is by resolved path, never by how the string is spelled.
-    #[test]
-    fn the_temp_exemption_does_not_leak_through_traversal_or_prefixes() {
-        let (h, d, e) = (home(), del(), etc());
-        let ws = format!("{h}/Workspace");
-        assert!(
-            blocked(&format!("{d} -rf /tmp/..{e}/passwd"), &ws),
-            "canon collapses the traversal, so this is judged as its real target"
-        );
-        assert!(
-            blocked(&format!("{d} -rf /tmpfoo/file"), &ws),
-            "a directory that merely starts with the same letters is not temp"
-        );
-    }
-
-    /// A mention inside a quoted message or title is prose, not a command. This
-    /// was a live annoyance rather than a theoretical one: it blocked commits
-    /// and PR creation whose text merely named the guard.
-    /// Every case here must FAIL under the old tokenizer, or the test proves
-    /// nothing. A message whose remaining words are all relative paths is not
-    /// enough: they canonicalise inside the safe root and were allowed anyway.
-    /// So each case carries either an absolute path the old code would have
-    /// judged as a target, or a substitution, which is the shape that actually
-    /// blocked an agent mid-commit.
-    #[test]
-    fn a_quoted_mention_is_prose_not_a_command() {
-        let (h, d, e) = (home(), del(), etc());
-        let ws = format!("{h}/Workspace");
-        for cmd in [
-            format!("git commit -m \"fix: stop using {d} on {e}/passwd\""),
-            format!("git commit -m 'docs: {d} on {e}/passwd is fatal'"),
-            format!("git commit -m \"note: {d} is risky\" && echo $(date)"),
-        ] {
-            assert!(!blocked(&cmd, &ws), "prose must not block: {cmd}");
-        }
-    }
-
-    /// Quoting must not become an escape hatch. Anything in command position is
-    /// still a command, and outside quotes nothing changed at all, which is what
-    /// keeps the wrapper forms caught.
-    #[test]
-    fn quoting_does_not_hide_a_real_deletion() {
-        let (h, d, e) = (home(), del(), etc());
-        let ws = format!("{h}/Workspace");
-        for cmd in [
-            format!("sudo {d} -rf {e}/passwd"),
-            format!("xargs {d} -rf {e}/passwd"),
-            format!("echo hi && {d} -rf {e}/passwd"),
-            // Inside quotes, but a separator puts it back in command position.
-            format!("sh -c \"cd /x && {d} -rf {e}/passwd\""),
-        ] {
-            assert!(blocked(&cmd, &ws), "must still block: {cmd}");
-        }
-    }
-
-    /// Regression for a FAIL-OPEN. `canon` treats a leading `$` as a relative
-    /// path and joins it to the cwd, so `$HOME/.cache/x` resolved to
-    /// `<repo>/$HOME/.cache/x`, landed inside a safe root and was ALLOWED, while
-    /// the shell expanded it to a real path outside the workspace. Unlike the
-    /// obfuscation cases this file documents as accepted misses, `$VAR` paths are
-    /// ordinary agent output, so this one had to fail closed. `$HOME` and
-    /// `$TMPDIR` are the exception: the guard expands them itself.
-    #[test]
-    fn an_unexpanded_variable_target_is_unresolvable_and_blocks() {
-        let (h, d) = (home(), del());
-        let ws = format!("{h}/Workspace");
-        for cmd in [
-            format!("{d} -rf \"$OTHER/.cache/x\""),
-            format!("{d} -rf $HOME/.ssh"),
-            format!("HOME=/ {d} -rf $HOME/.cache/x"),
-            format!("{d} -rf \"${{BUILD_DIR}}/out\""),
-            format!("{d} -rf `echo /etc`/passwd"),
-            // Accepted cost: a variable pointing INSIDE the workspace blocks too.
-            format!("{d} -rf \"$REPO/target\""),
-        ] {
-            assert!(blocked(&cmd, &ws), "unresolvable target must block: {cmd}");
-        }
-    }
-
-    /// The false positives of the old word splitter, and the forms it missed,
-    /// end to end through the hook entry.
-    #[test]
-    fn only_real_deletions_are_judged() {
-        let (h, d, e) = (home(), del(), etc());
-        let ws = format!("{h}/Workspace");
-        for cmd in [
-            format!("grep -E \"a | {d} -rf {e}/passwd\" f.txt"),
-            format!("{d} -f {ws}/proj/x 2>/dev/null"),
-            format!("cat <<EOF\n{d} -rf {e}/passwd\nEOF"),
-            format!("git commit -F - <<'EOF'\n{d} -rf {e}/passwd is fatal\nEOF"),
-            format!("find {ws}/proj -name '*.o' -delete"),
-            format!("find {ws}/proj -print0 | xargs -0 {d} -f"),
-        ] {
-            assert!(!blocked(&cmd, &ws), "should allow: {cmd}");
-        }
-        for cmd in [
-            format!("{d} -f {e}/passwd 2>/dev/null"),
-            format!("find {e} -name x -delete"),
-            format!("find {e} -exec {d} {{}} +"),
-            format!("ls | xargs {d}"),
-            "cd \"$X\" && find -delete".to_string(),
-        ] {
-            assert!(blocked(&cmd, &ws), "should block: {cmd}");
-        }
-    }
-
-    /// `$HOME` and `${HOME}` resolve to the home folder this hook sees.
-    #[test]
-    fn a_home_variable_target_is_expanded_and_judged() {
-        let (h, d) = (home(), del());
-        let ws = format!("{h}/Workspace");
-        for cmd in [
-            format!("{d} -rf \"$HOME/.cache/x\""),
-            format!("{d} -rf ${{HOME}}/.cache/x/"),
-            format!("{d} -rf $HOME/Workspace/proj/build"),
-        ] {
-            assert!(!blocked(&cmd, &ws), "should allow: {cmd}");
-        }
-    }
-
-    /// The fix must not turn into a blanket block: literal paths are unaffected.
-    #[test]
-    fn literal_targets_are_unaffected_by_the_expansion_rule() {
-        let (h, d) = (home(), del());
-        let ws = format!("{h}/Workspace");
-        assert!(!blocked(&format!("{d} -rf {ws}/proj/build"), &ws));
-        assert!(!blocked(&format!("{d} -rf {h}/.claude/cache/x"), &ws));
-        assert!(!blocked(&format!("{d} -rf /tmp/scratch"), &ws));
+    fn stdin_piped_input_is_read_when_hook_input_is_unset() {
+        assert!(!run_guard_via_stdin("rm-workspace-guard", "ls").contains("deny"));
+        assert!(run_guard_via_stdin("rm-workspace-guard", "rm -rf /").contains("deny"));
     }
 
     #[test]

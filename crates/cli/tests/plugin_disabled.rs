@@ -27,12 +27,11 @@ fn scratch_home(tag: &str, settings: Option<&str>) -> PathBuf {
 }
 
 fn run_rm_guard(home: &PathBuf, ignore: bool) -> Output {
-    let payload = serde_json::json!({ "tool_input": { "command": "rm -rf /etc/hosts" } });
+    let payload = serde_json::json!({ "tool_input": { "command": "rm -rf /" } });
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
     cmd.args(["hook", "rm-workspace-guard"])
         .env("HOME", home)
         .env("HOOK_INPUT", payload.to_string())
-        .env("PLAYBOOK_SAFE_ROOTS", home)
         .env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")
         .env_remove("PLAYBOOK_IGNORE_PLUGIN_DISABLED");

@@ -130,7 +130,7 @@ macro_rules! protected_reason {
         concat!(
             "Matched rule: ",
             $rule,
-            ". The rm guard's allowed roots, the prose lint mode, the pull request rules and the disk guard's thresholds are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Reading the config store is fine. Until then, work within the current setting and say so."
+            ". The prose lint mode, the pull request rules and the disk guard's thresholds are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.proseLint.mode warn`. Reading the config store is fine. Until then, work within the current setting and say so."
         )
     };
 }
