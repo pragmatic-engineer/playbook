@@ -62,7 +62,8 @@ pub enum UsageCommand {
     /// go. One that does not answer is killed, but only after checking that
     /// the process is really the playbook collector. Prints `stopped`, or
     /// `not running` with exit code 0 when no collector runs. The next
-    /// playbook command or session starts a new one.
+    /// playbook command or session starts a new one. A collector from
+    /// 0.38.0 or older holds no lock, so this does not see it.
     ///
     /// Example: `playbook usage stop`
     Stop,

@@ -402,8 +402,13 @@ pub fn stop(paths: &Paths, budget: Duration, may_kill: bool) -> Stopped {
 }
 
 #[cfg(not(unix))]
-pub fn stop(_paths: &Paths, _budget: Duration, _may_kill: bool) -> Stopped {
-    Stopped::NotRunning
+pub fn stop(paths: &Paths, _budget: Duration, _may_kill: bool) -> Stopped {
+    // Nothing can signal a holder here, so a held lock is reported, not hidden.
+    match lock_state(paths) {
+        LockState::Free => Stopped::NotRunning,
+        LockState::Held(_) => Stopped::StillRunning,
+        LockState::Unavailable => Stopped::Unavailable,
+    }
 }
 
 #[cfg(unix)]
