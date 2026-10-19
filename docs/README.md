@@ -15,8 +15,8 @@ Task-oriented workflows.
 - [Auto mode](guides/04-auto-mode.md): run commands without questions, with a spend cap.
 - [What setup installs](guides/05-what-setup-installs.md): every change `playbook setup` makes, what stays on your machine, and how to undo each part.
 - [Reading documents](guides/06-reading-documents.md): read a PDF or Office file as cheaper text with the optional anydoc converter.
-- [Disk use of agent worktrees](guides/08-worktree-disk.md): why target folders grow, the small private build agents use, and the `disk.*` knobs.
 - [The rm guard](guides/07-rm-guard.md): what the guard reads as a deletion, the roots it allows per OS, what stays blocked and how to add a root.
+- [Disk use of agent worktrees](guides/08-worktree-disk.md): why target folders grow, the small private build agents use, and the `disk.*` knobs.
 
 ## Reference
 

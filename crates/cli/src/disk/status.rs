@@ -66,9 +66,7 @@ impl Report {
     pub fn level(&self) -> Option<Level> {
         policy::tightest(&self.volumes).map(|v| self.policy.level(v.space.free))
     }
-}
 
-impl Report {
     /// Bytes in every cargo target folder the report found, each counted once.
     pub fn target_bytes(&self) -> u64 {
         let own = self.consumers.iter().filter(|c| c.kind == Kind::Target);
@@ -96,7 +94,13 @@ pub fn candidates(
             );
         }
         if let Ok(list) = crate::worktree::list_worktrees(repo) {
-            found.extend(list.into_iter().skip(1).map(|w| (Kind::Worktree, w.path)));
+            for worktree in list.into_iter().skip(1) {
+                let in_tree = worktree.path.join(targets::IN_TREE_TARGET);
+                if in_tree.join("CACHEDIR.TAG").is_file() {
+                    found.push((Kind::Target, in_tree));
+                }
+                found.push((Kind::Worktree, worktree.path));
+            }
         }
     }
     found.extend(

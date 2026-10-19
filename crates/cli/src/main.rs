@@ -2759,32 +2759,32 @@ fn effort_diff_shape(base: &str) -> Result<effort::auto::Shape, String> {
 /// The private target folder of the checkout the command runs in. Exits
 /// with an error outside one. Warns on stderr when free space is low or
 /// target folders pile up, since this runs before an agent builds.
-fn private_target(home: &std::path::Path) -> std::path::PathBuf {
+fn private_target(home: &std::path::Path, command: &str) -> std::path::PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| home.to_path_buf());
     let Some(checkout) = playbook_common::gitfacts::toplevel(&cwd) else {
-        eprintln!("disk target-dir: not inside a git checkout");
+        eprintln!("disk {command}: not inside a git checkout");
         std::process::exit(1);
     };
     let Some(root) = disk::targets::worktrees_root(&checkout) else {
         eprintln!(
-            "disk target-dir: cannot find the worktrees root of {}",
+            "disk {command}: cannot find the worktrees root of {}",
             checkout.display()
         );
         std::process::exit(1);
     };
     let Some(target) = disk::targets::target_for(&root, &checkout) else {
-        eprintln!("disk target-dir: {} has no folder name", checkout.display());
+        eprintln!("disk {command}: {} has no folder name", checkout.display());
         std::process::exit(1);
     };
     let policy = disk::policy::load(home);
     let count = disk::targets::target_dirs(&root).len();
     if let Some(warning) = disk::targets::too_many_warning(count, policy.max_target_dirs) {
-        eprintln!("disk target-dir: {warning}");
+        eprintln!("disk {command}: {warning}");
     }
     let paths = disk::policy::measured_paths(&policy, home, Some(&cwd));
     if let Some((free, level)) = disk::policy::low_space(&policy, &paths) {
         eprintln!(
-            "disk target-dir: {}",
+            "disk {command}: {}",
             hooks::disk_guard::warning(free, level, &policy, None)
         );
     }
@@ -2826,11 +2826,15 @@ fn run_disk(sub: DiskCommand) {
                 }
             }
         }
-        DiskCommand::TargetDir => println!("{}", private_target(&home).display()),
-        DiskCommand::TargetEnv => println!(
-            "{}",
-            disk::targets::export_line(&private_target(&home))
-        ),
+        DiskCommand::TargetDir => println!("{}", private_target(&home, "target-dir").display()),
+        DiskCommand::TargetEnv => {
+            let target = private_target(&home, "target-env");
+            let Some(line) = disk::targets::export_line(&target) else {
+                eprintln!("disk target-env: {} is not valid UTF-8", target.display());
+                std::process::exit(1);
+            };
+            println!("{line}");
+        }
         DiskCommand::Release => match disk::ballast::release(&home) {
             Ok(Some(bytes)) => println!(
                 "disk release: deleted the ballast, {} given back. Run `playbook disk reserve` after a cleanup to put it back",

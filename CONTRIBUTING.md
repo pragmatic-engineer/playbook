@@ -39,7 +39,7 @@ These settings are per shell or per command, so nothing changes for other contri
 - **Drop debug info.** `export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` makes builds faster and the target folder smaller. A panic message keeps its file and line, but backtraces and debuggers show only function names. Unset both when you need a debugger.
 - **Keep incremental builds on locally.** CI sets `CARGO_INCREMENTAL=0` because each run builds once. On your machine, incremental builds make the edit and test loop faster.
 - **Linker.** The rustup toolchain for x86_64 Linux already links with `rust-lld`. In CI, mold was slower: 44 s against 37 s to rebuild the test binaries. On macOS, `ld64.lld` from `brew install lld` saved 2 s per rebuild in one run: `RUSTFLAGS="-C link-arg=-fuse-ld=$(brew --prefix lld)/bin/ld64.lld"`. Cargo rebuilds everything whenever `RUSTFLAGS` changes, so set it the same way in every shell and editor, or in your own `~/.cargo/config.toml`.
-- **Disk.** One `CARGO_TARGET_DIR` per worktree keeps parallel builds from blocking each other, and each one grows to 1 GB or more. Agents use `eval "$(playbook disk target-env)"` for a smaller one. Run `cargo clean` in a worktree you are done with. See [the worktree disk guide](docs/guides/08-worktree-disk.md).
+- **Disk.** One `CARGO_TARGET_DIR` per worktree keeps parallel builds from blocking each other, and each one grows to 1 GB or more. Agents use `playbook disk target-env` for a smaller one. Run `cargo clean` in a worktree you are done with. See [the worktree disk guide](docs/guides/08-worktree-disk.md).
 
 The repository has no shared `.cargo/config.toml` build settings for speed, because a debugger or a missing linker would break them for some contributors.
 

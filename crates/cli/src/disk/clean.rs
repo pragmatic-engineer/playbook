@@ -21,9 +21,6 @@ pub const SCRATCH_IDLE: Duration = Duration::from_secs(60 * 60);
 /// A plugin cache orphaned more recently may still serve a running session.
 pub const ORPHAN_IDLE: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// The name of the target folder cargo makes inside a worktree.
-const IN_TREE_TARGET: &str = "target";
-
 /// Debug builds scan this folder in place of `/tmp`, for tests.
 pub const TEST_TMP_VAR: &str = "PLAYBOOK_TEST_DISK_TMP";
 
@@ -260,7 +257,7 @@ fn sources(env: &Env) -> Vec<Source> {
         }));
     }
     for worktree in &env.linked_worktrees {
-        let path = worktree.join(IN_TREE_TARGET);
+        let path = worktree.join(targets::IN_TREE_TARGET);
         if std::fs::symlink_metadata(&path).is_ok() {
             found.push(Source {
                 kind: Kind::Target,
@@ -608,10 +605,8 @@ fn remove_target_with(home: &Path, root: &Path, worktree: &Path, args: &str) -> 
 pub fn auto_due(home: &Path, cwd: &Path) -> bool {
     use super::policy;
     let policy = policy::load(home);
-    let volumes = policy::volumes(&policy::measured_paths(&policy, home, Some(cwd)));
-    policy.auto_cleanup
-        && policy::tightest(&volumes)
-            .is_some_and(|v| policy.level(v.space.free) != super::Level::Ok)
+    let paths = policy::measured_paths(&policy, home, Some(cwd));
+    policy.auto_cleanup && policy::low_space(&policy, &paths).is_some()
 }
 
 /// Runs the whole cleanup for the repo at `repo_root`, if any: the selection
@@ -965,7 +960,37 @@ mod tests {
         let (removed, _) = remove(chosen);
         assert_eq!(removed.len(), 2);
         assert!(!idle.join("target").exists() && idle.exists());
+        assert!(!building.join("target").exists() && building.exists());
         assert!(plain.join("target/notes.txt").exists());
+        fs::remove_dir_all(&f.root).unwrap();
+    }
+
+    #[test]
+    fn the_system_env_lists_linked_worktrees_but_not_the_main_one() {
+        let f = fixture("linked-list");
+        let main = f.root.join("main");
+        let linked = f.root.join("worktrees/feature");
+        fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .current_dir(dir)
+                .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+                .args(["-c", "commit.gpgsign=false"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+        };
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "x"]);
+        run(&main, &["worktree", "add", "-q", linked.to_str().unwrap()]);
+        let env = Env::from_system(&f.env.home, Some(&main));
+        let got: Vec<PathBuf> = env
+            .linked_worktrees
+            .iter()
+            .map(|p| fs::canonicalize(p).unwrap())
+            .collect();
+        assert_eq!(got, vec![fs::canonicalize(&linked).unwrap()]);
         fs::remove_dir_all(&f.root).unwrap();
     }
 

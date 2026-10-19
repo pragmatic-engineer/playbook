@@ -4,11 +4,11 @@ Every agent worktree that builds Rust grows its own cargo `target` folder. On 20
 
 ## What keeps it small
 
-- **One private, small build per worktree.** Agents run `eval "$(playbook disk target-env)" && cargo test` in the same Bash call. The line sets `CARGO_TARGET_DIR` to `<worktrees root>/cargo-<name>-<hash>`, and sets `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_PROFILE_TEST_DEBUG=0`. Panics keep their file and line. Backtraces and debuggers show only function names.
+- **One private, small build per worktree.** Agents run `env_line="$(playbook disk target-env)" && eval "$env_line" && cargo test` in the same Bash call, so a failed `target-env` stops the build. The line sets `CARGO_TARGET_DIR` to `<worktrees root>/cargo-<name>-<hash>`, and sets `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_PROFILE_TEST_DEBUG=0`. Panics keep their file and line. Backtraces and debuggers show only function names.
 - **Set per command, not in `.cargo/config.toml`.** Your own builds keep incremental compilation and debug info. Run the `eval` line in your shell, or set the variables yourself, when you want the same for a build you start by hand.
 - **Removed with the worktree.** `playbook worktree remove`, the sweep and the worktree-remove hook delete the folder with its worktree.
-- **Removed when idle.** `playbook disk clean` also removes a `cargo-*` folder and the `target` folder inside a linked worktree once nothing in it changed for 30 minutes. It keeps a folder when a cargo build holds its lock or a running process names it. The main worktree is never touched.
-- **Warned about.** `playbook disk status` warns when target folders hold more than `disk.maxTargetGb` together. `playbook disk target-dir` and `target-env` warn on stderr when free space is below `disk.warnFreeGb`, or more than `disk.maxTargetDirs` folders exist. They never refuse. The `disk-guard` hook still stops builds and new agents below `disk.blockFreeGb`.
+- **Removed when idle.** `playbook disk clean` also removes a `cargo-*` folder and the `target` folder inside any linked worktree of the repo, including one you made by hand, once nothing in it changed for 30 minutes. It keeps a folder when a cargo build holds its lock or a running process names it. The main worktree is never touched.
+- **Warned about.** `playbook disk status` warns when the `cargo-*` folders, the `target` folders inside linked worktrees and other cargo target folders under your home folder hold more than `disk.maxTargetGb` together. `playbook disk target-dir` and `target-env` warn on stderr when free space is below `disk.warnFreeGb`, or more than `disk.maxTargetDirs` folders exist. They never refuse. The `disk-guard` hook still stops builds and new agents below `disk.blockFreeGb`.
 
 ## Measured
 
