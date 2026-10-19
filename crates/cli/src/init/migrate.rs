@@ -45,6 +45,8 @@ pub const COLLECTOR_LABEL_MIGRATION: &str = "collector-service-label";
 pub const DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
 /// The `Owned` removal of the `no-slop-guard` hook entry setup used to write.
 pub const NO_SLOP_GUARD_MIGRATION: &str = "no-slop-guard-entry";
+/// The `Owned` move of a stored `update.plugin` boolean to `auto` or `off`.
+pub const PLUGIN_UPDATE_MODE_MIGRATION: &str = "plugin-update-mode";
 /// How long `collector-service-label` waits for the moved collector to run.
 const COLLECTOR_LABEL_WAIT: Duration = Duration::from_secs(3);
 
@@ -386,6 +388,13 @@ pub fn registry() -> Vec<Migration> {
             scope: Scope::Owned,
             run: no_slop_guard_entry,
         },
+        Migration {
+            id: PLUGIN_UPDATE_MODE_MIGRATION,
+            since: "next",
+            kind: Kind::Auto,
+            scope: Scope::Owned,
+            run: plugin_update_mode,
+        },
     ]
 }
 
@@ -678,6 +687,38 @@ fn auto_budget_defaults(ctx: &Ctx) -> Outcome {
             "raised the old default: {}{capped}. Run `playbook config set <key> <usd>` to pick another cap",
             moved.join(", ")
         ),
+    ))
+}
+
+/// Moves a stored `update.plugin` boolean to the word the key takes now:
+/// `true` was the automatic update, `false` was off. Any word stays.
+fn plugin_update_mode(ctx: &Ctx) -> Outcome {
+    use serde_json::Value;
+    const STEP: &str = "plugin update mode";
+    const KEY: &str = "update.plugin";
+    const MOVES: [(bool, &str); 2] = [(true, "auto"), (false, "off")];
+    let root = playbook_root_from(&ctx.home);
+    let mut moved = 0;
+    for (old, new) in MOVES {
+        match crate::config::store::replace_value(
+            &root,
+            KEY,
+            &Value::Bool(old),
+            &Value::String(new.to_string()),
+        ) {
+            Ok(n) => moved += n,
+            Err(err) => return Outcome::Failed(StepReport::failed(STEP, err.to_string())),
+        }
+    }
+    if moved == 0 {
+        return Outcome::Done(StepReport::skipped(
+            STEP,
+            "no stored update.plugin held a true or false",
+        ));
+    }
+    Outcome::Done(StepReport::wired(
+        STEP,
+        format!("moved update.plugin from true or false to auto or off in {moved} place(s)"),
     ))
 }
 

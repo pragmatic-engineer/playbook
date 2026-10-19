@@ -219,7 +219,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "hooks.proseLint.mode" => Some(Value::String("warn".to_string())),
         "update.mode" => Some(Value::String("notify".to_string())),
         "update.checkIntervalHours" => Some(Value::Number(24.into())),
-        "update.plugin" => Some(Value::Bool(true)),
+        "update.plugin" => Some(Value::String("auto".to_string())),
         "disk.warnFreeGb" => Some(Value::Number(
             crate::disk::policy::DEFAULT_WARN_FREE_GB.into(),
         )),
@@ -255,6 +255,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "docs.convert" => Some(&["auto", "off"]),
         "hooks.proseLint.mode" => Some(&["warn", "block", "off"]),
         "update.mode" => Some(&["notify", "auto", "off"]),
+        "update.plugin" => Some(&["auto", "ask", "off"]),
         "pr.rules.template"
         | "pr.rules.length"
         | "pr.rules.issue"
@@ -305,6 +306,20 @@ mod tests {
             default_value("auto.agentBudgetUsd"),
             Some(Value::Number(50.into()))
         );
+    }
+
+    #[test]
+    fn update_plugin_defaults_to_auto_and_takes_three_values() {
+        // Arrange
+        let key = "update.plugin";
+
+        // Act
+        let default = default_value(key);
+        let allowed = allowed_enum_values(key);
+
+        // Assert
+        assert_eq!(default, Some(Value::String("auto".to_string())));
+        assert_eq!(allowed, Some(&["auto", "ask", "off"][..]));
     }
 
     #[test]

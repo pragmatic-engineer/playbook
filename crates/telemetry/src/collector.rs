@@ -591,10 +591,17 @@ mod tests {
         assert!(!runs_other_build(&State::default()));
     }
 
+    /// Sets the stop flag and wakes the blocking accept on `port`.
+    fn halt(stop: &AtomicBool, port: u16) {
+        stop.store(true, Ordering::SeqCst);
+        crate::receiver::wake(SocketAddr::from((Ipv4Addr::LOCALHOST, port)));
+    }
+
     /// Runs a collector on a thread and always stops it, so a failed
     /// assertion cannot leave one serving.
     struct Running {
         stop: Arc<AtomicBool>,
+        port: u16,
         thread: Option<std::thread::JoinHandle<Result<String, String>>>,
     }
 
@@ -603,30 +610,40 @@ mod tests {
             let stop = Arc::new(AtomicBool::new(false));
             let (paths, flag) = (p.clone(), Arc::clone(&stop));
             let thread = std::thread::spawn(move || run_collect(&paths, Some(0), 0, &flag));
-            let me = Self {
+            let mut me = Self {
                 stop,
+                port: 0,
                 thread: Some(thread),
             };
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            while read_state(&state_path(p)).is_none_or(|s| s.pid == 0) {
+            loop {
+                if let Some(s) = read_state(&state_path(p)).filter(|s| s.pid != 0) {
+                    me.port = s.port;
+                    return me;
+                }
                 assert!(
                     std::time::Instant::now() < deadline,
                     "collector never came up"
                 );
                 std::thread::sleep(Duration::from_millis(10));
             }
-            me
         }
 
         fn finish(mut self) -> Result<String, String> {
-            self.stop.store(true, Ordering::SeqCst);
+            halt(&self.stop, self.port);
             self.thread.take().unwrap().join().unwrap()
         }
     }
 
     impl Drop for Running {
         fn drop(&mut self) {
-            self.stop.store(true, Ordering::SeqCst);
+            // With no port known nothing can wake accept, so a join could hang;
+            // the flag still ends a serve that has not reached accept yet.
+            if self.port == 0 {
+                self.stop.store(true, Ordering::SeqCst);
+                return;
+            }
+            halt(&self.stop, self.port);
             if let Some(t) = self.thread.take() {
                 let _ = t.join();
             }
@@ -769,7 +786,7 @@ mod tests {
         migrate_up(&db).unwrap();
         let serve_stop = Arc::new(AtomicBool::new(false));
         let server_stop = Arc::clone(&serve_stop);
-        let server = std::thread::spawn(move || {
+        let thread = std::thread::spawn(move || {
             let cfg = Config {
                 token: None,
                 idle: None,
@@ -777,13 +794,32 @@ mod tests {
             };
             let _ = serve(&listener, db, &cfg, &server_stop, || 0);
         });
+        let _server = Serving {
+            stop: serve_stop,
+            port,
+            thread: Some(thread),
+        };
         let stop = Arc::new(AtomicBool::new(false));
 
         let msg = run_collect(&p, None, 1, &stop).unwrap();
 
-        serve_stop.store(true, Ordering::SeqCst);
-        let _ = server.join();
         assert!(msg.contains("already running"), "{msg}");
+    }
+
+    /// A bare `serve` on a thread, stopped and joined in `Drop`.
+    struct Serving {
+        stop: Arc<AtomicBool>,
+        port: u16,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Drop for Serving {
+        fn drop(&mut self) {
+            halt(&self.stop, self.port);
+            if let Some(t) = self.thread.take() {
+                let _ = t.join();
+            }
+        }
     }
 
     fn state_on(p: &Paths, port: u16) {
