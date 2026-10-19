@@ -492,6 +492,62 @@ fn write(root: &Path, running: &str, state: State, now: u64) {
     let _ = crate::state::set(root, MARKER_KEY, &marker.format());
 }
 
+/// The detached body behind `update --refresh-plugin`: updates the plugin,
+/// records the marker and leaves the outcome line for the next session. It
+/// prints nothing. [`run`] does not read [`SKIP_ENV`], so the child the
+/// hook started cannot be stopped by its own variable.
+pub fn refresh_plugin(home: &Path) {
+    let root = crate::common::paths::playbook_root_from(home);
+    let claude_home = home.join(".claude");
+    let outcome = run(&Probe::for_home(home));
+    let after = plugin_id(&claude_home).and_then(|id| installed_version(&claude_home, id.as_str()));
+    finish(
+        &root,
+        &outcome,
+        env!("CARGO_PKG_VERSION"),
+        after.as_deref(),
+        now(),
+    );
+    if let Some(line) = outcome.line() {
+        crate::notices::store_notice(&root, &line);
+    }
+}
+
+/// Test seam that keeps the hook from starting the detached refresh. Read
+/// only in debug builds.
+#[cfg(debug_assertions)]
+const NO_SPAWN_ENV: &str = "PLAYBOOK_TEST_NO_SPAWN";
+
+#[cfg(debug_assertions)]
+const NO_SPAWN_VALUE: &str = "1";
+
+/// Starts `<exe> update --refresh-plugin` detached, like the release check
+/// refresh: own process group, no stdio, and the skip variable removed so
+/// the child is not mistaken for a nested run.
+// Not called until the hook trigger lands.
+#[allow(dead_code)]
+pub(crate) fn spawn_refresh_plugin() {
+    #[cfg(debug_assertions)]
+    if std::env::var_os(NO_SPAWN_ENV).is_some_and(|v| v == NO_SPAWN_VALUE) {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(["update", "--refresh-plugin"])
+        .env_remove(SKIP_ENV)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let _ = cmd.spawn();
+}
+
 /// The test seam that stands in for a terminal. Read only in debug builds,
 /// so a release binary cannot be fooled by it.
 #[cfg(debug_assertions)]

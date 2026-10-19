@@ -36,6 +36,7 @@ const HOUR_SECS: u64 = 60 * 60;
 const SKIP_ENV: &str = "PLAYBOOK_SKIP_PLUGIN_UPDATE";
 const ASSUME_TTY_ENV: &str = "PLAYBOOK_TEST_ASSUME_TTY";
 const MINUTE_SECS: u64 = 60;
+const NOTICE_KEY: &str = "notices/plugin-update";
 
 struct Fixture {
     home: PathBuf,
@@ -449,4 +450,57 @@ fn a_json_command_never_calls_claude() {
     assert_eq!(f.calls(), "");
     assert_eq!(f.marker(), None);
     assert!(!stderr(&out).contains(START_LINE));
+}
+
+#[test]
+fn the_detached_refresh_stores_the_updated_line_and_prints_nothing() {
+    // Arrange
+    let f = Fixture::new(true, 0);
+
+    // Act
+    let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "");
+    assert_eq!(stderr(&out), "");
+    assert_eq!(f.calls(), EXPECTED_CALL);
+    assert_eq!(
+        f.claude_env(),
+        "1\n",
+        "the claude child gets the skip variable"
+    );
+    let notice = playbook::state::get(&f.root(), NOTICE_KEY)
+        .unwrap()
+        .unwrap();
+    assert!(
+        notice.starts_with(&format!("plugin: updated {PLUGIN_ID} from ")),
+        "{notice}"
+    );
+    assert!(f.marker().unwrap().starts_with(&format!("{VERSION} done ")));
+}
+
+#[test]
+fn a_failed_detached_refresh_stores_the_failure_line_and_marks_failed() {
+    // Arrange
+    let f = Fixture::new(false, 1);
+
+    // Act
+    let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "");
+    assert_eq!(stderr(&out), "");
+    let notice = playbook::state::get(&f.root(), NOTICE_KEY)
+        .unwrap()
+        .unwrap();
+    assert!(
+        notice.starts_with("plugin: the update failed (network is down)"),
+        "{notice}"
+    );
+    assert!(f
+        .marker()
+        .unwrap()
+        .starts_with(&format!("{VERSION} failed ")));
 }

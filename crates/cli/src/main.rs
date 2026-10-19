@@ -2413,12 +2413,17 @@ fn main() {
             pre,
             yes,
             refresh_check,
+            refresh_plugin,
             print_notes,
             from,
             no_plugin,
         } => {
             if refresh_check {
                 update::check::run_refresh();
+                return;
+            }
+            if refresh_plugin {
+                playbook::plugin_update::refresh_plugin(&common::home_dir());
                 return;
             }
             // On stdout, so the install script can tell an answer from the
