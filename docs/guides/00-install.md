@@ -223,7 +223,7 @@ playbook skills sync             # write it
 
 The command copies the playbook skills and commands into `~/.agents/skills/playbook-<name>/`, the user skill folder Codex reads. Each command becomes a skill, so `/playbook:plan` is `$playbook-plan` in Codex. It needs Codex on the machine: a `~/.codex` folder or `codex` on your `PATH`.
 
-It never touches a folder it did not write, or one you edited. Those are left as they are and listed in the output. When the plugin updates, playbook refreshes the copies it wrote, and only for an agent you already synced. To opt out, do not run the command. `playbook uninstall` removes the folders that `skills sync` wrote and you did not edit.
+It never touches a folder it did not write, or one you edited. Those are left as they are and listed in the output. When the plugin updates, playbook adds, updates and removes its own folders to match, and only for an agent you already synced. To opt out, do not run the command. `playbook uninstall` removes the folders that `skills sync` wrote and you did not edit.
 
 Codex has no subagents and no `AskUserQuestion` tool, so a command step that needs one is done by the agent itself or asked in chat. A skill over 8,000 bytes is written as a short stub that tells the agent to read `references/playbook-body.md`. Whether a running Codex follows that line has not been verified. See [Codex skills](../internals/15-codex-skills.md).
 

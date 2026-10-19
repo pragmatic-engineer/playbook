@@ -157,7 +157,7 @@ Older installs placed `~/.config/playbook/hooks/lib/config-hash.sh`. The config 
 
 ## Codex skills (not part of setup)
 
-`playbook setup` never writes to `~/.agents/skills`. `playbook skills sync` is a separate command you run on purpose. It writes one `playbook-<name>/` folder per skill and per command, as real copies, and records the plugin version and a hash of each file it wrote. It skips a folder it did not write or one you edited. After the first run, a plugin update refreshes only the folders that record lists. `playbook uninstall` removes a recorded folder when it still matches the record, and keeps one you edited. See [Codex skills](../internals/15-codex-skills.md).
+`playbook setup` never writes to `~/.agents/skills`. `playbook skills sync` is a separate command you run on purpose. It writes one `playbook-<name>/` folder per skill and per command, as real copies, and records the plugin version and a hash of each file it wrote. It skips a folder it did not write or one you edited. After the first run, a plugin update brings the synced set up to date for that agent: it adds new skills, updates unedited folders, and removes folders for skills the plugin dropped. `playbook uninstall` removes a recorded folder when it still matches the record, and keeps one you edited. See [Codex skills](../internals/15-codex-skills.md).
 
 ## Undo
 
