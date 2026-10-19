@@ -261,7 +261,7 @@ fn no_plugin_a_false_config_key_or_a_failed_update_leave_the_exit_code_alone() {
     let dry_run = h.playbook(&["migrate", "--dry-run"], "", None);
     let calls_after_opt_out = h.claude_calls();
     let failed = h.playbook(&["migrate"], "", None);
-    let set = h.playbook(&["config", "set", "update.plugin", "false"], "", None);
+    let set = h.playbook(&["config", "set", "update.plugin", "off"], "", None);
     let off = h.playbook(&["migrate"], "", None);
     let bad = h.playbook(&["config", "set", "update.plugin", "sometimes"], "", None);
 
@@ -286,8 +286,7 @@ fn no_plugin_a_false_config_key_or_a_failed_update_leave_the_exit_code_alone() {
         String::from_utf8_lossy(&set.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&off.stdout)
-            .contains("plugin: not updated, update.plugin is false"),
+        String::from_utf8_lossy(&off.stdout).contains("plugin: not updated, update.plugin is off"),
         "{}",
         String::from_utf8_lossy(&off.stdout)
     );
@@ -298,7 +297,7 @@ fn no_plugin_a_false_config_key_or_a_failed_update_leave_the_exit_code_alone() {
     assert_ne!(
         bad.status.code(),
         Some(0),
-        "update.plugin takes true or false"
+        "update.plugin takes auto, ask or off"
     );
     assert_eq!(dry_run.status.code(), Some(0));
 }

@@ -5,7 +5,7 @@
 //! `playbook update` and `playbook migrate` (ADR 0034, 2026-10-19
 //! amendment). It runs `claude plugin update <id>` for the playbook plugin
 //! only, never for another plugin. A missing CLI, a failed update, a plugin
-//! that is off in Claude Code or `update.plugin` set to false never fails
+//! that is off in Claude Code or `update.plugin` set to off never fails
 //! the command: the result names the command to run by hand.
 
 use std::path::{Path, PathBuf};
@@ -90,13 +90,51 @@ pub fn command(id: &str) -> String {
     format!("claude plugin update {id}")
 }
 
-/// Whether the plugin update is on for `home`: `update.plugin` is not
-/// false. An unreadable value counts as on.
-pub fn enabled(home: &Path) -> bool {
-    crate::config::resolve(CONFIG_KEY, home, None)
-        .ok()
-        .and_then(|(v, _)| v.as_bool())
-        .unwrap_or(true)
+/// What `update.plugin` asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Auto,
+    Ask,
+    Off,
+}
+
+const MODE_AUTO: &str = "auto";
+const MODE_ASK: &str = "ask";
+const MODE_OFF: &str = "off";
+
+/// The mode a stored value names, or `None` when it names none. The old
+/// boolean values still count, so a store written before the key took words
+/// keeps its meaning.
+fn parse_mode(value: &serde_json::Value) -> Option<Mode> {
+    match value {
+        serde_json::Value::String(s) if s == MODE_AUTO => Some(Mode::Auto),
+        serde_json::Value::String(s) if s == MODE_ASK => Some(Mode::Ask),
+        serde_json::Value::String(s) if s == MODE_OFF => Some(Mode::Off),
+        serde_json::Value::Bool(true) => Some(Mode::Auto),
+        serde_json::Value::Bool(false) => Some(Mode::Off),
+        _ => None,
+    }
+}
+
+/// The mode for a stored value; a missing or unknown one is `Auto`, the
+/// default.
+fn mode_from(value: Option<&serde_json::Value>) -> Mode {
+    value.and_then(parse_mode).unwrap_or(Mode::Auto)
+}
+
+/// The `update.plugin` mode for `home`. The raw stored value is read, not
+/// the enum-checked one, because a `true` or `false` from before the key
+/// took words is still valid here.
+pub fn mode(home: &Path) -> Mode {
+    let Ok((value, _)) = crate::config::resolve(CONFIG_KEY, home, None) else {
+        return Mode::Auto;
+    };
+    if parse_mode(&value).is_none() {
+        eprintln!(
+            "warning: ignoring invalid value {value} for config key {CONFIG_KEY}, valid values are: {MODE_AUTO}, {MODE_ASK}, {MODE_OFF}"
+        );
+    }
+    mode_from(Some(&value))
 }
 
 /// The id Claude Code lists for the playbook plugin in
@@ -158,13 +196,13 @@ impl Probe {
     }
 }
 
-/// Updates the playbook plugin, unless `update.plugin` is false, the plugin
+/// Updates the playbook plugin, unless `update.plugin` is off, the plugin
 /// is not installed, or it is off in Claude Code.
 pub fn run(probe: &Probe) -> Outcome {
     let claude_home = probe.home.join(".claude");
-    if !enabled(&probe.home) {
+    if mode(&probe.home) == Mode::Off {
         return Outcome::Skipped(format!(
-            "{CONFIG_KEY} is false; to turn it on, run: playbook config set {CONFIG_KEY} true"
+            "{CONFIG_KEY} is off; to turn it on, run: playbook config set {CONFIG_KEY} {MODE_AUTO}"
         ));
     }
     let Some(id) = plugin_id(&claude_home) else {
@@ -359,7 +397,7 @@ mod tests {
             crate::config::write::Tier::Global,
             None,
             CONFIG_KEY,
-            &serde_json::json!(false),
+            &serde_json::json!("off"),
         )
         .unwrap();
         let config_off = run(&Probe {
@@ -370,11 +408,67 @@ mod tests {
         // Assert
         let (off, config_off) = (off.line().unwrap(), config_off.line().unwrap());
         assert!(off.contains("turned off in Claude Code"), "{off}");
-        assert!(
-            config_off.contains("update.plugin is false"),
-            "{config_off}"
-        );
+        assert!(config_off.contains("update.plugin is off"), "{config_off}");
         assert_eq!(calls(&home), "");
+    }
+
+    #[test]
+    fn mode_reads_each_word() {
+        // Arrange
+        let words = [("auto", Mode::Auto), ("ask", Mode::Ask), ("off", Mode::Off)];
+
+        for (word, expected) in words {
+            // Act
+            let mode = mode_from(Some(&serde_json::json!(word)));
+
+            // Assert
+            assert_eq!(mode, expected, "{word}");
+        }
+        assert_eq!(
+            mode_from(None),
+            Mode::Auto,
+            "a missing value is the default"
+        );
+    }
+
+    #[test]
+    fn a_stored_true_reads_as_auto_and_false_as_off() {
+        // Arrange
+        let home = scratch_dir("plugin-update-bool-mode");
+        let root = crate::common::paths::playbook_root_from(&home);
+        fs::create_dir_all(&root).unwrap();
+        let put = |value: serde_json::Value| {
+            crate::config::store::put(
+                &root,
+                crate::config::write::Tier::Global,
+                None,
+                CONFIG_KEY,
+                &value,
+            )
+            .unwrap();
+        };
+
+        // Act
+        put(serde_json::json!(true));
+        let on = mode(&home);
+        put(serde_json::json!(false));
+        let off = mode(&home);
+
+        // Assert
+        assert_eq!((on, off), (Mode::Auto, Mode::Off));
+    }
+
+    #[test]
+    fn an_unknown_word_reads_as_auto() {
+        // Arrange
+        let unknown = serde_json::json!("sometimes");
+
+        // Act
+        let mode = mode_from(Some(&unknown));
+
+        // Assert
+        assert_eq!(mode, Mode::Auto);
+        assert_eq!(parse_mode(&unknown), None);
     }
 
     #[test]
