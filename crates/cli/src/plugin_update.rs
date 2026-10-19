@@ -405,7 +405,7 @@ pub fn seen(root: &Path) -> Option<String> {
         .find_map(|(k, v)| (k == MARKER_KEY && !v.is_empty()).then_some(v))
 }
 
-fn now() -> u64 {
+pub(crate) fn now() -> u64 {
     u64::try_from(crate::common::time::now_secs()).unwrap_or(0)
 }
 
@@ -524,8 +524,6 @@ const NO_SPAWN_VALUE: &str = "1";
 /// Starts `<exe> update --refresh-plugin` detached, like the release check
 /// refresh: own process group, no stdio, and the skip variable removed so
 /// the child is not mistaken for a nested run.
-// Not called until the hook trigger lands.
-#[allow(dead_code)]
 pub(crate) fn spawn_refresh_plugin() {
     #[cfg(debug_assertions)]
     if std::env::var_os(NO_SPAWN_ENV).is_some_and(|v| v == NO_SPAWN_VALUE) {
