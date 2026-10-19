@@ -1,9 +1,9 @@
 # ADR-0042: Turn Off Claude Code Attribution in Setup
 
-- **Status:** Accepted. Amended by [ADR 0044](0044-drop-the-shell-launcher.md), which makes `--yes` turn on every setup part.
+- **Status:** Accepted. Amended by [ADR 0044](0044-drop-the-shell-launcher.md), which makes `--yes` turn on every setup part, and by [the 2026-10-19 amendment](#amendment-2026-10-19-one-attribution-part-with-two-states), which renames the part to `attribution` with an ON and an OFF state and retires the `attribution-off` migration.
 - **Date created:** 2026-10-17
-- **Date modified:** 2026-10-18
-- **Amends:** decisions 8 and 12 of [ADR 0034](0034-self-healing-upgrades.md), for this one key: `playbook doctor --fix` asks about it before the shared heal step, and may write it after a yes at a terminal.
+- **Date modified:** 2026-10-19
+- **Amends:** decisions 8 and 12 of [ADR 0034](0034-self-healing-upgrades.md), for this one key: `playbook doctor --fix` asks about it before the shared heal step, and may write it after a yes at a terminal. The 2026-10-19 amendment also amends decisions 7 and 9 of [ADR 0046](0046-migrations-by-release-version.md): a slug can be retired from the registry, and is never given to a new migration.
 
 ## Context
 
@@ -40,3 +40,14 @@ So `{"commit": "", "pr": ""}` alone leaves the session link in place. The value 
 - An existing install sees `playbook setup --only attribution-off` in the session message after the upgrade, until the key is set or the user says no.
 - A project `.claude/settings.json`, a local settings file or managed settings can still set attribution for that scope. Playbook reads and writes only the user file.
 - `playbook uninstall` keeps the key and prints one line that says so. The setup summary and `--explain` say to delete it by hand, and a backup sits next to the file.
+
+## Amendment 2026-10-19: one attribution part with two states
+
+The part was named for one state, so `--no-attribution-off` read as a double negative. It now has one name and two states. This replaces decisions 1, 3 and 4, the parts of decision 2 that name the old flags, the yes to the question or the reminder, and the second and fourth Consequences bullets.
+
+1. **The part is `attribution`.** `--attribution` is ON: Claude Code adds its attribution, and setup removes each `attribution` sub-key that holds exactly the off value. Any other value stays, and with no key setup changes nothing. `--no-attribution` is OFF, the default: setup writes the off value as before and replaces a value of the user's own. `--yes`, `--only attribution` and a no to the question give OFF and keep the user's own values. The question asks for ON, with No as the default.
+2. **The choice is stored.** A choice of ON or OFF is stored in the per-user key `attribution.enabled` (default false), as `launcher.shortName` stores its answer, so `--yes` and `--only attribution` keep an ON. A stored `attribution/declined` row from 0.36 or 0.37 counts as ON until a value is stored. A no in `playbook doctor --fix` stores ON.
+3. **The `attribution-off` migration is retired.** `attribution-off` is no longer in the registry: no consent item, no session reminder and no `playbook migrate` row. A record that names it, as `attribution-off` or `0015-attribution-off`, still loads, and the id is ignored. `0015-attribution-off` stays in the fixed table of old ids from [ADR 0046](0046-migrations-by-release-version.md), and `attribution-off` is listed as retired so no new migration takes the slug.
+4. **Doctor.** The row is PASS for OFF with every key set, or for ON by choice with no off value left. It is WARN with `playbook setup --only attribution` when OFF is the choice and a key is missing, and when ON is the choice and a key still holds the off value. It is INFO for a value of the user's own. `playbook doctor --fix` still asks at a terminal when OFF is the choice and a key is missing: a yes adds the missing keys and keeps the user's own values, and a no stores ON.
+5. **Old names keep working.** `--attribution-off` maps to `--no-attribution`, `--no-attribution-off` maps to `--attribution`, and the part name `attribution-off` in `--only` and `--explain` maps to `attribution`, as hidden names with one stderr note at a terminal, as in [ADR 0040](0040-rename-init-to-setup.md). The note for `--no-attribution-off` prints without a terminal too, because that flag now writes settings. `--no-attribution-off` beside an `--only` that does not name the part stays a no-op, as in 0.37. In 0.37 `--no-attribution-off` left settings alone; it now turns attribution ON, which removes the off value.
+6. **Uninstall** keeps the key and names `playbook setup --only attribution --attribution` as the way to get Claude Code's attribution back.

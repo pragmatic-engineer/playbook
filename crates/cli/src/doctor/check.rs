@@ -785,35 +785,86 @@ fn marker_endpoint(home: &Path) -> Option<String> {
 
 const TELEMETRY_SETUP_FIX: &str = "run: playbook setup --only telemetry";
 
-/// The `attribution` key in the user's settings.json (ADR 0042): ok when every
-/// attribution is off, a warning with the fix when a key is missing.
+/// The `attribution` key in the user's settings.json (ADR 0042). With
+/// attribution OFF, the default: ok when every key holds the off value, a
+/// warning with the fix when a key is missing. With ON chosen
+/// (`attribution.enabled` true): ok when no key holds the off value. A key
+/// with the user's own value is info.
 fn attribution_row(env: &Env) -> Row {
     use crate::init::attribution::{self, State};
-    match attribution::state(&env.settings()) {
-        State::Off => Row::new(
-            "-",
-            Level::Pass,
-            "attribution off: commits and PRs get no Claude trailer, footer or session link",
-        ),
+    let settings = env.settings();
+    match attribution::state(&settings) {
+        State::Unreadable(why) => Row::new("-", Level::Warn, format!("attribution: {why}")),
+        State::OtherShape => Row::new("-", Level::Info, attribution::OTHER_SHAPE),
+        state if attribution::enabled(&env.home) => {
+            attribution_on_row(&state, &attribution::held_off(&settings))
+        }
         State::Open { missing, custom } if !missing.is_empty() => Row::new(
             "-",
             Level::Warn,
             format!(
-                "attribution key missing in settings.json ({}), so Claude Code adds its attribution",
-                missing.join(", ")
+                "attribution OFF is the default, and {} is missing in settings.json, so Claude Code adds its attribution",
+                attribution::names(&missing)
             ),
         )
         .hint(format!(
-            "run: {} (or playbook doctor --fix){}",
+            "run: {} (or playbook doctor --fix){}; for attribution ON, run: {}",
             attribution::COMMAND,
-            if custom.is_empty() { "" } else { "; your own values stay" }
+            if custom.is_empty() { "" } else { "; your own values stay" },
+            attribution::ON_COMMAND
         )),
         State::Open { custom, .. } => Row::new(
             "-",
             Level::Info,
-            format!("attribution has your own value for {}", custom.join(", ")),
+            format!(
+                "attribution has your own value for {}",
+                attribution::names(&custom)
+            ),
         )
-        .hint(format!("to turn it off, run: {}", attribution::OFF_COMMAND)),
+        .hint(format!("for attribution OFF, run: {}", attribution::OFF_COMMAND)),
+        State::Off => Row::new(
+            "-",
+            Level::Pass,
+            "attribution OFF: commits and PRs get no Claude trailer, generated-by line or session link",
+        ),
+    }
+}
+
+/// The attribution row when the user chose ON. `held` names the keys that
+/// still hold the off value.
+fn attribution_on_row(state: &crate::init::attribution::State, held: &[&str]) -> Row {
+    use crate::init::attribution::{self, State};
+    if !held.is_empty() {
+        return Row::new(
+            "-",
+            Level::Warn,
+            format!(
+                "attribution ON is your choice ({} is true), and {} still holds the off value",
+                attribution::KEY,
+                attribution::names(held)
+            ),
+        )
+        .hint(format!("run: {}", attribution::COMMAND));
+    }
+    match state {
+        State::Off => Row::new(
+            "-",
+            Level::Info,
+            "attribution is false in settings.json, your own value, so Claude Code adds no attribution",
+        ),
+        State::Open { custom, .. } if !custom.is_empty() => Row::new(
+            "-",
+            Level::Info,
+            format!(
+                "attribution ON is your choice; your own value for {}",
+                attribution::names(custom)
+            ),
+        ),
+        State::Open { .. } => Row::new(
+            "-",
+            Level::Pass,
+            "attribution ON, your choice: Claude Code adds its trailer, generated-by line and session link",
+        ),
         State::OtherShape => Row::new("-", Level::Info, attribution::OTHER_SHAPE),
         State::Unreadable(why) => Row::new("-", Level::Warn, format!("attribution: {why}")),
     }

@@ -6,7 +6,7 @@
 
 - In a terminal, `playbook setup` is a guided wizard. It shows one screen per part ("Step 3 of 8"), with what happens if you accept and what happens if you decline, a mark for the recommended answer, and the keys y, n, b (back), s (use the default) and q (quit). A summary and a confirm come last. Nothing is written before you confirm.
 - `--yes` (or `--defaults`) skips the wizard and takes the defaults. Each part also has a `--x` and `--no-x` flag, and a flag wins over the wizard and shows in the summary as set by a flag.
-- Without a terminal there are no questions. Only `PATH` is on: hooks, the status line, the system prompt, the `pb` link, telemetry, the collector service and attribution-off stay off unless you pass `--yes` or their own flag.
+- Without a terminal there are no questions. Only `PATH` is on: hooks, the status line, the system prompt, the `pb` link, telemetry, and the collector service stay off, and attribution is left as it is, unless you pass `--yes` or their own flag.
 - `playbook setup --dry-run` prints exactly what would change for each part and changes nothing.
 - `playbook setup --explain` describes every part. `playbook setup --explain <part>` describes one, for example `--explain hooks`.
 - `playbook hooks list` prints every hook with its event, matcher and one line of purpose.
@@ -75,7 +75,7 @@ Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the
 | Usage telemetry | on, asked | `--telemetry`, `--no-telemetry` | `~/.claude/settings.json` (the `env` block), `~/.config/playbook/telemetry-env.json` |
 | Collector service | on, asked | `--collector-service`, `--no-collector-service` | `~/Library/LaunchAgents/com.github.pragmatic-engineer.playbook.collector.plist` (macOS) or `~/.config/systemd/user/playbook-collector.service` (Linux) |
 | `pb` short name | on, asked | `--short-name`, `--no-short-name` | the `pb` symlink in the install folder, and `~/.config/playbook` (the `launcher.shortName` key) |
-| Attribution off | on, asked | `--attribution-off`, `--no-attribution-off` | `~/.claude/settings.json` (the `attribution` key) |
+| Attribution | OFF, asked | `--attribution` (ON), `--no-attribution` (OFF) | `~/.claude/settings.json` (the `attribution` key), and `~/.config/playbook` (the `attribution.enabled` key) |
 
 `--settings` and `--no-settings` no longer exist. Each option that part used to carry now sits behind the hooks, status line or security part, or is not shipped.
 
@@ -131,9 +131,14 @@ Setup writes no line to your `.zshrc` or `.bashrc`. `playbook cc`, `playbook ccd
 
 `--collector-service` (on by default; `--yes` is a yes) keeps the usage collector running, so the telemetry that the telemetry part points Claude Code at has a receiver after every login. It acts only when your Claude Code user settings point telemetry at the playbook collector. On macOS it writes a launchd agent to `~/Library/LaunchAgents/com.github.pragmatic-engineer.playbook.collector.plist` with `RunAtLoad` and `KeepAlive`, then loads it with `launchctl bootstrap`. An agent that playbook 0.37.0 wrote under the old label, `io.github.pragmatic-engineer.playbook.collector`, moves to the new one by itself on the next `playbook migrate`, session start or setup run. On Linux it writes a systemd user unit to `~/.config/systemd/user/playbook-collector.service` with `Restart=always`, then runs `systemctl --user enable` and `restart`. On other systems it writes nothing and prints `playbook usage collect --idle-seconds 0` for you to run. The service runs `playbook usage collect --idle-seconds 0` and writes its output to `~/.config/playbook/data/collector-service.log` (mode `0600`). The service file (mode `0644`) names only the program and the log: the collector reads its token from `collector.json`, so no secret is written. Running setup again changes nothing when the file is current, and starts the service when it is stopped. A no is remembered, so the one-time session reminder for existing installs stays quiet. `playbook doctor` and `playbook usage status` name the service, and `playbook uninstall` stops it and removes the file. See [ADR 0043](../adr/0043-collector-service-in-setup.md).
 
-### Attribution off
+### Attribution
 
-`--attribution-off` (on by default; `--yes` is a yes) sets `attribution` to `{"commit": "", "pr": "", "sessionUrl": false}` in `~/.claude/settings.json`. Claude Code then adds no `Co-Authored-By` trailer to commits, no generated-by line to pull requests, and no `Claude-Session` trailer or claude.ai link. Setup adds only the keys that are missing. A key that holds your own value stays, unless you answer yes to the question or pass `--attribution-off`; `--yes` and `--only attribution-off` keep it. A no is remembered, so the session reminder stops. `playbook doctor` shows the key as ok, missing, or set to your own value, and `playbook doctor --fix` asks before it adds the missing keys. A project or managed settings file can still set its own value. Undo it by deleting the key. See [ADR 0042](../adr/0042-attribution-off-in-setup.md).
+Attribution is what Claude Code adds to commits and pull requests: a `Co-Authored-By` trailer, a generated-by line, and a `Claude-Session` trailer or claude.ai link. The part has two states.
+
+- OFF, the default (`--no-attribution`; a no to the question gives it too, and so does `--yes` unless you chose ON before): setup sets `attribution` to `{"commit": "", "pr": "", "sessionUrl": false}` in `~/.claude/settings.json`, so Claude Code adds none of it. Setup adds only the keys that are missing. A key that holds your own value stays, unless you pass `--no-attribution`.
+- ON (`--attribution`, or a yes to the question): setup removes each key that holds exactly that off value, so Claude Code adds its attribution again. Any other value stays.
+
+The choice is stored as `attribution.enabled`, so `--yes` and `--only attribution` keep an ON. A no to the old question in 0.36 or 0.37 counts as ON. `playbook doctor` shows a pass for OFF with every key set or for ON by your choice, a warning with `playbook setup --only attribution` when OFF is the choice and a key is missing, or when ON is the choice and a key still holds the off value, and info for a value of your own. `playbook doctor --fix` asks before it adds a missing key, and a no stores ON. A project or managed settings file can still set its own value. The old flags `--attribution-off` (now `--no-attribution`) and `--no-attribution-off` (now `--attribution`) and the part name `attribution-off` still work and print a note. See [ADR 0042](../adr/0042-attribution-off-in-setup.md).
 
 ### Memory migration
 

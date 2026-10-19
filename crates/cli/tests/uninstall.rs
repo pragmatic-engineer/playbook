@@ -159,6 +159,12 @@ fn removes_everything_init_placed_and_keeps_the_users_own_content() {
         "{}",
         text(&out)
     );
+    assert!(
+        text(&out)
+            .contains("run `playbook setup --only attribution --attribution` while playbook is still installed"),
+        "{}",
+        text(&out)
+    );
     for gone in [
         ".config/playbook/statusline.sh",
         ".config/playbook/prompts/SYSTEM_PROMPT.md",

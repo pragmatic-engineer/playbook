@@ -204,22 +204,6 @@ pub fn names(keys: &[&str]) -> String {
         .join(", ")
 }
 
-/// The `Consent` check of the reminder: a line when a key is missing, else
-/// `None`. Nothing is reported when the user chose ON, or for a key with the
-/// user's own value.
-pub fn pending(home: &Path, settings_path: &Path) -> Option<String> {
-    if enabled(home) {
-        return None;
-    }
-    match state(settings_path) {
-        State::Open { missing, .. } if !missing.is_empty() => Some(format!(
-            "{} not set in ~/.claude/settings.json, so Claude Code adds its attribution to commits and pull requests",
-            names(&missing)
-        )),
-        _ => None,
-    }
-}
-
 /// The setup step for `choice`. After the edit, OFF or ON is stored in
 /// `KEY`, so a later `--yes` keeps the choice.
 pub fn step(home: &Path, settings_path: &Path, epoch: u64, choice: Choice) -> StepReport {
@@ -508,7 +492,6 @@ mod tests {
         assert_eq!(step.status, StepStatus::Skipped);
         assert!(step.detail.contains(OFF_COMMAND), "{}", step.detail);
         assert_eq!(fs::read_to_string(&path).unwrap(), body);
-        assert_eq!(pending(home_of(&path), &path), None);
     }
 
     #[test]
@@ -522,7 +505,6 @@ mod tests {
         assert_eq!(remove(&odd, 1).status, StepStatus::Skipped);
         assert_eq!(remove(&off, 1).status, StepStatus::Skipped);
         assert_eq!(read(&off), json!({"attribution": false}));
-        assert_eq!(pending(home_of(&odd), &odd), None);
     }
 
     #[test]
@@ -585,20 +567,6 @@ mod tests {
         assert_eq!(off.status, StepStatus::Wired, "{}", off.detail);
         assert!(!enabled(home));
         assert_eq!(state(&path), State::Off);
-    }
-
-    #[test]
-    fn pending_names_only_the_missing_keys_and_is_quiet_after_on() {
-        let path = settings("pending", Some(r#"{"attribution":{"commit":""}}"#));
-
-        let line = pending(home_of(&path), &path).expect("pr and sessionUrl are missing");
-        record(home_of(&path), true).unwrap();
-
-        assert!(
-            line.starts_with("attribution.pr, attribution.sessionUrl not set"),
-            "{line}"
-        );
-        assert_eq!(pending(home_of(&path), &path), None);
     }
 
     #[test]
@@ -665,7 +633,7 @@ mod tests {
 
         assert_eq!(report.status, StepStatus::Skipped);
         assert_eq!(fs::read_to_string(&path).unwrap(), "{}");
-        assert!(pending(home_of(&path), &path).is_some());
+        assert!(!enabled(home_of(&path)));
     }
 
     #[cfg(unix)]

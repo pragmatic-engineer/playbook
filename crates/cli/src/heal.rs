@@ -588,16 +588,13 @@ mod tests {
         record
     }
 
-    /// Attribution already off, so only the item a test sets up is open.
-    const ATTRIBUTION_OFF: &str = r#""attribution":{"commit":"","pr":"","sessionUrl":false}"#;
-
     fn legacy_statusline(home: &Path) {
         fs::create_dir_all(home.join(".claude")).unwrap();
         let cmd = crate::init::statusline::playbook_statusline_path(home);
         fs::write(
             home.join(".claude/settings.json"),
             format!(
-                r#"{{{ATTRIBUTION_OFF},"statusLine":{{"type":"command","command":"bash {}"}}}}"#,
+                r#"{{"statusLine":{{"type":"command","command":"bash {}"}}}}"#,
                 cmd.display()
             ),
         )
@@ -805,11 +802,12 @@ mod tests {
         assert_eq!(Record::read(&root(&home)).unwrap(), before);
     }
 
-    /// Settings with no `attribution` keys, so the attribution item is open
-    /// unless the user said no.
-    fn settings_without_attribution(home: &Path) {
+    /// Settings from an earlier setup with no system prompt installed, so the
+    /// system prompt item is open unless the user said no.
+    fn settings_without_prompt(home: &Path) {
         fs::create_dir_all(home.join(".claude")).unwrap();
-        fs::write(home.join(".claude/settings.json"), r#"{"model":"x"}"#).unwrap();
+        let line = r#"{"statusLine":{"type":"command","command":"playbook statusline"}}"#;
+        fs::write(home.join(".claude/settings.json"), line).unwrap();
     }
 
     fn seed_pending(home: &Path, pending: &str) {
@@ -824,18 +822,18 @@ mod tests {
     #[test]
     fn a_stored_no_still_closes_an_item_the_record_names_by_its_old_number() {
         // Arrange: a 0.37.0 record whose pending list holds the old id, and a
-        // user who said no to the attribution part.
+        // user who said no to the system prompt.
         let home = scratch_dir("heal-no-by-slug");
-        settings_without_attribution(&home);
-        seed_pending(&home, "0015-attribution-off");
-        crate::state::set(&root(&home), "attribution/declined", "1").unwrap();
+        settings_without_prompt(&home);
+        seed_pending(&home, "0019-system-prompt-default-on");
+        crate::init::system_prompt::record(&home, false).unwrap();
 
         // Act
         let read = Record::read(&root(&home)).unwrap();
         let out = run(&ctx(&home), Trigger::Hook, 1000);
 
         // Assert
-        assert_eq!(read.pending, ["attribution-off"]);
+        assert_eq!(read.pending, [migrate::PROMPT_DEFAULT_MIGRATION]);
         assert!(out.open.is_empty(), "{:?}", out.open);
         assert!(Record::read(&root(&home)).unwrap().pending.is_empty());
     }
@@ -844,17 +842,17 @@ mod tests {
     fn an_open_item_under_its_old_number_stays_open_and_is_stored_as_a_slug() {
         // Arrange: the same record, with no answer stored.
         let home = scratch_dir("heal-open-by-slug");
-        settings_without_attribution(&home);
-        seed_pending(&home, "0015-attribution-off");
+        settings_without_prompt(&home);
+        seed_pending(&home, "0019-system-prompt-default-on");
 
         // Act
         let out = run(&ctx(&home), Trigger::Hook, 1000);
 
         // Assert
         let ids: Vec<&str> = out.open.iter().map(|i| i.id).collect();
-        assert_eq!(ids, [migrate::ATTRIBUTION_MIGRATION]);
+        assert_eq!(ids, [migrate::PROMPT_DEFAULT_MIGRATION]);
         let stored = crate::state::get(&root(&home), "versions/pending").unwrap();
-        assert_eq!(stored.as_deref(), Some("attribution-off"));
+        assert_eq!(stored.as_deref(), Some(migrate::PROMPT_DEFAULT_MIGRATION));
         let schema = crate::state::get(&root(&home), "versions/schema").unwrap();
         assert_eq!(
             schema,
@@ -867,8 +865,11 @@ mod tests {
     fn a_pending_list_with_an_old_and_a_new_id_for_one_item_is_stored_once() {
         // Arrange
         let home = scratch_dir("heal-mixed-pending");
-        settings_without_attribution(&home);
-        seed_pending(&home, "0015-attribution-off,attribution-off");
+        settings_without_prompt(&home);
+        seed_pending(
+            &home,
+            "0019-system-prompt-default-on,system-prompt-default-on",
+        );
 
         // Act
         let out = run(&ctx(&home), Trigger::Hook, 1000);
@@ -876,7 +877,26 @@ mod tests {
         // Assert
         assert_eq!(out.open.len(), 1, "{:?}", out.open);
         let stored = crate::state::get(&root(&home), "versions/pending").unwrap();
-        assert_eq!(stored.as_deref(), Some("attribution-off"));
+        assert_eq!(stored.as_deref(), Some(migrate::PROMPT_DEFAULT_MIGRATION));
+    }
+
+    #[test]
+    fn a_pending_list_with_the_retired_attribution_item_loads_and_drops_it() {
+        // Arrange: a 0.37.0 record with the retired item under both ids, and
+        // settings with no attribution key.
+        let home = scratch_dir("heal-retired-attribution");
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        fs::write(home.join(".claude/settings.json"), r#"{"model":"x"}"#).unwrap();
+        seed_pending(&home, "0015-attribution-off,attribution-off");
+
+        // Act
+        let read = Record::read(&root(&home)).unwrap();
+        let out = run(&ctx(&home), Trigger::Hook, 1000);
+
+        // Assert
+        assert_eq!(read.pending, [migrate::RETIRED_ATTRIBUTION_MIGRATION; 2]);
+        assert!(out.open.is_empty(), "{:?}", out.open);
+        assert!(Record::read(&root(&home)).unwrap().pending.is_empty());
     }
 
     /// The record check of playbook 0.34.0 to 0.37.0: the version first,
@@ -962,9 +982,7 @@ mod tests {
         run(&ctx(&home), Trigger::Hook, 1000);
         fs::write(
             home.join(".claude/settings.json"),
-            format!(
-                r#"{{{ATTRIBUTION_OFF},"statusLine":{{"type":"command","command":"playbook statusline"}}}}"#
-            ),
+            r#"{"statusLine":{"type":"command","command":"playbook statusline"}}"#,
         )
         .unwrap();
 

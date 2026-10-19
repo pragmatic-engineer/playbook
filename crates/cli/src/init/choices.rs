@@ -73,16 +73,22 @@ pub struct Flags {
     pub no_short_name: bool,
     #[arg(
         long,
-        overrides_with = "no_attribution",
+        overrides_with_all = ["no_attribution", "attribution_off", "no_attribution_off"],
         help = "Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true"
     )]
     pub attribution: bool,
     #[arg(
         long,
-        overrides_with = "attribution",
+        overrides_with_all = ["attribution", "attribution_off", "no_attribution_off"],
         help = "Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values"
     )]
     pub no_attribution: bool,
+    /// Deprecated name for `--no-attribution`, from 0.36 and 0.37.
+    #[arg(long, hide = true, overrides_with_all = ["attribution", "no_attribution", "no_attribution_off"])]
+    pub attribution_off: bool,
+    /// Deprecated name for `--attribution`, from 0.36 and 0.37.
+    #[arg(long, hide = true, overrides_with_all = ["attribution", "no_attribution", "attribution_off"])]
+    pub no_attribution_off: bool,
     #[arg(
         long,
         value_name = "PART",
@@ -163,12 +169,56 @@ pub fn retired_notes(flags: &Flags) -> Vec<String> {
         .collect()
 }
 
-/// Prints the retired notes when stderr is a terminal (ADR 0040).
-pub fn note_retired(flags: &Flags) {
-    if io::stderr().is_terminal() {
-        for note in retired_notes(flags) {
-            eprintln!("{note}");
-        }
+/// The `--only` and `--explain` name 0.36 and 0.37 gave the attribution part.
+pub const OLD_ATTRIBUTION_PART: &str = "attribution-off";
+
+/// Maps the attribution names 0.36 and 0.37 shipped to the current ones
+/// (ADR 0042): `--attribution-off` is `--no-attribution` (OFF),
+/// `--no-attribution-off` is `--attribution` (ON), and the part name
+/// `attribution-off` is `attribution`. Returns one stderr line per old name.
+pub fn map_deprecated(flags: &mut Flags) -> Vec<String> {
+    let note =
+        |old: &str, new: &str| format!("playbook setup: `{old}` is deprecated, use: `{new}`");
+    let mut notes = Vec::new();
+    if std::mem::take(&mut flags.attribution_off) {
+        flags.no_attribution = true;
+        notes.push(note("--attribution-off", "--no-attribution"));
+    }
+    // 0.37 took `--no-attribution-off` beside an `--only` without the part
+    // as a no-op, so it stays one there.
+    let only_other = !flags.only.is_empty()
+        && !flags
+            .only
+            .iter()
+            .any(|n| n == OLD_ATTRIBUTION_PART || n == attribution::PART);
+    if std::mem::take(&mut flags.no_attribution_off) {
+        flags.attribution = !only_other;
+        notes.push(note("--no-attribution-off", "--attribution"));
+    }
+    let explain = flags.explain.as_mut().and_then(Option::as_mut);
+    let old_names = flags.only.iter_mut().chain(explain);
+    let mut renamed = false;
+    for name in old_names.filter(|n| *n == OLD_ATTRIBUTION_PART) {
+        *name = attribution::PART.to_string();
+        renamed = true;
+    }
+    if renamed {
+        notes.push(note(OLD_ATTRIBUTION_PART, attribution::PART));
+    }
+    notes
+}
+
+/// Maps the deprecated names, then prints the retired and deprecated notes
+/// when stderr is a terminal (ADR 0040), and the `--no-attribution-off` note
+/// always.
+pub fn map_and_note(flags: &mut Flags) {
+    // `--no-attribution-off` now writes settings, so a script sees its note too.
+    let old_no = flags.no_attribution_off;
+    let deprecated = map_deprecated(flags);
+    let terminal = io::stderr().is_terminal();
+    let notes = retired_notes(flags).into_iter().chain(deprecated);
+    for note in notes.filter(|n| terminal || (old_no && n.contains("`--no-attribution-off`"))) {
+        eprintln!("{note}");
     }
 }
 
@@ -724,6 +774,77 @@ mod tests {
             err.contains("--no-attribution is not in --only hooks"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn the_old_attribution_names_map_to_the_new_ones_with_a_note() {
+        let mut off = Flags {
+            attribution_off: true,
+            only: vec!["attribution-off".into()],
+            ..Flags::default()
+        };
+        let mut on = Flags {
+            no_attribution_off: true,
+            explain: Some(Some("attribution-off".into())),
+            ..Flags::default()
+        };
+        let off_notes = map_deprecated(&mut off);
+        let on_notes = map_deprecated(&mut on);
+
+        assert!(off.no_attribution && !off.attribution && !off.attribution_off);
+        assert_eq!(off.only, ["attribution"]);
+        assert_eq!(
+            off_notes,
+            [
+                "playbook setup: `--attribution-off` is deprecated, use: `--no-attribution`",
+                "playbook setup: `attribution-off` is deprecated, use: `attribution`",
+            ]
+        );
+        assert!(on.attribution && !on.no_attribution && !on.no_attribution_off);
+        assert_eq!(on.explain, Some(Some("attribution".to_string())));
+        assert_eq!(on_notes.len(), 2, "{on_notes:?}");
+        assert!(on_notes[0].contains("use: `--attribution`"));
+        assert!(map_deprecated(&mut Flags::default()).is_empty());
+        let mut other = Flags {
+            no_attribution_off: true,
+            only: vec!["hooks".into()],
+            ..Flags::default()
+        };
+        map_deprecated(&mut other);
+        assert!(
+            !other.attribution,
+            "a no-op beside --only hooks, as in 0.37"
+        );
+        assert!(only_choices(&other).is_ok());
+    }
+
+    #[test]
+    fn clap_hides_the_old_attribution_flags_and_the_last_flag_wins() {
+        use clap::{CommandFactory, Parser};
+        #[derive(Parser)]
+        struct Setup {
+            #[command(flatten)]
+            flags: Flags,
+        }
+        let parse = |args: &[&str]| {
+            let mut flags = Setup::try_parse_from(args).unwrap().flags;
+            map_deprecated(&mut flags);
+            (flags.attribution, flags.no_attribution)
+        };
+
+        let help = Setup::command().render_long_help().to_string();
+
+        assert_eq!(
+            parse(&["s", "--attribution-off", "--attribution"]),
+            (true, false)
+        );
+        assert_eq!(
+            parse(&["s", "--attribution", "--attribution-off"]),
+            (false, true)
+        );
+        assert_eq!(parse(&["s", "--no-attribution-off"]), (true, false));
+        assert!(help.contains("--no-attribution"));
+        assert!(!help.contains("attribution-off"), "{help}");
     }
 
     #[test]
