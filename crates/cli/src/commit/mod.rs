@@ -30,6 +30,10 @@ fn git_with(dir: &Path, args: &[&str], timeout: Duration) -> Option<Output> {
     run_with_timeout(&mut command, timeout)
 }
 
+/// The marker that opens the abort message of [`guard_branch`]; the skill
+/// docs and the tests match on it.
+pub const WRONG_DIRECTORY: &str = "WRONG_DIRECTORY";
+
 /// Stops a run that landed on the wrong branch. A forked command can start in
 /// the session checkout instead of the worktree its caller works in, and then
 /// it commits or opens a PR for the wrong branch. `expected` is the branch the
@@ -43,7 +47,7 @@ pub fn guard_branch(dir: &Path, expected: Option<&str>) -> Result<(), String> {
         return Ok(());
     }
     Err(format!(
-        "WRONG_DIRECTORY: the caller reported branch '{expected}' but {} is on '{actual}'. Nothing was changed. Pass the worktree root with --dir (git rev-parse --show-toplevel in the caller) and run again.",
+        "{WRONG_DIRECTORY}: the caller reported branch '{expected}' but {} is on '{actual}'. Nothing was changed. Pass the worktree root with --dir (git rev-parse --show-toplevel in the caller) and run again.",
         dir.display()
     ))
 }

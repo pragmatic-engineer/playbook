@@ -186,6 +186,50 @@ fn a_dir_that_does_not_exist_exits_1_with_a_clear_message() {
 }
 
 #[test]
+fn pr_prepare_and_create_abort_when_the_branch_is_not_the_reported_one() {
+    // Arrange
+    let fx = pr_support::Fixture::new("expect", "feat/expect-demo");
+    fx.commit_lines("a.txt", 3);
+    let elsewhere = scratch();
+    let body = elsewhere.join("body.md");
+    std::fs::write(&body, "## Summary\n\nx\n").expect("body");
+    let work = fx.work.to_str().expect("utf8");
+
+    // Act / Assert
+    for args in [
+        vec![
+            "pr",
+            "prepare",
+            "--dir",
+            work,
+            "--expect-branch",
+            "feat/other",
+        ],
+        vec![
+            "pr",
+            "create",
+            "--title",
+            "fix: x",
+            "--body-file",
+            body.to_str().expect("utf8"),
+            "--dir",
+            work,
+            "--expect-branch",
+            "feat/other",
+        ],
+    ] {
+        let out = run_in(&elsewhere, &elsewhere, &args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{args:?}: {stderr}");
+        assert!(
+            stderr.contains(playbook::commit::WRONG_DIRECTORY),
+            "{args:?}: {stderr}"
+        );
+        assert!(stderr.contains("'feat/expect-demo'"), "{stderr}");
+    }
+}
+
+#[test]
 fn a_dir_outside_any_git_work_tree_exits_1() {
     let elsewhere = scratch();
     let plain = scratch();

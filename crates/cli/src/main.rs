@@ -1156,7 +1156,7 @@ fn main() {
                     expect_branch,
                 } => {
                     enter_dir("pr prepare", dir.as_deref());
-                    guard_pr_branch("pr prepare", expect_branch.as_deref());
+                    guard_branch_or_exit("pr prepare", expect_branch.as_deref());
                     match pr::prepare::run(&gh, base.as_deref(), ticket.as_deref()) {
                         Ok(output) => println!("{output}"),
                         Err(err) => {
@@ -1177,7 +1177,7 @@ fn main() {
                     // A relative body path is relative to where the caller ran.
                     let body_file = absolute_from_cwd(&body_file);
                     enter_dir("pr create", dir.as_deref());
-                    guard_pr_branch("pr create", expect_branch.as_deref());
+                    guard_branch_or_exit("pr create", expect_branch.as_deref());
                     let slug = common::repo_slug();
                     let repo_slug = (!slug.is_empty()).then_some(slug.as_str());
                     let draft = pr::create::draft_setting(&common::home_dir(), repo_slug);
@@ -1849,7 +1849,31 @@ fn main() {
                     dir, expect_branch, ..
                 } => (dir.clone(), expect_branch.clone()),
             };
+            // A relative message path is relative to where the caller ran.
+            let sub = match sub {
+                CommitCommand::Run {
+                    message_file: Some(p),
+                    amend,
+                    auto,
+                    no_signoff,
+                    no_type_check,
+                    no_prose_check,
+                    dir,
+                    expect_branch,
+                } => CommitCommand::Run {
+                    message_file: Some(absolute_from_cwd(&p.to_string_lossy()).into()),
+                    amend,
+                    auto,
+                    no_signoff,
+                    no_type_check,
+                    no_prose_check,
+                    dir,
+                    expect_branch,
+                },
+                other => other,
+            };
             enter_dir("commit", dir_arg.as_deref());
+            guard_branch_or_exit("commit", expect_branch.as_deref());
             let dir = std::env::current_dir().unwrap_or_default();
             match sub {
                 CommitCommand::Prepare {
@@ -1860,7 +1884,7 @@ fn main() {
                         stage_update: update,
                         amend,
                     };
-                    match commit::prepare::run(&dir, opts, expect_branch.as_deref()) {
+                    match commit::prepare::run(&dir, opts) {
                         Ok(text) => println!("{text}"),
                         Err(err) => {
                             eprintln!("ERROR: {err}");
@@ -1904,8 +1928,7 @@ fn main() {
                         no_type_check,
                         no_prose_check,
                     };
-                    let result =
-                        commit::run::run(&dir, &path, opts, signoff_on, expect_branch.as_deref());
+                    let result = commit::run::run(&dir, &path, opts, signoff_on);
                     if temp {
                         let _ = std::fs::remove_file(&path);
                     }
@@ -2720,7 +2743,7 @@ fn enter_dir(label: &str, dir: Option<&str>) {
 
 /// Exits 1 with WRONG_DIRECTORY when the current directory is not on the
 /// branch the caller reported.
-fn guard_pr_branch(label: &str, expected: Option<&str>) {
+fn guard_branch_or_exit(label: &str, expected: Option<&str>) {
     let dir = std::env::current_dir().unwrap_or_default();
     if let Err(err) = commit::guard_branch(&dir, expected) {
         eprintln!("{label}: {err}");

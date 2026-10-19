@@ -29,7 +29,7 @@ A fork can start in the session's main checkout, not in the git worktree of the 
 1. If the arguments carry `--dir <path>`, `cd` to that absolute path and start every later bash block with the same `cd` (each block is a new shell).
 2. Run `git rev-parse --show-toplevel` and `git branch --show-current`. When `--dir` was given, the top level must equal it. When `--expect-branch <name>` was given, the branch must equal it.
 3. On any mismatch, or when the skill's tools report `WRONG_DIRECTORY`, abort with one clear message naming the expected and the found directory and branch. Commit nothing, push nothing, open nothing. Do not retry in another checkout, and do not work around it with a raw `git commit` or `gh pr create`.
-4. With no `--dir`, report the top level and branch you found in your final message so the caller can see where you acted.
+4. Callers that run in a git worktree pass `--dir` (their `git rev-parse --show-toplevel`) and `--expect-branch` (their `git branch --show-current`). Without `--dir`, report the top level and branch you found in your final message so the caller can see where you acted.
 
 ## Prose register
 

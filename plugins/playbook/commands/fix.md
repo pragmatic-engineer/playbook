@@ -76,7 +76,7 @@ In auto mode never force-push. If the push is rejected, stop and report it in th
 
 ## Step 6: Open the pull request
 
-Invoke the `/playbook:create-pull-request` skill with the Skill tool. Do not run `gh pr create` yourself. Open one pull request for the fix. Link the issue when there is one.
+Invoke the `/playbook:create-pull-request` skill with the Skill tool (from a git worktree, add `--dir <worktree root> --expect-branch <branch>`, and do the same for `/playbook:commit-and-push`). Do not run `gh pr create` yourself. Open one pull request for the fix. Link the issue when there is one.
 
 When it returns the PR URL, invoke the `playbook:finish-pull-request` skill with the Skill tool for that PR. It runs the self-review the `autoReview.*` settings select, fixes findings, promotes the draft, and merges only when `autoMerge.enabled` allows it. The create-pull-request command runs in a fork that cannot do this itself. In auto mode no self-review runs for a fix PR and it is not merged; say so in the report.
 

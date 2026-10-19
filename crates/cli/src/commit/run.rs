@@ -195,9 +195,7 @@ pub fn run(
     message_file: &Path,
     opts: Options,
     config_signoff: bool,
-    expect_branch: Option<&str>,
 ) -> Result<String, String> {
-    super::guard_branch(dir, expect_branch)?;
     let branch = current_branch(dir);
     let message = std::fs::read_to_string(message_file)
         .map_err(|e| format!("could not read the message: {e}"))?;

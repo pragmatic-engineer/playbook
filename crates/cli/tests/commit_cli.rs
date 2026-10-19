@@ -575,7 +575,7 @@ fn the_scope_rule_set_to_block_refuses_a_branch_that_is_not_stacked() {
 
 // worktree cwd guard
 
-const WRONG_DIRECTORY: &str = "WRONG_DIRECTORY";
+use playbook::commit::WRONG_DIRECTORY;
 
 impl Repo {
     /// A linked worktree on a new branch, the way an implementation agent
@@ -636,9 +636,66 @@ fn run_aborts_on_the_wrong_branch_and_commits_nothing() {
 }
 
 #[test]
-fn a_missing_dir_is_a_hard_error() {
+fn a_missing_dir_exits_1_and_names_the_flag() {
     let r = Repo::new("wtbad");
     let o = r.pb(&["commit", "prepare", "--dir", "/nonexistent-pb-dir"], "");
-    assert!(!o.status.success());
-    assert!(err(&o).contains("--dir"), "{}", err(&o));
+    assert_eq!(o.status.code(), Some(1));
+    assert!(err(&o).contains("--dir /nonexistent-pb-dir"), "{}", err(&o));
+}
+
+#[test]
+fn a_wrong_branch_aborts_before_staging_anything() {
+    let r = Repo::new("wtnostage");
+    let _wt = r.worktree("agent");
+    fs::write(r.work.join("loose.txt"), "x\n").unwrap();
+    let o = r.pb(&["commit", "prepare", "-A", "--expect-branch", "agent"], "");
+    assert!(err(&o).contains(WRONG_DIRECTORY), "{}", err(&o));
+    assert_eq!(git(&r.work, &["diff", "--cached", "--name-only"]), "");
+}
+
+#[test]
+fn run_with_dir_commits_on_the_worktree_branch_and_leaves_the_checkout_alone() {
+    let r = Repo::new("wtcommit");
+    let wt = r.worktree("agent");
+    fs::write(wt.join("w.txt"), "w\n").unwrap();
+    git(&wt, &["add", "w.txt"]);
+    let feat_before = git(&r.work, &["rev-parse", "HEAD"]);
+    let o = r.pb(
+        &[
+            "commit",
+            "run",
+            "--dir",
+            wt.to_str().unwrap(),
+            "--expect-branch",
+            "agent",
+        ],
+        "feat: add w\n",
+    );
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert!(out(&o).contains("-> origin/agent"), "{}", out(&o));
+    assert_eq!(r.remote_head("agent"), git(&wt, &["rev-parse", "HEAD"]));
+    assert_eq!(git(&r.work, &["rev-parse", "HEAD"]), feat_before);
+}
+
+#[test]
+fn a_relative_message_file_is_read_from_where_the_caller_ran_not_from_dir() {
+    let r = Repo::new("wtmsg");
+    let wt = r.worktree("agent");
+    fs::write(wt.join("w.txt"), "w\n").unwrap();
+    git(&wt, &["add", "w.txt"]);
+    fs::write(r.work.join("msg.txt"), "feat: from the caller\n").unwrap();
+    fs::write(wt.join("msg.txt"), "feat: stale file in the worktree\n").unwrap();
+    let o = r.pb(
+        &[
+            "commit",
+            "run",
+            "--dir",
+            wt.to_str().unwrap(),
+            "--message-file",
+            "msg.txt",
+        ],
+        "",
+    );
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert!(git(&wt, &["log", "-1", "--format=%s"]).contains("from the caller"));
 }

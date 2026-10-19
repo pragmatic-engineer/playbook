@@ -79,8 +79,7 @@ fn lines(text: Option<String>) -> Vec<String> {
 }
 
 /// The text the message drafter reads, or an error for the protected branch.
-pub fn run(dir: &Path, opts: Options, expect_branch: Option<&str>) -> Result<String, String> {
-    super::guard_branch(dir, expect_branch)?;
+pub fn run(dir: &Path, opts: Options) -> Result<String, String> {
     let branch = current_branch(dir);
     let default = default_branch(dir);
     if is_protected(&branch, &default) {
