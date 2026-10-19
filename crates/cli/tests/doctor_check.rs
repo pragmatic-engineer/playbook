@@ -1307,6 +1307,10 @@ fn a_free_lock_warns_with_the_start_fix() {
         !daemon_paths(&b, playbook::usage::daemon::lock_path).exists(),
         "doctor must not create the lock file"
     );
+    assert!(
+        !daemon_paths(&b, playbook::usage::daemon::stamp_path).exists(),
+        "doctor must not take the respawn stamp"
+    );
 }
 
 #[test]
