@@ -2,6 +2,66 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.38.0
+
+### Breaking changes
+
+- **cli**: the `playbook shell-init` command is removed. Start sessions with `pb cc` or `pb ccd`, and delete the `eval "$(playbook shell-init)"` line from your shell rc file, or run `playbook setup` to remove it after a backup. Until 1.0 the old line prints one notice on stderr and the shell still starts. ([#1152](https://github.com/pragmatic-engineer/playbook/pull/1152))
+
+### Features
+
+- **shell**: mark commands that meet a command substitution ([#1127](https://github.com/pragmatic-engineer/playbook/pull/1127))
+- **hooks**: add a command parser for the rm guard ([#1126](https://github.com/pragmatic-engineer/playbook/pull/1126))
+- **hooks**: list the rm guard's built-in roots per OS ([#1131](https://github.com/pragmatic-engineer/playbook/pull/1131))
+- **hooks**: judge rm targets against the built-in roots ([#1132](https://github.com/pragmatic-engineer/playbook/pull/1132))
+- **hooks**: follow cd in the rm guard ([#1139](https://github.com/pragmatic-engineer/playbook/pull/1139))
+- **hooks**: follow variables in the rm guard ([#1140](https://github.com/pragmatic-engineer/playbook/pull/1140))
+- **hooks**: add a built-in deny set to the rm guard ([#1142](https://github.com/pragmatic-engineer/playbook/pull/1142))
+- **disk**: add the free space probe and disk.\* config keys ([#1141](https://github.com/pragmatic-engineer/playbook/pull/1141))
+- **hooks**: judge more deletion commands in the rm guard ([#1151](https://github.com/pragmatic-engineer/playbook/pull/1151))
+- **hooks**: run the rm guard for every Bash command ([#1154](https://github.com/pragmatic-engineer/playbook/pull/1154))
+- **migrate**: attach each migration to its release version ([#1137](https://github.com/pragmatic-engineer/playbook/pull/1137))
+- **disk**: add disk status and a doctor row ([#1153](https://github.com/pragmatic-engineer/playbook/pull/1153))
+- **disk**: add disk clean ([#1155](https://github.com/pragmatic-engineer/playbook/pull/1155))
+- **disk**: add disk reserve and disk release ([#1156](https://github.com/pragmatic-engineer/playbook/pull/1156))
+- **disk**: list cargo target folders of any project in disk status ([#1158](https://github.com/pragmatic-engineer/playbook/pull/1158))
+- **migrate**: name migrations by slug and convert old records ([#1157](https://github.com/pragmatic-engineer/playbook/pull/1157))
+- **disk**: classify which Bash commands are builds ([#1166](https://github.com/pragmatic-engineer/playbook/pull/1166))
+- **disk**: add the disk-guard hook that stops builds on a full disk ([#1162](https://github.com/pragmatic-engineer/playbook/pull/1162))
+- **setup**: rename attribution-off to attribution with ON and OFF ([#1163](https://github.com/pragmatic-engineer/playbook/pull/1163))
+- **memory**: add memory stats and print it after a rebuild ([#1169](https://github.com/pragmatic-engineer/playbook/pull/1169))
+- **disk**: wire the disk guard into setup, the session and status line ([#1167](https://github.com/pragmatic-engineer/playbook/pull/1167))
+- **cli**: add playbook commands, a list built from the clap tree ([#1173](https://github.com/pragmatic-engineer/playbook/pull/1173))
+- **setup**: retire the attribution-off migration and add flag aliases ([#1171](https://github.com/pragmatic-engineer/playbook/pull/1171))
+- **disk**: clean up old migration backups and stop making more ([#1170](https://github.com/pragmatic-engineer/playbook/pull/1170))
+- **hooks**: add playbook hooks explain-rm to show rm guard verdicts ([#1176](https://github.com/pragmatic-engineer/playbook/pull/1176))
+- **migrate**: list each item that needs you with its fix ([#1175](https://github.com/pragmatic-engineer/playbook/pull/1175))
+- **plugin**: add the playbook:cli skill pointing to playbook commands ([#1177](https://github.com/pragmatic-engineer/playbook/pull/1177))
+
+### Fixes
+
+- **release**: keep full multi-line breaking change footers ([#1125](https://github.com/pragmatic-engineer/playbook/pull/1125))
+- **hooks**: let the policy guard allow reads of the config store ([#1129](https://github.com/pragmatic-engineer/playbook/pull/1129))
+- **hooks**: judge rm guard targets from real command words ([#1128](https://github.com/pragmatic-engineer/playbook/pull/1128))
+- **setup**: name the collector agent com.github.pragmatic-engineer ([#1134](https://github.com/pragmatic-engineer/playbook/pull/1134))
+- **migrate**: move the collector agent to its new label ([#1136](https://github.com/pragmatic-engineer/playbook/pull/1136))
+- **rm-guard**: allow playbook's folders, protect only irreplaceable data ([#1165](https://github.com/pragmatic-engineer/playbook/pull/1165))
+- **policy-guard**: allow store reads, leave deletions to the rm guard ([#1172](https://github.com/pragmatic-engineer/playbook/pull/1172))
+- **migrate**: show each pending item once, then once a day ([#1179](https://github.com/pragmatic-engineer/playbook/pull/1179))
+
+### Other changes
+
+- test: give every playbook test a scratch home ([#1130](https://github.com/pragmatic-engineer/playbook/pull/1130))
+- docs: add the rm guard guide and ADR 0045 ([#1133](https://github.com/pragmatic-engineer/playbook/pull/1133))
+- test(hooks): pin the rm guard's verdicts on a corpus of real commands ([#1138](https://github.com/pragmatic-engineer/playbook/pull/1138))
+- docs: describe migrations by slug and release version ([#1160](https://github.com/pragmatic-engineer/playbook/pull/1160))
+- refactor(settings): make settings.shared.json the one permissions source ([#1161](https://github.com/pragmatic-engineer/playbook/pull/1161))
+- refactor(setup): look for the seed in the seed folder of a checkout ([#1164](https://github.com/pragmatic-engineer/playbook/pull/1164))
+- docs(memory): point shipped text at data/memory.db and guard it ([#1174](https://github.com/pragmatic-engineer/playbook/pull/1174))
+- refactor: move the shipped seed to seed/ and intents.json to plugins/ ([#1168](https://github.com/pragmatic-engineer/playbook/pull/1168))
+- refactor: remove breaking-changes.json and playbook breaking ([#1178](https://github.com/pragmatic-engineer/playbook/pull/1178))
+- chore(dev): tidy the justfile, the seed Brewfile and the script tests ([#1180](https://github.com/pragmatic-engineer/playbook/pull/1180))
+
 ## playbook 0.37.0
 
 ### Breaking changes
