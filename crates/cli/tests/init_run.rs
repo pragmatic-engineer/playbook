@@ -200,6 +200,7 @@ fn base_paths(home: &Path) -> InitPaths {
         collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
+        disk_ballast: false,
         pb_target: None,
         attribution: playbook::init::attribution::Choice::Off { replace: false },
         path_setup: None,
@@ -251,6 +252,7 @@ fn fresh_config_gets_fully_wired() {
             "telemetry",
             "collector-service",
             "short-name",
+            "disk-ballast",
         ]
         .contains(&step.name)
         {
@@ -307,6 +309,26 @@ fn fresh_config_gets_fully_wired() {
 }
 
 const OLD_STATUSLINE: &str = "bash $HOME/.config/playbook/statusline.sh";
+
+#[test]
+fn the_disk_ballast_part_writes_nothing_unless_chosen_and_keeps_an_existing_ballast() {
+    let home = scratch_home("ballast");
+    let ballast = home.join(".cache/playbook/ballast/ballast.bin");
+
+    let off = run(&base_paths(&home));
+    assert_eq!(find_step(&off, "disk-ballast").status, StepStatus::Skipped);
+    assert!(!ballast.exists());
+
+    write_text(&ballast, "already here");
+    let on = run(&InitPaths {
+        disk_ballast: true,
+        ..base_paths(&home)
+    });
+    let step = find_step(&on, "disk-ballast");
+    assert_eq!(step.status, StepStatus::AlreadyCorrect, "{}", step.detail);
+    assert!(step.detail.contains("already in place"), "{}", step.detail);
+    assert_eq!(fs::read_to_string(&ballast).unwrap(), "already here");
+}
 
 fn status_line_command(claude_home: &Path) -> Value {
     read_json(&claude_home.join("settings.json"))["statusLine"]["command"].clone()
@@ -724,6 +746,7 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
             "telemetry",
             "collector-service",
             "short-name",
+            "disk-ballast",
         ]
         .contains(&step.name)
         {
@@ -847,6 +870,7 @@ fn missing_self_root_skips_template_dependent_steps() {
         collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
+        disk_ballast: false,
         pb_target: None,
         attribution: playbook::init::attribution::Choice::Skip,
         path_setup: None,

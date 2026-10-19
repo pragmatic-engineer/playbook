@@ -150,6 +150,7 @@ impl V025Home {
             collector_service: playbook::init::collector_service::Choice::Skip,
             only: false,
             short_name: playbook::init::pb_link::Choice::Skip,
+            disk_ballast: false,
             pb_target: None,
             attribution: playbook::init::attribution::Choice::Off { replace: false },
             path_setup: None,

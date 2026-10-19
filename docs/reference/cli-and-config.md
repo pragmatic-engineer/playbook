@@ -1429,9 +1429,11 @@ Example: `playbook setup --no-hooks --system-prompt`
 - `--no-collector-service`: Do not install the background service for the usage collector
 - `--short-name`: Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
 - `--no-short-name`: Do not add the `pb` short name
+- `--disk-ballast`: Write a 1 GB ballast file under ~/.cache/playbook/ballast that `playbook disk release` deletes to give space back on a full disk
+- `--no-disk-ballast`: Do not write the disk ballast file, the default
 - `--attribution`: Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true
 - `--no-attribution`: Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values
-- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
+- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, disk-ballast, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing

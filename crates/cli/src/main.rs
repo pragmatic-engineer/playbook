@@ -642,6 +642,7 @@ fn main() {
                     init::pb_link::declined(&common::home_dir()),
                 ),
                 attribution: choices.attribution.resolve(&common::home_dir()),
+                disk_ballast: choices.disk_ballast,
             };
             if flags.dry_run {
                 print!("{}", init::preview::dry_run(&paths, &choices));
