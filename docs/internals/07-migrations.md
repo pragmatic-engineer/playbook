@@ -28,7 +28,7 @@ playbook 0.37.0: 2 items need you:
 To go through every setup change at once, run: playbook setup
 ```
 
-The session shows a new item in full once. After that it shows it at most once a day, in one line: `playbook: 2 items still need you (statusline-rust-command, plugin-version-range). To see the list, run: playbook migrate --status`. A report item that `playbook migrate` or `doctor --fix` printed does not come back in the session, and a headless session marks nothing. An item disappears as soon as it is fixed. The plugin items read the installed plugin in `installed_plugins.json` and the folder the session runs from, so a plugin update clears them, and a session that still runs an old plugin folder says to start Claude Code again.
+The session shows a new item in full once. After that it shows it at most once a day, in one line: `playbook: 2 items still need you (statusline-rust-command, plugin-version-range). To see the list, run: playbook migrate --status`. A list that `playbook migrate` or `doctor --fix` printed in a terminal counts as shown, so a setup item waits a day and a report item does not come back in the session. Captured or `--json` output does not count, and a headless session marks nothing. An item disappears as soon as it is fixed. The plugin items read the installed plugin in `installed_plugins.json` and the folder the session runs from, so a plugin update clears them, and a session that still runs an old plugin folder says to start Claude Code again.
 
 ## The three kinds
 

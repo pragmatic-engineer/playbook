@@ -118,9 +118,9 @@ Checked and not a cause: the release check notice of ADR 0036 already compares t
 3. **Each item shows until it is fixed or seen.** The `state` table keeps one row per item, `notices/items/<slug>`, with a hash of the item text, when it last showed, and whether `migrate` printed it.
    - A new item, or one whose text changed, shows in full in the next session.
    - An item already shown comes back at most once a day, in one line with the count, the slugs and `playbook migrate --status`.
-   - A `Report` item that `playbook migrate` or `doctor --fix` printed does not come back in the session. `migrate --status` and `doctor` still list it.
+   - A list that `playbook migrate` or `doctor --fix` printed to a terminal counts as shown: a `Consent` item waits a day, and a `Report` item does not come back in the session. `migrate --status` and `doctor` still list it. Output that a caller captures, such as `playbook update` or the automatic update, and `--json` output do not count, since no person may read them.
    - A `Consent` item the user answered is closed by its check, as before, and a no is remembered.
-   - An item whose check clears disappears at once, and its row is removed, so it shows in full if it comes back.
+   - An item whose check clears disappears at once, and its row is removed, so it shows in full if it comes back. Only a session whose heal computed the full list removes rows: a skipped, failed or timed out heal keeps them, and the stale session item is judged only by a session that has `CLAUDE_PLUGIN_ROOT`. `migrate` adds marks and removes none.
    - A headless session marks nothing.
 4. **`playbook migrate` ends with what is left.** It prints what it changed, what failed, the notes, then `Still left for you` and the list, or `nothing else needs you`.
 5. **A fresh store is not a change.** `memory-store-move` reports a marker it writes on a store with nothing to move as already correct.

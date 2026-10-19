@@ -273,7 +273,7 @@ fn a_v025_home_heals_its_own_files_and_leaves_the_rest_to_init() {
     );
     assert!(
         !settled.contains("claude plugin"),
-        "doctor --fix printed the report items, so they do not come back: {settled}"
+        "the report items showed less than a day ago: {settled}"
     );
 }
 

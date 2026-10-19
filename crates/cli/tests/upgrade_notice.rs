@@ -168,10 +168,7 @@ fn the_reported_notice_lists_the_item_with_its_command_and_does_not_repeat() {
         ),
         "{migrate}"
     );
-    assert_eq!(
-        second, "",
-        "migrate printed it, so the hook does not repeat it"
-    );
+    assert_eq!(second, "", "shown less than a day ago");
     assert_eq!(third, "");
     assert!(
         after_update.ends_with("nothing needs you\n"),
