@@ -87,6 +87,25 @@ const STRONG_NAME_TOKENS: usize = 2;
 /// Score of a name hit; a description hit scores one.
 const NAME_HIT_SCORE: usize = 2;
 
+/// Score of a fact alias found in the prompt.
+const ALIAS_HIT_SCORE: usize = 2;
+
+/// Index column that holds the fact file, relative to the memory root.
+const FACT_FILE_COLUMN: usize = 5;
+
+/// Index column that holds the fact aliases, joined with `ALIAS_SEPARATOR`.
+/// Older rows have six columns and no aliases.
+const ALIAS_COLUMN: usize = 6;
+
+/// Joins the aliases of one fact inside the alias column.
+const ALIAS_SEPARATOR: char = '|';
+
+/// Word that names the crates folder in an anchor path.
+const CRATES_DIR: &str = "crates";
+
+/// Score of a prompt word that names the crate folder of an anchor.
+const PATH_HIT_SCORE: usize = 2;
+
 /// Score of a fact anchored to a file touched this session.
 const TOUCHED_FILE_SCORE: usize = 1;
 
@@ -261,8 +280,9 @@ fn run_prompt(payload: &Payload, dir: &str) {
     }
 
     let root = git_toplevel();
-    let tokens = prompt_tokens(&prompt);
-    let mut matches = prompt_token_matches(&contents, &tokens);
+    let query = PromptQuery::new(&prompt);
+    let tokens = &query.tokens;
+    let mut matches = prompt_token_matches(&contents, &query);
     let index = AnchorIndex::parse(&contents);
     for touched_abs in touched_paths(dir) {
         let relpath = repo_relative_path(&root, &touched_abs);
@@ -275,13 +295,14 @@ fn run_prompt(payload: &Payload, dir: &str) {
                 matches.push(RecallMatch {
                     score: TOUCHED_FILE_SCORE,
                     strong: true,
+                    path_scored: false,
                     row,
                 });
             }
         }
     }
     if matches.is_empty() {
-        emit_zero_match_hint(dir, &tokens);
+        emit_zero_match_hint(dir, tokens);
         return;
     }
 
@@ -337,7 +358,7 @@ fn run_prompt(payload: &Payload, dir: &str) {
     if entries.is_empty() {
         // Matches existed but none could be read: the model got nothing.
         if unreadable {
-            emit_zero_match_hint(dir, &tokens);
+            emit_zero_match_hint(dir, tokens);
         }
         return;
     }
@@ -357,7 +378,7 @@ fn run_prompt(payload: &Payload, dir: &str) {
     // Strength is judged over every match, so a strong fact shown on an
     // earlier prompt still keeps the weak hint away.
     if !tokens.is_empty() && !matches.iter().any(|m| m.strong) {
-        let hint = recall_hint(&tokens, &repo_slug(), true);
+        let hint = recall_hint(tokens, &repo_slug(), true);
         let fits = msg.chars().count() + 2 + hint.chars().count() <= PROMPT_RECALL_CAP_CHARS;
         if fits && reserve_hint_slot(dir) {
             msg.push_str("\n\n");
@@ -467,25 +488,132 @@ fn contains_at_boundary(text: &str, token: &str) -> bool {
     })
 }
 
+/// The searchable parts of one prompt.
+struct PromptQuery {
+    /// Words that can match a fact name or description.
+    tokens: Vec<String>,
+    /// Words that name a crate, for matching the crate folder of an anchor.
+    path_tokens: Vec<String>,
+    /// The whole prompt, lowercased, for matching aliases as phrases.
+    lower: String,
+}
+
+impl PromptQuery {
+    fn new(prompt: &str) -> Self {
+        Self {
+            tokens: prompt_tokens(prompt),
+            path_tokens: prompt_path_tokens(prompt),
+            lower: prompt
+                .to_lowercase()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
+        }
+    }
+}
+
+/// Whether any alias in `aliases` appears in the lowercased `prompt` as a
+/// whole word or phrase, so "pbcode" does not match "pbcodex".
+fn alias_in_prompt(aliases: &str, prompt: &str) -> bool {
+    aliases
+        .split(ALIAS_SEPARATOR)
+        .any(|a| !a.is_empty() && contains_at_boundary(prompt, a))
+}
+
+/// Add the alias column to each index row. Reads each fact file once; a file
+/// that is missing or has no `aliases:` leaves the column empty.
+fn append_alias_column(rows: Vec<String>, mem_dir: &Path) -> Vec<String> {
+    let mut cache: HashMap<String, String> = HashMap::new();
+    rows.into_iter()
+        .map(|row| {
+            let file = row.split('\t').nth(FACT_FILE_COLUMN).unwrap_or("");
+            let aliases = cache
+                .entry(file.to_string())
+                .or_insert_with(|| read_alias_cell(mem_dir, file))
+                .clone();
+            format!("{row}\t{aliases}")
+        })
+        .collect()
+}
+
+/// The aliases of one fact file as an index cell: lowercased, whitespace
+/// folded (so no tab, newline or separator survives), joined with `|`.
+fn read_alias_cell(mem_dir: &Path, file: &str) -> String {
+    if file.is_empty() {
+        return String::new();
+    }
+    let Ok(content) = fs::read_to_string(mem_dir.join(file)) else {
+        return String::new();
+    };
+    crate::hooks::rebuild_memory_graph::fact_aliases(&content)
+        .iter()
+        .map(|a| {
+            a.to_lowercase()
+                .replace(ALIAS_SEPARATOR, " ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|a| !a.is_empty())
+        .collect::<Vec<_>>()
+        .join(&ALIAS_SEPARATOR.to_string())
+}
+
+/// Words directly before `crate` or `crates`, stopwords included ("code" in
+/// "PB code crate"). Only these can name a crate, so a bare "src" or "docs"
+/// in a prompt never reaches an anchor path.
+fn prompt_path_tokens(prompt: &str) -> Vec<String> {
+    let lower = prompt.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(char::is_whitespace)
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '-'))
+        .collect();
+    let mut out: Vec<String> = Vec::new();
+    for pair in words.windows(2) {
+        let (before, next) = (pair[0], pair[1]);
+        if !before.is_empty()
+            && matches!(next, "crate" | "crates")
+            && !out.iter().any(|t| t == before)
+        {
+            out.push(before.to_string());
+        }
+    }
+    out
+}
+
+/// The crate folder name of an anchor that is the crate folder itself
+/// (`crates/code` or `crates/code/`). Anchors on files or folders inside the
+/// crate (`src`, `main.rs`) give `None`, so a prompt naming a crate does not
+/// pull in every fact anchored somewhere under it.
+fn anchor_crate_name(anchor: &str) -> Option<&str> {
+    let mut segments = anchor.split('/');
+    segments.find(|s| *s == CRATES_DIR)?;
+    let name = segments.next().filter(|s| !s.is_empty())?;
+    segments.all(str::is_empty).then_some(name)
+}
+
 /// A fact row that matched the prompt or a touched file. `strong` marks a
 /// match specific enough to trust: a hyphenated name token, two distinct name
-/// tokens, or a touched-file anchor. Anything else is weak.
+/// tokens, an alias hit, a crate-folder hit, or a touched-file anchor. Anything
+/// else is weak.
 struct RecallMatch {
     score: usize,
     strong: bool,
+    /// Whether the crate-folder bonus is already in `score`.
+    path_scored: bool,
     row: Vec<String>,
 }
 
 /// Rows whose name or description matches a prompt token, best first: each
-/// distinct token that hits counts one, two when it hits the name. Ties keep
-/// index order. Deduplicated by from_id, same as `matching_rows`.
-fn prompt_token_matches(idx_contents: &str, tokens: &[String]) -> Vec<RecallMatch> {
-    if tokens.is_empty() {
-        return Vec::new();
-    }
-
+/// distinct token that hits counts one, two when it hits the name. An alias
+/// phrase in the prompt and a crate-folder anchor named before "crate" add
+/// their own bonus and make the match strong. Ties keep index order. One match
+/// per from_id; a later anchor row of the same fact can add the crate-folder
+/// bonus to it.
+fn prompt_token_matches(idx_contents: &str, query: &PromptQuery) -> Vec<RecallMatch> {
+    let tokens = &query.tokens;
     let mut scored: Vec<RecallMatch> = Vec::new();
-    let mut seen_from: HashSet<String> = HashSet::new();
+    let mut seen_from: HashMap<String, usize> = HashMap::new();
     for line in idx_contents.lines() {
         if line.is_empty() {
             continue;
@@ -512,17 +640,44 @@ fn prompt_token_matches(idx_contents: &str, tokens: &[String]) -> Vec<RecallMatc
                 score += 1;
             }
         }
+        let path_hit = cols
+            .first()
+            .and_then(|anchor| anchor_crate_name(&anchor.to_lowercase()).map(str::to_string))
+            .is_some_and(|name| query.path_tokens.contains(&name));
+        if path_hit {
+            score += PATH_HIT_SCORE;
+        }
+        let alias_hit = cols
+            .get(ALIAS_COLUMN)
+            .is_some_and(|aliases| alias_in_prompt(aliases, &query.lower));
+        if alias_hit {
+            score += ALIAS_HIT_SCORE;
+        }
         if score == 0 {
             continue;
         }
         let from_id = cols.get(1).copied().unwrap_or("").to_string();
-        if from_id.is_empty() || seen_from.contains(&from_id) {
+        if from_id.is_empty() {
             continue;
         }
-        seen_from.insert(from_id);
+        // Another anchor row of a fact already scored: only the crate-folder
+        // hit differs per row, so let it upgrade the first row's match.
+        if let Some(&at) = seen_from.get(&from_id) {
+            if path_hit && !scored[at].path_scored {
+                scored[at].strong = true;
+                scored[at].path_scored = true;
+                scored[at].score += PATH_HIT_SCORE;
+            }
+            continue;
+        }
+        seen_from.insert(from_id, scored.len());
         scored.push(RecallMatch {
             score,
-            strong: hyphenated_name_hit || name_hit_tokens.len() >= STRONG_NAME_TOKENS,
+            path_scored: path_hit,
+            strong: path_hit
+                || alias_hit
+                || hyphenated_name_hit
+                || name_hit_tokens.len() >= STRONG_NAME_TOKENS,
             row: cols.iter().map(|s| s.to_string()).collect(),
         });
     }
@@ -779,7 +934,7 @@ fn git_last_commit_epoch(path: &Path) -> Option<staleness::DateTime> {
 
 /// Build the tab-separated anchor index from `memory.db` for the current
 /// repo scope. One row per in-scope `anchors` edge, columns anchor, from_id,
-/// name, description, neighbours, file. The `file` column exists solely for
+/// name, description, neighbours, file, aliases. The `file` column exists solely for
 /// `run_prompt`'s body reads; `PreToolUse`'s `format_message` only reads
 /// columns 2 through 4, so this addition is safe for that path. Any failure
 /// (missing or malformed graph)
@@ -824,7 +979,7 @@ fn compute_index_rows(mem_dir: &Path, repo: &str) -> Vec<String> {
     let neigh = collect_neighbours(&edges, &byid, &inscope);
     let mut rows = collect_anchor_rows(&edges, &byid, &inscope, &neigh);
     append_unanchored_fact_rows(&nodes, &inscope, &mut rows);
-    rows
+    append_alias_column(rows, mem_dir)
 }
 
 /// A fact with no `anchors` edge still needs a row, or `run_prompt`'s
@@ -1046,7 +1201,173 @@ mod tests {
     }
 
     fn scored(index: &str, prompt: &str) -> Vec<RecallMatch> {
-        prompt_token_matches(index, &prompt_tokens(prompt))
+        prompt_token_matches(index, &PromptQuery::new(prompt))
+    }
+
+    /// Four anchored rows in the `RECALL_INDEX` shape: a crate folder, two files
+    /// inside another crate, and a file outside `crates/`.
+    const PATH_INDEX: &str = "crates/code/\tproject/a\tcode-index\tsource index\t\ta.md\n\
+        crates/cli/src/x.rs\tproject/b\tcli-helper\tlives in crates\t\tb.md\n\
+        crates/cli/src/main.rs\tproject/c\tentry-point\tthe binary start\t\tc.md\n\
+        src/lib.rs\tproject/d\tlib-root\tthe library root\t\td.md\n";
+
+    #[test]
+    fn a_word_before_crate_matches_the_crate_folder_and_ranks_first() {
+        // Act
+        let got = scored(PATH_INDEX, "PB code crate");
+
+        // Assert
+        assert_eq!(got[0].row[1], "project/a");
+        assert!(got[0].strong, "a crate-name path hit is a strong match");
+    }
+
+    #[test]
+    fn path_tokens_are_only_the_words_before_crate_or_crates() {
+        assert_eq!(prompt_path_tokens("PB code crate"), terms(&["code"]));
+        assert_eq!(prompt_path_tokens("the Data, crates"), terms(&["data"]));
+        assert!(prompt_path_tokens("fix the test").is_empty());
+        assert!(prompt_path_tokens("crate").is_empty());
+    }
+
+    #[test]
+    fn a_prompt_with_no_crate_word_gets_no_path_hit() {
+        // "src" is a real path segment but is not named before "crate"
+        let got = scored(PATH_INDEX, "fix the bug in src");
+        assert!(got.is_empty(), "got {:?}", got.len());
+    }
+
+    #[test]
+    fn the_word_crate_alone_matches_no_path() {
+        let got = scored(PATH_INDEX, "crate");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].row[1], "project/b");
+        assert!(!got[0].strong);
+    }
+
+    #[test]
+    fn a_path_token_does_not_make_a_file_or_folder_segment_a_strong_hit() {
+        // "main" is a segment of crates/cli/src/main.rs but not the crate name
+        let main = scored(PATH_INDEX, "main crate");
+        assert!(main.iter().all(|m| !m.strong));
+        let src = scored(PATH_INDEX, "src crate");
+        assert!(src.iter().all(|m| !m.strong));
+        let rs = scored(PATH_INDEX, "rs crate");
+        assert!(rs.iter().all(|m| !m.strong));
+    }
+
+    #[test]
+    fn a_path_hit_on_a_later_anchor_row_of_the_same_fact_is_kept() {
+        // One fact, two anchors: the first row hits only a description word
+        let index = "docs/a.md\tproject/a\tsome-notes\tabout the index\t\ta.md\n\
+            crates/code/\tproject/a\tsome-notes\tabout the index\t\ta.md\n";
+        let got = scored(index, "code crate index");
+        assert_eq!(got.len(), 1);
+        assert!(got[0].strong, "the crate-folder row must make it strong");
+    }
+
+    #[test]
+    fn a_file_inside_a_crate_is_not_a_crate_folder_hit() {
+        // PATH_INDEX anchors project/b at crates/cli/src/x.rs
+        let got = scored(PATH_INDEX, "the cli crate");
+        assert!(got.iter().all(|m| !m.strong));
+    }
+
+    #[test]
+    fn the_crate_bonus_is_added_once_whatever_the_row_order() {
+        let file_first = "crates/cli/src/x.rs\tproject/a\tnotes\tabout the index\t\ta.md\n\
+            crates/code/\tproject/a\tnotes\tabout the index\t\ta.md\n";
+        let dir_first = "crates/code/\tproject/a\tnotes\tabout the index\t\ta.md\n\
+            crates/cli/src/x.rs\tproject/a\tnotes\tabout the index\t\ta.md\n";
+        let a = scored(file_first, "code crate index");
+        let b = scored(dir_first, "code crate index");
+        assert_eq!(a[0].score, b[0].score);
+    }
+
+    #[test]
+    fn a_crate_name_never_matches_by_prefix() {
+        // "cod" is a prefix of the crate "code"
+        let got = scored(PATH_INDEX, "cod crate");
+        assert!(got.iter().all(|m| !m.strong));
+    }
+
+    /// Same shape as `PATH_INDEX` plus a seventh column of aliases.
+    const ALIAS_INDEX: &str =
+        "crates/code/\tproject/a\tcode-index\tsource index\t\ta.md\tpbcode|pb code\n\
+        \tproject/b\tunrelated-fact\tsomething else\t\tb.md\t\n\
+        \tproject/c\tsix-columns\tno alias column here\t\tc.md\n";
+
+    #[test]
+    fn an_alias_in_the_prompt_is_a_strong_match() {
+        for prompt in ["what does pbcode do", "the pb code crate", "PBCODE?"] {
+            let got = scored(ALIAS_INDEX, prompt);
+            assert_eq!(got[0].row[1], "project/a", "{prompt}");
+            assert!(got[0].strong, "{prompt}");
+        }
+    }
+
+    #[test]
+    fn an_alias_of_short_or_stop_words_matches_without_other_tokens() {
+        // "pb" is under the token length and "code" is a stopword, so the
+        // prompt has no searchable token; the alias must still match.
+        let index = "\tproject/a\tnotes\tnothing here\t\ta.md\tpb code\n";
+        let got = scored(index, "pb code");
+        assert_eq!(got.len(), 1);
+        assert!(got[0].strong);
+    }
+
+    #[test]
+    fn an_alias_matches_across_a_newline_or_double_space() {
+        let index = "\tproject/a\tnotes\tnothing here\t\ta.md\ttoken flow\n";
+        for prompt in ["about token\nflow", "about token  flow"] {
+            let got = scored(index, prompt);
+            assert_eq!(got.len(), 1, "{prompt:?}");
+        }
+    }
+
+    #[test]
+    fn an_alias_matches_on_word_boundaries_only() {
+        let got = scored(ALIAS_INDEX, "what does pbcodex do");
+        assert!(got.iter().all(|m| m.row[1] != "project/a"));
+        let got = scored(ALIAS_INDEX, "the xpb code");
+        assert!(got.iter().all(|m| m.row[1] != "project/a"));
+    }
+
+    #[test]
+    fn a_six_column_row_still_parses_and_scores() {
+        let got = scored(ALIAS_INDEX, "tell me about six-columns");
+        assert_eq!(got[0].row[1], "project/c");
+        assert!(got[0].strong);
+    }
+
+    #[test]
+    fn an_empty_alias_column_matches_nothing() {
+        let got = scored(ALIAS_INDEX, "something");
+        assert!(got.iter().all(|m| !m.strong));
+    }
+
+    #[test]
+    fn a_missing_fact_file_leaves_the_alias_column_empty() {
+        let dir = std::env::temp_dir().join(format!("pb-alias-missing-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let rows = vec!["a\tg/a\tn\td\t\tmissing.md".to_string()];
+        let got = append_alias_column(rows, &dir);
+        assert_eq!(got, vec!["a\tg/a\tn\td\t\tmissing.md\t"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_alias_column_holds_lowercased_aliases_without_tabs() {
+        let dir = std::env::temp_dir().join(format!("pb-alias-read-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("f.md"),
+            "---\nname: f\naliases: [PBCode, pb | code]\n---\nbody\n",
+        )
+        .unwrap();
+        let rows = vec!["a\tg/a\tn\td\t\tf.md".to_string()];
+        let got = append_alias_column(rows, &dir);
+        assert_eq!(got, vec!["a\tg/a\tn\td\t\tf.md\tpbcode|pb code"]);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn terms(words: &[&str]) -> Vec<String> {
