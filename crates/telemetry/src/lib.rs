@@ -9,6 +9,7 @@ pub mod account;
 pub mod aggregate;
 pub mod api;
 pub mod backfill;
+pub mod burnup;
 pub mod claude_code;
 pub mod cli;
 pub mod codex;

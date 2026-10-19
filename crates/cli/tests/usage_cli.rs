@@ -466,3 +466,64 @@ fn the_zone_flags_work_after_a_usage_subcommand() {
     // Assert
     assert!(out.status.success(), "{}", stderr(&out));
 }
+
+#[test]
+fn a_piped_summary_with_a_monthly_budget_prints_the_burn_up_table_in_ascii() {
+    // Arrange
+    let home = Home::new("burnup-table");
+    let set = home.run(&[
+        "config",
+        "set",
+        "--global",
+        "usage.budget.monthlyUsd",
+        "100",
+    ]);
+    assert!(
+        set.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    // Act: stdout is a pipe here, and the colors are off.
+    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args(["usage", "--summary"])
+        .env("HOME", &home.0)
+        .env("NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .output()
+        .unwrap();
+
+    // Assert
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    let table: Vec<&str> = text
+        .lines()
+        .skip_while(|l| !l.contains("burn-up, cumulative spend this period"))
+        .collect();
+    assert!(!table.is_empty(), "{text}");
+    assert!(
+        table
+            .iter()
+            .any(|l| l.contains("date") && l.contains("cumulative")),
+        "{text}"
+    );
+    assert!(table.iter().all(|l| l.is_ascii()), "{text}");
+    assert!(!text.contains('\u{1b}'), "{text}");
+}
+
+#[test]
+fn a_summary_without_a_monthly_budget_has_no_burn_up_table() {
+    // Arrange
+    let home = Home::new("burnup-none");
+
+    // Act
+    let out = home.run(&["usage", "--summary"]);
+
+    // Assert
+    assert!(out.status.success());
+    assert!(!stdout(&out).contains("burn-up"), "{}", stdout(&out));
+}

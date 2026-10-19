@@ -12,6 +12,7 @@
 //!
 //! Manual limits come from the `usage.budget.*` config keys.
 
+use super::burnup::burnup_for;
 use super::limits::{Burn, Limit, LimitPeriod, Origin, State, Unit};
 use super::limits::{CrossState, Crossing};
 use super::period::Period;
@@ -22,6 +23,9 @@ use super::UsageEvent;
 use crate::util::atomic::write_atomic_private;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+
+/// The most days the plain burn-up table prints: a month is at most 31.
+const BURNUP_TABLE_ROWS: usize = 31;
 
 /// A snapshot older than this is shown as stale rather than hidden.
 pub const STALE_SECONDS: i64 = 6 * 3600;
@@ -603,10 +607,16 @@ fn spend_json(s: &Sources, events: &[UsageEvent], now: i64) -> Value {
     })
 }
 
+/// Whether this is the monthly dollar limit the burn-up chart follows.
+pub(crate) fn is_monthly_dollars(l: &Limit) -> bool {
+    l.period == LimitPeriod::Monthly && l.unit == Unit::Dollars
+}
+
 /// The limits and burn rates as JSON, for `--json`.
 pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart) -> Value {
     let snapshot = s.snapshot.as_ref();
     let limits = all_limits(s, events, now, week);
+    let burnup = burnup_for(s, &limits, events, now);
     let burn: serde_json::Map<String, Value> = [Period::Today, Period::Week(week), Period::Month]
         .into_iter()
         .map(|p| {
@@ -633,7 +643,13 @@ pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart
             "age_seconds": c.age(now),
             "fresh": c.is_fresh(now),
         })),
-        "limits": limits.iter().map(|l| l.to_json(now)).collect::<Vec<_>>(),
+        "limits": limits.iter().map(|l| {
+            let mut v = l.to_json(now);
+            if let (Some(map), true) = (v.as_object_mut(), is_monthly_dollars(l)) {
+                map.insert("series".into(), burnup.series_json());
+            }
+            v
+        }).collect::<Vec<_>>(),
         "burn": burn,
     })
 }
@@ -695,7 +711,7 @@ fn stamp(at: i64) -> String {
 }
 
 /// One threshold as a phrase.
-fn crossing_text(c: &Crossing) -> String {
+pub(crate) fn crossing_text(c: &Crossing) -> String {
     let pct = c.pct;
     match c.state {
         CrossState::Crossed { at } => format!("{pct}% crossed about {}", stamp(at)),
@@ -718,7 +734,7 @@ fn scope_text(scope: Scope) -> &'static str {
 }
 
 /// The server figure used for the monthly limit, if one is.
-fn server_in_use(s: &Sources, now: i64) -> Option<&SpendFigure> {
+pub(crate) fn server_in_use(s: &Sources, now: i64) -> Option<&SpendFigure> {
     if matches!(monthly(s, now), Monthly::Server { .. }) {
         s.server.as_ref()
     } else {
@@ -805,6 +821,12 @@ pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekS
     }
     for line in spend_lines(s, &limits, events, now) {
         out.push_str(&format!("  {line}\n"));
+    }
+    if limits.iter().any(is_monthly_dollars) {
+        out.push_str("  burn-up, cumulative spend this period\n");
+        for line in burnup_for(s, &limits, events, now).table(BURNUP_TABLE_ROWS) {
+            out.push_str(&format!("    {line}\n"));
+        }
     }
     if s.stale(now) {
         out.push_str("  note: the plan limits were read over 6 hours ago\n");
@@ -1942,5 +1964,58 @@ mod tests {
             text.contains("monthly crossings (server, from the local estimate):"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_summary_prints_the_burn_up_table_for_a_monthly_dollar_limit_only() {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let with = Sources {
+            budgets: vec![(LimitPeriod::Monthly, 100.0)],
+            ..Sources::default()
+        };
+        let weekly = Sources {
+            budgets: vec![(LimitPeriod::Weekly, 100.0)],
+            ..Sources::default()
+        };
+        let events = [
+            cost(MONTH_START + 10, 25.0),
+            cost(MONTH_START + 3 * 86_400, 25.0),
+        ];
+
+        let text = summary_section(&with, &events, NOW, WeekStart::Monday);
+        let other = summary_section(&weekly, &events, NOW, WeekStart::Monday);
+
+        assert!(
+            text.contains("  burn-up, cumulative spend this period\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("    2027-01-01        $25.00     25.0%\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("    2027-01-04        $50.00     50.0%\n"),
+            "{text}"
+        );
+        assert!(!other.contains("burn-up"), "{other}");
+    }
+
+    #[test]
+    fn the_json_gives_the_monthly_dollar_limit_a_day_series_and_no_other_limit() {
+        let s = Sources {
+            budgets: vec![(LimitPeriod::Monthly, 100.0), (LimitPeriod::Weekly, 40.0)],
+            ..Sources::default()
+        };
+        let events = [cost(MONTH_START + 10, 25.0)];
+
+        let v = report_json(&s, &events, NOW, WeekStart::Monday);
+
+        let limits = v["limits"].as_array().unwrap();
+        let monthly = limits.iter().find(|l| l["period"] == "monthly").unwrap();
+        let weekly = limits.iter().find(|l| l["period"] == "weekly").unwrap();
+        assert_eq!(monthly["series"]["days"][0]["day"], "2027-01-01");
+        assert_eq!(monthly["series"]["days"][0]["cumulative_usd"], 25.0);
+        assert!(monthly["series"]["projected_end_usd"].is_number());
+        assert!(weekly.get("series").is_none());
     }
 }
