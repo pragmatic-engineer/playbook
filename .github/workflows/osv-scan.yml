@@ -33,7 +33,7 @@ jobs:
       contents: read
       security-events: write  # upload SARIF
     steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           # Block-mode allowlist derived from audit telemetry on a
           # known-good pure-fx run (run 26576056664). The set is small
@@ -57,7 +57,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+      - uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
         with:
           # `--skip-git` was a v1.x flag; osv-scanner v2 rejects it as
           # "flag provided but not defined: -skip-git". The v2 scanner
