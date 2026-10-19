@@ -94,7 +94,7 @@ fn every_hook_init_wires_has_a_row_in_the_hook_reference() {
 
 #[test]
 fn every_hook_in_the_shipped_template_is_one_init_wires() {
-    let template: Value = serde_json::from_str(&read("settings.shared.json")).unwrap();
+    let template: Value = serde_json::from_str(&read("seed/settings.shared.json")).unwrap();
     let wired: BTreeSet<_> = wired_entries().into_iter().collect();
 
     for entry in entries(&template) {

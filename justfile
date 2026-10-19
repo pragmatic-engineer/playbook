@@ -8,7 +8,7 @@ set shell := ["bash", "-uc"]
 # Where to read the live settings from. Override for testing:
 #   just src=/tmp/fixture.json settings-shared
 src := env_var_or_default("SRC", env_var("HOME") / ".claude/settings.json")
-out := "settings.shared.json"
+out := "seed/settings.shared.json"
 bin := "./target/release/playbook"
 
 # List the available recipes.

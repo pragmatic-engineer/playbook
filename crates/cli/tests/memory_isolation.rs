@@ -23,11 +23,12 @@ fn shipped_files() -> Vec<PathBuf> {
         "crates/data/src",
         "crates/telemetry/src",
         "plugins",
-        "prompts",
+        "seed",
     ] {
-        files_under(&root.join(dir), &["rs", "md", "json", "sh"], &mut out);
+        let dir = root.join(dir);
+        assert!(dir.is_dir(), "{} is missing", dir.display());
+        files_under(&dir, &["rs", "md", "json", "sh"], &mut out);
     }
-    out.push(root.join("settings.shared.json"));
     out
 }
 

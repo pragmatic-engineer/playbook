@@ -12,20 +12,14 @@
 !/CODE_OF_CONDUCT.md
 !/CONTRIBUTING.md
 !/SECURITY.md
-!/Brewfile
 !/install.sh
 !/install-pbtop.sh
 !/justfile
-!/prompts/
+!/seed/
 !/plugins/
 !/scripts/
-!/intents.json
 !/breaking-changes.json
 !/CHANGELOG.md
-# settings.json is intentionally NOT tracked: it is the owner's live, personal
-# config. The shipped install seed is settings.shared.json below.
-# Warning: `git clean -x` inside ~/.claude will delete the untracked settings.json.
-!/settings.shared.json
 !/docs/
 !/.github/
 # Rust binary scaffold (ADR 0007): Cargo.lock is committed per the repo's

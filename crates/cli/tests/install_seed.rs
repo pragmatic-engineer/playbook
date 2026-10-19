@@ -73,7 +73,7 @@ fn a_fresh_install_seeds_settings_and_wires_the_ported_hooks() {
     let settings = settings_of(&home);
 
     let template: Value = serde_json::from_str(
-        &fs::read_to_string(repo_root().join("settings.shared.json")).unwrap(),
+        &fs::read_to_string(repo_root().join("seed/settings.shared.json")).unwrap(),
     )
     .unwrap();
     for (key, want) in template.as_object().unwrap() {

@@ -262,7 +262,7 @@ fn playbook_hook_command_naming_a_nonexistent_hook_is_rejected() {
 #[test]
 fn real_settings_shared_json_validates() {
     let repo_root = Path::new(env!("PLAYBOOK_REPO_ROOT"));
-    let template = repo_root.join("settings.shared.json");
+    let template = repo_root.join("seed/settings.shared.json");
     let out = isolated::playbook()
         .args(["settings", "check"])
         .arg(&template)
@@ -277,7 +277,7 @@ fn real_settings_shared_json_validates() {
 #[test]
 fn shipped_permissions_allow_only_the_safe_playbook_mode_commands() {
     let repo_root = Path::new(env!("PLAYBOOK_REPO_ROOT"));
-    let raw = fs::read_to_string(repo_root.join("settings.shared.json"))
+    let raw = fs::read_to_string(repo_root.join("seed/settings.shared.json"))
         .expect("shipped file is readable");
     let json: serde_json::Value = serde_json::from_str(&raw).expect("shipped file is JSON");
     let allow: Vec<&str> = json
