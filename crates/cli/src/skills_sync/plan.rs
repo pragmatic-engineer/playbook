@@ -253,6 +253,7 @@ mod tests {
         assert!(err.contains("both named fix"), "{err}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlinked_skill_folder_is_an_error_naming_it() {
         // Arrange
@@ -268,6 +269,7 @@ mod tests {
         assert!(err.contains("symlink"), "{err}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlinked_file_inside_a_skill_is_an_error_naming_it() {
         // Arrange
@@ -286,6 +288,7 @@ mod tests {
         assert!(err.contains("symlink"), "{err}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlinked_command_is_an_error_naming_it() {
         // Arrange
