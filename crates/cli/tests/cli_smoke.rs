@@ -501,6 +501,7 @@ fn table() -> Vec<Case> {
             .out("verdict: deny")
             .plain(),
         case("hooks explain-rm", &["hooks", "explain-rm", "--json", "ls"]).out(r#""verdict":"allow""#),
+        case("skills sync", &["skills", "sync", "--dry-run"]).out("no other agents found"),
         case("uninstall", &["uninstall"]).code(1).err("nothing was changed"),
         case("uninstall", &["uninstall", "--dry-run"]).pre(&["setup", "--yes"]),
         case("uninstall", &["uninstall", "--yes"]).pre(&["setup", "--yes"]).writes(),

@@ -2597,13 +2597,6 @@ fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
     use skills_sync::{apply, Agent};
     const TARGET_DIR: &str = ".agents/skills";
     const NO_AGENTS: &str = "no other agents found (looked for Codex at ~/.codex)";
-    let plugin = match playbook::plugin_root::resolve_here() {
-        Ok(resolved) => resolved.root,
-        Err(err) => {
-            eprintln!("{err}");
-            return 1;
-        }
-    };
     let home = common::home_dir();
     let path = std::env::var("PATH").unwrap_or_default();
     let agents: Vec<Agent> = skills_sync::detect(&home, &path)
@@ -2614,6 +2607,15 @@ fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
         println!("{NO_AGENTS}");
         return 0;
     }
+    // Resolved after the agent check, so a machine with no other agent never
+    // needs the plugin folder.
+    let plugin = match playbook::plugin_root::resolve_here() {
+        Ok(resolved) => resolved.root,
+        Err(err) => {
+            eprintln!("{err}");
+            return 1;
+        }
+    };
     let version = playbook::plugin_root::plugin_version(&plugin).unwrap_or_default();
     let rendered = skills_sync::plan::plan(&plugin)
         .and_then(|targets| skills_sync::render_targets(&plugin, &targets));
