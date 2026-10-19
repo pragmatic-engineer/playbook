@@ -1233,7 +1233,7 @@ fn a_collector_that_is_not_running_and_has_no_rows_warns_with_each_fix() {
     );
     assert!(all.contains("WARN collector not running"), "{all}");
     assert!(all.contains("WARN no telemetry rows yet"), "{all}");
-    assert!(hints(&mine).contains("playbook usage collect"));
+    assert!(hints(&mine).contains(playbook::usage::daemon::START_HINT));
 }
 
 /// A daemon file of the home in `b`, such as the lock or the stamp.
@@ -1672,108 +1672,83 @@ fn doctor_passes_attribution_on_by_choice_and_warns_when_off_values_remain() {
     assert!(row["message"].as_str().unwrap().contains("your own value"));
 }
 
+/// The one row doctor keeps for the retired collector service.
+const LEFTOVER_SERVICE: &str = "WARN a collector service file is still installed";
+
 #[test]
-fn doctor_names_the_collector_service_and_the_command_that_adds_it() {
-    use playbook::usage::service::{find, log_path, render, Kind};
+fn doctor_warns_once_about_a_leftover_collector_service_file() {
+    use playbook::usage::service::{log_path, old_file, render, render_old, Kind};
     let Some(kind) = Kind::current() else {
         return;
     };
-    // Arrange
+    // Arrange: no file, the current file, and on macOS the agent under the
+    // 0.37.0 label, both playbook's and one playbook did not write.
     let none = Box::new("svc-none");
     point_settings_at_collector(&none, free_port());
-    let installed = Box::new("svc-ok");
-    point_settings_at_collector(&installed, free_port());
-    let gone = Box::new("svc-gone");
-    point_settings_at_collector(&gone, free_port());
-    for (b, program) in [
-        (&installed, PathBuf::from(env!("CARGO_BIN_EXE_playbook"))),
-        (&gone, gone.root.join("no/playbook")),
-    ] {
-        let file = kind.file(&b.home());
-        fs::create_dir_all(file.parent().unwrap()).unwrap();
-        fs::write(&file, render(kind, &program, &log_path(&b.home()))).unwrap();
-        assert!(find(&b.home()).is_some());
+    let current = Box::new("svc-current");
+    let file = kind.file(&current.home());
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let program = PathBuf::from(env!("CARGO_BIN_EXE_playbook"));
+    fs::write(&file, render(kind, &program, &log_path(&current.home()))).unwrap();
+    let mut leftovers = vec![current];
+    if kind == Kind::Launchd {
+        let ours = Box::new("svc-old-label");
+        let foreign = Box::new("svc-old-foreign");
+        let body = render_old(&program, &log_path(&ours.home()));
+        for (b, body) in [(&ours, body.as_str()), (&foreign, "<plist/>")] {
+            let file = old_file(&b.home());
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, body).unwrap();
+        }
+        leftovers.extend([ours, foreign]);
     }
 
     // Act
     let none = none.run_with_env(&[]);
-    let installed = installed.run_with_env(&[]);
-    let gone = gone.run_with_env(&[]);
+    let leftovers: Vec<Vec<Value>> = leftovers.iter().map(|b| b.run_with_env(&[])).collect();
 
     // Assert
     let none = telemetry_rows(&none);
+    assert!(!text(&none).contains("service"), "{}", text(&none));
     assert!(
-        text(&none).contains("INFO no collector service"),
-        "{}",
-        text(&none)
-    );
-    assert!(
-        hints(&none).contains("playbook usage collect, or keep it running")
-            || hints(&none).contains("`playbook usage collect`, or keep it running"),
+        !hints(&none).contains("collector-service"),
         "{}",
         hints(&none)
     );
-    assert!(hints(&none).contains("playbook setup --only collector-service"));
-    let installed = telemetry_rows(&installed);
-    assert!(
-        text(&installed).contains("PASS collector service installed"),
-        "{}",
-        text(&installed)
-    );
-    let gone = telemetry_rows(&gone);
-    assert!(
-        text(&gone).contains("WARN the collector service starts a program that is gone"),
-        "{}",
-        text(&gone)
-    );
+    for rows in &leftovers {
+        let rows = telemetry_rows(rows);
+        let text = text(&rows);
+        assert_eq!(text.matches(LEFTOVER_SERVICE).count(), 1, "{text}");
+        let service: Vec<&&Value> = rows
+            .iter()
+            .filter(|r| r["message"].as_str().unwrap().contains("service"))
+            .collect();
+        assert_eq!(service.len(), 1, "{text}");
+        let row = service[0];
+        assert_eq!(row["hint"], "run: playbook migrate", "{row}");
+        assert!(
+            !hints(&rows).contains("collector-service"),
+            "{}",
+            hints(&rows)
+        );
+    }
 }
 
 #[test]
-fn doctor_flags_a_collector_agent_left_under_the_old_label() {
-    use playbook::usage::service::{log_path, old_file, render_old};
-    // Arrange
-    let ours = Box::new("svc-old-label");
-    let foreign = Box::new("svc-old-foreign");
-    for (b, body) in [
-        (
-            &ours,
-            render_old(
-                Path::new("/opt/homebrew/bin/playbook"),
-                &log_path(&ours.home()),
-            ),
-        ),
-        (&foreign, "<plist/>".to_string()),
-    ] {
-        let file = old_file(&b.home());
-        fs::create_dir_all(file.parent().unwrap()).unwrap();
-        fs::write(&file, body).unwrap();
-    }
+fn a_stopped_collector_names_the_start_hint_and_no_setup_part() {
+    // Arrange: telemetry points at a recorded collector that does not run.
+    let b = Box::new("svc-down");
+    point_settings_at_collector(&b, free_port());
 
     // Act
-    let ours = ours.run_with_env(&[]);
-    let foreign = foreign.run_with_env(&[]);
+    let rows = b.run_with_env(&[]);
 
     // Assert
-    let ours = telemetry_rows(&ours);
-    assert!(
-        text(&ours).contains("WARN the collector service still uses the old label: launchd agent io.github.pragmatic-engineer.playbook.collector"),
-        "{}",
-        text(&ours)
-    );
-    assert!(
-        hints(&ours).contains("run: playbook migrate"),
-        "{}",
-        hints(&ours)
-    );
-    let foreign = telemetry_rows(&foreign);
-    assert!(
-        text(&foreign).contains("uses the old collector label but playbook did not write it"),
-        "{}",
-        text(&foreign)
-    );
-    assert!(
-        hints(&foreign).contains("launchctl bootout gui/"),
-        "{}",
-        hints(&foreign)
-    );
+    let rows = telemetry_rows(&rows);
+    let row = rows
+        .iter()
+        .find(|r| r["message"] == "collector not running, so telemetry sent now is lost")
+        .unwrap_or_else(|| panic!("{}", text(&rows)));
+    assert_eq!(row["hint"], playbook::usage::daemon::START_HINT, "{row}");
+    assert!(!hints(&rows).contains("setup --only collector-service"));
 }

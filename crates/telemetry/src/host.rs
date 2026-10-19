@@ -27,9 +27,9 @@ pub trait Host: Send + Sync {
     /// for a program that is the usage tool itself.
     fn command(&self, args: &str) -> String;
 
-    /// The command that runs one part of playbook's setup, for messages:
-    /// `telemetry` or `collector-service`. A host that may run next to an
-    /// older playbook adds the old command name.
+    /// The command that runs one part of playbook's setup, such as
+    /// `telemetry`, for messages. A host that may run next to an older
+    /// playbook adds the old command name.
     fn setup_command(&self, part: &str) -> String;
 
     /// The arguments, before any usage subcommand, that make the program run

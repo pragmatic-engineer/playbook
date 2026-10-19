@@ -32,7 +32,7 @@ impl Host for Standalone {
     }
 
     /// `pbtop` may run next to a playbook from before the rename to `setup`,
-    /// or from before the collector-service part.
+    /// or from before the part existed.
     fn setup_command(&self, part: &str) -> String {
         match part {
             "telemetry" => {

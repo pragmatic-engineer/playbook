@@ -654,7 +654,7 @@ fn an_agent_under_the_old_label_is_left_alone_in_a_scratch_home_and_uninstall_re
 
     // Act
     let migrate = sb.run(&["migrate"]);
-    let status = sb.run(&["usage", "status"]);
+    let doctor = sb.run(&["doctor", "check"]);
     let kept = old.is_file();
     let dry = sb.run(&["uninstall", "--yes", "--dry-run"]);
     let removed = sb.run(&["uninstall", "--yes"]);
@@ -672,10 +672,11 @@ fn an_agent_under_the_old_label_is_left_alone_in_a_scratch_home_and_uninstall_re
     assert!(kept);
     assert!(!Kind::Launchd.file(&sb.home).exists());
     assert!(
-        text(&status).contains("io.github.pragmatic-engineer.playbook.collector")
-            && text(&status).contains("playbook migrate"),
+        text(&doctor)
+            .contains("a collector service file is still installed: launchd agent io.github")
+            && text(&doctor).contains("playbook migrate"),
         "{}",
-        text(&status)
+        text(&doctor)
     );
     assert!(
         text(&dry).contains("would stop and remove the launchd agent io.github"),
