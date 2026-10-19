@@ -20,6 +20,8 @@ pub enum Kind {
     Cache,
     /// The ballast file.
     Ballast,
+    /// A copy an old migration left, such as `playbook.db.migrated.3`.
+    Backup,
 }
 
 impl Kind {
@@ -29,6 +31,7 @@ impl Kind {
             Kind::Worktree => "worktree",
             Kind::Cache => "cache",
             Kind::Ballast => "ballast",
+            Kind::Backup => "backup",
         }
     }
 }
@@ -92,6 +95,11 @@ pub fn candidates(
     if ballast::size(home).is_some() {
         found.push((Kind::Ballast, ballast::file(home)));
     }
+    found.extend(
+        super::backups::leftovers(home)
+            .into_iter()
+            .map(|l| (Kind::Backup, l.path)),
+    );
     found
 }
 

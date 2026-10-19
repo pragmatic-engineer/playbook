@@ -9,9 +9,10 @@
 //!
 //! * The old file is copied with `VACUUM INTO`, which reads a consistent
 //!   snapshot including the WAL, then checked table by table, then renamed
-//!   into place. Nothing is ever deleted.
+//!   into place. Nothing whose data exists nowhere else is deleted.
 //! * The old file and its `-wal` and `-shm` are renamed to `*.migrated` once
-//!   the copy is verified.
+//!   the copy is verified. A `*.migrated` copy from an earlier run holds data
+//!   already in the new file, so it is replaced, and only one copy stays.
 //! * When the new file already exists (for example an older binary kept
 //!   writing the old path and recreated it), the rows are merged with
 //!   `INSERT OR IGNORE`, which cannot duplicate a row with a primary key.
@@ -218,9 +219,25 @@ fn table_counts(conn: &Connection) -> Result<Vec<(String, i64)>, String> {
     Ok(out)
 }
 
+/// Rename the old file and its sidecars to `*.migrated` after its data is
+/// verified in the new file. An earlier `*.migrated` copy (an older binary
+/// recreated the old path and it was merged again) holds data the new file
+/// already has, so it is removed first and only the newest copy stays.
+pub fn set_aside_verified(old: &Path) -> Result<(), String> {
+    let kept = with_suffix(old, ".migrated");
+    for side in SIDE_SUFFIXES {
+        let earlier = with_suffix(&kept, side);
+        if earlier.is_file() {
+            fs::remove_file(&earlier)
+                .map_err(|e| format!("could not remove {}: {e}", earlier.display()))?;
+        }
+    }
+    set_aside(old)
+}
+
 /// Rename the old file and its sidecars to `*.migrated`; when that name is
-/// taken (an older binary recreated the old path and it was merged again) the
-/// name gets a numeric suffix. Nothing is overwritten.
+/// taken the name gets a numeric suffix. Nothing is overwritten. Used for a
+/// file whose data could not be checked, such as a corrupt one.
 pub fn set_aside(old: &Path) -> Result<(), String> {
     let mut n = 0u32;
     let suffix = loop {
@@ -535,7 +552,7 @@ fn move_cache(step: &Move) -> Outcome {
         None::<Connection>
     };
     let outcome = if step.new.exists() {
-        match set_aside(&step.old) {
+        match set_aside_verified(&step.old) {
             Ok(()) => Outcome::SetAside,
             Err(_) => Outcome::Nothing,
         }
@@ -589,14 +606,14 @@ fn run_locked(step: &Move) -> Result<Outcome, String> {
                 };
                 let inserted = merge(step, &rules)?;
                 drop(old_conn);
-                set_aside(&step.old)?;
+                set_aside_verified(&step.old)?;
                 drop(writer_lock);
                 return Ok(Outcome::Merged { inserted });
             }
         }
     };
     drop(old_conn);
-    set_aside(&step.old)?;
+    set_aside_verified(&step.old)?;
     drop(writer_lock);
     Ok(outcome)
 }
@@ -744,7 +761,10 @@ mod tests {
         make(&m.old, &[(3, "c"), (4, "d")]);
         assert_eq!(migrate(&m).unwrap(), Outcome::Merged { inserted: 1 });
         assert_eq!(rows(&m.new).len(), 4);
-        assert!(with_suffix(&m.old, ".migrated.1").exists());
+        // The earlier copy's rows are in the new file, so one copy stays.
+        assert!(with_suffix(&m.old, ".migrated").exists());
+        assert!(!with_suffix(&m.old, ".migrated.1").exists());
+        assert_eq!(rows(&with_suffix(&m.old, ".migrated")).len(), 2);
     }
 
     #[test]

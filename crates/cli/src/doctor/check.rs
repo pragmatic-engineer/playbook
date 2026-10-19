@@ -1127,7 +1127,28 @@ fn data_rows(env: &Env) -> Vec<Row> {
     }
     let mut rows = vec![Row::new("-", Level::Info, msg)];
     rows.extend(orphan_rows(env, &dir));
+    rows.extend(backup_row(env));
     rows
+}
+
+/// One row when old migration backups sit in the playbook folder.
+fn backup_row(env: &Env) -> Option<Row> {
+    let found = crate::disk::backups::leftovers(&env.home);
+    if found.is_empty() {
+        return None;
+    }
+    Some(
+        Row::new(
+            "-",
+            Level::Info,
+            format!(
+                "disk: {} old migration backup file(s), {} KB",
+                found.len(),
+                crate::disk::backups::total_bytes(&found) / 1024
+            ),
+        )
+        .hint("`playbook disk clean` removes those older than 7 days and keeps the newest"),
+    )
 }
 
 /// Databases in the data folder with no worktree of this clone. They belong

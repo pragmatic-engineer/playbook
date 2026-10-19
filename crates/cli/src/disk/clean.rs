@@ -35,6 +35,10 @@ pub enum Kind {
     Cache,
     /// A plugin cache version Claude Code marked orphaned.
     OrphanedPlugin,
+    /// A copy an old migration left (`playbook.db.migrated` and the like).
+    Backup,
+    /// A `.DS_Store` in the playbook folder.
+    Junk,
 }
 
 impl Kind {
@@ -44,6 +48,8 @@ impl Kind {
             Kind::Scratch => "scratch",
             Kind::Cache => "cache",
             Kind::OrphanedPlugin => "orphaned plugin",
+            Kind::Backup => "old backup",
+            Kind::Junk => "junk",
         }
     }
 
@@ -52,7 +58,8 @@ impl Kind {
         match self {
             Kind::Target => TARGET_IDLE,
             Kind::Scratch | Kind::Cache => SCRATCH_IDLE,
-            Kind::OrphanedPlugin => Duration::ZERO,
+            Kind::Backup => super::backups::BACKUP_IDLE,
+            Kind::OrphanedPlugin | Kind::Junk => Duration::ZERO,
         }
     }
 }
@@ -186,6 +193,9 @@ struct Source {
     base: PathBuf,
     path: PathBuf,
     keep: Option<String>,
+    /// A backup file inside the memory store, which may go even though the
+    /// store is protected. Only regular files with a backup name get it.
+    in_memory_store: bool,
 }
 
 /// Picks what to remove. Nothing is deleted here.
@@ -234,6 +244,7 @@ fn sources(env: &Env) -> Vec<Source> {
                 base: root.clone(),
                 path,
                 keep,
+                in_memory_store: false,
             }
         }));
     }
@@ -245,6 +256,7 @@ fn sources(env: &Env) -> Vec<Source> {
                 base: tmp.clone(),
                 path,
                 keep: other_owner.then(|| "owned by another user".to_string()),
+                in_memory_store: false,
             });
         }
     }
@@ -260,9 +272,23 @@ fn sources(env: &Env) -> Vec<Source> {
                     base: base.clone(),
                     path,
                     keep: None,
+                    in_memory_store: false,
                 });
             }
         }
+    }
+    for left in super::backups::leftovers(&env.home) {
+        found.push(Source {
+            kind: if left.junk { Kind::Junk } else { Kind::Backup },
+            base: left
+                .path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default(),
+            path: left.path,
+            keep: left.keep,
+            in_memory_store: left.in_memory_store,
+        });
     }
     let plugin_base = crate::plugin_root::cache_dir(&env.claude_home);
     for path in crate::plugin_root::orphaned_cache_dirs(&env.claude_home) {
@@ -276,6 +302,7 @@ fn sources(env: &Env) -> Vec<Source> {
             base: plugin_base.clone(),
             path,
             keep: recent.then(|| "marked orphaned less than a day ago".to_string()),
+            in_memory_store: false,
         });
     }
     found
@@ -287,7 +314,14 @@ fn pre_check(env: &Env, protected: &[PathBuf], source: &Source) -> Option<String
     source
         .keep
         .clone()
-        .or_else(|| unsafe_target(&source.base, &source.path, protected))
+        .or_else(|| {
+            let guard: &[PathBuf] = if source.in_memory_store {
+                &[]
+            } else {
+                protected
+            };
+            unsafe_target(&source.base, &source.path, guard)
+        })
         .or_else(|| named_by_a_process(&source.path, &env.process_args))
         .or_else(|| {
             (source.kind == Kind::Target)
@@ -658,6 +692,56 @@ mod tests {
         assert!(
             got.contains(&f.env.home.join(".config/playbook/tmp/doc")),
             "{got:?}"
+        );
+        fs::remove_dir_all(&f.root).unwrap();
+    }
+
+    #[test]
+    fn removes_week_old_backups_but_never_the_memory_facts_or_the_live_db() {
+        let f = fixture("backups");
+        let root = f.env.home.join(".config/playbook");
+        let data = root.join("data");
+        fs::create_dir_all(&data).unwrap();
+        rusqlite::Connection::open(data.join("config.db"))
+            .unwrap()
+            .execute_batch(playbook_data::config::SCHEMA_SQL)
+            .unwrap();
+        rusqlite::Connection::open(data.join("memory.db"))
+            .unwrap()
+            .execute_batch(&format!(
+                "{}; INSERT INTO nodes (id, file, scope, type) VALUES ('a', 'a.md', 'global', 'fact');",
+                playbook_data::memory::SCHEMA_SQL
+            ))
+            .unwrap();
+        let week = Duration::from_secs(8 * 24 * 60 * 60);
+        let aged = |name: &str, age: Duration| {
+            let path = root.join(name);
+            write(&path);
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(SystemTime::now() - age)
+                .unwrap();
+            path
+        };
+        let old = aged("playbook.db.migrated", week * 2);
+        let newest = aged("playbook.db.migrated.1", week);
+        let fresh_graph = aged("memory/memory.graph.json.migrated", Duration::from_secs(60));
+        let old_graph = aged("memory/memory.graph.json.migrated.1", week * 3);
+        let fact = aged("memory/old-fact.md", week * 3);
+        let live = aged("playbook.db", week * 3);
+        let junk = aged(".DS_Store", Duration::from_secs(60));
+        let got = picked(&f.env);
+        assert!(got.contains(&old), "{got:?}");
+        assert!(got.contains(&old_graph), "{got:?}");
+        assert!(got.contains(&junk), "{got:?}");
+        for kept in [&newest, &fresh_graph, &fact, &live, &data.join("config.db")] {
+            assert!(!got.contains(kept), "{} was picked", kept.display());
+        }
+        assert_eq!(
+            reason(&f.env, &newest).as_deref(),
+            Some("the newest backup")
         );
         fs::remove_dir_all(&f.root).unwrap();
     }
