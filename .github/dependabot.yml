@@ -1,12 +1,44 @@
-# Managed by repo-config. Direct edits are overwritten on the next `terraform apply`.
+# Dependabot version updates (ADR 0048). This file is bespoke: repo-config
+# must set `manage_dependabot_config = false` for this repo, or its next
+# `terraform apply` writes its monthly template over this file.
 #
-# Dependabot version-update schedule. `monthly` runs in the first week of the
-# month (GitHub does not support pinning to a specific day number). Patch and
-# minor PRs are auto-merged by .github/workflows/dependabot-auto-merge.yml;
-# major-version bumps require manual review. PRs are grouped to minimise noise.
-#
-# When dependabot_version_updates = false only the file header is written;
-# GitHub's automatic security updates (enabled via the repo setting) still run
-# without any entry here.
+# Each crate's Cargo.toml pins its dependencies exactly, so a cargo PR bumps
+# the pin and Cargo.lock together. Patch and minor bumps come as one grouped
+# PR a week per ecosystem, on different days so the two do not run CI side by
+# side. dependabot-auto-merge.yml merges them once CI passes. For a 0.x crate
+# a minor bump can break the build, and CI is the gate for that too. A major
+# bump opens its own PR and waits for review. A new release waits 7 days
+# before Dependabot proposes it.
 
 version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 7
+    groups:
+      all-github-actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "thursday"
+    cooldown:
+      default-days: 7
+    groups:
+      all-cargo:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 10
