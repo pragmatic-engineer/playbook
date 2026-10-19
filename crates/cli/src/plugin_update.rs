@@ -18,6 +18,15 @@ pub const CONFIG_KEY: &str = "update.plugin";
 /// leaves the plugin to the update itself, so it runs once.
 pub const SKIP_ENV: &str = "PLAYBOOK_SKIP_PLUGIN_UPDATE";
 
+/// The value of [`SKIP_ENV`] that turns the update off.
+const SKIP_VALUE: &str = "1";
+
+/// The id prefix of the playbook plugin in `installed_plugins.json`.
+const ID_PREFIX: &str = "playbook@";
+
+/// The most characters of `claude`'s last error line shown to the user.
+const WHY_MAX_CHARS: usize = 200;
+
 /// How long `claude plugin update` may take.
 const TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -102,9 +111,19 @@ pub fn plugin_id(claude_home: &Path) -> Option<String> {
     let text = std::fs::read_to_string(claude_home.join("plugins/installed_plugins.json")).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     let map = value.get("plugins").unwrap_or(&value).as_object()?;
-    let mut ids = map.keys().filter(|k| k.starts_with("playbook@"));
+    let mut ids = map.keys().filter(|k| k.starts_with(ID_PREFIX));
     let id = ids.next()?.clone();
     ids.next().is_none().then_some(id)
+}
+
+/// Whether `settings.json` turns plugin `id` off. Unlike the hook pause,
+/// this follows the id Claude Code lists, so a fork id counts too.
+fn is_off_in_claude_code(claude_home: &Path, id: &str) -> bool {
+    std::fs::read_to_string(claude_home.join("settings.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.pointer("/enabledPlugins")?.get(id).cloned())
+        == Some(serde_json::Value::Bool(false))
 }
 
 /// The version Claude Code lists for plugin `id`, from its `installPath`.
@@ -151,7 +170,7 @@ pub fn run(probe: &Probe) -> Outcome {
     let Some(id) = plugin_id(&claude_home) else {
         return Outcome::NotInstalled;
     };
-    if crate::common::plugin_state::is_disabled_in(&probe.home) {
+    if is_off_in_claude_code(&claude_home, &id) {
         return Outcome::Skipped(format!(
             "{id} is turned off in Claude Code; turn it on there, then run: {}",
             command(&id)
@@ -177,7 +196,9 @@ pub fn run(probe: &Probe) -> Outcome {
             .lines()
             .map(str::trim)
             .rfind(|l| !l.is_empty())
-            .map(|l| crate::ui::render::sanitize(&l.chars().take(200).collect::<String>()))
+            .map(|l| {
+                crate::ui::render::sanitize(&l.chars().take(WHY_MAX_CHARS).collect::<String>())
+            })
             .unwrap_or_default();
         let why = if last.is_empty() {
             format!("exit {}", out.status.code().unwrap_or(-1))
@@ -204,7 +225,7 @@ pub fn run(probe: &Probe) -> Outcome {
 /// [`run`] for a command, unless `--no-plugin` was passed or the caller set
 /// [`SKIP_ENV`]. `None` when it was not asked to run.
 pub fn run_for_command(home: &Path, no_plugin: bool) -> Option<Outcome> {
-    let skip = no_plugin || std::env::var_os(SKIP_ENV).is_some_and(|v| v == "1");
+    let skip = no_plugin || std::env::var_os(SKIP_ENV).is_some_and(|v| v == SKIP_VALUE);
     (!skip).then(|| run(&Probe::for_home(home)))
 }
 
@@ -353,6 +374,30 @@ mod tests {
             config_off.contains("update.plugin is false"),
             "{config_off}"
         );
+        assert_eq!(calls(&home), "");
+    }
+
+    #[test]
+    fn a_fork_id_that_is_off_runs_nothing() {
+        // Arrange
+        let home = scratch_dir("plugin-update-fork-off");
+        let dir = plugin(&home, "0.36.0");
+        install(&home, "playbook@my-fork", &dir);
+        let claude = fake_claude(&home, None, 0);
+        fs::write(
+            home.join(".claude/settings.json"),
+            r#"{"enabledPlugins":{"playbook@my-fork":false}}"#,
+        )
+        .unwrap();
+
+        // Act
+        let out = run(&Probe {
+            home: home.clone(),
+            claude: Some(claude),
+        });
+
+        // Assert
+        assert!(out.line().unwrap().contains("turned off"));
         assert_eq!(calls(&home), "");
     }
 
