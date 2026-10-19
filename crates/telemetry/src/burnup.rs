@@ -7,13 +7,11 @@
 //! and the clock come in as arguments. The chart is drawn in `tui::burnup`
 //! and the plain table here serves `--summary`, a pipe and a narrow panel.
 
-use super::aggregate::SECONDS_PER_DAY;
-use super::limits::{
-    thresholds, Crossing, Limit, LimitPeriod, Origin, Unit, MIN_PROJECTION_SECONDS,
-};
+use super::limits::{Crossing, Limit, LimitPeriod, Origin, MIN_PROJECTION_SECONDS};
 use super::limits_source::{self, Sources};
 use super::query::WeekStart;
 use super::spend::dollars;
+use super::tz::Zone;
 use super::UsageEvent;
 use serde_json::{json, Value};
 
@@ -25,6 +23,8 @@ pub struct Burnup {
     pub start: i64,
     pub end: i64,
     pub now: i64,
+    /// The zone whose midnights split the period into days.
+    pub zone: Zone,
     /// Cumulative spend at the end of each day, from the first day through
     /// today. Empty before the period starts. Never decreases.
     pub actual: Vec<f64>,
@@ -41,9 +41,14 @@ pub struct Burnup {
 }
 
 impl Burnup {
-    /// The days the period spans, the last one possibly partial.
+    /// The calendar days the period spans in its zone, the last one possibly
+    /// partial.
     pub fn days(&self) -> usize {
-        ((self.end - self.start + SECONDS_PER_DAY - 1) / SECONDS_PER_DAY).max(0) as usize
+        (self.zone.day_of(self.end - 1) - self.zone.day_of(self.start) + 1).max(0) as usize
+    }
+
+    fn first_day(&self) -> i64 {
+        self.zone.day_of(self.start)
     }
 
     /// Spend at `at` along the straight line from now to the period end.
@@ -52,6 +57,13 @@ impl Burnup {
         let span = (self.end - self.now) as f64;
         let share = ((at - self.now) as f64 / span).clamp(0.0, 1.0);
         Some(self.total + (end - self.total) * share)
+    }
+
+    /// The date of day `i` of the period, `YYYY-MM-DD` in its zone.
+    fn day_text(&self, i: usize) -> String {
+        self.zone
+            .iso(self.zone.day_start(self.first_day() + i as i64))[..10]
+            .to_string()
     }
 
     /// The share of the limit spent at the end of day `i`, in percent.
@@ -65,7 +77,7 @@ impl Burnup {
     pub fn series_json(&self) -> Value {
         json!({
             "days": self.actual.iter().enumerate().map(|(i, c)| json!({
-                "day": day_text(self.start, i),
+                "day": self.day_text(i),
                 "cumulative_usd": c,
                 "percent_of_limit": self.percent_of_limit(*c),
             })).collect::<Vec<_>>(),
@@ -73,8 +85,8 @@ impl Burnup {
         })
     }
 
-    /// A plain table, ASCII only, one row per day through today, then the
-    /// crossing lines. `rows` keeps the last rows when the room is short.
+    /// A plain table, ASCII only, one row per day through today. `rows`
+    /// keeps the last rows when the room is short.
     pub fn table(&self, rows: usize) -> Vec<String> {
         let skip = self.actual.len().saturating_sub(rows);
         let mut out = vec![format!(
@@ -87,28 +99,30 @@ impl Burnup {
                 .map_or("n/a".to_string(), |p| format!("{p:.1}%"));
             out.push(format!(
                 "{:<10}  {:>12}  {share:>8}",
-                day_text(self.start, i),
+                self.day_text(i),
                 dollars(*c)
             ));
         }
         if self.actual.is_empty() {
             out.push("the period has not started".to_string());
         }
-        out.extend(self.crossings.iter().map(limits_source::crossing_text));
         out
     }
-}
 
-/// The date of day `i` of a period starting at `start`, as `YYYY-MM-DD` in
-/// the chosen zone.
-fn day_text(start: i64, i: usize) -> String {
-    crate::tz::iso(start + i as i64 * SECONDS_PER_DAY)[..10].to_string()
+    /// One line for each of the 50, 80 and 100 percent crossings.
+    pub fn crossing_lines(&self) -> Vec<String> {
+        self.crossings
+            .iter()
+            .map(limits_source::crossing_text)
+            .collect()
+    }
 }
 
 /// The burn-up of the period `[start, end)` at `now`.
 pub fn burnup(
     events: &[UsageEvent],
     (start, end): (i64, i64),
+    zone: Zone,
     now: i64,
     limit: Option<f64>,
     billed: Option<(i64, f64)>,
@@ -118,6 +132,7 @@ pub fn burnup(
         start,
         end,
         now,
+        zone,
         actual: Vec::new(),
         total: 0.0,
         projected_end: None,
@@ -128,13 +143,14 @@ pub fn burnup(
     if now < start || end <= start {
         return b;
     }
-    let today = (((now - start) / SECONDS_PER_DAY) as usize).min(b.days().saturating_sub(1));
+    let first = b.first_day();
+    let today = ((zone.day_of(now) - first).max(0) as usize).min(b.days().saturating_sub(1));
     let mut per_day = vec![0.0; today + 1];
     for e in events
         .iter()
         .filter(|e| e.timestamp >= start && e.timestamp <= now)
     {
-        let day = (((e.timestamp - start) / SECONDS_PER_DAY) as usize).min(today);
+        let day = ((zone.day_of(e.timestamp) - first).max(0) as usize).min(today);
         per_day[day] += e.cost_usd;
     }
     let mut cumulative = 0.0;
@@ -154,30 +170,39 @@ pub fn burnup(
 }
 
 /// The burn-up for the monthly dollar limit if there is one, else for the
-/// month that holds `now`, from the sources and the limits already built.
+/// month that holds `now`, from the sources and the limits already built. A
+/// period the server's reset time gave starts at a UTC midnight, so its days
+/// are UTC days.
 pub fn burnup_for(s: &Sources, limits: &[Limit], events: &[UsageEvent], now: i64) -> Burnup {
-    let monthly = limits
-        .iter()
-        .find(|l| l.period == LimitPeriod::Monthly && l.unit == Unit::Dollars);
-    let period = match monthly {
-        // A reset time from the server is the true end of the period.
-        Some(l) if l.origin == Origin::Server => s
-            .server
-            .as_ref()
-            .and_then(|f| f.resets_at)
-            .filter(|r| *r > now)
-            .map_or((l.start, l.end), |r| LimitPeriod::Monthly.ending_at(r)),
-        Some(l) => (l.start, l.end),
-        None => LimitPeriod::Monthly.containing(now, WeekStart::default()),
+    let monthly = limits.iter().find(|l| limits_source::is_monthly_dollars(l));
+    let (period, zone) = match monthly {
+        Some(l) => {
+            let from_server = l.origin == Origin::Server
+                && s.server
+                    .as_ref()
+                    .and_then(|f| f.resets_at)
+                    .is_some_and(|r| r > now);
+            let zone = if from_server {
+                Zone::Utc
+            } else {
+                crate::tz::current()
+            };
+            ((l.start, l.end), zone)
+        }
+        None => (
+            LimitPeriod::Monthly.containing(now, WeekStart::default()),
+            crate::tz::current(),
+        ),
     };
     let billed = limits_source::server_in_use(s, now)
         .and_then(|f| f.used_usd().map(|used| (f.fetched_at, used)));
     let crossings = monthly
-        .and_then(|l| thresholds(period.0, period.1, now, l.used, l.limit))
+        .and_then(|l| l.thresholds(now))
         .map_or_else(Vec::new, |c| c.to_vec());
     burnup(
         events,
         period,
+        zone,
         now,
         monthly.map(|l| l.limit),
         billed,
@@ -188,7 +213,8 @@ pub fn burnup_for(s: &Sources, limits: &[Limit], events: &[UsageEvent], now: i64
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::limits::CrossState;
+    use crate::aggregate::SECONDS_PER_DAY;
+    use crate::limits::{thresholds, CrossState};
 
     const D: i64 = SECONDS_PER_DAY;
     /// 2027-01-01 00:00 UTC.
@@ -203,7 +229,15 @@ mod tests {
     }
 
     fn month(days: i64, now: i64, events: &[UsageEvent]) -> Burnup {
-        burnup(events, (JAN, JAN + days * D), now, None, None, Vec::new())
+        burnup(
+            events,
+            (JAN, JAN + days * D),
+            Zone::Utc,
+            now,
+            None,
+            None,
+            Vec::new(),
+        )
     }
 
     #[test]
@@ -285,6 +319,7 @@ mod tests {
         let b = burnup(
             &[cost(JAN + 10, 30.0), cost(JAN + D + 10, 20.0)],
             (JAN, JAN + 30 * D),
+            Zone::Utc,
             JAN + 2 * D,
             Some(100.0),
             None,
@@ -297,8 +332,10 @@ mod tests {
         assert_eq!(t[1], "2027-01-01        $30.00     30.0%");
         assert_eq!(t[2], "2027-01-02        $50.00     50.0%");
         assert_eq!(t[3], "2027-01-03        $50.00     50.0%");
-        assert!(t[4].starts_with("50% crossed about 2027-01-03"), "{}", t[4]);
-        assert!(t.iter().all(|l| l.is_ascii()), "{t:?}");
+        assert_eq!(t.len(), 4);
+        let c = b.crossing_lines();
+        assert!(c[0].starts_with("50% crossed about 2027-01-03"), "{}", c[0]);
+        assert!(t.iter().chain(&c).all(|l| l.is_ascii()), "{t:?}");
     }
 
     #[test]
@@ -317,6 +354,7 @@ mod tests {
         let b = burnup(
             &[cost(JAN + 10, 25.0)],
             (JAN, JAN + 30 * D),
+            Zone::Utc,
             JAN + D,
             Some(100.0),
             None,
@@ -393,5 +431,45 @@ mod tests {
         assert_eq!((b.start, b.end), (JAN, JAN + 31 * D));
         assert!(b.limit.is_none() && b.crossings.is_empty() && b.billed.is_none());
         assert_eq!(b.total, 2.0);
+    }
+
+    #[test]
+    fn a_period_from_the_server_labels_its_days_in_utc_whatever_the_machine_zone() {
+        crate::tz::set(Zone::Fixed(-3 * 3600));
+        let reset = JAN + 31 * D;
+        let (s, limits) = server_limit(Some(reset));
+
+        let b = burnup_for(&s, &limits, &[cost(JAN + 5, 20.0)], JAN + 3 * D);
+
+        assert_eq!(b.zone, Zone::Utc);
+        assert_eq!(b.table(31)[1].split_whitespace().next(), Some("2027-01-01"));
+        assert_eq!(b.series_json()["days"][0]["day"], "2027-01-01");
+        assert_eq!(b.days(), 31);
+    }
+
+    #[test]
+    fn a_local_period_splits_days_at_local_midnights() {
+        let east = Zone::Fixed(10 * 3600);
+        crate::tz::set(east);
+        let start = east.day_start(east.day_of(JAN) + 1);
+        let events = [
+            cost(start + 10, 1.0),
+            cost(start + D - 10, 2.0),
+            cost(start + D + 10, 4.0),
+        ];
+
+        let b = burnup(
+            &events,
+            (start, start + 3 * D),
+            east,
+            start + D + 100,
+            None,
+            None,
+            Vec::new(),
+        );
+
+        assert_eq!(b.actual, [3.0, 7.0]);
+        assert_eq!(b.table(31)[1].split_whitespace().next(), Some("2027-01-02"));
+        assert_eq!(b.days(), 3);
     }
 }

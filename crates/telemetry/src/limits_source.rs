@@ -13,8 +13,7 @@
 //! Manual limits come from the `usage.budget.*` config keys.
 
 use super::burnup::burnup_for;
-use super::limits::{Burn, Limit, LimitPeriod, Origin, State, Unit};
-use super::limits::{CrossState, Crossing};
+use super::limits::{spent, Burn, CrossState, Crossing, Limit, LimitPeriod, Origin, State, Unit};
 use super::period::Period;
 use super::plan::{Account, Capabilities, DisplayLine, LoginKind, PlanChoice};
 use super::query::{month_first_day, WeekStart};
@@ -457,6 +456,12 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
     if let Some((origin, limit_usd, used_usd, fetched_at, fresh)) = figure {
         let mut l = Limit::manual_budget(LimitPeriod::Monthly, limit_usd, events, now, week);
         l.origin = origin;
+        // The server's own reset time is the true end of its period.
+        let reset = s.server.as_ref().and_then(|f| f.resets_at);
+        if let (Origin::Server, Some(r)) = (origin, reset.filter(|r| *r > now)) {
+            (l.start, l.end) = LimitPeriod::Monthly.ending_at(r);
+            l.used = spent(events, l.start, now);
+        }
         // A fresh figure knows the spend of every machine on the account, so
         // it replaces this machine's estimate, unless it was fetched before
         // this month began.
@@ -483,12 +488,7 @@ pub fn compare_server(
     // The server billed up to the moment it was asked, so only the local
     // spend up to then is comparable.
     let until = now.min(figure.fetched_at);
-    let local = events
-        .iter()
-        .filter(|e| e.timestamp >= utc_month_start(now) && e.timestamp <= until)
-        .map(|e| e.cost_usd)
-        .sum::<f64>()
-        + 0.0;
+    let local = spent(events, utc_month_start(now), until);
     Some(Comparison::new(figure, local))
 }
 

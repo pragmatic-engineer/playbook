@@ -340,6 +340,17 @@ pub fn thresholds(start: i64, end: i64, now: i64, used: f64, limit: f64) -> Opti
     ])
 }
 
+/// The cost of the `events` from `start` through `until`. `+ 0.0` turns the
+/// -0.0 of an empty sum into 0.0.
+pub fn spent(events: &[UsageEvent], start: i64, until: i64) -> f64 {
+    events
+        .iter()
+        .filter(|e| e.timestamp >= start && e.timestamp <= until)
+        .map(|e| e.cost_usd)
+        .sum::<f64>()
+        + 0.0
+}
+
 impl Limit {
     pub fn headroom(&self, now: i64) -> Option<Headroom> {
         headroom(self.start, self.end, now, self.used, self.limit)
@@ -363,12 +374,7 @@ impl Limit {
             unit: Unit::Dollars,
             period,
             origin: Origin::Manual,
-            used: events
-                .iter()
-                .filter(|e| e.timestamp >= start && e.timestamp <= now)
-                .map(|e| e.cost_usd)
-                .sum::<f64>()
-                + 0.0,
+            used: spent(events, start, now),
             limit: limit_usd,
             start,
             end,
