@@ -205,14 +205,17 @@ pub struct Volume {
     pub space: Space,
 }
 
-/// Each distinct volume behind `paths`, in order. A path that cannot be read
-/// is left out.
+/// Each distinct volume behind `paths`, in order. A path that cannot be read,
+/// or that sits on an in-memory file system, is left out.
 pub fn volumes(paths: &[PathBuf]) -> Vec<Volume> {
     let mut found: Vec<Volume> = Vec::new();
     for path in paths {
         let Ok(space) = probe::space(path) else {
             continue;
         };
+        if probe::ram_backed(path) {
+            continue;
+        }
         if found.iter().all(|v| v.space.device != space.device) {
             found.push(Volume {
                 path: path.clone(),

@@ -122,6 +122,9 @@ impl Env {
             .env("LANG", "C.UTF-8")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
+            // Plenty of free space, so the disk guard and the doctor's disk
+            // row do not depend on the machine and start no cleanup.
+            .env("PLAYBOOK_TEST_DISK_FREE_GB", "500")
             .env("NO_PROXY", "")
             .env("no_proxy", "");
         for k in [
@@ -403,7 +406,7 @@ const SESSION_PAYLOAD: &str = r#"{"session_id":"smoke","hook_event_name":"Sessio
 /// Every hook name, with the JSON Claude Code would send it.
 #[rustfmt::skip]
 fn hook_cases() -> Vec<Case> {
-    let hooks: [(&str, &str); 25] = [
+    let hooks: [(&str, &str); 26] = [
         ("session-init", SESSION_PAYLOAD),
         ("preread-edit-check", EDIT_PAYLOAD),
         ("preread-size-check", EDIT_PAYLOAD),
@@ -428,6 +431,7 @@ fn hook_cases() -> Vec<Case> {
         ("context-hygiene", SESSION_PAYLOAD),
         ("doc-read-hint", EDIT_PAYLOAD),
         ("usage-warm", SESSION_PAYLOAD),
+        ("disk-guard", BASH_PAYLOAD),
         // Retired, kept so an old plugin cache stays quiet: no output, no files.
         ("migration-check", SESSION_PAYLOAD),
     ];

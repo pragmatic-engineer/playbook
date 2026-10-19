@@ -471,14 +471,18 @@ pub enum Lock {
     Unavailable(std::io::Error),
 }
 
+/// The file whose lock one cleanup holds while it runs.
+pub fn lock_path(home: &Path) -> PathBuf {
+    crate::common::paths::playbook_root_from(home).join("disk-clean.lock")
+}
+
 /// Takes the cleanup lock.
 pub fn lock(home: &Path) -> Lock {
-    let path = crate::common::paths::playbook_root_from(home).join("disk-clean.lock");
     match std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
-        .open(&path)
+        .open(lock_path(home))
     {
         Ok(file) if try_lock(&file) => Lock::Held(file),
         Ok(_) => Lock::Busy,
@@ -487,7 +491,7 @@ pub fn lock(home: &Path) -> Lock {
 }
 
 #[cfg(unix)]
-pub(super) fn try_lock(file: &std::fs::File) -> bool {
+pub fn try_lock(file: &std::fs::File) -> bool {
     use std::os::unix::io::AsRawFd;
     // SAFETY: the descriptor belongs to `file`, which outlives the call. The
     // lock is released when the file is closed.
@@ -495,7 +499,7 @@ pub(super) fn try_lock(file: &std::fs::File) -> bool {
 }
 
 #[cfg(not(unix))]
-pub(super) fn try_lock(_file: &std::fs::File) -> bool {
+pub fn try_lock(_file: &std::fs::File) -> bool {
     false
 }
 
@@ -512,8 +516,9 @@ pub fn auto_due(home: &Path, cwd: &Path) -> bool {
 
 /// Runs the whole cleanup for the repo at `repo_root`, if any: the selection
 /// above, then the worktree sweep. Returns the lines to print. A dry run
-/// takes no lock and writes nothing.
-pub fn run(home: &Path, repo_root: Option<&Path>, dry_run: bool) -> Vec<String> {
+/// takes no lock and writes nothing. An automatic run (`auto`) does nothing
+/// without the lock, so many started at once on a full disk cannot overlap.
+pub fn run(home: &Path, repo_root: Option<&Path>, dry_run: bool, auto: bool) -> Vec<String> {
     let mut lines = Vec::new();
     let _lock = if dry_run {
         None
@@ -521,6 +526,11 @@ pub fn run(home: &Path, repo_root: Option<&Path>, dry_run: bool) -> Vec<String> 
         match lock(home) {
             Lock::Busy => {
                 return vec!["disk clean: another cleanup is running, nothing to do".to_string()]
+            }
+            Lock::Unavailable(e) if auto => {
+                return vec![format!(
+                    "disk clean: the cleanup lock cannot be taken ({e}), nothing to do"
+                )]
             }
             Lock::Unavailable(e) => {
                 lines.push(format!(

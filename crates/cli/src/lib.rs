@@ -2211,6 +2211,7 @@ pub enum HookName {
     ContextHygiene,
     DocReadHint,
     UsageWarm,
+    DiskGuard,
     /// Kept so a playbook-hooks plugin cached on disk from an older release
     /// still exits 0 on SessionStart. Does nothing. Remove it once those
     /// caches have aged out.
