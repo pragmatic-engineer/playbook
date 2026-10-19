@@ -63,6 +63,9 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `usage.autoIngestMinutes` | `10` | a number, see the config keys page for the range |
 | `usage.budget.monthlyUsd` | `0` | a number, see the config keys page for the range |
 | `usage.budget.weeklyUsd` | `0` | a number, see the config keys page for the range |
+| `usage.plan` | `auto` | `auto`, `pro`, `max5x`, `max20x`, `team`, `enterprise`, `api`, `cloud` |
+| `usage.spend.enabled` | `false` | `true`, `false` |
+| `usage.spend.cacheSeconds` | `60` | a number, see the config keys page for the range |
 | `usage.ui.layout` | empty | see the config keys page |
 | `usage.ui.state` | empty | see the config keys page |
 | `sessions.staleAfterDays` | `3` | a number, see the config keys page for the range |

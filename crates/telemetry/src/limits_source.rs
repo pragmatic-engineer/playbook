@@ -14,7 +14,7 @@
 
 use super::limits::{Burn, Limit, LimitPeriod, Origin, State, Unit};
 use super::period::Period;
-use super::plan::Account;
+use super::plan::{Account, PlanChoice};
 use super::query::{month_first_day, WeekStart};
 use super::spend::{Comparison, NotCompared, SpendFigure};
 use super::UsageEvent;
@@ -227,12 +227,19 @@ pub struct Sources {
     pub account: Account,
     /// The figure the server billed, when one was fetched.
     pub server: Option<SpendFigure>,
+    /// The `usage.plan` setting.
+    pub plan_choice: PlanChoice,
 }
 
 impl Sources {
     /// Reads the sources. `usage_dir` is the folder of the usage database.
     pub fn load(usage_dir: Option<&Path>, claude_json: &Path, home: &Path) -> Sources {
-        Sources::new(usage_dir, claude_json, manual_budgets(home), true)
+        Sources {
+            plan_choice: super::host::config_value("usage.plan", home)
+                .and_then(|v| v.as_str().and_then(PlanChoice::parse))
+                .unwrap_or_default(),
+            ..Sources::new(usage_dir, claude_json, manual_budgets(home), true)
+        }
     }
 
     /// The sources with the budgets given. The terminal view asks for the
@@ -253,6 +260,7 @@ impl Sources {
                 super::plan::read(claude_json)
             },
             server: None,
+            plan_choice: PlanChoice::Auto,
         }
     }
 
@@ -495,8 +503,8 @@ pub fn windows_note(s: &Sources, limits: &[Limit]) -> Option<&'static str> {
 }
 
 /// The plan label, for views that name it.
-pub fn plan_label(s: &Sources) -> &'static str {
-    s.account.plan.label()
+pub fn plan_label(s: &Sources) -> String {
+    super::plan::plan_label(s.account.plan, s.plan_choice)
 }
 
 /// The empty state shown where a limit would be.
@@ -1015,6 +1023,22 @@ mod tests {
     }
 
     #[test]
+    fn the_plan_setting_changes_only_the_label_in_the_json() {
+        let s = Sources {
+            plan_choice: PlanChoice::Team,
+            budgets: vec![(LimitPeriod::Monthly, 100.0)],
+            ..Sources::default()
+        };
+
+        let v = report_json(&s, &[], NOW, WeekStart::Monday);
+        let base = report_json(&Sources::default(), &[], NOW, WeekStart::Monday);
+
+        assert_eq!(v["plan_label"], "Team (set by you)");
+        assert_eq!(v["plan"], base["plan"]);
+        assert_eq!(v["windows_note"], base["windows_note"]);
+    }
+
+    #[test]
     fn the_json_names_the_plan_and_the_cache_age() {
         let s = Sources {
             account: cache(600, spend(500.0, None), None),
@@ -1211,6 +1235,7 @@ mod tests {
             severity: None,
             resets_at: None,
             limit_reached: None,
+            scope: crate::spend::Scope::Unspecified,
             windows: Vec::new(),
             fetched_at,
             origin: Origin::Server,

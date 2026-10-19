@@ -82,6 +82,231 @@ impl Plan {
     }
 }
 
+/// The `usage.plan` setting: a label for the plan, set by the user. It changes
+/// the wording and, for `api` and `cloud`, says there is no server figure to
+/// ask for. It never changes a limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlanChoice {
+    #[default]
+    Auto,
+    Pro,
+    Max5x,
+    Max20x,
+    Team,
+    Enterprise,
+    Api,
+    Cloud,
+}
+
+impl PlanChoice {
+    pub fn parse(value: &str) -> Option<PlanChoice> {
+        Some(match value {
+            "auto" => PlanChoice::Auto,
+            "pro" => PlanChoice::Pro,
+            "max5x" => PlanChoice::Max5x,
+            "max20x" => PlanChoice::Max20x,
+            "team" => PlanChoice::Team,
+            "enterprise" => PlanChoice::Enterprise,
+            "api" => PlanChoice::Api,
+            "cloud" => PlanChoice::Cloud,
+            _ => return None,
+        })
+    }
+
+    /// The name of the plan class, `None` for `auto`.
+    pub fn label(self) -> Option<&'static str> {
+        Some(match self {
+            PlanChoice::Auto => return None,
+            PlanChoice::Pro => "Pro",
+            PlanChoice::Max5x => "Max 5x",
+            PlanChoice::Max20x => "Max 20x",
+            PlanChoice::Team => "Team",
+            PlanChoice::Enterprise => "Enterprise",
+            PlanChoice::Api => "API key",
+            PlanChoice::Cloud => "Bedrock, Vertex or Foundry",
+        })
+    }
+
+    /// Whether the user says there is no Claude.ai login to ask the server
+    /// through.
+    pub fn is_local_only(self) -> bool {
+        matches!(self, PlanChoice::Api | PlanChoice::Cloud)
+    }
+}
+
+/// The plan name for output. `auto` keeps the name read from the tiers; any
+/// other choice is shown as the user's own.
+pub fn plan_label(detected: Plan, choice: PlanChoice) -> String {
+    match choice.label() {
+        Some(label) => format!("{label} (set by you)"),
+        None => detected.label().to_string(),
+    }
+}
+
+/// How the user signs in to Claude Code. Only an OAuth login has a token the
+/// server figure could be asked with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginKind {
+    OAuth,
+    ApiKey,
+    /// Bedrock, Vertex or Foundry.
+    Cloud,
+    Unknown,
+}
+
+/// The variables that switch Claude Code to a cloud provider.
+const CLOUD_ENV: [&str; 3] = [
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+];
+
+/// The variable that holds an API key.
+const API_KEY_ENV: &str = "ANTHROPIC_API_KEY";
+
+impl LoginKind {
+    /// The login from whether the config file names an OAuth account and from
+    /// the environment (`env` returns a variable's value). A cloud provider
+    /// variable wins, then an API key variable, then an OAuth account. The
+    /// names of the cloud variables are not all documented, so a missing one
+    /// shows as `OAuth` or `Unknown`, which only costs a skipped optimization.
+    pub fn detect(has_oauth_account: bool, env: &dyn Fn(&str) -> Option<String>) -> LoginKind {
+        let on = |name: &str| {
+            env(name).is_some_and(|v| {
+                let v = v.trim();
+                !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false")
+            })
+        };
+        if CLOUD_ENV.iter().any(|n| on(n)) {
+            LoginKind::Cloud
+        } else if on(API_KEY_ENV) && !has_oauth_account {
+            LoginKind::ApiKey
+        } else if has_oauth_account {
+            LoginKind::OAuth
+        } else {
+            LoginKind::Unknown
+        }
+    }
+}
+
+/// Whose spend a figure counts, for the label.
+pub use crate::spend::Scope;
+
+/// One line a view draws.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DisplayLine {
+    /// A rolling window, by the name the source gave it.
+    Window(String),
+    MonthlyCap,
+    /// The estimate from this machine's own history. Always drawn.
+    LocalEstimate,
+}
+
+/// The plan shown when nothing identifies it and no source has data.
+pub const PLAN_LIMITS_UNAVAILABLE: &str = "plan limits unavailable";
+
+/// What a source actually carries. The lines a view draws follow this set and
+/// never the plan name: only one response shape has been observed, so no
+/// table of plans and limits exists.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Capabilities {
+    pub rolling_windows: Vec<(String, Window)>,
+    pub monthly_cap: Option<crate::spend::Money>,
+    pub scope: Scope,
+    /// Nothing server side is known, so only the local estimate is shown.
+    pub local_only: bool,
+}
+
+impl Capabilities {
+    fn build(
+        rolling_windows: Vec<(String, Window)>,
+        monthly_cap: Option<crate::spend::Money>,
+        scope: Scope,
+    ) -> Capabilities {
+        let local_only = rolling_windows.is_empty() && monthly_cap.is_none();
+        Capabilities {
+            rolling_windows,
+            monthly_cap,
+            scope,
+            local_only,
+        }
+    }
+
+    /// From a figure fetched from the server. A null window is not there.
+    pub fn from_figure(f: &crate::spend::SpendFigure) -> Capabilities {
+        Capabilities::build(f.windows.clone(), f.limit.clone(), f.scope)
+    }
+
+    /// From the usage numbers Claude Code cached.
+    pub fn from_cache(c: &UsageCache) -> Capabilities {
+        let windows = [("five_hour", &c.five_hour), ("seven_day", &c.seven_day)]
+            .into_iter()
+            .filter_map(|(name, w)| w.clone().map(|w| (name.to_string(), w)))
+            .collect();
+        Capabilities::build(
+            windows,
+            c.spend.map(|s| dollars(s.limit_usd)),
+            Scope::Unspecified,
+        )
+    }
+
+    /// From the statusline reading.
+    pub fn from_snapshot(s: &limits_source::Snapshot) -> Capabilities {
+        let windows = [("five_hour", &s.five_hour), ("seven_day", &s.seven_day)]
+            .into_iter()
+            .filter_map(|(name, w)| w.clone().map(|w| (name.to_string(), w)))
+            .collect();
+        let cap = s
+            .spend_limit
+            .as_ref()
+            .and_then(|l| l.limit_usd)
+            .map(dollars);
+        Capabilities::build(windows, cap, Scope::Unspecified)
+    }
+
+    /// Applies the login and the `usage.plan` choice. An API key or a cloud
+    /// provider has no server figure, so only the local estimate remains.
+    pub fn for_login(self, login: LoginKind, choice: PlanChoice) -> Capabilities {
+        if choice.is_local_only() || matches!(login, LoginKind::ApiKey | LoginKind::Cloud) {
+            return Capabilities::build(Vec::new(), None, Scope::Unspecified);
+        }
+        self
+    }
+
+    /// The lines to draw, in order: the windows, the monthly cap, then the
+    /// local estimate.
+    pub fn lines(&self) -> Vec<DisplayLine> {
+        let mut out: Vec<DisplayLine> = self
+            .rolling_windows
+            .iter()
+            .map(|(name, _)| DisplayLine::Window(name.clone()))
+            .collect();
+        if self.monthly_cap.is_some() {
+            out.push(DisplayLine::MonthlyCap);
+        }
+        out.push(DisplayLine::LocalEstimate);
+        out
+    }
+
+    /// The one neutral line for a plan that is not identified and has no data.
+    pub fn note(&self, plan: Plan, choice: PlanChoice) -> Option<&'static str> {
+        (self.local_only && plan == Plan::EnterpriseOrUnknown && choice == PlanChoice::Auto)
+            .then_some(PLAN_LIMITS_UNAVAILABLE)
+    }
+}
+
+/// A dollar amount as USD in cents.
+fn dollars(usd: f64) -> crate::spend::Money {
+    crate::spend::Money {
+        minor: (usd * USD_MINOR_PER_UNIT).round() as i64,
+        decimals: USD_DECIMALS,
+        currency: Some(crate::spend::USD.to_string()),
+    }
+}
+
+const USD_DECIMALS: u8 = 2;
+const USD_MINOR_PER_UNIT: f64 = 100.0;
+
 /// The monthly spend limit of an account, in dollars.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpendLimit {
@@ -1032,6 +1257,7 @@ mod tests {
             severity: None,
             resets_at: None,
             limit_reached: None,
+            scope: crate::spend::Scope::Unspecified,
             windows: Vec::new(),
             fetched_at: NOW - age,
             origin: crate::limits::Origin::Server,
@@ -1050,5 +1276,230 @@ mod tests {
             "{fresh}"
         );
         assert!(stale.contains("(stale)"), "{stale}");
+    }
+
+    use crate::spend::{self, Parsed};
+
+    fn synthetic(name: &str) -> Capabilities {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/spend")
+            .join(format!("synthetic-unverified-{name}.json"));
+        let body = std::fs::read_to_string(path).unwrap();
+        match spend::parse(&body, NOW) {
+            Ok(Parsed::Figure(f)) => Capabilities::from_figure(&f),
+            Ok(Parsed::Empty) => Capabilities::build(Vec::new(), None, Scope::Unspecified),
+            Err(e) => panic!("{name}: {e:?}"),
+        }
+    }
+
+    fn window_names(c: &Capabilities) -> Vec<&str> {
+        c.rolling_windows.iter().map(|(n, _)| n.as_str()).collect()
+    }
+
+    #[test]
+    fn the_capability_set_follows_the_fields_present_in_each_synthetic_shape() {
+        use DisplayLine::{LocalEstimate, MonthlyCap, Window};
+        let w = |n: &str| Window(n.to_string());
+        let table = [
+            (
+                "max20x-extra-usage",
+                Scope::Unspecified,
+                vec![MonthlyCap, LocalEstimate],
+            ),
+            (
+                "windows-only",
+                Scope::Unspecified,
+                vec![w("five_hour"), w("seven_day"), LocalEstimate],
+            ),
+            (
+                "monthly-cap-only",
+                Scope::Unspecified,
+                vec![MonthlyCap, LocalEstimate],
+            ),
+            (
+                "windows-and-cap",
+                Scope::Unspecified,
+                vec![w("five_hour"), w("seven_day"), MonthlyCap, LocalEstimate],
+            ),
+            ("org-scope", Scope::Org, vec![MonthlyCap, LocalEstimate]),
+            (
+                "member-scope",
+                Scope::Member,
+                vec![MonthlyCap, LocalEstimate],
+            ),
+            (
+                "unknown-extra-window",
+                Scope::Unspecified,
+                vec![w("thirty_day"), MonthlyCap, LocalEstimate],
+            ),
+            ("empty", Scope::Unspecified, vec![LocalEstimate]),
+            ("free-or-unknown", Scope::Unspecified, vec![LocalEstimate]),
+        ];
+
+        for (name, scope, lines) in table {
+            let c = synthetic(name);
+
+            assert_eq!(c.scope, scope, "{name}");
+            assert_eq!(c.lines(), lines, "{name}");
+            assert_eq!(c.local_only, lines == [LocalEstimate], "{name}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_window_is_shown_under_its_own_name() {
+        assert_eq!(
+            window_names(&synthetic("unknown-extra-window")),
+            ["thirty_day"]
+        );
+    }
+
+    #[test]
+    fn an_api_key_or_cloud_login_is_local_only_whatever_the_server_said() {
+        let rich = synthetic("windows-and-cap");
+
+        for login in [LoginKind::ApiKey, LoginKind::Cloud] {
+            let c = rich.clone().for_login(login, PlanChoice::Auto);
+
+            assert!(c.local_only, "{login:?}");
+            assert_eq!(c.lines(), [DisplayLine::LocalEstimate]);
+        }
+        assert!(synthetic("api-key-login").local_only);
+        assert!(synthetic("cloud-login").local_only);
+        assert!(
+            !rich
+                .clone()
+                .for_login(LoginKind::OAuth, PlanChoice::Auto)
+                .local_only
+        );
+        assert!(
+            !rich
+                .for_login(LoginKind::Unknown, PlanChoice::Auto)
+                .local_only
+        );
+    }
+
+    #[test]
+    fn the_api_and_cloud_choices_force_local_only_and_the_others_change_nothing() {
+        let rich = synthetic("windows-and-cap");
+
+        for choice in [PlanChoice::Api, PlanChoice::Cloud] {
+            assert!(rich.clone().for_login(LoginKind::OAuth, choice).local_only);
+        }
+        for choice in [
+            PlanChoice::Auto,
+            PlanChoice::Pro,
+            PlanChoice::Max5x,
+            PlanChoice::Max20x,
+            PlanChoice::Team,
+            PlanChoice::Enterprise,
+        ] {
+            assert_eq!(rich.clone().for_login(LoginKind::OAuth, choice), rich);
+        }
+    }
+
+    #[test]
+    fn the_choice_changes_only_the_label() {
+        let a = plan_label(Plan::Max20x, PlanChoice::Max5x);
+        let b = plan_label(Plan::Max20x, PlanChoice::Max20x);
+
+        assert_eq!(a, "Max 5x (set by you)");
+        assert_eq!(b, "Max 20x (set by you)");
+        assert_eq!(plan_label(Plan::Max20x, PlanChoice::Auto), "Max 20x");
+        assert_eq!(
+            plan_label(Plan::EnterpriseOrUnknown, PlanChoice::Auto),
+            "Enterprise or unknown plan"
+        );
+        assert_eq!(
+            plan_label(Plan::EnterpriseOrUnknown, PlanChoice::Team),
+            "Team (set by you)"
+        );
+    }
+
+    #[test]
+    fn the_choice_parses_every_documented_value_and_nothing_else() {
+        for key in [
+            "auto",
+            "pro",
+            "max5x",
+            "max20x",
+            "team",
+            "enterprise",
+            "api",
+            "cloud",
+        ] {
+            assert!(PlanChoice::parse(key).is_some(), "{key}");
+        }
+        assert!(PlanChoice::parse("free").is_none());
+        assert!(PlanChoice::parse("").is_none());
+        assert_eq!(PlanChoice::default(), PlanChoice::Auto);
+    }
+
+    #[test]
+    fn an_unknown_plan_with_no_data_gets_one_neutral_line() {
+        let none = synthetic("empty");
+        let rich = synthetic("windows-only");
+
+        assert_eq!(
+            none.note(Plan::EnterpriseOrUnknown, PlanChoice::Auto),
+            Some("plan limits unavailable")
+        );
+        assert_eq!(none.note(Plan::Max20x, PlanChoice::Auto), None);
+        assert_eq!(none.note(Plan::EnterpriseOrUnknown, PlanChoice::Team), None);
+        assert_eq!(rich.note(Plan::EnterpriseOrUnknown, PlanChoice::Auto), None);
+    }
+
+    #[test]
+    fn the_cache_and_the_statusline_give_the_same_kind_of_set() {
+        let win = Window {
+            used_percentage: 1.0,
+            resets_at: NOW + 60,
+        };
+        let cache = UsageCache {
+            fetched_at: NOW,
+            five_hour: Some(win.clone()),
+            seven_day: None,
+            spend: Some(SpendLimit {
+                limit_usd: 500.0,
+                used_usd: None,
+            }),
+        };
+        let snap = Snapshot {
+            captured_at: NOW,
+            seven_day: Some(win),
+            ..Snapshot::default()
+        };
+
+        let from_cache = Capabilities::from_cache(&cache);
+        let from_snap = Capabilities::from_snapshot(&snap);
+
+        assert_eq!(window_names(&from_cache), ["five_hour"]);
+        assert_eq!(from_cache.monthly_cap.as_ref().unwrap().format(), "500.00");
+        assert_eq!(window_names(&from_snap), ["seven_day"]);
+        assert!(from_snap.monthly_cap.is_none());
+        assert!(Capabilities::from_cache(&UsageCache::default()).local_only);
+    }
+
+    #[test]
+    fn the_login_follows_the_environment_and_the_account() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+
+        let cloud = LoginKind::detect(true, &env(&[("CLAUDE_CODE_USE_BEDROCK", "1")]));
+        let off = LoginKind::detect(true, &env(&[("CLAUDE_CODE_USE_VERTEX", "0")]));
+        let key = LoginKind::detect(false, &env(&[("ANTHROPIC_API_KEY", "set")]));
+        let key_and_account = LoginKind::detect(true, &env(&[("ANTHROPIC_API_KEY", "set")]));
+        let none = LoginKind::detect(false, &env(&[]));
+
+        assert_eq!(cloud, LoginKind::Cloud);
+        assert_eq!(off, LoginKind::OAuth);
+        assert_eq!(key, LoginKind::ApiKey);
+        assert_eq!(key_and_account, LoginKind::OAuth);
+        assert_eq!(none, LoginKind::Unknown);
     }
 }

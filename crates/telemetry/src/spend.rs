@@ -26,7 +26,7 @@ pub const MAX_DECIMALS: u8 = 6;
 const MAX_MINOR_UNITS: f64 = 1e15;
 
 /// The currency code of dollars.
-const USD: &str = "USD";
+pub const USD: &str = "USD";
 
 /// The longest currency code that is kept. Anything longer or with other
 /// characters than letters and digits is treated as absent, so a hostile
@@ -104,6 +104,30 @@ impl Money {
     }
 }
 
+/// Whose spend the figure counts, when the document says. The field name is
+/// not documented, so a document that does not carry one is `Unspecified` and
+/// the label says "as reported by the server".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    Member,
+    Org,
+    Unspecified,
+}
+
+impl Scope {
+    fn parse(v: Option<&Value>) -> Scope {
+        match v
+            .and_then(Value::as_str)
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("member") => Scope::Member,
+            Some("org") => Scope::Org,
+            _ => Scope::Unspecified,
+        }
+    }
+}
+
 /// The server's view of the monthly spend limit at one instant.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpendFigure {
@@ -114,6 +138,7 @@ pub struct SpendFigure {
     /// When the limit resets, UTC seconds, if the document said.
     pub resets_at: Option<i64>,
     pub limit_reached: Option<bool>,
+    pub scope: Scope,
     /// Every top level usage window, by the document's own name, sorted by it.
     pub windows: Vec<(String, Window)>,
     /// When the figure was fetched, UTC seconds.
@@ -241,6 +266,10 @@ pub fn parse(body: &str, fetched_at: i64) -> Result<Parsed, SpendError> {
         severity: text(spend.and_then(|s| s.get("severity"))),
         resets_at: time(field("resets_at")),
         limit_reached: root.get("spend_limit_reached").and_then(Value::as_bool),
+        scope: match Scope::parse(root.get("scope")) {
+            Scope::Unspecified => Scope::parse(field("scope")),
+            stated => stated,
+        },
         windows,
         fetched_at,
         origin: Origin::Server,

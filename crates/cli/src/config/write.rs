@@ -290,6 +290,7 @@ fn usd(cents: i64) -> String {
 /// `auto.budgetUsd` and `auto.agentBudgetUsd` take any number of at least one cent, since the spend cap
 /// is held in whole cents, so a fractional budget works.
 /// `usage.budget.*Usd` takes any number from 0 (no budget).
+/// `usage.spend.cacheSeconds` takes a whole number within 30 to 600.
 /// `auto.warnPct` takes a whole number within 1 to 100, `usage.refreshSeconds` one within 1 to
 /// 3600, `hygiene.thresholdTokens` one of at least 10000, the `fix.` and `review.stack` limits a whole number of at least 1, and every other
 /// numeric key 0 or more.
@@ -319,6 +320,10 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         "usage.refreshSeconds" => (
             whole.is_some_and(|n| (1..=3600).contains(&n)),
             "a whole number between 1 and 3600",
+        ),
+        "usage.spend.cacheSeconds" => (
+            whole.is_some_and(|n| playbook_telemetry::config::SPEND_CACHE_SECONDS.contains(&n)),
+            "a whole number between 30 and 600",
         ),
         "disk.warnFreeGb" | "disk.blockFreeGb" => (
             whole.is_some_and(|n| (0..=crate::disk::policy::MAX_THRESHOLD_GB).contains(&n)),

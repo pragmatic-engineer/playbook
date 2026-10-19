@@ -1,0 +1,1 @@
+{"_note": "Invented to test tolerance. Not real Anthropic output.", "extra_usage": {"monthly_limit": 50000, "decimal_places": 2, "currency": "USD"}, "thirty_day": {"utilization": 5.0, "resets_at": "2026-09-30T00:00:00+00:00"}}
