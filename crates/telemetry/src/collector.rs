@@ -126,17 +126,23 @@ pub enum Probe {
     Silent,
 }
 
-const PROBE_DEADLINE: Duration = Duration::from_millis(1000);
+pub(crate) const PROBE_DEADLINE: Duration = Duration::from_millis(1000);
 
 /// Sends a harmless request to `port` and classifies the reply. A collector
 /// answers every request, including this unauthenticated `GET`, with the
 /// `X-Playbook-Collector` header.
 pub fn probe(port: u16) -> Probe {
-    use std::io::{Read, Write};
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    let Ok(mut stream) = TcpStream::connect_timeout(&addr, PROBE_DEADLINE) else {
-        return Probe::Silent;
-    };
+    match TcpStream::connect_timeout(&addr, PROBE_DEADLINE) {
+        Ok(stream) => probe_stream(stream),
+        Err(_) => Probe::Silent,
+    }
+}
+
+/// `probe` on a stream the caller connected, so the daemon's starters can
+/// count their connects.
+pub(crate) fn probe_stream(mut stream: TcpStream) -> Probe {
+    use std::io::{Read, Write};
     let _ = stream.set_read_timeout(Some(PROBE_DEADLINE));
     let _ = stream.set_write_timeout(Some(PROBE_DEADLINE));
     let request = "GET /v1/logs HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
@@ -188,7 +194,11 @@ fn first_port_from(preferred: u16) -> Result<u16, String> {
 /// Binds the recorded port. A port a killed process is still releasing is
 /// retried for up to `wait`; a port another program owns is an error, never
 /// a different port. Any other bind error is returned at once.
-fn bind_recorded(port: u16, wait: Duration) -> Result<std::net::TcpListener, String> {
+fn bind_recorded(
+    port: u16,
+    wait: Duration,
+    on_foreign: impl FnOnce(),
+) -> Result<std::net::TcpListener, String> {
     let deadline = std::time::Instant::now() + wait;
     loop {
         match bind(port) {
@@ -197,6 +207,7 @@ fn bind_recorded(port: u16, wait: Duration) -> Result<std::net::TcpListener, Str
                 return Err(format!("cannot listen on 127.0.0.1:{port}: {e}"));
             }
             Err(e) if std::time::Instant::now() >= deadline => {
+                on_foreign();
                 return Err(format!(
                     "port {port} is in use by another program ({e}). The collector keeps its recorded port so the Claude Code settings stay valid. Free the port, or move to a new one with `{} --port <N>` and then run `playbook setup --only telemetry` (older versions: `playbook init --only telemetry`) to rewrite the endpoint in your settings",
                     super::host::command("usage collect")
@@ -514,7 +525,12 @@ fn run_collect_with(
                     let wait = if foreign { Duration::ZERO } else { retry };
                     // The token is kept: it is also in the settings that init
                     // wrote, and a new one would lock every session out.
-                    bind_recorded(p, wait)?
+                    // Every spawn would fail the same way, so starters hold
+                    // off and doctor can say why.
+                    bind_recorded(p, wait, || {
+                        let reason = daemon::port_busy_reason(p);
+                        let _ = daemon::hold_off(paths, daemon::PORT_BUSY_WINDOW, &reason);
+                    })?
                 }
                 None => first_listener_from(default_port)?,
             }
@@ -557,7 +573,7 @@ fn run_collect_with(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::util::scratch_dir;
     use std::sync::atomic::Ordering;
@@ -591,42 +607,59 @@ mod tests {
         assert!(!runs_other_build(&State::default()));
     }
 
+    /// Sets the stop flag and wakes the blocking accept on `port`.
+    fn halt(stop: &AtomicBool, port: u16) {
+        stop.store(true, Ordering::SeqCst);
+        crate::receiver::wake(SocketAddr::from((Ipv4Addr::LOCALHOST, port)));
+    }
+
     /// Runs a collector on a thread and always stops it, so a failed
     /// assertion cannot leave one serving.
-    struct Running {
+    pub(crate) struct Running {
         stop: Arc<AtomicBool>,
+        port: u16,
         thread: Option<std::thread::JoinHandle<Result<String, String>>>,
     }
 
     impl Running {
-        fn start(p: &Paths) -> Self {
+        pub(crate) fn start(p: &Paths) -> Self {
             let stop = Arc::new(AtomicBool::new(false));
             let (paths, flag) = (p.clone(), Arc::clone(&stop));
             let thread = std::thread::spawn(move || run_collect(&paths, Some(0), 0, &flag));
-            let me = Self {
+            let mut me = Self {
                 stop,
+                port: 0,
                 thread: Some(thread),
             };
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            while read_state(&state_path(p)).is_none_or(|s| s.pid == 0) {
+            loop {
+                if let Some(s) = read_state(&state_path(p)).filter(|s| s.pid != 0) {
+                    me.port = s.port;
+                    return me;
+                }
                 assert!(
                     std::time::Instant::now() < deadline,
                     "collector never came up"
                 );
                 std::thread::sleep(Duration::from_millis(10));
             }
-            me
         }
 
         fn finish(mut self) -> Result<String, String> {
-            self.stop.store(true, Ordering::SeqCst);
+            halt(&self.stop, self.port);
             self.thread.take().unwrap().join().unwrap()
         }
     }
 
     impl Drop for Running {
         fn drop(&mut self) {
-            self.stop.store(true, Ordering::SeqCst);
+            // With no port known nothing can wake accept, so a join could hang;
+            // the flag still ends a serve that has not reached accept yet.
+            if self.port == 0 {
+                self.stop.store(true, Ordering::SeqCst);
+                return;
+            }
+            halt(&self.stop, self.port);
             if let Some(t) = self.thread.take() {
                 let _ = t.join();
             }
@@ -769,7 +802,7 @@ mod tests {
         migrate_up(&db).unwrap();
         let serve_stop = Arc::new(AtomicBool::new(false));
         let server_stop = Arc::clone(&serve_stop);
-        let server = std::thread::spawn(move || {
+        let thread = std::thread::spawn(move || {
             let cfg = Config {
                 token: None,
                 idle: None,
@@ -777,13 +810,32 @@ mod tests {
             };
             let _ = serve(&listener, db, &cfg, &server_stop, || 0);
         });
+        let _server = Serving {
+            stop: serve_stop,
+            port,
+            thread: Some(thread),
+        };
         let stop = Arc::new(AtomicBool::new(false));
 
         let msg = run_collect(&p, None, 1, &stop).unwrap();
 
-        serve_stop.store(true, Ordering::SeqCst);
-        let _ = server.join();
         assert!(msg.contains("already running"), "{msg}");
+    }
+
+    /// A bare `serve` on a thread, stopped and joined in `Drop`.
+    struct Serving {
+        stop: Arc<AtomicBool>,
+        port: u16,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Drop for Serving {
+        fn drop(&mut self) {
+            halt(&self.stop, self.port);
+            if let Some(t) = self.thread.take() {
+                let _ = t.join();
+            }
+        }
     }
 
     fn state_on(p: &Paths, port: u16) {
@@ -843,6 +895,10 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(10));
         let after = read_state(&state_path(&p)).unwrap();
         assert_eq!((after.port, after.token.as_str()), (port, "t"));
+        assert_eq!(
+            daemon::stamp_reason(&p),
+            Some(daemon::port_busy_reason(port))
+        );
     }
 
     #[test]
@@ -950,7 +1006,7 @@ mod tests {
         });
         let started = std::time::Instant::now();
 
-        let again = bind_recorded(port, Duration::from_secs(5));
+        let again = bind_recorded(port, Duration::from_secs(5), || ());
 
         let _ = releaser.join();
         assert!(again.is_ok(), "{:?}", again.err());
@@ -970,7 +1026,7 @@ mod tests {
         drop(listener);
         drop(client);
 
-        let again = bind_recorded(port, Duration::from_secs(1));
+        let again = bind_recorded(port, Duration::from_secs(1), || ());
 
         assert!(again.is_ok(), "{:?}", again.err());
     }

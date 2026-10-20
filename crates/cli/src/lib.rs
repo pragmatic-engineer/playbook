@@ -91,6 +91,7 @@ pub mod uninstall;
 pub mod update;
 pub use playbook_telemetry as usage;
 pub mod service_manager;
+pub mod skills_sync;
 pub mod usage_host;
 pub mod worktree;
 
@@ -314,7 +315,7 @@ pub enum Command {
         #[command(flatten)]
         flags: init::choices::Flags,
     },
-    /// List the hooks that `playbook setup` wires into Claude Code, or explain a guard verdict
+    /// List the hooks that `playbook setup` wires into Claude Code
     Hooks {
         #[command(subcommand)]
         sub: HooksCommand,

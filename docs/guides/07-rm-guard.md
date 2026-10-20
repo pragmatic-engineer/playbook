@@ -4,20 +4,20 @@ The `rm-workspace-guard` hook stops one kind of accident: a command that deletes
 
 ## What it denies
 
-An `rm`, `rmdir`, `unlink` or `shred` with any of these targets, with or without quotes, with any flags (also `--no-preserve-root` and `--`), and after `sudo`, `command`, `env`, `exec`, `nohup` or `time`:
+An `rm`, `rmdir`, `unlink` or `shred` with any of these targets, with or without quotes, with any flags (also `--no-preserve-root` and `--`), and after a wrapper (`sudo`, `doas`, `command`, `env`, `exec`, `nohup`, `time`, `nice`, `ionice`, `timeout` or `xargs`, with any option or value it takes):
 
 | Target | Forms |
 | :- | :- |
-| The filesystem root | `/`, `/*`, `//` |
-| Your home folder | `~`, `~/`, `~/*`, `$HOME`, `${HOME}`, `$HOME/`, `$HOME/*`, and the literal path of your home folder, with or without `/` or `/*` after it |
+| The filesystem root | `/`, `/*`, `/**`, `//` |
+| Your home folder | `~`, `~/`, `~/*`, `~/.*`, `$HOME`, `${HOME}`, `${HOME:?}`, `$HOME/`, `$HOME/*`, and the literal path of your home folder, with or without `/`, `/.`, `/*`, `/**` or `/.*` after it |
 
-The command line is split on `;`, `&`, `|` and line breaks, and each simple command is read word by word. The denial is one fixed sentence that says the model does not run it and that you can run the command yourself with `!`.
+The command line is split on `;`, `&`, `|`, `(`, `)`, backticks and line breaks, and each simple command is read word by word. So `(rm -rf /)`, `{ rm -rf /; }`, `if x; then rm -rf ~; fi`, `$(rm -rf /)` and backticks are read too, and the script of `sh -c`, `bash -c`, `zsh -c`, `dash -c` and `ksh -c` is read the same way. The denial is one fixed sentence that says the model does not run it and that you can run the command yourself with `!`.
 
 ## What it allows
 
 Every other path, including paths inside home: `rm -rf ./target`, `rm -rf ~/projects/x/target`, `rm -rf /tmp/x` and `rm -rf /Users/other` all pass.
 
-The guard does not follow `cd`, variables, subshells (`$(...)`, backticks), `find -delete`, `xargs`, `git clean`, interpreter one-liners, redirects, here-docs or scripts. Anything it cannot read passes. Quoted text, an `echo`, a grep pattern and a commit message are data, so `echo "rm -rf /"` passes.
+The guard does not follow `cd`, variables, `find -delete`, the input of `xargs`, `git clean`, interpreter one-liners, redirects, here-docs or script files. Anything it cannot read passes. Quoted text, an `echo`, a grep pattern and a commit message are data, so `echo "rm -rf /"` passes.
 
 ## What changed
 

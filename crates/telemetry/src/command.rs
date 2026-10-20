@@ -46,7 +46,7 @@ pub enum UsageCommand {
     /// disabled it in your Claude Code settings, or off because nothing sets it) with a one-line
     /// fix, then the pid, port, idle limit, how many telemetry rows are stored
     /// (API requests, tool calls, API errors, metric points), the retention limits, the time of the newest
-    /// event and the background service that runs the collector, if one is installed. It starts nothing and never prints the token. With `--json` it
+    /// event and the background service that runs the collector, if one is installed. Like most playbook commands it can start the collector first. It never prints the token. With `--json` it
     /// prints the same as JSON. Exit code 0 whether or not a receiver runs.
     ///
     /// Example: `playbook usage status --json`
@@ -55,6 +55,18 @@ pub enum UsageCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Stop the running telemetry collector
+    ///
+    /// Asks the collector that holds the lock to stop through its
+    /// authenticated shutdown route and waits up to 3 seconds for it to let
+    /// go. One that does not answer is killed, but only after checking that
+    /// the process is really the playbook collector. Prints `stopped`, or
+    /// `not running` with exit code 0 when no collector runs. The next
+    /// playbook command or session starts a new one. A collector from
+    /// 0.38.0 or older holds no lock, so this does not see it.
+    ///
+    /// Example: `playbook usage stop`
+    Stop,
     /// Show where pbtop can read your usage limits on this machine
     ///
     /// Lists which sources exist: the plan fields and cached usage numbers
