@@ -228,6 +228,8 @@ pub(crate) const META: &[Meta] = &[
     ro("settings check"),
     free("settings gen"),
     user("setup"),
+    ro("skills"),
+    user("skills sync"),
     ro("state"),
     ro("state list"),
     ro("statusline"),
