@@ -77,6 +77,12 @@ pub struct Flags {
     /// Do not write the disk ballast file, the default
     #[arg(long, overrides_with = "disk_ballast")]
     pub no_disk_ballast: bool,
+    /// Turn the policy guard on (`hooks.policyGuard.enabled`): it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
+    #[arg(long, overrides_with = "no_policy_guard")]
+    pub policy_guard: bool,
+    /// Do not turn the policy guard on; it is off by default and a stored choice is not changed
+    #[arg(long, overrides_with = "policy_guard")]
+    pub no_policy_guard: bool,
     #[arg(
         long,
         overrides_with_all = ["no_attribution", "attribution_off", "no_attribution_off"],
@@ -100,7 +106,7 @@ pub struct Flags {
         value_name = "PART",
         value_delimiter = ',',
         num_args = 1..,
-        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, disk-ballast, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
+        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, disk-ballast, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
     )]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
@@ -127,6 +133,8 @@ pub struct Choices {
     pub short_name: bool,
     /// Whether to write the 1 GB disk ballast. Off unless chosen.
     pub disk_ballast: bool,
+    /// Whether to turn the policy guard on. Off unless chosen.
+    pub policy_guard: bool,
     /// Attribution OFF (the default), ON, or left as it is.
     pub attribution: attribution::Choice,
 }
@@ -152,6 +160,7 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
         "collector-service" => (flags.collector_service, flags.no_collector_service),
         "short-name" => (flags.short_name, flags.no_short_name),
         "disk-ballast" => (flags.disk_ballast, flags.no_disk_ballast),
+        "policy-guard" => (flags.policy_guard, flags.no_policy_guard),
         "attribution" => (flags.attribution, flags.no_attribution),
         _ => return None,
     })
@@ -304,6 +313,7 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         collector_service: has("collector-service"),
         short_name: has("short-name"),
         disk_ballast: has("disk-ballast"),
+        policy_guard: has("policy-guard"),
         attribution: match has(attribution::PART) {
             true => attribution_from_flags(flags).unwrap_or(attribution::Choice::Default),
             false => attribution::Choice::Skip,
@@ -527,6 +537,14 @@ pub fn resolve_with(
             catalog::question("disk-ballast"),
             false,
         ),
+        // It denies tool calls, so it stays off unless a flag or an answer
+        // says yes, `--yes` included.
+        policy_guard: decide(
+            flags.policy_guard,
+            flags.no_policy_guard,
+            catalog::question("policy-guard"),
+            false,
+        ),
         attribution: attribution::Choice::Skip,
     };
     // The question asks for ON, so a no, or Enter, is OFF that keeps the
@@ -567,13 +585,14 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
         (flags.collector_service, flags.no_collector_service),
         (flags.short_name, flags.no_short_name),
         (flags.disk_ballast, flags.no_disk_ballast),
+        (flags.policy_guard, flags.no_policy_guard),
         (flags.attribution, flags.no_attribution),
     ]
     .iter()
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
         "setup: output is not a terminal, so no questions were asked; the hooks, status line, \
-         system-prompt, telemetry, collector-service, short-name and disk-ballast parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
+         system-prompt, telemetry, collector-service, short-name, disk-ballast and policy-guard parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
 }
@@ -601,6 +620,7 @@ mod tests {
             no_collector_service: true,
             no_short_name: true,
             no_disk_ballast: true,
+            no_policy_guard: true,
             no_attribution: true,
             ..Flags::default()
         };
@@ -653,6 +673,7 @@ mod tests {
                 collector_service: false,
                 short_name: false,
                 disk_ballast: false,
+                policy_guard: false,
                 attribution: attribution::Choice::Skip
             }
         );
@@ -673,10 +694,36 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.path);
-        assert_eq!(asked.len(), 7, "{asked:?}");
+        assert_eq!(asked.len(), 8, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| !q.contains("hooks") && q != catalog::question("path")));
+    }
+
+    #[test]
+    fn the_policy_guard_stays_off_unless_a_flag_or_an_answer_says_yes() {
+        let yes = Flags {
+            yes: true,
+            ..Flags::default()
+        };
+        assert!(!resolve(&yes, false, true, &mut never).policy_guard);
+        assert!(!resolve(&yes, true, true, &mut never).policy_guard);
+        let flag = Flags {
+            yes: true,
+            policy_guard: true,
+            ..Flags::default()
+        };
+        assert!(resolve(&flag, false, true, &mut never).policy_guard);
+        let answered = resolve(&Flags::default(), true, true, &mut |q, d| {
+            q == catalog::question("policy-guard") || d
+        });
+        assert!(answered.policy_guard);
+        let only = Flags {
+            only: vec!["policy-guard".into()],
+            ..Flags::default()
+        };
+        let c = only_choices(&only).unwrap().unwrap();
+        assert!(c.policy_guard && !c.hooks && !c.disk_ballast);
     }
 
     #[test]
@@ -922,6 +969,7 @@ mod tests {
                 collector_service: true,
                 short_name: true,
                 disk_ballast: false,
+                policy_guard: false,
                 attribution: attribution::Choice::Default
             }
         );
@@ -1017,6 +1065,7 @@ mod tests {
                 collector_service: false,
                 short_name: false,
                 disk_ballast: false,
+                policy_guard: false,
                 attribution: attribution::Choice::Skip
             }
         );
@@ -1152,6 +1201,7 @@ mod tests {
             collector_service: false,
             short_name: false,
             disk_ballast: false,
+            policy_guard: false,
             attribution: attribution::Choice::Skip,
         }
     }
