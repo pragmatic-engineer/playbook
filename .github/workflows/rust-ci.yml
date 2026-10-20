@@ -262,6 +262,21 @@ jobs:
         with:
           tool: nextest@0.9.145
 
+      # The playbook doc tests that run the real pbdoc read it from PBDOC_BIN,
+      # because cargo only builds a binary for its own crate's tests.
+      - name: Build pbdoc for the playbook tests
+        if: env.LANE == 'true'
+        env:
+          PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
+        run: |
+          set -euo pipefail
+          case " $PKGS " in
+            *" --workspace "*|*" -p playbook "*|*" -p pbdoc "*)
+              cargo build -p pbdoc
+              echo "PBDOC_BIN=$PWD/target/debug/pbdoc" >> "$GITHUB_ENV"
+              ;;
+          esac
+
       - name: cargo nextest run
         if: env.LANE == 'true'
         env:

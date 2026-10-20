@@ -11,7 +11,7 @@ use super::tmp::TempDir;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Read;
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -24,6 +24,10 @@ pub const FORMATS: &[&str] = &[
 
 /// The converter version these safeguards were tested with.
 pub const TESTED_VERSION: &str = "0.2";
+
+/// The largest input accepted whatever `docs.maxBytes` says. Equal to the
+/// ceiling the bundled converter enforces itself.
+pub const HARD_MAX_INPUT_BYTES: u64 = 104_857_600;
 
 /// Hard ceiling on the bytes read back from the converter's output file.
 const READ_CEILING: u64 = 32 * 1024 * 1024;
@@ -49,6 +53,7 @@ pub enum DocError {
     NeedsOcr,
     Timeout(u64),
     MemoryLimit(u64),
+    ResourceLimit(String),
     Interrupted(i32),
     OutOfDate,
     Failed(String),
@@ -81,6 +86,7 @@ impl DocError {
                     "conversion stopped, it used more than {mb} MB of memory (docs.maxMemoryMb)"
                 )
             }
+            Self::ResourceLimit(reason) => format!("the document hit a safety limit: {reason}"),
             Self::Interrupted(_) => "conversion interrupted".to_string(),
             Self::OutOfDate => OUT_OF_DATE_MESSAGE.to_string(),
             Self::Failed(why) => format!("conversion failed: {why}"),
@@ -98,6 +104,7 @@ impl DocError {
             Self::NeedsOcr => "needs_ocr",
             Self::Timeout(_) => "timeout",
             Self::MemoryLimit(_) => "memory_limit",
+            Self::ResourceLimit(_) => "resource_limit",
             Self::Interrupted(_) => "interrupted",
             Self::OutOfDate => "out_of_date",
             Self::Failed(_) => "failed",
@@ -187,9 +194,22 @@ const FLAG_END_OF_FLAGS: &str = "--";
 const FLAG_MAX_INPUT_BYTES: &str = "--max-input-bytes";
 const FLAG_MAX_MEMORY_MB: &str = "--max-memory-mb";
 const KB_PER_MB: u64 = 1024;
+const BYTES_PER_KB: u64 = 1024;
 /// A converter exits with this code when it rejects its arguments.
 const EXIT_USAGE: i32 = 2;
 const EXIT_NEEDS_OCR: i32 = 3;
+/// The bundled helper exits with this code when it hits a safety limit.
+const EXIT_RESOURCE_LIMIT: i32 = 4;
+/// Added to `docs.maxMemoryMb` for the address space cap, so mapped libraries
+/// and thread stacks do not trip it before the memory cap does.
+const ADDRESS_SPACE_HEADROOM: u64 = 512 * 1024 * 1024;
+const REASON_MEMORY: &str = "memory";
+const REASON_CRASH: &str = "memory limit or crash";
+
+/// The signals a child gets when it runs out of address space or memory.
+fn is_memory_crash(sig: i32) -> bool {
+    matches!(sig, libc::SIGABRT | libc::SIGSEGV | libc::SIGKILL)
+}
 
 /// The arguments passed to the converter. Output goes to a file in the
 /// private directory. No OCR, API key or URL flag is ever added here. The
@@ -401,10 +421,11 @@ pub fn convert(
     if !meta.is_file() {
         return Err(DocError::NotAFile);
     }
-    if meta.len() > limits.max_input_bytes {
+    let max_input = limits.max_input_bytes.min(HARD_MAX_INPUT_BYTES);
+    if meta.len() > max_input {
         return Err(DocError::TooLarge {
             bytes: meta.len(),
-            max: limits.max_input_bytes,
+            max: max_input,
         });
     }
     let input = fs::canonicalize(input).map_err(|e| DocError::Io(e.kind().to_string()))?;
@@ -439,12 +460,27 @@ pub fn convert(
         .stderr(Stdio::from(stderr))
         .current_dir(scratch.path())
         .process_group(0);
+    // Only the bundled helper gets an address space cap, because Node reserves
+    // a large virtual range and would never start under one. macOS accepts
+    // neither RLIMIT_AS nor RLIMIT_DATA, so there the helper's own heap cap and
+    // watchdog plus the resident size watchdog below are the memory limits.
+    let address_space_cap = (cfg!(target_os = "linux") && converter.kind == Kind::Bundled)
+        .then(|| (limits.max_rss_kb * BYTES_PER_KB + ADDRESS_SPACE_HEADROOM) as libc::rlim_t);
     // SAFETY: only `setrlimit` runs between fork and exec, which is async
-    // signal safe. It caps the size of any file the child writes and turns
-    // off core dumps. RLIMIT_AS is not used because Node reserves a large
-    // virtual range, so the memory cap is the resident size watchdog below.
+    // signal safe. It caps the size of any file the child writes, turns off
+    // core dumps and applies the address space cap when there is one.
     unsafe {
-        cmd.pre_exec(|| {
+        cmd.pre_exec(move || {
+            #[cfg(target_os = "linux")]
+            if let Some(bytes) = address_space_cap {
+                let cap = libc::rlimit {
+                    rlim_cur: bytes,
+                    rlim_max: bytes,
+                };
+                libc::setrlimit(libc::RLIMIT_AS, &cap);
+            }
+            #[cfg(not(target_os = "linux"))]
+            let _ = address_space_cap;
             let cap = libc::rlimit {
                 rlim_cur: FILE_SIZE_LIMIT as libc::rlim_t,
                 rlim_max: FILE_SIZE_LIMIT as libc::rlim_t,
@@ -484,7 +520,11 @@ pub fn convert(
             last_rss = Instant::now();
             if group_rss_kb(child.id()) > limits.max_rss_kb {
                 kill_group(&mut child);
-                return Err(DocError::MemoryLimit(limits.max_rss_kb / 1024));
+                return Err(if converter.kind == Kind::Bundled {
+                    DocError::ResourceLimit(REASON_MEMORY.to_string())
+                } else {
+                    DocError::MemoryLimit(limits.max_rss_kb / 1024)
+                });
             }
         }
         std::thread::sleep(POLL);
@@ -498,8 +538,14 @@ pub fn convert(
     if !status.success() {
         match status.code() {
             Some(EXIT_NEEDS_OCR) => return Err(DocError::NeedsOcr),
+            Some(EXIT_RESOURCE_LIMIT) if converter.kind == Kind::Bundled => {
+                return Err(DocError::ResourceLimit(first_line(&err_file)));
+            }
             Some(EXIT_USAGE) if converter.kind == Kind::Bundled => return Err(DocError::OutOfDate),
             _ => {}
+        }
+        if converter.kind == Kind::Bundled && status.signal().is_some_and(is_memory_crash) {
+            return Err(DocError::ResourceLimit(REASON_CRASH.to_string()));
         }
         return Err(DocError::Failed(first_line(&err_file)));
     }

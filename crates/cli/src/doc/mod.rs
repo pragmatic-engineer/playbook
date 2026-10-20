@@ -21,6 +21,8 @@ const STALE_AFTER: Duration = Duration::from_secs(3600);
 pub struct Settings {
     pub limits: Limits,
     pub anydoc_path: String,
+    /// `docs.maxBytes` was above the hard ceiling and has been lowered to it.
+    pub max_bytes_clamped: bool,
 }
 
 fn number(home: &Path, slug: Option<&str>, key: &str) -> u64 {
@@ -39,14 +41,16 @@ pub fn settings(home: &Path) -> Settings {
         .ok()
         .and_then(|(v, _, _)| v.as_str().map(str::to_string))
         .unwrap_or_default();
+    let max_bytes = number(home, slug, "docs.maxBytes");
     Settings {
         limits: Limits {
-            max_input_bytes: number(home, slug, "docs.maxBytes"),
+            max_input_bytes: max_bytes.min(convert::HARD_MAX_INPUT_BYTES),
             timeout: Duration::from_secs(number(home, slug, "docs.timeoutSeconds")),
             max_output_chars: number(home, slug, "docs.maxOutputChars") as usize,
             max_rss_kb: number(home, slug, "docs.maxMemoryMb") * 1024,
         },
         anydoc_path,
+        max_bytes_clamped: max_bytes > convert::HARD_MAX_INPUT_BYTES,
     }
 }
 
@@ -59,6 +63,12 @@ pub fn scratch_root(home: &Path) -> PathBuf {
 /// when the document needs OCR, 1 for every other failure.
 pub fn read(home: &Path, file: &Path, json: bool) -> i32 {
     let cfg = settings(home);
+    if cfg.max_bytes_clamped {
+        eprintln!(
+            "doc read: note: docs.maxBytes is above the 100 MiB ceiling ({} bytes), so the ceiling applies",
+            convert::HARD_MAX_INPUT_BYTES
+        );
+    }
     let root = scratch_root(home);
     tmp::sweep_stale(&root, STALE_AFTER);
     convert::install_signal_handlers();

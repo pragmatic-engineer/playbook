@@ -206,6 +206,9 @@ fn usd(cents: i64) -> String {
     text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
+/// The most `docs.maxBytes` may be: the converter's own input ceiling.
+const DOCS_MAX_BYTES_CEILING: i64 = crate::doc::convert::HARD_MAX_INPUT_BYTES as i64;
+
 /// `auto.budgetUsd` and `auto.agentBudgetUsd` take any number of at least one cent, since the spend cap
 /// is held in whole cents, so a fractional budget works.
 /// `usage.budget.*Usd` takes any number from 0 (no budget).
@@ -256,8 +259,11 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         | "review.suggest.packageSpan"
         | "review.suggest.untestedLines"
         | "update.checkIntervalHours" => (whole.is_some_and(|n| n >= 1), "a positive integer"),
+        "docs.maxBytes" => (
+            whole.is_some_and(|n| (1..=DOCS_MAX_BYTES_CEILING).contains(&n)),
+            "a whole number from 1 to 104857600 (the 100 MiB ceiling)",
+        ),
         "pr.bodyMaxChars"
-        | "docs.maxBytes"
         | "docs.timeoutSeconds"
         | "docs.maxOutputChars"
         | "docs.maxMemoryMb" => (whole.is_some_and(|n| n >= 1), "a positive integer"),

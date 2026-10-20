@@ -27,6 +27,8 @@ pub mod doc {
     use std::path::Path;
 
     pub mod convert {
+        pub const HARD_MAX_INPUT_BYTES: u64 = 104_857_600;
+
         pub struct Converter;
 
         pub fn find_converter(

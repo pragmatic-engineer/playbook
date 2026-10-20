@@ -7,13 +7,13 @@
 
 use playbook::config::write::{set, Tier};
 use playbook::doc::convert::{
-    version_skew_note, INSTALL_HINT, OUT_OF_DATE_MESSAGE, STATUS_ANYDOC_LINE,
+    version_skew_note, HARD_MAX_INPUT_BYTES, INSTALL_HINT, OUT_OF_DATE_MESSAGE, STATUS_ANYDOC_LINE,
     STATUS_BUNDLED_PREFIX, STATUS_NOT_FOUND_PREFIX, STATUS_NPM_NOTE, STATUS_OVERRIDE_NOTE,
     STATUS_VERSION_PREFIX,
 };
 use serde_json::Value;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -90,7 +90,7 @@ impl Env {
         fs::create_dir_all(&dir).unwrap();
         let copy = dir.join("playbook");
         if !copy.exists() {
-            fs::copy(env!("CARGO_BIN_EXE_playbook"), &copy).unwrap();
+            link_or_copy(Path::new(env!("CARGO_BIN_EXE_playbook")), &copy);
         }
         copy
     }
@@ -126,7 +126,7 @@ impl Env {
         fs::create_dir_all(&dir).unwrap();
         let copy = dir.join("playbook");
         if !copy.exists() {
-            fs::copy(env!("CARGO_BIN_EXE_playbook"), &copy).unwrap();
+            link_or_copy(Path::new(env!("CARGO_BIN_EXE_playbook")), &copy);
         }
         self.command_for(&copy, args)
     }
@@ -164,6 +164,16 @@ impl Env {
 impl Drop for Env {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+/// Gives each test its own path to the playbook binary without writing a new
+/// 60 MB executable. A hard link shares the already-vetted inode, so no extra
+/// file is written or newly assessed by the OS; a copy is the fallback when
+/// the temp dir is on another filesystem.
+fn link_or_copy(from: &Path, to: &Path) {
+    if fs::hard_link(from, to).is_err() {
+        fs::copy(from, to).unwrap();
     }
 }
 
@@ -720,4 +730,295 @@ fn status_notes_an_active_override_when_a_configured_converter_shadows_the_bundl
         "{}",
         stdout_of(&out)
     );
+}
+
+const GIB: u64 = 1 << 30;
+const MIB: u64 = 1 << 20;
+const BLOCK_BYTES: u64 = 512;
+const SPARSE_ALLOCATED_LIMIT: u64 = MIB;
+const HARD_CEILING_LITERAL: u64 = 104_857_600;
+const DEFAULT_MAX_BYTES: u64 = 26_214_400;
+const FIVE_GIB: u64 = 5 * GIB;
+const TEN_GIB: u64 = 10 * GIB;
+const OVER_HARD_CEILING_CONFIG: u64 = 1_000_000_000;
+const OVER_HARD_CEILING_FILE: u64 = 150 * MIB;
+const CEILING_NOTE: &str = "100 MiB";
+const SAFETY_LIMIT_PREFIX: &str = "the document hit a safety limit: ";
+const EXIT_RESOURCE_LIMIT_BODY: &str = "echo 'memory limit reached' >&2; exit 4";
+const SELF_ABORT_BODY: &str = "kill -ABRT $$";
+const CRASH_REASON: &str = "memory limit or crash";
+
+impl Env {
+    /// A sparse file of `len` bytes, or `None` (with a printed reason) when the
+    /// filesystem allocates the whole file, which would make the test slow.
+    fn sparse(&self, name: &str, len: u64) -> Option<PathBuf> {
+        let path = self.root.join(name);
+        fs::File::create(&path).unwrap().set_len(len).unwrap();
+        if fs::metadata(&path).unwrap().blocks() * BLOCK_BYTES > SPARSE_ALLOCATED_LIMIT {
+            eprintln!("skipped: the filesystem does not make sparse files");
+            return None;
+        }
+        Some(path)
+    }
+
+    /// Store a value the way a hand-edited config would hold it: without the
+    /// checks `config set` applies.
+    fn config_unchecked(&self, key: &str, value: Value) {
+        let root = playbook::common::paths::playbook_root_from(&self.home);
+        playbook::config::store::put(&root, Tier::Global, None, key, &value).unwrap();
+    }
+
+    fn read_bundled(&self, file: &Path) -> Output {
+        self.bundled_command(&["doc", "read", file.to_str().unwrap()])
+            .output()
+            .unwrap()
+    }
+}
+
+#[test]
+fn the_hard_input_ceiling_is_100_mib_like_the_converters() {
+    // Arrange
+    let expected = HARD_CEILING_LITERAL;
+
+    // Act
+    let actual = HARD_MAX_INPUT_BYTES;
+
+    // Assert
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn a_five_gib_sparse_file_is_refused_without_running_the_converter() {
+    // Arrange
+    let env = Env::new("ceiling-5gib");
+    env.fake(OK);
+    env.config_unchecked("docs.maxBytes", Value::from(TEN_GIB));
+    let Some(doc) = env.sparse("huge.csv", FIVE_GIB) else {
+        return;
+    };
+
+    // Act
+    let out = env.read(&doc);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(text(&out).contains("over the limit"), "{}", text(&out));
+    assert!(
+        !env.argv_log().exists(),
+        "the converter should not have run"
+    );
+    assert!(env.leftovers().is_empty());
+}
+
+#[test]
+fn a_file_of_exactly_the_default_limit_reaches_the_converter() {
+    // Arrange
+    let env = Env::new("boundary-at");
+    env.fake(OK);
+    let Some(doc) = env.sparse("at.csv", DEFAULT_MAX_BYTES) else {
+        return;
+    };
+
+    // Act
+    let out = env.read(&doc);
+
+    // Assert
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(env.argv_log().exists(), "the converter should have run");
+}
+
+#[test]
+fn a_file_one_byte_over_the_default_limit_is_refused() {
+    // Arrange
+    let env = Env::new("boundary-over");
+    env.fake(OK);
+    let Some(doc) = env.sparse("over.csv", DEFAULT_MAX_BYTES + 1) else {
+        return;
+    };
+
+    // Act
+    let out = env.read(&doc);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(text(&out).contains("over the limit"), "{}", text(&out));
+    assert!(
+        !env.argv_log().exists(),
+        "the converter should not have run"
+    );
+}
+
+#[test]
+fn a_hand_written_max_bytes_above_the_ceiling_is_clamped_and_says_so() {
+    // Arrange
+    let env = Env::new("ceiling-clamp");
+    env.fake(OK);
+    env.config_unchecked("docs.maxBytes", Value::from(OVER_HARD_CEILING_CONFIG));
+    let Some(doc) = env.sparse("clamped.csv", OVER_HARD_CEILING_FILE) else {
+        return;
+    };
+
+    // Act
+    let out = env.read(&doc);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(text(&out).contains(CEILING_NOTE), "{}", text(&out));
+    assert!(
+        !env.argv_log().exists(),
+        "the converter should not have run"
+    );
+}
+
+#[test]
+fn config_set_rejects_max_bytes_above_the_ceiling_and_names_it() {
+    // Arrange
+    let env = Env::new("set-over");
+    let over = (HARD_CEILING_LITERAL + 1).to_string();
+
+    // Act
+    let out = env
+        .command(&["config", "set", "--global", "docs.maxBytes", &over])
+        .output()
+        .unwrap();
+
+    // Assert
+    assert!(!out.status.success(), "{}", text(&out));
+    assert!(
+        text(&out).contains(&HARD_CEILING_LITERAL.to_string()),
+        "{}",
+        text(&out)
+    );
+}
+
+#[test]
+fn config_set_accepts_max_bytes_at_the_ceiling() {
+    // Arrange
+    let env = Env::new("set-at");
+    let at = HARD_CEILING_LITERAL.to_string();
+
+    // Act
+    let out = env
+        .command(&["config", "set", "--global", "docs.maxBytes", &at])
+        .output()
+        .unwrap();
+
+    // Assert
+    assert!(out.status.success(), "{}", text(&out));
+}
+
+#[test]
+fn a_bundled_converter_that_exits_4_is_reported_as_a_safety_limit() {
+    // Arrange
+    let env = Env::new("bundled-exit4");
+    env.fake_bundled(&own_pbdoc_version(), EXIT_RESOURCE_LIMIT_BODY);
+    let doc = env.doc("report.pdf", b"%PDF-1.4");
+
+    // Act
+    let out = env.read_bundled(&doc);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(
+        text(&out).contains(&format!("{SAFETY_LIMIT_PREFIX}memory limit reached")),
+        "{}",
+        text(&out)
+    );
+    assert!(env.leftovers().is_empty());
+}
+
+#[test]
+fn a_safety_limit_carries_the_resource_limit_code_in_json() {
+    // Arrange
+    let env = Env::new("bundled-exit4-json");
+    env.fake_bundled(&own_pbdoc_version(), EXIT_RESOURCE_LIMIT_BODY);
+    let doc = env.doc("report.pdf", b"%PDF-1.4");
+
+    // Act
+    let out = env
+        .bundled_command(&["doc", "read", "--json", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    // Assert
+    let json: Value = serde_json::from_str(&stdout_of(&out)).unwrap();
+    assert_eq!(json["status"], "resource_limit");
+    assert!(json["message"]
+        .as_str()
+        .unwrap()
+        .starts_with(SAFETY_LIMIT_PREFIX));
+}
+
+#[test]
+fn a_bundled_converter_that_aborts_is_reported_as_a_memory_limit_or_crash() {
+    // Arrange
+    let env = Env::new("bundled-abort");
+    env.fake_bundled(&own_pbdoc_version(), SELF_ABORT_BODY);
+    let doc = env.doc("report.pdf", b"%PDF-1.4");
+
+    // Act
+    let out = env.read_bundled(&doc);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(
+        text(&out).contains(&format!("{SAFETY_LIMIT_PREFIX}{CRASH_REASON}")),
+        "{}",
+        text(&out)
+    );
+    assert!(env.leftovers().is_empty());
+}
+
+#[test]
+fn an_external_converter_that_aborts_keeps_the_plain_failure_message() {
+    // Arrange
+    let env = Env::new("external-abort");
+    env.fake(SELF_ABORT_BODY);
+    let doc = env.doc("report.pdf", b"%PDF-1.4");
+
+    // Act
+    let out = env.read(&doc);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(text(&out).contains("conversion failed"), "{}", text(&out));
+    assert!(!text(&out).contains(SAFETY_LIMIT_PREFIX), "{}", text(&out));
+}
+
+#[cfg(target_os = "linux")]
+const REAL_CSV_BYTES: usize = 20 << 20;
+#[cfg(target_os = "linux")]
+const LOW_MEMORY_MB: u64 = 16;
+
+#[cfg(target_os = "linux")]
+#[test]
+fn the_real_converter_hitting_its_memory_cap_is_reported_as_a_safety_limit() {
+    // Arrange
+    let Some(pbdoc) = std::env::var_os("PBDOC_BIN") else {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "PBDOC_BIN must point at the built pbdoc in CI"
+        );
+        eprintln!("skipped: PBDOC_BIN is not set");
+        return;
+    };
+    let env = Env::new("real-memory");
+    env.playbook_copy();
+    let bundled = env.bundled_dir().join("pbdoc");
+    link_or_copy(Path::new(&pbdoc), &bundled);
+    env.config("docs.maxMemoryMb", Value::from(LOW_MEMORY_MB));
+    let row = "a,b,c,d,e,f,g,h\n";
+    let doc = env.doc("big.csv", row.repeat(REAL_CSV_BYTES / row.len()).as_bytes());
+
+    // Act
+    let out = env.read_bundled(&doc);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(
+        text(&out).contains(&format!("{SAFETY_LIMIT_PREFIX}memory")),
+        "{}",
+        text(&out)
+    );
+    assert!(env.leftovers().is_empty());
 }
