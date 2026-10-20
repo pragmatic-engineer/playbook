@@ -211,7 +211,6 @@ fn writing_style_keeps_the_loading_heading_and_every_reference() {
         "commits-and-prs",
         "github-review-comments",
         "github-prohibited",
-        "worktree-guard",
     ] {
         assert!(skill.contains(&format!("`{name}`")), "{name}");
         read_skill(&format!("writing-style/references/{name}.md"));
@@ -368,6 +367,44 @@ fn language_standards_name_every_reference_and_only_their_own() {
         assert!(
             checked.iter().any(|s| s == expected),
             "{expected} has no references/ folder to check"
+        );
+    }
+}
+
+/// Every forked command or agent that runs the worktree guard must name the
+/// skill that owns `references/worktree-guard.md`, and that file must exist.
+#[test]
+fn forked_files_point_at_the_existing_worktree_guard() {
+    let root = Path::new(env!("PLAYBOOK_PLUGIN_ROOT"));
+    let mut users = Vec::new();
+    for dir in ["commands", "agents"] {
+        for entry in fs::read_dir(root.join(dir)).unwrap().filter_map(Result::ok) {
+            let path = entry.path();
+            let text = fs::read_to_string(&path).unwrap_or_default();
+            if text.contains("references/worktree-guard.md") {
+                let skill = text
+                    .split("references/worktree-guard.md")
+                    .next()
+                    .and_then(|before| before.rsplit("`playbook:").next())
+                    .and_then(|tail| tail.split('`').next())
+                    .unwrap_or_default()
+                    .to_string();
+                assert!(
+                    skills_dir()
+                        .join(&skill)
+                        .join("references/worktree-guard.md")
+                        .is_file(),
+                    "{} points at skill `{skill}`, which has no references/worktree-guard.md",
+                    path.display()
+                );
+                users.push(path.file_name().unwrap().to_string_lossy().to_string());
+            }
+        }
+    }
+    for forked in ["commit-and-push.md", "create-pull-request.md", "git.md"] {
+        assert!(
+            users.iter().any(|u| u == forked),
+            "{forked} must use the guard"
         );
     }
 }

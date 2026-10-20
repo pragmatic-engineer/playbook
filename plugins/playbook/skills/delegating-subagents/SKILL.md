@@ -98,6 +98,10 @@ The `Agent` tool has no per-call effort setting, so effort is chosen by which ag
 
 If the wanted variant is not in `allowed`, spawn the base agent. That is normal outside the launcher, never an error. Narrow `cheap-check` lenses go to `cheap-checker`, already pinned low. A verifier that misses a wrong claim defeats its purpose, so pick a cheaper `fact-checker` variant only when the ceiling requires it. Every tier keeps the base agent's `tools`, so the read-only and file-delivery limits above apply unchanged.
 
+## Worktree guard
+
+A forked git command (`/playbook:commit-and-push`, `/playbook:create-pull-request`) can start in the wrong checkout. Its first step is the guard in [references/worktree-guard.md](references/worktree-guard.md); the caller passes "Worktree root: <path>, branch: <name>" in the prompt.
+
 ## Re-dispatching
 
 Every `Agent` call is a fresh spawn with no memory of any prior round, even for the same `subagent_type`. When a quality-gate phase (`critic`, `test-reviewer`, `fact-checker`) FAILs, is revised, and needs a second pass, send the COMPLETE current artifact, not a changelist. A partial re-prompt makes the agent flag things as unaddressed that the artifact already covers; treat a "still failing" or "new finding" from one with suspicion. Why: [references/evidence.md](references/evidence.md). How many rounds a gate phase may take, and when it stops as STUCK, is in [references/gate-loop.md](references/gate-loop.md).

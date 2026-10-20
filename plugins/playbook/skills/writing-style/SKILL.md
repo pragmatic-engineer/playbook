@@ -142,4 +142,3 @@ This file holds the universal rules. Load the reference that matches the prose y
 - Review comment, reply to feedback, or issue or PR comment on GitHub: `github-review-comments` and `review-examples`.
 - Anything posted to GitHub, including a PR body: `github-prohibited`.
 - A `gh api -f body=` call: `shell-quoting`.
-- A forked git command acting in a worktree (the git agent loads it): `worktree-guard`.
