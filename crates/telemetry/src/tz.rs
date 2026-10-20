@@ -13,8 +13,6 @@
 //! environment variable, the `usage.timeZone` setting, then `local`. A value
 //! that is not one of those two is ignored with a notice, never a panic.
 
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
-
 use chrono::{Local, Offset, TimeZone};
 
 use crate::aggregate::SECONDS_PER_DAY;
@@ -161,28 +159,89 @@ fn day_start_with(off: &dyn Fn(i64) -> i64, day: i64) -> i64 {
         .unwrap_or(first)
 }
 
-// 0 is UTC, 1 is local, 2 is fixed (offset in FIXED). Unset reads as UTC so
-// code that never calls `set` (tests, embedders) keeps the old behaviour.
-static MODE: AtomicU8 = AtomicU8::new(0);
-static FIXED: AtomicI64 = AtomicI64::new(0);
+/// The process-wide zone state. 0 is UTC, 1 is local, 2 is fixed (offset in
+/// `fixed`). Unset reads as UTC so code that never calls `set` (tests,
+/// embedders) keeps the old behaviour.
+///
+/// In the library's own unit tests the state lives per thread, not per
+/// process. The test harness runs each test on its own thread, so a test that
+/// installs a zone (directly, or through `entry::run` calling `ensure_init`)
+/// cannot change the zone another parallel test reads.
+#[cfg(not(test))]
+mod state {
+    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
+
+    static MODE: AtomicU8 = AtomicU8::new(0);
+    static FIXED: AtomicI64 = AtomicI64::new(0);
+    static INITIALISED: AtomicBool = AtomicBool::new(false);
+
+    pub fn mode() -> u8 {
+        MODE.load(Ordering::Relaxed)
+    }
+    pub fn set_mode(v: u8) {
+        MODE.store(v, Ordering::Relaxed);
+    }
+    pub fn fixed() -> i64 {
+        FIXED.load(Ordering::Relaxed)
+    }
+    pub fn set_fixed(v: i64) {
+        FIXED.store(v, Ordering::Relaxed);
+    }
+    pub fn initialised() -> bool {
+        INITIALISED.load(Ordering::Relaxed)
+    }
+    pub fn set_initialised() {
+        INITIALISED.store(true, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod state {
+    use std::cell::Cell;
+
+    thread_local! {
+        static MODE: Cell<u8> = const { Cell::new(0) };
+        static FIXED: Cell<i64> = const { Cell::new(0) };
+        static INITIALISED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub fn mode() -> u8 {
+        MODE.with(Cell::get)
+    }
+    pub fn set_mode(v: u8) {
+        MODE.with(|c| c.set(v));
+    }
+    pub fn fixed() -> i64 {
+        FIXED.with(Cell::get)
+    }
+    pub fn set_fixed(v: i64) {
+        FIXED.with(|c| c.set(v));
+    }
+    pub fn initialised() -> bool {
+        INITIALISED.with(Cell::get)
+    }
+    pub fn set_initialised() {
+        INITIALISED.with(|c| c.set(true));
+    }
+}
 
 /// Makes `zone` the zone of the whole process.
 pub fn set(zone: Zone) {
     match zone {
-        Zone::Utc => MODE.store(0, Ordering::Relaxed),
-        Zone::Local => MODE.store(1, Ordering::Relaxed),
+        Zone::Utc => state::set_mode(0),
+        Zone::Local => state::set_mode(1),
         Zone::Fixed(secs) => {
-            FIXED.store(i64::from(secs), Ordering::Relaxed);
-            MODE.store(2, Ordering::Relaxed);
+            state::set_fixed(i64::from(secs));
+            state::set_mode(2);
         }
     }
 }
 
 /// The zone of the process.
 pub fn current() -> Zone {
-    match MODE.load(Ordering::Relaxed) {
+    match state::mode() {
         1 => Zone::Local,
-        2 => Zone::Fixed(i32::try_from(FIXED.load(Ordering::Relaxed)).unwrap_or(0)),
+        2 => Zone::Fixed(i32::try_from(state::fixed()).unwrap_or(0)),
         _ => Zone::Utc,
     }
 }
@@ -275,12 +334,10 @@ fn shown(text: &str) -> String {
     format!("{short:?}")
 }
 
-static INITIALISED: AtomicBool = AtomicBool::new(false);
-
 /// Runs `init(None)` unless `init` already ran, for programs that embed the
 /// library and call `entry::run` without going through `cli::main`.
 pub fn ensure_init() {
-    if !INITIALISED.load(Ordering::Relaxed) {
+    if !state::initialised() {
         init(None);
     }
 }
@@ -288,7 +345,7 @@ pub fn ensure_init() {
 /// Chooses the zone from the real environment and the stored setting and
 /// installs it.
 pub fn init(flag: Option<Zone>) {
-    INITIALISED.store(true, Ordering::Relaxed);
+    state::set_initialised();
     let env = std::env::var(ENV_VAR).ok();
     let setting = crate::host::config_value_now(SETTING);
     let zone = choose(
