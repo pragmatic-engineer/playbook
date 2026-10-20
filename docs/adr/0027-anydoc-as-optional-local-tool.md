@@ -1,8 +1,8 @@
 # ADR-0027: Use anydoc as an Optional Local Tool Found on PATH, Never Vendored
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR 0051](0051-bundle-anydoc-as-pbdoc-helper.md)
 - **Date created:** 2026-10-12
-- **Date modified:** 2026-10-12
+- **Date modified:** 2026-10-21
 
 ## Context
 
