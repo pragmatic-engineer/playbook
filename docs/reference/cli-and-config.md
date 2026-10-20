@@ -1513,7 +1513,7 @@ Example: `playbook usage --range today`
 - `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 - `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 
-Subcommands: `collect`, `doctor`, `prune`, `status`
+Subcommands: `collect`, `doctor`, `prune`, `status`, `stop`
 
 ### `playbook usage collect`
 
@@ -1561,6 +1561,17 @@ Prints how telemetry is configured (on with the collector running, off because y
 Example: `playbook usage status --json`
 
 - `--json`: Print the status as JSON
+- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+
+### `playbook usage stop`
+
+Stop the running telemetry collector
+
+Asks the collector that holds the lock to stop through its authenticated shutdown route and waits up to 3 seconds for it to let go. One that does not answer is killed, but only after checking that the process is really the playbook collector. Prints `stopped`, or `not running` with exit code 0 when no collector runs. The next playbook command or session starts a new one. A collector from 0.38.0 or older holds no lock, so this does not see it.
+
+Example: `playbook usage stop`
+
 - `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 - `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 

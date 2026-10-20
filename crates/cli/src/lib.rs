@@ -91,6 +91,7 @@ pub mod uninstall;
 pub mod update;
 pub use playbook_telemetry as usage;
 pub mod service_manager;
+pub mod skills_sync;
 pub mod usage_host;
 pub mod worktree;
 

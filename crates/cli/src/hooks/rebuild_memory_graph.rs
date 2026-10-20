@@ -282,6 +282,15 @@ fn parse_frontmatter(content: &str) -> Frontmatter {
     state.result
 }
 
+/// The optional `aliases:` list of a fact file: other names a prompt may use
+/// for the fact. Empty when the key is absent or the frontmatter is bad.
+pub(crate) fn fact_aliases(content: &str) -> Vec<String> {
+    parse_frontmatter(content)
+        .list("aliases")
+        .cloned()
+        .unwrap_or_default()
+}
+
 /// Return the text strictly between a `---` opening line and the first
 /// `---` closing line, both required to be a full line (only trailing
 /// spaces/tabs allowed) and the closing line must itself be followed by
@@ -1341,5 +1350,38 @@ mod similarity_tests {
                 ]
             )]
         );
+    }
+}
+
+#[cfg(test)]
+mod alias_tests {
+    use super::*;
+
+    #[test]
+    fn fact_aliases_reads_an_inline_list() {
+        let content = "---\nname: x\naliases: [pbcode, pb code]\n---\nbody\n";
+        assert_eq!(fact_aliases(content), vec!["pbcode", "pb code"]);
+    }
+
+    #[test]
+    fn fact_aliases_reads_a_block_list() {
+        let content = "---\nname: x\naliases:\n  - pbcode\n  - pb code\n---\nbody\n";
+        assert_eq!(fact_aliases(content), vec!["pbcode", "pb code"]);
+    }
+
+    #[test]
+    fn fact_aliases_is_empty_without_the_key() {
+        assert!(fact_aliases("---\nname: x\n---\nbody\n").is_empty());
+    }
+
+    #[test]
+    fn fact_aliases_is_empty_for_bad_frontmatter() {
+        assert!(fact_aliases("no frontmatter at all").is_empty());
+        assert!(fact_aliases("---\naliases: [a, b]\nnever closed").is_empty());
+    }
+
+    #[test]
+    fn fact_aliases_is_empty_when_the_key_is_a_plain_scalar() {
+        assert!(fact_aliases("---\naliases: pbcode\n---\nbody\n").is_empty());
     }
 }
