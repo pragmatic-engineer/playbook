@@ -1,6 +1,6 @@
 # ADR-0025: A Self Improving Playbook Proposes Config Patches Behind a Staged Trust Ladder
 
-- **Status:** Proposed. Amended 2026-10-21 after the #532 spike: paths follow the crates layout, `auto` is deferred, the 2 session and edit link conditions are dropped, and the expiry by dead anchor rule is withdrawn. See the Amendment section.
+- **Status:** Proposed. Amended 2026-10-21 after the #532 spike: paths follow the crates layout, `auto` is deferred, the 2 session and edit link conditions are dropped, and the expiry by dead anchor rule is withdrawn. See [the Amendment section](#amendment-2026-10-21-what-the-532-spike-measured).
 - **Date created:** 2026-10-11
 - **Date modified:** 2026-10-21
 
@@ -41,7 +41,7 @@ The same reports name what cannot be measured today: cost per merged PR (the sto
 
 ## Decision
 
-### 1. One loop, one change surface, three autonomy levels
+### 1. One loop, one change surface, two accepted autonomy levels and one reserved
 
 The loop is: observe, propose, evaluate, approve, apply, measure, roll back. It runs on demand and from a scheduled routine. It never runs inside a session hook, because a hook adds latency to every turn and must never fail a session.
 
@@ -138,7 +138,7 @@ Where it runs: on demand (`playbook learn run`) and from a scheduled routine the
 
 | Failure | Effect | Response |
 | --- | --- | --- |
-| Memory poisoning (a wrong fact captured, then promoted) | A bad fact steers later sessions | Promotion needs a passing anchor check and a human at `propose`. Facts carry their evidence. `reset` archives, never deletes. |
+| Memory poisoning (a wrong fact captured, then promoted) | A bad fact steers later sessions | Promotion needs a passing anchor check and a human at `propose`. Facts carry their evidence. `reset` restores the prior state. A fact is archived only on a human yes, never deleted. |
 | Stale signals | A change made on old data | Windows are bounded and each record carries its window |
 | Prompt drift | Wording changes slowly lose behavior | Text is never changed automatically. A routing eval gates the proposal. |
 | Cost creep | A loop that spends to save | Weekly budget defaults to zero. The change log shows spend against savings. |
@@ -168,7 +168,7 @@ Each stage ships on its own and is judged on its own record. Stage 0 is the smal
 2. **Signals that are missing.** Record kept or dropped findings in `deep-review`, a content free hook denial counter, merge state for the metric.
 3. **Share the key with effort.** Make `effort.auto` obey the `learn.autonomy` ceiling, and add the `playbook learn` entry that lists effort proposals from ADR-0022.
 4. **Thresholds and routing proposals.** Replay based proposals for recall and hygiene thresholds, guard and description wording as draft pull requests.
-5. **Raise autonomy per surface from `off` to `propose`** after a recorded track record (guardrail 4). `auto` needs a new ADR. The default stays `off` for new installs.
+5. **Raise autonomy per surface.** A user moves a surface from `off` to `propose` by a config change (guardrail 3). Going above `propose` needs the track record in guardrail 4 and a new ADR. The default stays `off` for new installs.
 
 ## Alternatives considered
 
@@ -189,7 +189,7 @@ Each stage ships on its own and is judged on its own record. Stage 0 is the smal
 
 ## Amendment 2026-10-21: what the #532 spike measured
 
-The spike (plans/gh-532-spike-report.md, origin/main `75010eb6`, no model calls) tested the memory rules above against the live store. Its bars were fixed before the data was read.
+The spike (a local plan file, `plans/gh-532-spike-report.md`, not committed; results are in the #532 issue comment of 2026-10-21; origin/main `75010eb6`, no model calls) tested the memory rules above against the live store. Its bars were fixed before the data was read.
 
 | Measure | Result |
 | --- | --- |
@@ -212,7 +212,7 @@ What changed in this record, and why:
 
 Caveat: this is one store on one machine and one repo. Many dead anchors are `src/` to `crates/` moves and Python to Rust ports, so the share is probably inflated. The 15 id sample review by the maintainer is still pending. It is not an input to the withdrawal, because the rule fails the bar without it.
 
-Bar for any replacement expiry rule before it can leave `propose`, measured on a store and not asserted: it would archive under 10% of anchored facts, and the maintainer keeps at most 1 of a 15 id sample (seeded, ids only), re-measured after the anchors are re-pointed to current paths. The baseline to beat is the manual quarterly prune.
+Bar for any replacement expiry rule before stage 1 may build it at `propose` (and before any later record may raise it above `propose`), measured on a store and not asserted: it would archive under 10% of anchored facts, and the maintainer keeps at most 1 of a 15 id sample (seeded, ids only), re-measured after the anchors are re-pointed to current paths. The baseline to beat is the manual quarterly prune.
 
 This amendment builds nothing: no subcommand, config key, hook, migration, doctor row or setup part.
 
