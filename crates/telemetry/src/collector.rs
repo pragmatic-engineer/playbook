@@ -271,12 +271,6 @@ pub struct Status {
     /// How telemetry is configured, in words, and the one-line fix if any.
     pub telemetry: String,
     pub telemetry_fix: Option<String>,
-    /// The background service that runs the collector, in words, when one
-    /// is installed (ADR 0043).
-    pub service: Option<String>,
-    /// What to do while the collector is down, for the text.
-    #[serde(skip)]
-    pub collector_fix: String,
 }
 
 /// The time of the newest stored telemetry event, unix seconds. Opens the
@@ -346,8 +340,6 @@ pub fn status(paths: &Paths, retention: Retention) -> Result<Status, String> {
         last_event,
         telemetry: mode.text().to_string(),
         telemetry_fix: mode.fix().map(str::to_string),
-        service: super::service::installed(&super::host::home_dir()),
-        collector_fix: super::service::collector_fix(&super::host::home_dir()),
     })
 }
 
@@ -374,16 +366,12 @@ impl Status {
             }
             _ => {
                 lines.push("collector: not running".to_string());
-                lines.push(self.collector_fix.clone());
+                lines.push(format!("fix: {}", super::host::start_hint()));
                 if let Some(port) = self.port {
                     lines.push(format!("last port: {port}"));
                 }
             }
         }
-        lines.push(match &self.service {
-            Some(service) => format!("background service: {service}"),
-            None => "background service: none".to_string(),
-        });
         lines.push(format!(
             "rows: {} requests, {} tool calls, {} api errors, {} metric points",
             self.requests, self.tool_calls, self.api_errors, self.metric_points

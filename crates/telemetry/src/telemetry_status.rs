@@ -125,10 +125,8 @@ pub fn empty_panel_lines_for(mode: Option<Mode>, host: &dyn super::host::Host) -
         ],
         Some(Mode::OnCollectorDown) => vec![
             "No rows: the collector is not running.".into(),
-            "Start it with:".into(),
-            host.command("usage collect"),
-            "Keep it running in the background with:".into(),
-            host.setup_command("collector-service"),
+            "To start it:".into(),
+            host.start_hint(),
         ],
         Some(Mode::OnRunning) => vec![
             "No rows in this range yet.".into(),
@@ -251,18 +249,18 @@ mod tests {
             "{off:?}"
         );
         assert!(down[0].contains("collector is not running"), "{down:?}");
+        assert!(down.contains(&crate::daemon::START_HINT.to_string()));
         assert!(
-            down.iter().any(|l| l.ends_with("usage collect")),
+            !down.iter().any(|l| l.contains("collector-service")),
             "{down:?}"
         );
-        assert!(down.contains(&crate::host::setup_command("collector-service")));
         assert!(quiet[1].contains("collector runs"), "{quiet:?}");
         assert!(
             !quiet.iter().any(|l| l.starts_with("playbook")),
             "{quiet:?}"
         );
-        // The cause and the first command fit the four lines of a short panel.
-        assert_eq!(down[2], crate::host::command("usage collect"));
+        // The cause and the fix fit the four lines of a short panel.
+        assert_eq!(down[2], crate::daemon::START_HINT);
         for line in off.iter().chain(&down).chain(&quiet) {
             assert!(line.chars().count() <= 46, "too long: {line}");
         }

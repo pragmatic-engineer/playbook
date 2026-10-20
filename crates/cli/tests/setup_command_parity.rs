@@ -8,7 +8,7 @@
 //! the part catalog its wizard is built from.
 
 use clap::CommandFactory;
-use playbook::init::{catalog, telemetry, wizard};
+use playbook::init::{catalog, choices, telemetry, wizard};
 use playbook::Cli;
 use std::fs;
 use std::path::PathBuf;
@@ -182,4 +182,27 @@ fn the_command_quotes_the_welcome() {
         setup_md().contains(wizard::WELCOME),
         "setup.md must quote the welcome text"
     );
+}
+
+/// The start of each Step 2 rule that drops retired words.
+const RETIRED_RULE: &str = "- Drop the retired words ";
+
+#[test]
+fn the_command_drops_every_retired_part() {
+    let rules: String = setup_md()
+        .lines()
+        .filter(|l| l.starts_with(RETIRED_RULE))
+        .collect();
+    for part in choices::RETIRED_PARTS {
+        for word in [
+            format!("`--{part}`"),
+            format!("`--no-{part}`"),
+            format!("`{part}`"),
+        ] {
+            assert!(
+                rules.contains(&word),
+                "setup.md must drop the retired word {word}"
+            );
+        }
+    }
 }

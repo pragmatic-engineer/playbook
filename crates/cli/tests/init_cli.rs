@@ -283,7 +283,7 @@ fn yes_turns_every_part_on_in_a_scratch_home() {
         fs::read_link(bin.join("pb")).unwrap(),
         Path::new("playbook")
     );
-    assert!(text(&out).contains("collector-service"), "{}", text(&out));
+    assert!(!text(&out).contains("collector-service"), "{}", text(&out));
 }
 
 #[test]
@@ -344,6 +344,45 @@ fn only_a_retired_part_runs_nothing() {
     assert!(!sb.path(".claude/settings.json").exists());
     assert!(!sb.path(".bashrc").exists());
     assert!(!sb.path(".zshrc").exists());
+}
+
+/// The places the retired collector-service part wrote: the launchd agent,
+/// the systemd unit and the stored no.
+fn no_collector_service_trace(sb: &Sandbox) {
+    assert!(!sb.path("Library/LaunchAgents").exists());
+    assert!(!sb.path(".config/systemd").exists());
+    assert!(!playbook::init::collector_service::declined(&sb.home));
+}
+
+#[test]
+fn only_the_retired_collector_service_part_runs_nothing() {
+    let sb = Sandbox::new("retired-collector-only");
+
+    let out = sb.init("/bin/bash", &["--only", "collector-service"]);
+
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!sb.path(".claude/settings.json").exists());
+    no_collector_service_trace(&sb);
+}
+
+#[test]
+fn the_retired_collector_service_flags_are_accepted_and_change_nothing() {
+    for flag in ["--collector-service", "--no-collector-service"] {
+        let sb = Sandbox::new("retired-collector-flag");
+        let plain = Sandbox::new("retired-collector-plain");
+
+        let out = sb.init("/bin/bash", &[flag, "--only", "hooks"]);
+        plain.init("/bin/bash", &["--only", "hooks"]);
+
+        assert!(out.status.success(), "{flag}: {}", text(&out));
+        assert!(!text(&out).contains("collector-service"), "{}", text(&out));
+        assert_eq!(
+            sb.read(".claude/settings.json"),
+            plain.read(".claude/settings.json"),
+            "{flag}"
+        );
+        no_collector_service_trace(&sb);
+    }
 }
 
 #[test]
