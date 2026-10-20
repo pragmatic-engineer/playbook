@@ -56,7 +56,7 @@ Other facts:
 
 - `--plugin-dir <checkout>` loads playbook with no marketplace install. The binary finds plugin files through `playbook path plugin-root`, which prefers the installed plugin, so set `PLAYBOOK_PLUGIN_DIR=<checkout>/plugins/playbook` when a marketplace install is also present. `system/init` in `stream-json` listed it as `playbook@inline`, version 0.16.0, with 23 playbook slash commands.
 - `claude -p "/playbook:session-start"` ran the command: it called `playbook handoff show`, read the log, and checked git (4 turns, 14 cents).
-- Hooks that fired in a headless run: SessionStart (`session-init`, source `startup`), UserPromptSubmit (`auto-model-detect`, `memory-anchors`), PreToolUse (`preread-*`, `no-slop-guard`, `bg-await-guard`, `memory-anchors`), PostToolUse (`search-counter`, `post-edit-track`), Stop (`memory-capture`, `session-clean-exit`). The `statusLine` never renders.
+- Hooks that fired in a headless run: SessionStart (`session-init`, source `startup`), UserPromptSubmit (`auto-model-detect`, `memory-anchors`), PreToolUse (`preread-*`, `bg-await-guard`, `memory-anchors`), PostToolUse (`search-counter`, `post-edit-track`), Stop (`memory-capture`, `session-clean-exit`). The `statusLine` never renders.
 - Folder trust: the runs happened in a fresh scratch directory with no trust entry. The project hooks and the plugin still ran, so `playbook trust` is not needed for CI.
 
 ### The memory Stop hook
@@ -72,7 +72,7 @@ To see the worst case, a marker was created for a fixed `--session-id`. The hook
 | `session-init` | Writes `session-start.log`. Under `PLAYBOOK_HEADLESS` it skips every nudge, the worktree sweep and memory injection (opt in with `PLAYBOOK_HEADLESS_MEMORY=1`). It still injects the tool map. |
 | `memory-capture` (Stop) | Never blocks headless. |
 | `auto-model-detect` | Silent headless. |
-| Safety guards (`preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) | Fire and stay quiet. They are the reason to run with hooks on. |
+| Safety guards (`preread-*`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) | Fire and stay quiet. They are the reason to run with hooks on. |
 | `search-counter`, `post-edit-track`, `session-clean-exit` | Write small files under `runtime/`. Harmless. |
 
 No hook reads a TTY or prompts. Only `crates/cli/src/main.rs` reads stdin, for the hook payload.
@@ -86,7 +86,7 @@ When headless:
 - `session-init` skips the worktree sweep, the handoff load, and the auto-learn nudge (the same effect as `AUTO_LEARN_NUDGE=0`). It injects no memory either, unless `PLAYBOOK_HEADLESS_MEMORY=1` opts memory in. It still injects the tool map (see `playbook tools map`) and writes `session-start.log`.
 - `memory-capture` (Stop) never blocks, even if a `capture-due` marker exists.
 - `auto-model-detect` stays silent.
-- The safety guards (`preread-*`, `no-slop-guard`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) behave exactly as they do interactively.
+- The safety guards (`preread-*`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) behave exactly as they do interactively.
 
 `memory-capture` returns without blocking when headless. Interactive runs keep the bounded re-block from ADR 0009: it blocks at most twice, the second block escalates the handoff nudge, and then it releases, so it cannot loop. It deliberately does not read `stop_hook_active`, because that field would end the escalation after the first block.
 
