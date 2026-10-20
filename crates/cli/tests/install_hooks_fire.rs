@@ -380,7 +380,7 @@ fn fires(f: &Fire, name: &str) -> bool {
             let out = run_hook(
                 &f.playbook,
                 name,
-                r#"{"tool_input":{"command":"rm -rf /etc/hosts"}}"#,
+                r#"{"tool_input":{"command":"rm -rf /"}}"#,
                 &home,
                 &home,
                 &[],
