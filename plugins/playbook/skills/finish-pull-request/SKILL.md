@@ -9,7 +9,7 @@ Run this in the main session or in a delegated or forked agent that holds the `A
 
 Inputs from the create-pull-request report: the PR number or URL, its branch, and whether `--ready` was passed. If any is missing, read it with `gh pr view`.
 
-An optional worktree path may also be given, for a caller whose working directory is not the PR's checkout. When it is, run every git command as `git -C <worktree>`, run `gh` and any tool from the tool map with the PR number so they do not depend on the current directory, pass the path on to `/playbook:commit-and-push` and the review commands, and never change directory or touch files outside the worktree.
+An optional worktree path may also be given, for a caller whose working directory is not the PR's checkout. When it is, run every git command as `git -C <worktree>`, run `gh` and any tool from the tool map with the PR number so they do not depend on the current directory, pass the path on to the review commands, and put it with the branch in the prompt of `/playbook:commit-and-push` as "Worktree root: <path>, branch: <name>", and never change directory or touch files outside the worktree.
 
 ## Run mode
 
