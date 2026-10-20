@@ -7,7 +7,7 @@
 //! still matches that record. See `docs/internals/15-codex-skills.md`.
 
 use super::Agent;
-use crate::common::atomic::{with_dir_lock_aged, LONG_LOCK_STALE_AGE};
+use crate::common::atomic::{acquire_dir_lock_aged, LONG_LOCK_STALE_AGE};
 use crate::init::migrate::content_hash;
 use std::collections::BTreeMap;
 use std::fs;
@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+/// A file the file manager adds to any folder it opens. It is not the
+/// user's work, so it does not make a folder read as edited.
+const IGNORED_FILE: &str = ".DS_Store";
 const LOCK_NAME: &str = ".playbook-sync.lock";
 const TMP_PREFIX: &str = ".playbook-tmp-";
 const OLD_PREFIX: &str = ".playbook-old-";
@@ -225,6 +228,9 @@ fn hash_folder(dir: &Path) -> io::Result<Hashes> {
 fn collect_hashes(base: &Path, rel: &Path, out: &mut Hashes) -> io::Result<()> {
     for entry in fs::read_dir(base.join(rel))? {
         let entry = entry?;
+        if entry.file_name() == IGNORED_FILE {
+            continue;
+        }
         let child = rel.join(entry.file_name());
         let kind = entry.file_type()?;
         if kind.is_dir() {
@@ -293,8 +299,7 @@ pub fn apply(
         return report.finish(false);
     }
     let lock = target_root.join(LOCK_NAME);
-    // Fail-open helper: the closure only runs either way, the flag decides.
-    let (acquired, ()) = with_dir_lock_aged(&lock, 0, Duration::ZERO, LONG_LOCK_STALE_AGE, || ());
+    let acquired = acquire_dir_lock_aged(&lock, 0, Duration::ZERO, LONG_LOCK_STALE_AGE);
     if !acquired {
         report.busy = true;
         report.skipped += 1;
@@ -328,6 +333,8 @@ impl Run<'_> {
             .into_iter()
             .filter_map(|(key, value)| {
                 let name = key.strip_prefix(&self.prefix())?.to_string();
+                // A name that is not one the plan could make is never a path.
+                super::plan::is_folder_name(&name).then_some(())?;
                 Some((name, Record::decode(&value)?))
             })
             .collect();
@@ -407,6 +414,11 @@ impl Run<'_> {
                 .target_root
                 .join(format!("{OLD_PREFIX}{}", unique_suffix(name)));
             fs::rename(&dir, &parked).map_err(io_msg)?;
+            // The folder may have changed since the check above.
+            if !record.owns(&hash_folder(&parked).map_err(io_msg)?) {
+                fs::rename(&parked, &dir).map_err(io_msg)?;
+                return Ok(Some(Change::Skipped(SKIP_EDITED)));
+            }
             self.fault(Step::AfterDropParked)?;
             self.delete_record(name)?;
             self.fault(Step::AfterDropRecord)?;
@@ -437,6 +449,13 @@ impl Run<'_> {
         self.fault(Step::AfterPendingRecord)?;
         if had_old {
             fs::rename(&dir, &parked).map_err(io_msg)?;
+            // The folder may have changed since the check in the caller.
+            if hash_folder(&parked).map_err(io_msg)? != *old {
+                let back = fs::rename(&parked, &dir);
+                let _ = fs::remove_dir_all(&tmp);
+                back.map_err(io_msg)?;
+                return Err("edited while the sync ran, left as it is".to_string());
+            }
         }
         self.fault(Step::AfterOldMoved)?;
         fs::rename(&tmp, &dir).map_err(io_msg)?;
@@ -689,6 +708,93 @@ mod tests {
         assert!(!s.target.join("playbook-gone").exists());
         assert!(record(&s, "playbook-gone").is_none());
         assert!(record(&s, NAME).is_some());
+    }
+
+    #[test]
+    fn a_dropped_name_with_an_edited_folder_is_kept_and_reported() {
+        // Arrange
+        let s = setup("apply-drop-edited");
+        sync(&s, V1, &[folder(NAME, "one"), folder("playbook-gone", "x")]);
+        fs::write(s.target.join("playbook-gone").join("SKILL.md"), "mine").unwrap();
+
+        // Act
+        let report = sync(&s, V2, &[folder(NAME, "one")]);
+
+        // Assert
+        assert_eq!(
+            report.lines[0],
+            "skipped playbook-gone, edited since the last sync"
+        );
+        assert_eq!(skill_md(&s, "playbook-gone"), "mine");
+        assert!(record(&s, "playbook-gone").is_some());
+    }
+
+    #[test]
+    fn a_file_manager_note_does_not_make_a_folder_read_as_edited() {
+        // Arrange
+        let s = setup("apply-ds-store");
+        sync(&s, V1, &[folder(NAME, "one")]);
+        fs::write(s.target.join(NAME).join(".DS_Store"), "x").unwrap();
+
+        // Act
+        let report = sync(&s, V2, &[folder(NAME, "two")]);
+
+        // Assert
+        assert_eq!(report.lines, vec!["updated playbook-fix", "1 updated"]);
+        assert_eq!(skill_md(&s, NAME), "two");
+    }
+
+    #[test]
+    fn a_record_with_an_odd_name_is_never_followed_as_a_path() {
+        // Arrange
+        let s = setup("apply-odd-record");
+        sync(&s, V1, &[folder(NAME, "one")]);
+        let outside = s.target.parent().unwrap().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        let odd = Record {
+            version: V1.to_string(),
+            pending: false,
+            old: Hashes::new(),
+            new: Hashes::new(),
+        };
+        crate::state::set(&s.data, "skills-sync/codex/../outside", &odd.encode()).unwrap();
+
+        // Act
+        let report = sync(&s, V2, &[folder(NAME, "one")]);
+
+        // Assert
+        assert!(outside.exists());
+        assert!(report.is_clean());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_at_a_shipped_name_or_inside_an_owned_folder_is_left_alone() {
+        // Arrange
+        let s = setup("apply-links");
+        fs::create_dir_all(&s.target).unwrap();
+        let real = s.target.parent().unwrap().join("real");
+        fs::create_dir_all(&real).unwrap();
+        std::os::unix::fs::symlink(&real, s.target.join("playbook-linked")).unwrap();
+        sync(&s, V1, &[folder(NAME, "one")]);
+        std::os::unix::fs::symlink(&real, s.target.join(NAME).join("link")).unwrap();
+
+        // Act
+        let report = sync(
+            &s,
+            V2,
+            &[folder("playbook-linked", "x"), folder(NAME, "two")],
+        );
+
+        // Assert
+        assert!(report
+            .lines
+            .contains(&"skipped playbook-linked, not written by playbook".to_string()));
+        assert!(report
+            .lines
+            .contains(&"skipped playbook-fix, edited since the last sync".to_string()));
+        assert!(s.target.join("playbook-linked").is_symlink());
+        assert_eq!(skill_md(&s, NAME), "one");
     }
 
     #[test]
