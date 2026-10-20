@@ -724,17 +724,6 @@ pub enum Command {
         #[command(subcommand)]
         sub: WorktreeCommand,
     },
-    /// Check free disk space and keep builds from filling the disk
-    ///
-    /// Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb` and
-    /// the folders that use the most of it. `disk reserve` can keep a ballast
-    /// file that gives space back when the disk is full.
-    ///
-    /// Example: `playbook disk status`
-    Disk {
-        #[command(subcommand)]
-        sub: DiskCommand,
-    },
     /// Manage the memory graph that sessions read from
     Memory {
         #[command(subcommand)]
@@ -2103,57 +2092,6 @@ pub enum SessionsCommand {
         #[arg(long)]
         json: bool,
     },
-}
-
-/// `playbook disk` subcommands.
-#[derive(Subcommand, Debug)]
-pub enum DiskCommand {
-    /// Show free space per volume, the thresholds, and the biggest folders
-    /// playbook and its agents made: cargo target folders, worktrees, caches
-    /// and the ballast. Also lists cargo target folders of any project under
-    /// the home folder and `disk.paths`
-    Status {
-        /// Print JSON for tools
-        #[arg(long)]
-        json: bool,
-    },
-    /// Write a 1 GB ballast file under ~/.cache/playbook/ballast that `disk
-    /// release` deletes to give space back on a full disk. The folder carries
-    /// a CACHEDIR.TAG and, on macOS, a Time Machine exclusion.
-    /// Refuses, with exit code 1, when less than `disk.warnFreeGb` would stay
-    /// free
-    Reserve,
-    /// Delete the ballast file and print the space it gave back
-    Release,
-    /// Remove what playbook can prove is disposable and print what it freed
-    ///
-    /// Removes idle `cargo-*` target folders under this repo's worktrees
-    /// root that no build holds, `/tmp/pb-*` scratch older than an hour,
-    /// playbook's own cache and tmp entries, plugin cache versions Claude
-    /// Code marked orphaned a day ago or more, and landed worktrees through
-    /// `playbook worktree sweep`. Never removes uncommitted work, a branch,
-    /// the memory store or the config database.
-    ///
-    /// Example: `playbook disk clean --dry-run`
-    Clean {
-        /// Show what would be removed without removing anything
-        #[arg(long)]
-        dry_run: bool,
-        /// Run only when `disk.autoCleanup` is on and free space is below
-        /// `disk.warnFreeGb`, as the disk guard hooks do
-        #[arg(long)]
-        auto: bool,
-    },
-    /// Print the private cargo target folder for this worktree
-    ///
-    /// Prints `<worktrees root>/cargo-<worktree name>-<hash>`, the folder an
-    /// agent sets as `CARGO_TARGET_DIR` so each worktree builds into its own
-    /// target folder. `playbook worktree remove`, the sweep and the
-    /// worktree-remove hook delete it with the worktree. Warns on stderr when
-    /// more than `disk.maxTargetDirs` target folders exist.
-    ///
-    /// Example: `CARGO_TARGET_DIR="$(playbook disk target-dir)" cargo test`
-    TargetDir,
 }
 
 /// `playbook worktree` subcommands.
