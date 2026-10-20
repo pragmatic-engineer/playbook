@@ -148,6 +148,6 @@ Off by default. Set it with `playbook config set --global effort.auto suggest` (
 - [Plan and implement](../guides/01-plan-and-implement.md): the `/playbook:fix` limits.
 - [Worktree engine](../internals/03-worktree.md): the sweep that the `worktreeCleanup.*` keys control.
 
-With the policy guard on, the model cannot change `hooks.policyGuard.*`, `hooks.rmGuard.*` (retired: `hooks.rmGuard.allowedRoots` is no longer read, and a stored value is ignored for one release), `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`, `pr.ticketPatterns` or `disk.*`. The policy guard refuses a model-run `config set`, `import`, `unset` or `edit` on them. Run the change yourself in the prompt with `!`.
+With the policy guard on, the model cannot change `hooks.policyGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`, `pr.ticketPatterns` or `disk.*`. The policy guard refuses a model-run `config set`, `import`, `unset` or `edit` on them. Run the change yourself in the prompt with `!`.
 
 With the policy guard on, the model cannot write Claude Code's `settings.json` or `settings.local.json` (user or project) with the Edit or Write tools or with a Bash command. Settings change through `playbook setup`, `uninstall`, `config set` and `doctor`, or by you in the prompt with `!`.

@@ -435,10 +435,6 @@ pub fn registry() -> Vec<Migration> {
 /// off. It changes nothing and never turns the guard on. A fresh install, or
 /// one that stored the key either way, gets nothing.
 fn policy_guard_off_notice(ctx: &Ctx) -> Outcome {
-    // A headless session prints nothing, so wait for one that does.
-    if crate::common::headless::is_headless() {
-        return Outcome::Quiet;
-    }
     let settings = ctx.claude_home.join("settings.json");
     let wired =
         crate::doctor::field::hook_commands_for_event(&settings, "PreToolUse", &["policy-guard"])
