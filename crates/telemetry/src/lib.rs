@@ -36,6 +36,7 @@ pub mod run;
 pub mod say;
 pub mod service;
 pub mod session_view;
+pub mod spend;
 pub mod standalone;
 pub mod summary;
 pub mod telemetry_db;
