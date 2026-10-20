@@ -11,7 +11,7 @@
 //! is the home of the account, so a run with a scratch `HOME` never loads a
 //! real service.
 
-use crate::usage::service::{find_old, Kind, LABEL, OLD_LABEL, UNIT};
+use crate::usage::service::{find_kind, find_old, Kind, LABEL, OLD_LABEL, UNIT};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -106,12 +106,13 @@ fn off_limits(home: &Path) -> Result<(), String> {
     }
 }
 
-/// Stops the service and deletes its file. `Ok(false)` when there was no file.
+/// Stops the service and deletes its file. `Ok(false)` when there was no
+/// file, or it is not one playbook wrote, which stays.
 pub fn remove(kind: Kind, home: &Path, manager: &dyn Manager, uid: u32) -> Result<bool, String> {
-    let file = kind.file(home);
-    if !file.exists() {
+    let Some(found) = find_kind(kind, home).filter(|f| f.ours) else {
         return Ok(false);
-    }
+    };
+    let file = found.file;
     off_limits(home)?;
     for (program, args) in unload_commands(kind, uid) {
         // Not loaded is fine: the file goes either way.
