@@ -12,8 +12,8 @@
 //!   (`~/.claude/projects/*/memory/`) or the retired `~/.claude/memory/`.
 //!
 //! - changing the `rm` guard's own allowance: `playbook config set` on a
-//!   `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`
-//!   or `pr.ticketPatterns` key, `config import`, `config unset` or `config edit`,
+//!   `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`,
+//!   `pr.ticketPatterns` key, `config import`, `config unset` or `config edit`,
 //!   a write to the config database or a config file (a redirect into it, a
 //!   writer program, an interpreter, `sed -i`, or `sqlite3` with anything but
 //!   a read), or an inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`
@@ -130,7 +130,7 @@ macro_rules! protected_reason {
         concat!(
             "Matched rule: ",
             $rule,
-            ". The rm guard's allowed roots, the prose lint mode and the pull request rules are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Reading the config store is fine. Until then, work within the current setting and say so."
+            ". The prose lint mode and the pull request rules are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.proseLint.mode warn`. Reading the config store is fine. Until then, work within the current setting and say so."
         )
     };
 }

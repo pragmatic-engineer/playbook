@@ -671,21 +671,35 @@ mod unix {
                         Probe::Silent => {}
                     }
                 }
+                // A prompt or a command may not kill, so a holder that will
+                // not stop would cost the whole budget on every call. The
+                // stamp, taken before the stop, makes that once per window.
+                let stamped = !opts.may_kill;
+                if stamped && !take_stamp(paths, deps.window, crate::util::time::now_secs()) {
+                    return Ensured::Down;
+                }
                 match stop_with(paths, opts.stop_budget, opts.may_kill, deps) {
                     Stopped::Stopped | Stopped::Killed | Stopped::NotRunning => {
-                        spawn(paths, exe, opts, deps, Ensured::Replaced)
+                        spawn(paths, exe, opts, deps, Ensured::Replaced, stamped)
                     }
                     Stopped::StillRunning | Stopped::Unavailable => Ensured::Down,
                 }
             }
-            LockState::Free => spawn(paths, exe, opts, deps, Ensured::Started),
+            LockState::Free => spawn(paths, exe, opts, deps, Ensured::Started, false),
         }
     }
 
-    /// Takes the stamp, retires a lockless older collector, spawns, and with
+    /// Takes the stamp (unless the caller already did), retires a lockless older collector, spawns, and with
     /// a `wait` polls until the new one holds the lock and listens.
-    fn spawn(paths: &Paths, exe: &Path, opts: EnsureOpts, deps: &Deps, done: Ensured) -> Ensured {
-        if !take_stamp(paths, deps.window, crate::util::time::now_secs()) {
+    fn spawn(
+        paths: &Paths,
+        exe: &Path,
+        opts: EnsureOpts,
+        deps: &Deps,
+        done: Ensured,
+        stamped: bool,
+    ) -> Ensured {
+        if !stamped && !take_stamp(paths, deps.window, crate::util::time::now_secs()) {
             return Ensured::Down;
         }
         retire_lockless(paths, opts.stop_budget, deps);

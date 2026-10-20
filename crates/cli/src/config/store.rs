@@ -376,10 +376,12 @@ pub fn import(root: &Path, doc: &Value) -> Result<usize, ConfigError> {
             return Ok(());
         };
         for (key, value) in obj {
+            if super::keys::RETIRED_KEYS.contains(&key.as_str()) {
+                continue;
+            }
             super::write::validate_key_and_value(key, value)?;
             super::write::require_global_for_user_key(key, tier == "global")?;
-            let value = super::write::normalize(key, value.clone());
-            rows.push((tier, scope.to_string(), key.clone(), value));
+            rows.push((tier, scope.to_string(), key.clone(), value.clone()));
         }
         Ok(())
     };

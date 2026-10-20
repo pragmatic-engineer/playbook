@@ -93,12 +93,15 @@ pub const KNOWN_KEYS: &[&str] = &[
     "launcher.shortName",
     "systemPrompt.enabled",
     "attribution.enabled",
-    "hooks.rmGuard.allowedRoots",
     "hooks.proseLint.mode",
     "update.mode",
     "update.checkIntervalHours",
     "update.plugin",
 ];
+
+/// Keys that were removed. A stored value stays in the store, is never read,
+/// and `config import` skips it (one release of grace).
+pub const RETIRED_KEYS: &[&str] = &["hooks.rmGuard.allowedRoots"];
 
 /// The per-user settings, which live only in the global tier.
 pub const USER_KEYS: &[&str] = &[
@@ -205,7 +208,6 @@ pub fn default_value(key: &str) -> Option<Value> {
         "launcher.claudeOverride" | "launcher.shortName" => Some(Value::Bool(false)),
         "systemPrompt.enabled" => Some(Value::Bool(true)),
         "attribution.enabled" => Some(Value::Bool(false)),
-        "hooks.rmGuard.allowedRoots" => Some(Value::Array(Vec::new())),
         "hooks.proseLint.mode" => Some(Value::String("warn".to_string())),
         "update.mode" => Some(Value::String("notify".to_string())),
         "update.checkIntervalHours" => Some(Value::Number(24.into())),
@@ -270,6 +272,31 @@ pub fn model_override_error(key: &str, value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_retired_rm_guard_key_is_no_longer_known() {
+        for key in RETIRED_KEYS {
+            assert!(!KNOWN_KEYS.contains(key), "{key}");
+            assert_eq!(default_value(key), None, "{key}");
+        }
+    }
+
+    #[test]
+    fn import_skips_a_retired_key_and_set_refuses_it() {
+        let home = crate::common::test_support::scratch_dir("retired-key");
+        let root = crate::common::paths::playbook_root_from(&home);
+        std::fs::create_dir_all(&root).unwrap();
+        let doc = serde_json::json!({"global": {"hooks.rmGuard.allowedRoots": ["~/a/b"], "usage.theme": "dark"}});
+        assert_eq!(super::super::store::import(&root, &doc).unwrap(), 1);
+        let set = super::super::write::set(
+            super::super::write::Tier::Global,
+            "hooks.rmGuard.allowedRoots",
+            Value::Array(Vec::new()),
+            &home,
+            None,
+        );
+        assert!(set.is_err());
+    }
 
     #[test]
     fn the_auto_budgets_default_to_the_measured_caps_and_the_ceiling_to_zero() {
