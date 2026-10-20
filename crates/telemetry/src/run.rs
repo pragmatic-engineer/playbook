@@ -113,7 +113,7 @@ pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<Stri
     };
     if !usage.is_empty() {
         text.push_str(&limits_source::summary_section(
-            &limit_sources(paths),
+            &limit_sources(paths, true),
             &usage,
             now,
             super::entry::configured_week_start(),
@@ -122,21 +122,44 @@ pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<Stri
     Ok(text)
 }
 
-/// The stored plan limits, the manual budgets from the config and what
-/// Claude Code caches in its config file.
-pub fn limit_sources(paths: &Paths) -> limits_source::Sources {
-    limits_source::Sources::load(
+/// The stored plan limits, the manual budgets from the config, what Claude
+/// Code caches in its config file and, when the user turned it on, the figure
+/// the server billed. `network` says whether a request may be made: a first
+/// screen passes false and shows what the cache holds. Nothing here fails: a
+/// problem with the server figure leaves a reason in its place.
+pub fn limit_sources(paths: &Paths, network: bool) -> limits_source::Sources {
+    let mut sources = limits_source::Sources::load(
         paths.db.parent(),
         &paths.claude_json,
         &super::host::home_dir(),
-    )
+    );
+    if let Some(dir) = paths.db.parent() {
+        let now = crate::util::time::now_secs();
+        let views = std::panic::catch_unwind(|| {
+            super::spend_fetch::for_views(
+                super::host::current(),
+                dir,
+                &paths.claude_json,
+                now,
+                network,
+                &|name| std::env::var(name).ok(),
+            )
+        })
+        .unwrap_or(super::spend_fetch::Views {
+            figure: None,
+            unavailable: Some(super::spend::Reason::Internal),
+        });
+        sources.server = views.figure;
+        sources.spend_unavailable = views.unavailable;
+    }
+    sources
 }
 
 /// The `limits` object of `--json`. `events` must reach back to
 /// `limits_source::events_since`.
 pub fn limits_json(paths: &Paths, events: &[UsageEvent], now: i64) -> serde_json::Value {
     limits_source::report_json(
-        &limit_sources(paths),
+        &limit_sources(paths, true),
         events,
         now,
         super::entry::configured_week_start(),

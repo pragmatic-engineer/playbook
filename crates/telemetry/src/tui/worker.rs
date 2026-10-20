@@ -41,12 +41,19 @@ pub struct Worker {
 /// How often a partial snapshot is sent while a first read runs.
 const PARTIAL_EVERY: Duration = Duration::from_secs(1);
 
-/// Reads the store into a snapshot.
-fn snapshot(conn: &rusqlite::Connection, paths: &Paths, query: &(Range, String)) -> Update {
+/// Reads the store into a snapshot. `network` lets it ask the server for the
+/// spend limit once the cache is out of date; the first screens pass false so
+/// they never wait on the network.
+fn snapshot(
+    conn: &rusqlite::Connection,
+    paths: &Paths,
+    query: &(Range, String),
+    network: bool,
+) -> Update {
     match data::load(conn, query.0, &query.1, now_secs()) {
         Ok(mut d) => {
             // A limits failure never hides the rest of the view.
-            if let Ok(l) = data::load_limits(conn, paths, query.0, d.now) {
+            if let Ok(l) = data::load_limits(conn, paths, query.0, d.now, network) {
                 d.limits = l;
             }
             Update::Data(Box::new(d))
@@ -81,7 +88,10 @@ impl Worker {
                 // never waits on a first read of a large history.
                 if first {
                     first = false;
-                    if update_tx.send(snapshot(&conn, &paths, &query)).is_err() {
+                    if update_tx
+                        .send(snapshot(&conn, &paths, &query, false))
+                        .is_err()
+                    {
                         return;
                     }
                 }
@@ -103,7 +113,10 @@ impl Worker {
                     }
                     if last_sent.elapsed() >= PARTIAL_EVERY {
                         last_sent = std::time::Instant::now();
-                        if update_tx.send(snapshot(&conn, &paths, &query)).is_err() {
+                        if update_tx
+                            .send(snapshot(&conn, &paths, &query, false))
+                            .is_err()
+                        {
                             gone = true;
                         }
                     }
@@ -113,7 +126,7 @@ impl Worker {
                     return;
                 }
                 let update = match ingested {
-                    Ok(_) => snapshot(&conn, &paths, &query),
+                    Ok(_) => snapshot(&conn, &paths, &query, true),
                     Err(e) => Update::Error(e),
                 };
                 if update_tx.send(update).is_err() {

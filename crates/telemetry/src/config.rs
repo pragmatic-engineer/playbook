@@ -41,7 +41,7 @@ pub const KEYS: &[&str] = &[
 pub const SPEND_CACHE_SECONDS: std::ops::RangeInclusive<i64> = 30..=600;
 
 /// The default `usage.spend.cacheSeconds`.
-const DEFAULT_SPEND_CACHE_SECONDS: i64 = 60;
+pub(crate) const DEFAULT_SPEND_CACHE_SECONDS: i64 = 60;
 
 /// The built-in default of `key`, `None` for a key that is not a usage key.
 pub fn default_value(key: &str) -> Option<Value> {

@@ -370,6 +370,12 @@ impl Default for Account {
     }
 }
 
+/// Whether the config file names an OAuth account (a Claude.ai login). The
+/// account itself is never read, only that it is there.
+pub(crate) fn has_oauth_account(path: &Path) -> bool {
+    load(path).is_some_and(|v| v.get("oauthAccount").is_some_and(Value::is_object))
+}
+
 fn load(path: &Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }

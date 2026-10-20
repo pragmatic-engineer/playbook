@@ -97,6 +97,25 @@ impl Reason {
         }
     }
 
+    /// The reason with this key, for a cache entry read back from disk.
+    pub fn from_key(key: &str) -> Option<Reason> {
+        [
+            Reason::Disabled,
+            Reason::NoConsent,
+            Reason::NoToken,
+            Reason::Unauthorized,
+            Reason::RateLimited,
+            Reason::Timeout,
+            Reason::Schema,
+            Reason::UnsupportedLogin,
+            Reason::Network,
+            Reason::Internal,
+            Reason::Fetching,
+        ]
+        .into_iter()
+        .find(|r| r.key() == key)
+    }
+
     /// The one line that stands where the server figure would be.
     pub fn line(self) -> String {
         match self {
@@ -183,6 +202,14 @@ impl Scope {
             Scope::Member => "member",
             Scope::Org => "org",
             Scope::Unspecified => "unspecified",
+        }
+    }
+
+    pub(crate) fn from_key(key: &str) -> Scope {
+        match key {
+            "member" => Scope::Member,
+            "org" => Scope::Org,
+            _ => Scope::Unspecified,
         }
     }
 
@@ -274,7 +301,7 @@ fn decimals(v: Option<&Value>) -> Result<Option<u8>, SpendError> {
 }
 
 /// A short word from the document: letters, digits, `_` and `-` only.
-fn word(v: Option<&Value>) -> Option<String> {
+pub(crate) fn word(v: Option<&Value>) -> Option<String> {
     v.and_then(Value::as_str)
         .map(str::trim)
         .filter(|s| {

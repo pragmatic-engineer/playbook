@@ -400,16 +400,18 @@ pub fn load(conn: &Connection, range: Range, filter: &str, now: i64) -> Result<D
 }
 
 /// Reads the plan limits the statusline kept and the manual budgets, and the
-/// events the burn rate needs.
+/// events the burn rate needs. `network` lets it ask the server for the spend
+/// limit; false shows only what was kept from an earlier ask.
 pub fn load_limits(
     conn: &Connection,
     paths: &Paths,
     range: Range,
     now: i64,
+    network: bool,
 ) -> Result<LimitsView, String> {
     let week = crate::entry::configured_week_start();
     let events = db::load_usage_events_since(conn, limits_source::events_since(now, week))?;
-    let sources = crate::run::limit_sources(paths);
+    let sources = crate::run::limit_sources(paths, network);
     Ok(LimitsView::build(&sources, &events, now, week, range))
 }
 

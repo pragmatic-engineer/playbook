@@ -57,6 +57,18 @@ pub trait Host: Send + Sync {
 
     /// The records for the sessions panel, with the time they were read at.
     fn sessions(&self, paths: &Paths, home: &Path) -> Result<(Vec<Record>, i64), String>;
+
+    /// The way to ask the server for the spend limit, or `None` when this
+    /// program has none (the default). Read in one place, `spend_fetch::for_views`.
+    fn spend_fetcher(&self) -> Option<Box<dyn super::spend_fetch::SpendFetcher>> {
+        None
+    }
+
+    /// Whether the user has confirmed the spend limit notice. Without it no
+    /// fetch is made, whatever the config says.
+    fn spend_ack(&self) -> bool {
+        false
+    }
 }
 
 static HOST: RwLock<Option<&'static dyn Host>> = RwLock::new(None);

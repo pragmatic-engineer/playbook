@@ -307,7 +307,7 @@ pub enum Monthly {
 }
 
 /// The first second of the UTC month that holds `now`.
-fn utc_month_start(now: i64) -> i64 {
+pub(crate) fn utc_month_start(now: i64) -> i64 {
     let utc = crate::tz::Zone::Utc;
     utc.day_start(month_first_day(utc.day_of(now)))
 }
