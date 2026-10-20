@@ -1,14 +1,23 @@
-# Dependabot version updates (ADR 0047). This file is bespoke: repo-config
-# must set `manage_dependabot_config = false` for this repo, or its next
-# `terraform apply` writes its monthly template over this file.
+# Dependabot security updates only (ADR 0047, amended 2026-10-20).
 #
-# Each crate's Cargo.toml pins its dependencies exactly, so a cargo PR bumps
-# the pin and Cargo.lock together. Patch and minor bumps come as one grouped
-# PR a week per ecosystem, on different days so the two do not run CI side by
-# side. dependabot-auto-merge.yml merges them once CI passes. For a 0.x crate
-# a minor bump can break the build, and CI is the gate for that too. A major
-# bump opens its own PR and waits for review. A new release waits 7 days
-# before Dependabot proposes it.
+# Version updates are off: `open-pull-requests-limit: 0` on both ecosystems.
+# GitHub documents that limit as the way to disable version updates for a
+# package manager, and says security update PRs have a separate fixed limit
+# of 10 that this option does not change. The cooldown below is also not
+# applied to security updates. Security PRs come from the repo setting
+# "Dependabot security updates", which is on. Weekly version PRs were noise.
+#
+# To turn version updates back on, raise `open-pull-requests-limit` (5 for
+# github-actions and 10 for cargo were the old values). The schedule, cooldown
+# and groups are kept so that is the only edit.
+#
+# Each crate's Cargo.toml pins its direct dependencies exactly, so a security
+# PR for one bumps the pin and Cargo.lock together; for a transitive crate it
+# changes Cargo.lock only. dependabot-auto-merge.yml says how PRs are merged.
+#
+# This file is bespoke: repo-config must keep `manage_dependabot_config =
+# false` for this repo, or its next `terraform apply` writes its monthly
+# template over this file.
 
 version: 2
 
@@ -26,7 +35,7 @@ updates:
         update-types: ["minor", "patch"]
     commit-message:
       prefix: "chore(deps)"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
 
   - package-ecosystem: "cargo"
     directory: "/"
@@ -41,4 +50,4 @@ updates:
         update-types: ["minor", "patch"]
     commit-message:
       prefix: "chore(deps)"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 0

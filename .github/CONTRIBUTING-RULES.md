@@ -113,7 +113,7 @@ Replace `<PROJECT_LICENSE>` with the SPDX identifier from the project's [LICENSE
 - **Minimise new runtime dependencies.** Each new dependency increases the supply chain attack surface and the maintenance burden.
 - **Justify each new dependency in the PR description**: what problem it solves, what alternatives were considered, and why this one is the right trade-off.
 - **Prefer widely audited libraries** over niche ones. Active maintenance, security responsiveness, and license compatibility are non-negotiable.
-- **Pin dependencies to specific versions.** Never use floating ranges (`^`, `~`, `*`) in lockfiles. Dependabot handles version updates via reviewable PRs.
+- **Pin dependencies to specific versions.** Never use floating ranges (`^`, `~`, `*`) in lockfiles. Dependabot opens PRs for security advisories only; version bumps are done by hand in a normal PR.
 - **Dev dependencies have a lower bar than runtime dependencies** but the justification step still applies.
 
 ### Commit Signing
