@@ -46,14 +46,19 @@ pub fn run_with(home: &Path, mode: Mode, json: bool, seen: bool, plugin: bool) -
                 .then(|| crate::plugin_update::run_for_command(home, false))
                 .flatten()
                 .and_then(|o| o.line());
+            let skills_lines = if plugin {
+                crate::skills_sync::refresh(home, false)
+            } else {
+                Vec::new()
+            };
             let items = out.items(home);
             if json {
-                if let Some(line) = &plugin_line {
+                for line in plugin_line.iter().chain(&skills_lines) {
                     eprintln!("{line}");
                 }
                 println!("{}", run_json(&out, &items));
             } else {
-                if let Some(line) = &plugin_line {
+                for line in plugin_line.iter().chain(&skills_lines) {
                     println!("{line}");
                 }
                 print!("{}", heal::render_fix(&out, &items));
@@ -74,11 +79,24 @@ pub fn run_with(home: &Path, mode: Mode, json: bool, seen: bool, plugin: bool) -
                 return 1;
             };
             let items = items_of(home, &plan);
+            // Planned only: no claim, no writes.
+            let skills_lines = if plugin && mode == Mode::DryRun {
+                crate::skills_sync::refresh(home, true)
+            } else {
+                Vec::new()
+            };
             let text = match (mode, json) {
                 (Mode::Status, true) => format!("{}\n", status_json(&record, &plan, &items)),
                 (Mode::Status, false) => render_status(&record, &plan, &items),
-                (_, true) => format!("{}\n", dry_run_json(&record, &plan, &items)),
-                (_, false) => render_dry_run(&record, &plan, &items),
+                (_, true) => {
+                    let mut value = dry_run_json(&record, &plan, &items);
+                    value["skills"] = json!(skills_lines);
+                    format!("{value}\n")
+                }
+                (_, false) => {
+                    let lines: String = skills_lines.iter().map(|l| format!("{l}\n")).collect();
+                    format!("{lines}{}", render_dry_run(&record, &plan, &items))
+                }
             };
             print!("{text}");
             0
