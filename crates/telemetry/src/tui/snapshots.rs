@@ -333,6 +333,7 @@ fn plan_snapshot() -> Snapshot {
             resets_at: NOW + 4 * DAY,
         }),
         spend_limit: None,
+        ..Snapshot::default()
     }
 }
 

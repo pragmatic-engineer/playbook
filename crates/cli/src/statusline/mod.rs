@@ -80,14 +80,13 @@ pub fn run() -> i32 {
 
 /// Keeps the plan limits Claude Code passes in (`rate_limits`, Pro and Max or
 /// a gateway only) for `playbook usage`. Best effort and local: only
-/// percentages, reset times and the gateway dollar limit are stored.
+/// percentages, reset times and the gateway dollar limit are stored. A reading
+/// that carries one window keeps the other as stored.
 fn remember_rate_limits(input: &str, now: i64) {
     if !input.contains("rate_limits") {
         return;
     }
-    if let Some(snap) = crate::usage::limits_source::Snapshot::from_statusline(input, now) {
-        crate::usage::limits_source::save(&crate::common::paths::usage_db_dir(), &snap);
-    }
+    crate::usage::limits_source::remember(&crate::common::paths::usage_db_dir(), input, now);
 }
 
 /// Whether the terminal is known to support OSC 8 hyperlinks.
