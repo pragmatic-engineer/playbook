@@ -431,9 +431,10 @@ fn hook_cases() -> Vec<Case> {
         ("context-hygiene", SESSION_PAYLOAD),
         ("doc-read-hint", EDIT_PAYLOAD),
         ("usage-warm", SESSION_PAYLOAD),
-        ("disk-guard", BASH_PAYLOAD),
-        // Retired, kept so an old plugin cache stays quiet: no output, no files.
+        // Retired, kept so an old plugin cache or settings entry stays quiet:
+        // no output, no files.
         ("migration-check", SESSION_PAYLOAD),
+        ("disk-guard", BASH_PAYLOAD),
     ];
     hooks.iter().map(|(name, payload)| {
             let c = case(&format!("hook {name}"), &["hook", name]).stdin(payload);
@@ -441,7 +442,7 @@ fn hook_cases() -> Vec<Case> {
                 // A worktree hook with no worktree name refuses and says so.
                 "worktree-create" => c.code(1).err("unsafe worktree name"),
                 "worktree-remove" => c.err("worktree_path is missing"),
-                "migration-check" => c,
+                "migration-check" | "disk-guard" | "no-slop-guard" => c,
                 // These keep a log or a counter, so a second run adds to it.
                 "session-init" | "session-clean-exit" | "search-counter" | "precompact-warn"
                 | "usage-warm" => c.grows(),
@@ -497,10 +498,8 @@ fn table() -> Vec<Case> {
         case("init", &["init", "--dry-run"]).out("nothing is changed"),
         case("init", &["init", "--yes"]).out("Applying").writes(),
         case("hooks list", &["hooks", "list"]).out("Safety guards").plain(),
-        case("hooks explain-rm", &["hooks", "explain-rm", "unlink /etc/hosts"])
-            .out("verdict: deny")
-            .plain(),
-        case("hooks explain-rm", &["hooks", "explain-rm", "--json", "ls"]).out(r#""verdict":"allow""#),
+        case("hooks explain-rm", &["hooks", "explain-rm", "ls"]).code(2).err("was removed"),
+        case("skills sync", &["skills", "sync", "--dry-run"]).out("no other agents found"),
         case("uninstall", &["uninstall"]).code(1).err("nothing was changed"),
         case("uninstall", &["uninstall", "--dry-run"]).pre(&["setup", "--yes"]),
         case("uninstall", &["uninstall", "--yes"]).pre(&["setup", "--yes"]).writes(),
@@ -584,11 +583,6 @@ fn table() -> Vec<Case> {
         case( "pr land-wait", &["pr", "land-wait", "1", "--timeout", "1", "--interval", "1"], ).out("LAND_VERDICT=TIMEOUT"),
         case("pr merge", &["pr", "merge", "1"]).out("merge_rc=-1"),
         // worktrees and memory
-        case("disk status", &["disk", "status"]).out("Thresholds"),
-        case("disk reserve", &["disk", "reserve"]).pre(&["config", "set", "disk.warnFreeGb", "10000"]).code(1).err("refused"),
-        case("disk release", &["disk", "release"]).out("no ballast"),
-        case("disk clean", &["disk", "clean", "--dry-run"]).out("disk clean: would remove"),
-        case("disk target-dir", &["disk", "target-dir"]).out("cargo-"),
         case("worktree sweep", &["worktree", "sweep"]),
         case("worktree remove", &["worktree", "remove", "{ROOT}/none"]).code(1).err("not a registered git worktree"),
         case( "worktree review setup", &["worktree", "review", "setup", "1", "abc123"], ).code(1).err("failed to resolve repo URL"),
@@ -987,8 +981,6 @@ fn doctor_on_a_fresh_home_reports_only_known_not_installed_failures() {
                 "safety guards wired 0/",
                 "playbook binary not on PATH",
                 "plugin not installed",
-                // The machine's own disk can be below disk.blockFreeGb.
-                "disk: ",
             ];
             assert!(
                 documented.iter().any(|d| line.contains(d)),

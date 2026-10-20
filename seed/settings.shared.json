@@ -98,11 +98,6 @@
           },
           {
             "type": "command",
-            "command": "playbook hook no-slop-guard",
-            "timeout": 10
-          },
-          {
-            "type": "command",
             "command": "playbook hook precommit-check",
             "if": "Bash(git commit:*)",
             "timeout": 10
@@ -116,11 +111,6 @@
             "type": "command",
             "command": "playbook hook policy-guard",
             "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "playbook hook disk-guard",
-            "timeout": 10
           }
         ]
       },
@@ -129,22 +119,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "playbook hook no-slop-guard",
-            "timeout": 10
-          },
-          {
-            "type": "command",
             "command": "playbook hook policy-guard",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Agent|Task",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "playbook hook disk-guard",
             "timeout": 10
           }
         ]

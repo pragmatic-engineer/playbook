@@ -16,6 +16,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// The collector port every scratch home records before setup runs. Without
+/// it, setup takes the default 47318 or, when a real collector holds that
+/// port, the first free one it probes, which differs between the two runs.
+/// Nothing listens here: setup only writes the number into the settings.
+const PINNED_PORT: u16 = 47_999;
+
+/// The token recorded with [`PINNED_PORT`].
+const PINNED_TOKEN: &str = "setup-alias-test-token";
+
 struct Run {
     code: Option<i32>,
     stdout: String,
@@ -41,6 +50,13 @@ fn run_with(name: &str, args: &[&str], terminal_stderr: bool) -> Run {
     assert!(home.starts_with(std::env::temp_dir()) && home != std::env::temp_dir());
     let _ = fs::remove_dir_all(&home);
     fs::create_dir_all(home.join(".claude")).expect("scratch home");
+    let state_dir = home.join(".config/playbook/data");
+    fs::create_dir_all(&state_dir).expect("scratch state dir");
+    fs::write(
+        state_dir.join("collector.json"),
+        format!(r#"{{"pid":0,"port":{PINNED_PORT},"token":"{PINNED_TOKEN}"}}"#),
+    )
+    .expect("pin the collector port");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
     cmd.arg(name)
         .args(args)
@@ -219,6 +235,10 @@ fn only_telemetry_and_short_name_match_under_both_names() {
     let telemetry = assert_same(&["--only", "telemetry"]);
     assert_eq!(telemetry.code, Some(0));
     assert!(telemetry.files[".claude/settings.json"].contains("OTEL_EXPORTER_OTLP_ENDPOINT"));
+    assert!(
+        telemetry.files[".claude/settings.json"].contains(&format!("127.0.0.1:{PINNED_PORT}")),
+        "the endpoint must use the pinned port, not a probed one"
+    );
     assert_eq!(
         assert_same(&["--only", "short-name", "--short-name"]).code,
         Some(0)

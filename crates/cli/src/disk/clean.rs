@@ -99,7 +99,9 @@ impl Env {
     pub fn from_system(home: &Path, repo_root: Option<&Path>) -> Env {
         Env {
             home: home.to_path_buf(),
-            claude_home: super::status::claude_home(home),
+            claude_home: std::env::var_os("CLAUDE_CONFIG_DIR")
+                .filter(|v| !v.is_empty())
+                .map_or_else(|| home.join(".claude"), PathBuf::from),
             worktrees_root: repo_root.and_then(targets::worktrees_root),
             tmp_dirs: system_tmp_dirs(),
             now: SystemTime::now(),
@@ -134,9 +136,7 @@ fn current_uid() -> Option<u32> {
     cfg!(unix).then(crate::service_manager::uid)
 }
 
-/// The playbook data that is never removed. It is the list the rm guard
-/// protects (ADR 0045, `rm_workspace_guard::roots::protected`), kept here
-/// as a copy because the rm guard keeps its list private: the memory store,
+/// The playbook data that is never removed: the memory store,
 /// the databases, plans and handoffs, legacy org config, session state, the
 /// effort ledger, the system prompt and the config file. The ballast is
 /// added, and each path is listed as given and with links resolved.

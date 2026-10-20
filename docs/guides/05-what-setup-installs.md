@@ -56,7 +56,7 @@ Before this wizard, the command (then called `init`) printed a flat plan and one
 ## Privacy
 
 - Playbook stores everything on your machine, under `~/.config/playbook/` and the files named below.
-- Playbook sends nothing anywhere. No hook, and no part of `setup`, makes a network call. The commands that reach the network are `playbook update` (it downloads a release from GitHub), `playbook update` and `playbook migrate` through `claude plugin update`, which Claude Code runs against the plugin marketplace (`update.plugin` set to `false` turns it off), the background release check that `update.mode` controls (one unauthenticated request to the GitHub releases API every `update.checkIntervalHours`, 24 by default, whose only identifying header is the `playbook/<version>` user agent; with `update.mode` set to `auto` the same background process also downloads a newer release from GitHub and checks its attestation through the `gh` tool you are logged into; `playbook config set --global update.mode off` turns it off), and the status line, which calls the `gh` tool you already have to show PR and CI state.
+- Playbook sends nothing anywhere. No hook, and no part of `setup`, makes a network call itself, but the `session-init` hook can start the background `claude plugin update` described below. The commands that reach the network are `playbook update` (it downloads a release from GitHub), `claude plugin update`, which Claude Code runs against the plugin marketplace when `playbook update`, `playbook migrate`, the first playbook command at a terminal after an upgrade or the next session start brings the plugin up to the binary's version (`playbook config set update.plugin off` turns it off), the background release check that `update.mode` controls (one unauthenticated request to the GitHub releases API every `update.checkIntervalHours`, 24 by default, whose only identifying header is the `playbook/<version>` user agent; with `update.mode` set to `auto` the same background process also downloads a newer release from GitHub and checks its attestation through the `gh` tool you are logged into; `playbook config set --global update.mode off` turns it off), and the status line, which calls the `gh` tool you already have to show PR and CI state.
 - No hook reads a secret value. `precommit-check` looks at file names only, to flag names that look like credentials.
 - `playbook usage` reads local Claude Code history. With `usage.telemetry` on `auto`, `playbook cc` points a session at a receiver on your own machine, and `setup --telemetry` can do the same for plain `claude`, the IDE and the desktop app. See [usage telemetry privacy](../internals/04-usage-dashboard.md#telemetry-privacy).
 - Claude Code's own settings are yours. Playbook edits `~/.claude/settings.json` only when you agree to it in `setup`, and takes a timestamped backup first.
@@ -75,7 +75,7 @@ Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the
 | Usage telemetry | on, asked | `--telemetry`, `--no-telemetry` | `~/.claude/settings.json` (the `env` block), `~/.config/playbook/telemetry-env.json` |
 | Collector service | on, asked | `--collector-service`, `--no-collector-service` | `~/Library/LaunchAgents/com.github.pragmatic-engineer.playbook.collector.plist` (macOS) or `~/.config/systemd/user/playbook-collector.service` (Linux) |
 | `pb` short name | on, asked | `--short-name`, `--no-short-name` | the `pb` symlink in the install folder, and `~/.config/playbook` (the `launcher.shortName` key) |
-| Disk ballast | off, asked | `--disk-ballast`, `--no-disk-ballast` | `~/.cache/playbook/ballast` (a 1 GB `ballast.bin`, a `CACHEDIR.TAG` and a lock file) |
+| Policy guard | off, asked | `--policy-guard`, `--no-policy-guard` | `~/.config/playbook` (the `hooks.policyGuard.enabled` key) |
 | Attribution | OFF, asked | `--attribution` (ON), `--no-attribution` (OFF) | `~/.claude/settings.json` (the `attribution` key), and `~/.config/playbook` (the `attribution.enabled` key) |
 
 `--settings` and `--no-settings` no longer exist. Each option that part used to carry now sits behind the hooks, status line or security part, or is not shipped.
@@ -84,9 +84,9 @@ Three steps run every time and have no flag: the memory migration, the trust ste
 
 ### Hooks
 
-Setup adds 33 hook entries to `~/.claude/settings.json`. They run 25 different `playbook hook <name>` commands. The [hook reference](../reference/hooks.md) lists each one with its event, matcher, what it reads and writes, whether it can block a tool call, and how to turn it off.
+Setup adds 29 hook entries to `~/.claude/settings.json`. They run 23 different `playbook hook <name>` commands. The [hook reference](../reference/hooks.md) lists each one with its event, matcher, what it reads and writes, whether it can block a tool call, and how to turn it off.
 
-The entries fall into six groups: safety guards, session lifecycle, usage tracking and auto mode, memory, hygiene, and worktree. Only a few hooks can stop a tool call: `rm-workspace-guard`, `no-slop-guard`, `policy-guard`, `disk-guard`, `preread-size-check`, and (in `auto` mode) `auto-guard` and `auto-cost`. `memory-capture` can pause a stop. `worktree-create` replaces Claude Code's own worktree creation. The rest add context or warn.
+The entries fall into six groups: safety guards, session lifecycle, usage tracking and auto mode, memory, hygiene, and worktree. Only a few hooks can stop a tool call: `rm-workspace-guard`, `policy-guard` (only once you turn it on), `preread-size-check`, and (in `auto` mode) `auto-guard` and `auto-cost`. `memory-capture` can pause a stop. `worktree-create` replaces Claude Code's own worktree creation. The rest add context or warn.
 
 While the plugin is disabled in Claude Code, every hook and the status line pause. See the [hook reference](../reference/hooks.md#how-to-turn-a-hook-off).
 
@@ -132,7 +132,9 @@ Setup writes no line to your `.zshrc` or `.bashrc`. `playbook cc`, `playbook ccd
 
 `--collector-service` (on by default; `--yes` is a yes) keeps the usage collector running, so the telemetry that the telemetry part points Claude Code at has a receiver after every login. It acts only when your Claude Code user settings point telemetry at the playbook collector. On macOS it writes a launchd agent to `~/Library/LaunchAgents/com.github.pragmatic-engineer.playbook.collector.plist` with `RunAtLoad` and `KeepAlive`, then loads it with `launchctl bootstrap`. An agent that playbook 0.37.0 wrote under the old label, `io.github.pragmatic-engineer.playbook.collector`, moves to the new one by itself on the next `playbook migrate`, session start or setup run. On Linux it writes a systemd user unit to `~/.config/systemd/user/playbook-collector.service` with `Restart=always`, then runs `systemctl --user enable` and `restart`. On other systems it writes nothing and prints `playbook usage collect --idle-seconds 0` for you to run. The service runs `playbook usage collect --idle-seconds 0` and writes its output to `~/.config/playbook/data/collector-service.log` (mode `0600`). The service file (mode `0644`) names only the program and the log: the collector reads its token from `collector.json`, so no secret is written. Running setup again changes nothing when the file is current, and starts the service when it is stopped. A no is remembered, so the one-time session reminder for existing installs stays quiet. `playbook doctor` and `playbook usage status` name the service, and `playbook uninstall` stops it and removes the file. See [ADR 0043](../adr/0043-collector-service-in-setup.md).
 
-`--disk-ballast` (off by default; `--yes` leaves it off) runs `playbook disk reserve`, which writes a 1 GB file of real blocks to `~/.cache/playbook/ballast/ballast.bin`. Deleting it needs no free space, so on a full disk `playbook disk release` gives back room for a shell and a cleanup, and the disk guard hook deletes it by itself when free space on its volume falls below 1 GB. The folder carries a `CACHEDIR.TAG`, and on macOS the file is kept out of Time Machine. Setup refuses when writing it would leave less than `disk.warnFreeGb` free. Run `playbook disk release` to remove it. See [ADR 0047](../adr/0047-disk-guard.md).
+### Policy guard
+
+`--policy-guard` (off by default; `--yes` leaves it off) stores `hooks.policyGuard.enabled` true. The `policy-guard` hook entries are always wired with the other hooks and allow every call while the key is false, so a no changes nothing and the guard can be switched later with `playbook config set --global hooks.policyGuard.enabled true` or `false`. A run without the flag never turns the guard off. [The policy guard](08-policy-guard.md) lists every rule it applies when on, the `POLICY_GUARD` switch and the known pitfalls.
 
 ### Attribution
 
@@ -155,9 +157,13 @@ If `~/.claude.json` exists, setup marks `~/.config/playbook` as trusted there, s
 
 Older installs placed `~/.config/playbook/hooks/lib/config-hash.sh`. The config hash now runs inside `playbook`, so setup removes that script once. The hash itself is a fingerprint of your Claude Code config files that `session-init` stores in the session directory, to warn when a resumed session's config has changed. It is never sent anywhere.
 
+## Codex skills (not part of setup)
+
+`playbook setup` never writes to `~/.agents/skills`. `playbook skills sync` is a separate command you run on purpose. It writes one `playbook-<name>/` folder per skill and per command, as real copies, and records the plugin version and a hash of each file it wrote. It skips a folder it did not write or one you edited. After the first run, a plugin update brings the synced set up to date for that agent: it adds new skills, updates unedited folders, and removes folders for skills the plugin dropped. A folder you deleted is not written again. `playbook uninstall` removes a recorded folder when it still matches the record, and keeps one you edited. See [Codex skills](../internals/15-codex-skills.md).
+
 ## Undo
 
-- `playbook uninstall` removes the hook entries and status line setup wrote, the launcher block, the files setup placed under `~/.config/playbook`, and the collector service. Run it with `--dry-run` first to see the list. Add `--remove-binary` to remove the binary and its PATH block too.
+- `playbook uninstall` removes the hook entries and status line setup wrote, the launcher block, the files setup placed under `~/.config/playbook`, the collector service, and the Codex skill folders that `skills sync` wrote and you did not edit. Run it with `--dry-run` first to see the list. Add `--remove-binary` to remove the binary and its PATH block too.
 - Memory, your own settings, sessions, history and earlier backups are never removed.
 - Backups of `settings.json` are timestamped files next to it, named `settings.json.bak.<time>`.
 - Any single part can be turned off by running `setup` again with its `--no-` flag, then removing the entries by hand. Setup never deletes a value you have.
