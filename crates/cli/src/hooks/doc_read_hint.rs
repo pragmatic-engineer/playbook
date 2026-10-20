@@ -8,7 +8,8 @@
 
 use crate::common::emit_pre_context;
 use crate::common::payload::Payload;
-use crate::doc::convert::find_anydoc;
+use crate::doc::convert::find_converter;
+use std::ffi::OsStr;
 use std::path::Path;
 
 /// Extensions the converter reads that the built in Read tool cannot parse.
@@ -42,6 +43,17 @@ pub fn hint_for(path: &Path, has_pages: bool, has_range: bool) -> Option<String>
     None
 }
 
+/// Whether the hint should be emitted: `docs.convert` is `auto` and a
+/// converter is available.
+fn hint_enabled(
+    convert: &str,
+    configured: &str,
+    exe: Option<&Path>,
+    path_var: Option<&OsStr>,
+) -> bool {
+    convert == "auto" && find_converter(configured, exe, path_var).is_some()
+}
+
 pub fn run(payload: &Payload) {
     let path = payload.field(".tool_input.file_path");
     if path.is_empty() {
@@ -62,11 +74,15 @@ pub fn run(payload: &Payload) {
             .and_then(|(v, _, _)| v.as_str().map(str::to_string))
             .unwrap_or_default()
     };
-    if setting("docs.convert") != "auto" {
-        return;
-    }
     let path_var = std::env::var_os("PATH");
-    if find_anydoc(&setting("docs.anydocPath"), path_var.as_deref()).is_none() {
+    let exe = std::env::current_exe().ok();
+    let enabled = hint_enabled(
+        &setting("docs.convert"),
+        &setting("docs.anydocPath"),
+        exe.as_deref(),
+        path_var.as_deref(),
+    );
+    if !enabled {
         return;
     }
     emit_pre_context("PreToolUse", &text);
@@ -108,5 +124,44 @@ mod tests {
         for name in ["a.png", "a.rs", "a.md", "a.csv", "noext"] {
             assert!(hint_for(Path::new(name), false, false).is_none(), "{name}");
         }
+    }
+
+    /// A directory with a `playbook` stand-in and an executable `pbdoc` next to it.
+    fn exe_with_bundled_sibling(tag: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("playbook-hint-{}-{tag}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("playbook");
+        std::fs::write(&exe, "").unwrap();
+        let pbdoc = dir.join("pbdoc");
+        std::fs::write(&pbdoc, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&pbdoc, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (dir, exe)
+    }
+
+    #[test]
+    fn a_bundled_converter_with_convert_auto_emits_the_hint() {
+        // Arrange
+        let (dir, exe) = exe_with_bundled_sibling("auto");
+
+        // Act
+        let enabled = hint_enabled("auto", "", Some(&exe), None);
+
+        // Assert
+        std::fs::remove_dir_all(dir).unwrap();
+        assert!(enabled);
+    }
+
+    #[test]
+    fn a_bundled_converter_with_convert_off_emits_no_hint() {
+        // Arrange
+        let (dir, exe) = exe_with_bundled_sibling("off");
+
+        // Act
+        let enabled = hint_enabled("off", "", Some(&exe), None);
+
+        // Assert
+        std::fs::remove_dir_all(dir).unwrap();
+        assert!(!enabled);
     }
 }

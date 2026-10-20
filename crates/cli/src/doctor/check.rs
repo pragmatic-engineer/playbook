@@ -85,6 +85,46 @@ const PRE_GUARDS: [&str; 5] = [
     "policy-guard",
 ];
 
+/// The informational row for the document converter. `pbdoc_version` is the
+/// bundled helper's version, compared with playbook's own.
+#[cfg(unix)]
+fn doc_converter_row(found: Option<&crate::doc::convert::Converter>, pbdoc_version: &str) -> Row {
+    use crate::doc::convert::{
+        Kind, DOCTOR_ROW_BUNDLED, DOCTOR_ROW_EXTERNAL, DOCTOR_ROW_NONE, DOCTOR_ROW_SKEW,
+    };
+    match found.map(|c| c.kind) {
+        Some(Kind::Bundled) if pbdoc_version == env!("CARGO_PKG_VERSION") => {
+            Row::new("-", Level::Pass, DOCTOR_ROW_BUNDLED)
+        }
+        Some(Kind::Bundled) => {
+            Row::new("-", Level::Warn, DOCTOR_ROW_SKEW).hint("run: playbook update")
+        }
+        Some(Kind::External) => Row::new("-", Level::Warn, DOCTOR_ROW_EXTERNAL),
+        None => Row::new("-", Level::Info, DOCTOR_ROW_NONE),
+    }
+}
+
+#[cfg(unix)]
+fn doc_rows(env: &Env) -> Vec<Row> {
+    use crate::doc::convert::{find_converter, pbdoc_number, version_of};
+    let configured = config::resolve_valid("docs.anydocPath", &env.home, env.repo_slug.as_deref())
+        .ok()
+        .and_then(|(v, _, _)| v.as_str().map(str::to_string))
+        .unwrap_or_default();
+    let exe = std::env::current_exe().ok();
+    let found = find_converter(&configured, exe.as_deref(), Some(env.path_var.as_os_str()));
+    let version = found
+        .as_ref()
+        .map(|c| version_of(&c.path, &std::env::temp_dir()))
+        .unwrap_or_default();
+    vec![doc_converter_row(found.as_ref(), pbdoc_number(&version))]
+}
+
+#[cfg(not(unix))]
+fn doc_rows(_env: &Env) -> Vec<Row> {
+    Vec::new()
+}
+
 /// The guards that must also be wired on PostToolUse.
 const POST_GUARDS: [&str; 1] = ["commit-message-sanitizer"];
 
@@ -94,7 +134,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 19] = [
+const PROBES: [Probe; 20] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -119,6 +159,7 @@ const PROBES: [Probe; 19] = [
     |env| vec![attribution_row(env)],
     update_rows,
     |env| vec![policy_guard_row(env)],
+    doc_rows,
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -1488,5 +1529,70 @@ mod tests {
         assert_eq!(without[1].level, Level::Fail);
         assert_eq!(failing.len(), 1);
         assert_eq!(failing[0].level, Level::Fail);
+    }
+
+    #[cfg(unix)]
+    fn converter(kind: crate::doc::convert::Kind) -> crate::doc::convert::Converter {
+        crate::doc::convert::Converter {
+            path: PathBuf::from("/opt/bin/pbdoc"),
+            kind,
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_bundled_converter_at_playbooks_version_is_a_pass_row() {
+        use crate::doc::convert::{Kind, DOCTOR_ROW_BUNDLED};
+        // Arrange
+        let found = converter(Kind::Bundled);
+
+        // Act
+        let row = doc_converter_row(Some(&found), env!("CARGO_PKG_VERSION"));
+
+        // Assert
+        assert_eq!(row.level, Level::Pass);
+        assert_eq!(row.message, DOCTOR_ROW_BUNDLED);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_bundled_converter_at_another_version_is_a_warn_row() {
+        use crate::doc::convert::{Kind, DOCTOR_ROW_SKEW};
+        // Arrange
+        let found = converter(Kind::Bundled);
+
+        // Act
+        let row = doc_converter_row(Some(&found), "0.0.1");
+
+        // Assert
+        assert_eq!(row.level, Level::Warn);
+        assert_eq!(row.message, DOCTOR_ROW_SKEW);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_external_converter_is_a_warn_row() {
+        use crate::doc::convert::{Kind, DOCTOR_ROW_EXTERNAL};
+        // Arrange
+        let found = converter(Kind::External);
+
+        // Act
+        let row = doc_converter_row(Some(&found), "");
+
+        // Assert
+        assert_eq!(row.level, Level::Warn);
+        assert_eq!(row.message, DOCTOR_ROW_EXTERNAL);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn no_converter_is_an_info_row() {
+        use crate::doc::convert::DOCTOR_ROW_NONE;
+        // Arrange and Act
+        let row = doc_converter_row(None, "");
+
+        // Assert
+        assert_eq!(row.level, Level::Info);
+        assert_eq!(row.message, DOCTOR_ROW_NONE);
     }
 }
