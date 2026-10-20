@@ -72,7 +72,7 @@ brew install pragmatic-engineer/tap/playbook
 playbook setup
 ```
 
-`playbook setup` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `setup` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew installs update with `brew upgrade playbook`, and `playbook update` refuses a Homebrew install and tells you to use brew.
+`playbook setup` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `setup` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew on Linux works the same way: install [Homebrew](https://brew.sh) for Linux, then run the same two commands. The formula picks the static musl build for x86_64 or arm64, so it needs no system libraries. Brew installs under its own prefix (`/home/linuxbrew/.linuxbrew` by default) and playbook never asks for `sudo`. Each release installs `playbook` and `pbtop` this way on an x86_64 Ubuntu runner after the tap is updated, and fails the release run when that breaks. Homebrew installs update with `brew upgrade playbook`, and `playbook update` refuses a Homebrew install and tells you to use brew.
 
 ### Optional: pbtop alone
 
