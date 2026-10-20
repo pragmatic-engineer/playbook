@@ -583,11 +583,6 @@ fn table() -> Vec<Case> {
         case( "pr land-wait", &["pr", "land-wait", "1", "--timeout", "1", "--interval", "1"], ).out("LAND_VERDICT=TIMEOUT"),
         case("pr merge", &["pr", "merge", "1"]).out("merge_rc=-1"),
         // worktrees and memory
-        case("disk status", &["disk", "status"]).out("Thresholds"),
-        case("disk reserve", &["disk", "reserve"]).pre(&["config", "set", "disk.warnFreeGb", "10000"]).code(1).err("refused"),
-        case("disk release", &["disk", "release"]).out("no ballast"),
-        case("disk clean", &["disk", "clean", "--dry-run"]).out("disk clean: would remove"),
-        case("disk target-dir", &["disk", "target-dir"]).out("cargo-"),
         case("worktree sweep", &["worktree", "sweep"]),
         case("worktree remove", &["worktree", "remove", "{ROOT}/none"]).code(1).err("not a registered git worktree"),
         case( "worktree review setup", &["worktree", "review", "setup", "1", "abc123"], ).code(1).err("failed to resolve repo URL"),
@@ -986,8 +981,6 @@ fn doctor_on_a_fresh_home_reports_only_known_not_installed_failures() {
                 "safety guards wired 0/",
                 "playbook binary not on PATH",
                 "plugin not installed",
-                // The machine's own disk can be below disk.blockFreeGb.
-                "disk: ",
             ];
             assert!(
                 documented.iter().any(|d| line.contains(d)),

@@ -79,9 +79,6 @@ fn reason(slug: &str) -> Option<&'static str> {
         migrate::NO_SLOP_GUARD_MIGRATION => {
             "Claude Code runs a hook entry for a hook playbook no longer has, on every tool call"
         }
-        migrate::COLLECTOR_SERVICE_MIGRATION => {
-            "the usage collector runs only while a session keeps it alive, so usage data has gaps"
-        }
         migrate::PROMPT_DEFAULT_MIGRATION => {
             "pb cc sessions start without the playbook system prompt until it is installed or turned off"
         }
