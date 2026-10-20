@@ -177,31 +177,6 @@ pub fn global_read_only(root: &Path, key: &str) -> Option<Value> {
     serde_json::from_str(&raw).ok()
 }
 
-/// Every global value whose key starts with `prefix`, read with one query on a
-/// read-only connection. Empty when the store is missing or unreadable.
-pub fn global_read_only_prefix(root: &Path, prefix: &str) -> Vec<(String, Value)> {
-    let path = db_path(root);
-    if !path.is_file() {
-        return Vec::new();
-    }
-    let Ok(conn) = crate::state::open_read_only(&path) else {
-        return Vec::new();
-    };
-    let Ok(mut stmt) = conn.prepare(
-        "SELECT key, value_json FROM config WHERE tier = 'global' AND scope = '' AND substr(key, 1, length(?1)) = ?1",
-    ) else {
-        return Vec::new();
-    };
-    let Ok(rows) = stmt.query_map(params![prefix], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    }) else {
-        return Vec::new();
-    };
-    rows.flatten()
-        .filter_map(|(key, raw)| Some((key, serde_json::from_str(&raw).ok()?)))
-        .collect()
-}
-
 /// The value of `key` per tier, for the repo slug and its owner.
 /// Precedence is the caller's: this only reports what each tier holds.
 pub struct TierValues {

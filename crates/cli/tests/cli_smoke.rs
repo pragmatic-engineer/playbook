@@ -122,9 +122,6 @@ impl Env {
             .env("LANG", "C.UTF-8")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
-            // Plenty of free space, so the disk guard and the doctor's disk
-            // row do not depend on the machine and start no cleanup.
-            .env("PLAYBOOK_TEST_DISK_FREE_GB", "500")
             .env("NO_PROXY", "")
             .env("no_proxy", "");
         for k in [

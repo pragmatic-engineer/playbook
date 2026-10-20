@@ -98,11 +98,6 @@ pub const KNOWN_KEYS: &[&str] = &[
     "update.mode",
     "update.checkIntervalHours",
     "update.plugin",
-    "disk.warnFreeGb",
-    "disk.blockFreeGb",
-    "disk.autoCleanup",
-    "disk.paths",
-    "disk.maxTargetDirs",
 ];
 
 /// The per-user settings, which live only in the global tier.
@@ -112,11 +107,6 @@ pub const USER_KEYS: &[&str] = &[
     "update.plugin",
     "systemPrompt.enabled",
     "attribution.enabled",
-    "disk.warnFreeGb",
-    "disk.blockFreeGb",
-    "disk.autoCleanup",
-    "disk.paths",
-    "disk.maxTargetDirs",
 ];
 
 /// Whether `key` is a per-user setting. `config set` writes it to the global
@@ -220,17 +210,6 @@ pub fn default_value(key: &str) -> Option<Value> {
         "update.mode" => Some(Value::String("notify".to_string())),
         "update.checkIntervalHours" => Some(Value::Number(24.into())),
         "update.plugin" => Some(Value::String("auto".to_string())),
-        "disk.warnFreeGb" => Some(Value::Number(
-            crate::disk::policy::DEFAULT_WARN_FREE_GB.into(),
-        )),
-        "disk.blockFreeGb" => Some(Value::Number(
-            crate::disk::policy::DEFAULT_BLOCK_FREE_GB.into(),
-        )),
-        "disk.autoCleanup" => Some(Value::Bool(true)),
-        "disk.paths" => Some(Value::Array(Vec::new())),
-        "disk.maxTargetDirs" => Some(Value::Number(
-            crate::disk::policy::DEFAULT_MAX_TARGET_DIRS.into(),
-        )),
         _ => None,
     }
 }
