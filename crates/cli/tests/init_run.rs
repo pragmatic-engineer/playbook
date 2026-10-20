@@ -828,6 +828,44 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
 }
 
 #[test]
+fn the_entry_of_the_removed_disk_guard_hook_is_dropped_by_composed_init() {
+    // Arrange: a 0.38.0 install, whose `settings.json` still runs the disk
+    // guard on Bash and on agents, next to a hook that still exists.
+    let home = scratch_home("retired-disk-guard");
+    let claude_home = claude_home_of(&home);
+    let retired = "playbook hook disk-guard";
+    write_json(
+        &claude_home.join("settings.json"),
+        &json!({
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            {"type": "command", "command": retired},
+                            {"type": "command", "command": "playbook hook policy-guard"}
+                        ]
+                    },
+                    {
+                        "matcher": "Agent|Task",
+                        "hooks": [{"type": "command", "command": retired}]
+                    }
+                ]
+            }
+        }),
+    );
+
+    // Act
+    let outcome = run(&base_paths(&home));
+
+    // Assert
+    assert!(outcome.ok());
+    let commands = all_hook_commands(&read_json(&claude_home.join("settings.json")));
+    assert!(!commands.contains(&retired.to_string()), "{commands:?}");
+    assert!(commands.contains(&"playbook hook policy-guard".to_string()));
+}
+
+#[test]
 fn hand_added_hook_entry_survives_composed_init() {
     // Arrange: a `settings.json` with a hook entry the template does not
     // know about, alongside the four guards a real unwired install ships.

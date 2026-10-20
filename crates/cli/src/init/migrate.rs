@@ -29,8 +29,9 @@ pub const RETIRED_ATTRIBUTION_MIGRATION: &str = "attribution-off";
 /// Slugs taken out of the registry. A record row or pending id under one
 /// loads and is ignored. A retired slug is never given to a new migration,
 /// because old applied rows would mark that one as already run.
-pub const RETIRED_IDS: [&str; 3] = [
+pub const RETIRED_IDS: [&str; 4] = [
     RETIRED_ATTRIBUTION_MIGRATION,
+    RETIRED_DISK_GUARD_MIGRATION,
     RETIRED_COLLECTOR_SERVICE_MIGRATION,
     RETIRED_COLLECTOR_LABEL_MIGRATION,
 ];
@@ -49,8 +50,10 @@ pub const AUTO_BUDGET_MIGRATION: &str = "auto-budget-defaults";
 pub const RC_LINE_MIGRATION: &str = "retired-launcher-rc-line";
 /// The `Consent` question about the system prompt now on by default (ADR 0044).
 pub const PROMPT_DEFAULT_MIGRATION: &str = "system-prompt-default-on";
-/// The `Consent` item that adds the disk guard hook (ADR 0047 decision 8).
-pub const DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
+/// The `Consent` item 0.38.0 shipped to wire the disk guard hook, retired
+/// when the disk guard was removed. A record that names it still
+/// loads, and the id is ignored.
+pub const RETIRED_DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
 /// The `Consent` removal of the retired `no-slop-guard` and `no-dash-guard`
 /// hook entries setup used to write.
 pub const NO_SLOP_GUARD_MIGRATION: &str = "no-slop-guard-entry";
@@ -369,16 +372,6 @@ pub fn registry() -> Vec<Migration> {
             run: system_prompt_default_by_setup,
         },
         Migration {
-            id: DISK_GUARD_MIGRATION,
-            since: "0.38.0",
-            kind: Kind::Idempotent,
-            scope: Scope::Consent {
-                check: disk_guard_hook_pending,
-                command: "playbook setup --hooks",
-            },
-            run: disk_guard_hook_by_setup,
-        },
-        Migration {
             id: NO_SLOP_GUARD_MIGRATION,
             since: "next",
             kind: Kind::Idempotent,
@@ -431,25 +424,6 @@ fn rm_guard_simplified_notice(ctx: &Ctx) -> Outcome {
         ));
     }
     Outcome::Done(StepReport::wired(RM_GUARD_NOTICE_STEP, RM_GUARD_NOTICE))
-}
-
-/// An install with the policy guard wired and no disk guard on Bash (ADR
-/// 0047 decision 8). One without the policy guard declined the hooks, so it
-/// stays quiet.
-fn disk_guard_hook_pending(ctx: &Ctx) -> Option<String> {
-    let settings = ctx.claude_home.join("settings.json");
-    let policy_guard =
-        crate::doctor::field::hook_commands_for_event(&settings, "PreToolUse", &["policy-guard"])
-            .iter()
-            .any(|(_, n)| *n > 0);
-    (policy_guard && !crate::hooks::disk_guard::wired(&ctx.claude_home)).then(|| {
-        "the disk guard hook, which stops builds when the disk is nearly full, is not wired; setup adds it".to_string()
-    })
-}
-
-/// Setup's hooks part wires the disk guard with the other guards.
-fn disk_guard_hook_by_setup(_: &Ctx) -> Outcome {
-    Outcome::Quiet
 }
 
 /// Removes the retired `no-slop-guard` and `no-dash-guard` entries older
@@ -777,7 +751,7 @@ fn dead_hook_scripts(ctx: &Ctx) -> Outcome {
         Ok(removed) => Outcome::Repeat(StepReport::wired(
             "dead-hooks",
             format!(
-                "removed {} hook(s) whose script is gone: {}",
+                "removed {} hook(s) that no longer exist: {}",
                 removed.len(),
                 removed.join(", ")
             ),
@@ -2318,40 +2292,6 @@ mod tests {
         assert!(open
             .iter()
             .any(|i| i.id == "other-playbook-plugins" && i.command.is_none()));
-    }
-
-    #[test]
-    fn the_disk_guard_check_is_open_only_when_the_other_guards_are_wired() {
-        let h = home("disk-guard-pending");
-        let ctx = ctx(&h);
-        assert_eq!(disk_guard_hook_pending(&ctx), None, "no settings");
-        let settings = ctx.claude_home.join("settings.json");
-        let write = |commands: &[&str]| {
-            let hooks: Vec<_> = commands
-                .iter()
-                .map(|c| serde_json::json!({"type": "command", "command": c}))
-                .collect();
-            let doc =
-                serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": hooks}]}});
-            std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
-            std::fs::write(&settings, doc.to_string()).unwrap();
-        };
-        write(&["playbook hook policy-guard"]);
-        let open = disk_guard_hook_pending(&ctx).expect("open");
-        assert!(open.contains("disk guard"), "{open}");
-        write(&["playbook hook policy-guard", "playbook hook disk-guard"]);
-        assert_eq!(disk_guard_hook_pending(&ctx), None);
-        write(&["my-own-hook"]);
-        assert_eq!(disk_guard_hook_pending(&ctx), None, "hooks declined");
-        let doc = serde_json::json!({"hooks": {"PreToolUse": [
-            {"matcher": "Bash", "hooks": [{"type": "command", "command": "playbook hook policy-guard"}]},
-            {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "playbook hook disk-guard"}]},
-        ]}});
-        std::fs::write(&settings, doc.to_string()).unwrap();
-        assert!(
-            disk_guard_hook_pending(&ctx).is_some(),
-            "wired for agents only leaves builds unguarded"
-        );
     }
 
     #[test]

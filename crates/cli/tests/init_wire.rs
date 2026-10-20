@@ -18,7 +18,7 @@
 //!   `running_wire_twice_writes_nothing_the_second_time`
 //! - Every written command for a ported hook resolves to a real `HookName`,
 //!   and is a bare name rather than a path (the "bare-name assumption"),
-//!   and all 25 ported hooks (the 18 functional hooks plus the 7 safety
+//!   and all 24 ported hooks (the 18 functional hooks plus the 6 safety
 //!   guards) are exactly the ones wired that way:
 //!   `every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves`
 //! - A pre-existing user hook entry survives wiring, unclobbered:
@@ -257,7 +257,6 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "precommit-check",
         "commit-message-sanitizer",
         "policy-guard",
-        "disk-guard",
     ]
     .into_iter()
     .collect();
@@ -265,7 +264,7 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         resolved_names.iter().map(String::as_str).collect();
     assert_eq!(
         resolved_names, expected,
-        "wiring should register exactly all 25 ported HookName variants in binary form"
+        "wiring should register exactly all 24 ported HookName variants in binary form"
     );
 }
 
