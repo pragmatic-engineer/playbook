@@ -28,7 +28,7 @@ Earlier versions kept these files elsewhere:
 The first command that needs a database moves the old file. The move never deletes data that exists nowhere else:
 
 - The old file is copied with SQLite's `VACUUM INTO`, which reads a consistent snapshot including the write-ahead log. The copy is checked table by table and renamed into place only if the row counts match. While it runs, playbook holds the old file's write lock, so no writer can add a row between the copy and the rename.
-- The old file, with its `-wal` and `-shm` files, is renamed to `<name>.migrated`. An earlier `<name>.migrated` that reads as a sound database came from such a move, so its rows are in the new file and it is replaced. One that does not read was parked as corrupt and stays, and the new copy takes a numbered name (`.migrated.1`). `playbook disk clean` removes old copies of `playbook.db` after 7 days and keeps the newest. The code index is a cache, so it moves by a plain rename instead.
+- The old file, with its `-wal` and `-shm` files, is renamed to `<name>.migrated`. An earlier `<name>.migrated` that reads as a sound database came from such a move, so its rows are in the new file and it is replaced. One that does not read was parked as corrupt and stays, and the new copy takes a numbered name (`.migrated.1`). The `.migrated` copies are kept; delete them by hand once the new store works. The code index is a cache, so it moves by a plain rename instead.
 - A lock folder next to the new file (`<name>.db.migrate.lock`) keeps two processes from moving the same file. A lock older than five minutes is treated as left behind by a killed process.
 - One notice line goes to stderr, and only when stderr is a terminal. Hooks never print it.
 

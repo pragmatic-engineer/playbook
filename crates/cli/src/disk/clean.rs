@@ -99,7 +99,9 @@ impl Env {
     pub fn from_system(home: &Path, repo_root: Option<&Path>) -> Env {
         Env {
             home: home.to_path_buf(),
-            claude_home: super::status::claude_home(home),
+            claude_home: std::env::var_os("CLAUDE_CONFIG_DIR")
+                .filter(|v| !v.is_empty())
+                .map_or_else(|| home.join(".claude"), PathBuf::from),
             worktrees_root: repo_root.and_then(targets::worktrees_root),
             tmp_dirs: system_tmp_dirs(),
             now: SystemTime::now(),

@@ -11,7 +11,6 @@ pub mod clean;
 pub mod policy;
 pub mod probe;
 pub mod size;
-pub mod status;
 pub mod targets;
 
 pub use policy::{Level, Policy};
