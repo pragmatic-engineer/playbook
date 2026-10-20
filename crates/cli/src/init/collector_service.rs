@@ -162,4 +162,17 @@ mod tests {
         assert_eq!(none, None);
         assert!(file.is_file(), "a file playbook did not write stays");
     }
+
+    #[test]
+    fn removal_takes_a_service_file_that_is_not_text() {
+        let home = scratch_dir("collector-service-remove-binary");
+        let file = Kind::Systemd.file(&home);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, [0xff_u8, 0xfe, 0x00]).unwrap();
+
+        let done = remove_with(&home, &Launchd::default()).unwrap();
+
+        assert!(done.is_some());
+        assert!(!file.exists());
+    }
 }
