@@ -74,6 +74,18 @@ playbook setup
 
 `playbook setup` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `setup` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew on Linux works the same way: install [Homebrew](https://brew.sh) for Linux, then run the same two commands. The formula picks the static musl build for x86_64 or arm64, so it needs no system libraries. Brew installs under its own prefix (`/home/linuxbrew/.linuxbrew` by default) and playbook never asks for `sudo`. Each release installs `playbook` and `pbtop` this way on an x86_64 Ubuntu runner after the tap is updated, and fails the release run when that breaks. Homebrew installs update with `brew upgrade playbook`, and `playbook update` refuses a Homebrew install and tells you to use brew.
 
+### Debian, Ubuntu and Fedora packages
+
+Each release has a `.deb` and an `.rpm` for x86_64 and arm64. They hold the static `playbook` and `pbtop` binaries and the `pb` link in `/usr/bin`, with no dependencies. Download the file for your machine and `SHA256SUMS` from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest), check them as in [Without `curl | bash`](#without-curl--bash) below, then install with your package manager, which asks for its own privileges (`playbook` never runs `sudo`):
+
+```bash
+sudo apt install ./playbook_<version>_amd64.deb     # Debian, Ubuntu (arm64: _arm64.deb)
+sudo dnf install ./playbook-<version>.x86_64.rpm    # Fedora, RHEL (arm64: aarch64.rpm)
+playbook setup
+```
+
+An upgrade installs the newer file the same way. The package owns no file under `/etc` or your home folder, so an upgrade or a removal leaves your config alone, and `playbook migrate` runs on first use. The package manager owns `/usr/bin/playbook`, so update with it. Do not run `playbook update` on a package install, because it would replace a file the package manager owns. Each release installs, reinstalls and removes the packages in Debian, Ubuntu and Fedora containers before and after it is published.
+
 ### Optional: pbtop alone
 
 You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. Install `pbtop`, the usage dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
