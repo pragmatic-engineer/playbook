@@ -118,6 +118,26 @@ pub struct Cli {
     pub command: Command,
 }
 
+/// `playbook skills` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum SkillsCommand {
+    /// Copy the playbook skills into another agent's skill folder
+    ///
+    /// Without `--agent`, every agent found on this machine is synced. A
+    /// second run with nothing new changes nothing.
+    Sync {
+        /// Sync only this agent
+        #[arg(long, value_parser = ["codex"])]
+        agent: Option<String>,
+        /// Show what would change and write nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Print the report lines as a JSON array
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 /// `playbook state` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum StateCommand {
@@ -315,7 +335,7 @@ pub enum Command {
         #[command(flatten)]
         flags: init::choices::Flags,
     },
-    /// List the hooks that `playbook setup` wires into Claude Code, or explain a guard verdict
+    /// List the hooks that `playbook setup` wires into Claude Code
     Hooks {
         #[command(subcommand)]
         sub: HooksCommand,
@@ -521,6 +541,17 @@ pub enum Command {
     State {
         #[command(subcommand)]
         sub: StateCommand,
+    },
+    /// Share the playbook skills with other agents
+    ///
+    /// `sync` copies the plugin's skills and commands into the folder that
+    /// Codex reads, `~/.agents/skills`, as `playbook-*` folders. It never
+    /// touches folders you made yourself or edited.
+    ///
+    /// Example: `playbook skills sync --dry-run`
+    Skills {
+        #[command(subcommand)]
+        sub: SkillsCommand,
     },
     /// Set playbook's own ceiling on effort, or inspect one component's
     ///
@@ -2290,21 +2321,12 @@ pub enum HooksCommand {
     /// Lists the hooks setup adds to settings.json, grouped by purpose.
     /// Changes nothing.
     List,
-    /// Show what the rm guard does with a Bash command
-    ///
-    /// Reads the command the way the guard does and prints each path it
-    /// deletes or overwrites, with the verdict and the rule that matched,
-    /// then the denial text Claude would see. Runs nothing and changes
-    /// nothing.
+    /// Removed: the rm guard is a short fixed rule now (prints a note)
+    #[command(hide = true)]
     ExplainRm {
-        /// The Bash command, quoted as one argument
-        command: String,
-        /// The folder the command runs in (default: the current folder)
-        #[arg(long)]
-        cwd: Option<std::path::PathBuf>,
-        /// Print JSON instead of text
-        #[arg(long)]
-        json: bool,
+        /// Ignored
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
 }
 
