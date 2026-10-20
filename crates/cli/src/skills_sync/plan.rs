@@ -95,6 +95,13 @@ fn is_name_char(c: char) -> bool {
     c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'
 }
 
+/// Whether `name` is shaped like a folder name this plan makes: the prefix,
+/// then lowercase letters, digits and dashes.
+pub(super) fn is_folder_name(name: &str) -> bool {
+    name.strip_prefix(NAME_PREFIX)
+        .is_some_and(|rest| !rest.is_empty() && rest.chars().all(is_name_char))
+}
+
 fn file_name(path: &Path) -> Result<String, String> {
     path.file_name()
         .and_then(|n| n.to_str())

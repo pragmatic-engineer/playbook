@@ -1236,6 +1236,129 @@ fn a_collector_that_is_not_running_and_has_no_rows_warns_with_each_fix() {
     assert!(hints(&mine).contains("playbook usage collect"));
 }
 
+/// A daemon file of the home in `b`, such as the lock or the stamp.
+fn daemon_paths(b: &Box, file: fn(&playbook::usage::run::Paths) -> PathBuf) -> PathBuf {
+    file(&playbook::usage::run::Paths::from_home(&b.home()))
+}
+
+/// Holds `collector.lock` in this test process, with `version` in the
+/// holder line, the way a running collector does. The lock lasts as long as
+/// the returned file.
+fn hold_collector_lock(b: &Box, version: &str) -> fs::File {
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(daemon_paths(b, playbook::usage::daemon::lock_path))
+        .unwrap();
+    lock.try_lock().unwrap();
+    std::io::Write::write_all(
+        &mut &lock,
+        format!("{} {version}\n", std::process::id()).as_bytes(),
+    )
+    .unwrap();
+    lock
+}
+
+/// The one daemon row, as `LEVEL message`, and its hint.
+fn daemon_row(rows: &[Value]) -> (String, String) {
+    let row = rows
+        .iter()
+        .find(|r| {
+            r["message"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("collector daemon:"))
+        })
+        .expect("a collector daemon row");
+    (
+        text(&[row]),
+        row["hint"].as_str().unwrap_or_default().to_string(),
+    )
+}
+
+#[test]
+fn a_held_lock_at_this_version_passes_with_its_pid_and_version() {
+    let b = Box::new("daemon-held");
+    point_settings_at_collector(&b, free_port());
+    let _lock = hold_collector_lock(&b, env!("CARGO_PKG_VERSION"));
+
+    let (row, _) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(
+        row,
+        format!(
+            "PASS collector daemon: pid {}, version {}, lock held",
+            std::process::id(),
+            env!("CARGO_PKG_VERSION")
+        )
+    );
+}
+
+#[test]
+fn a_free_lock_warns_with_the_start_fix() {
+    let b = Box::new("daemon-free");
+    point_settings_at_collector(&b, free_port());
+
+    let (row, hint) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(row, "WARN collector daemon: lock free");
+    assert_eq!(hint, "run any playbook command or start a session");
+    assert!(
+        !daemon_paths(&b, playbook::usage::daemon::lock_path).exists(),
+        "doctor must not create the lock file"
+    );
+    assert!(
+        !daemon_paths(&b, playbook::usage::daemon::stamp_path).exists(),
+        "doctor must not take the respawn stamp"
+    );
+}
+
+#[test]
+fn a_held_lock_from_another_version_warns_naming_both_versions() {
+    const OLD: &str = "0.0.1";
+    let b = Box::new("daemon-old");
+    point_settings_at_collector(&b, free_port());
+    let _lock = hold_collector_lock(&b, OLD);
+
+    let (row, hint) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(
+        row,
+        format!(
+            "WARN collector daemon: version {OLD} (pid {}) differs from this binary ({})",
+            std::process::id(),
+            env!("CARGO_PKG_VERSION")
+        )
+    );
+    assert_eq!(hint, "run: playbook usage stop, then any playbook command");
+}
+
+#[test]
+fn a_stamp_left_by_a_busy_port_warns_with_the_reason_and_the_move_fix() {
+    const PORT: u16 = 47_999;
+    let b = Box::new("daemon-port");
+    point_settings_at_collector(&b, PORT);
+    let reason = playbook::usage::daemon::port_busy_reason(PORT);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let window = playbook::usage::daemon::PORT_BUSY_WINDOW.as_secs();
+    fs::write(
+        daemon_paths(&b, playbook::usage::daemon::stamp_path),
+        format!("{now} {window} {reason}\n"),
+    )
+    .unwrap();
+
+    let (row, hint) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(row, format!("WARN collector daemon: lock free, {reason}"));
+    assert_eq!(
+        hint,
+        format!("free port {PORT}, or move with playbook usage collect --port <N> and playbook setup --only telemetry")
+    );
+}
+
 #[test]
 fn another_program_on_the_collector_port_fails_with_the_move_command() {
     let b = Box::new("tel-conflict");
