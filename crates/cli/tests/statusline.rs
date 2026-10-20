@@ -857,3 +857,29 @@ fn an_unwritable_data_folder_still_exits_zero() {
     std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert!(status.success(), "{status:?}");
 }
+
+#[test]
+fn a_history_file_that_cannot_be_appended_to_still_exits_zero_and_is_left_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new();
+    let data = s.0.join(".config/playbook/data");
+    std::fs::create_dir_all(&data).unwrap();
+    let file = data.join("rate_limits.jsonl");
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let before = format!(
+        "{{\"t\":{},\"five_hour\":1.0,\"seven_day\":null}}\n",
+        secs - 1000
+    );
+    std::fs::write(&file, &before).unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o400)).unwrap();
+    // a user that can write anyway (root) is not the case under test
+    let can_write = std::fs::OpenOptions::new().append(true).open(&file).is_ok();
+
+    let status = statusline_status(&s.0, &payload(&s.0, FULL));
+
+    assert!(status.success(), "{status:?}");
+    assert!(can_write || std::fs::read_to_string(&file).unwrap() == before);
+}

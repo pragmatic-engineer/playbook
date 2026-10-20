@@ -91,6 +91,19 @@ pub mod atomic {
     /// file is owner-only on unix, and the content is flushed before the
     /// rename. The caller creates the directory.
     pub fn write_atomic_private(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {
+        write_through_tmp(path, content.as_ref(), true)
+    }
+
+    /// Like [`write_atomic_private`] without the flush to disk, for a file a
+    /// hot path rewrites and that can be lost with the machine.
+    pub fn write_atomic_private_unsynced(
+        path: &Path,
+        content: impl AsRef<[u8]>,
+    ) -> std::io::Result<()> {
+        write_through_tmp(path, content.as_ref(), false)
+    }
+
+    fn write_through_tmp(path: &Path, content: &[u8], sync: bool) -> std::io::Result<()> {
         let dir = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -100,7 +113,7 @@ pub mod atomic {
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
         let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
         let tmp = dir.join(format!(".{name}.{}.{seq}.tmp", std::process::id()));
-        let result = stage(&tmp, content.as_ref())
+        let result = stage(&tmp, content, sync)
             .and_then(|()| match fs::metadata(path) {
                 Ok(meta) => fs::set_permissions(&tmp, meta.permissions()),
                 Err(_) => Ok(()),
@@ -112,7 +125,7 @@ pub mod atomic {
         result
     }
 
-    fn stage(tmp: &Path, content: &[u8]) -> std::io::Result<()> {
+    fn stage(tmp: &Path, content: &[u8], sync: bool) -> std::io::Result<()> {
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -122,7 +135,10 @@ pub mod atomic {
         }
         let mut file = options.open(tmp)?;
         file.write_all(content)?;
-        file.sync_all()
+        if sync {
+            file.sync_all()?;
+        }
+        Ok(())
     }
 
     /// Creates the database file owner-only before SQLite can make it with the

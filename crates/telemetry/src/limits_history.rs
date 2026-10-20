@@ -15,7 +15,7 @@
 //! Everything is best effort: a failure here never reaches the statusline.
 
 use crate::limits::LimitPeriod;
-use crate::util::atomic::write_atomic_private;
+use crate::util::atomic::{write_atomic_private, write_atomic_private_unsynced};
 use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -28,6 +28,10 @@ pub const MAX_BYTES: u64 = 256 * 1024;
 pub const KEEP_SECONDS: i64 = 8 * 24 * 3600;
 /// The fewest seconds between two lines.
 pub const MIN_GAP_SECONDS: i64 = 300;
+/// The oldest line may be this much past [`KEEP_SECONDS`] before a write
+/// rewrites the file, so the rewrite happens about once a day and not on every
+/// write once the file holds 8 days.
+const TRIM_SLACK_SECONDS: i64 = 24 * 3600;
 /// A trim leaves the file at this size, so the next writes append again.
 const TRIM_TO_BYTES: u64 = MAX_BYTES / 4 * 3;
 /// How much of the start and the end of the file one write looks at: more
@@ -36,10 +40,17 @@ const EDGE_BYTES: u64 = 512;
 
 /// One line of the file.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Reading {
-    pub t: i64,
-    pub five_hour: Option<f64>,
-    pub seven_day: Option<f64>,
+struct Reading {
+    t: i64,
+    five_hour: Option<f64>,
+    seven_day: Option<f64>,
+}
+
+/// What a write needs to know of the file without reading all of it.
+struct Edges {
+    first: Option<Reading>,
+    last: Option<Reading>,
+    ends_clean: bool,
 }
 
 /// `rate_limits.jsonl` in the usage folder.
@@ -67,9 +78,9 @@ fn line_of(r: &Reading) -> String {
     )
 }
 
-/// The first line, the last line, and whether the file ends in a newline,
-/// from two short reads. `None` for a part that is not a whole, valid line.
-fn edges(path: &Path, len: u64) -> Option<(Option<Reading>, Option<Reading>, bool)> {
+/// The first and the last line and whether the file ends in a newline, from
+/// two short reads. A line is `None` when it is not whole and valid.
+fn edges(path: &Path, len: u64) -> Option<Edges> {
     let mut f = fs::File::open(path).ok()?;
     let mut head = vec![0; usize::try_from(len.min(EDGE_BYTES)).ok()?];
     f.read_exact(&mut head).ok()?;
@@ -81,7 +92,6 @@ fn edges(path: &Path, len: u64) -> Option<(Option<Reading>, Option<Reading>, boo
     f.seek(SeekFrom::Start(from)).ok()?;
     let mut tail = vec![0; usize::try_from(len - from).ok()?];
     f.read_exact(&mut tail).ok()?;
-    let ends_clean = tail.last() == Some(&b'\n');
     let text = String::from_utf8_lossy(&tail);
     let body = text.trim_end_matches('\n');
     let last = match body.rsplit_once('\n') {
@@ -90,13 +100,18 @@ fn edges(path: &Path, len: u64) -> Option<(Option<Reading>, Option<Reading>, boo
         None if from == 0 => parse_line(body),
         None => None,
     };
-    Some((first, last, ends_clean))
+    Some(Edges {
+        first,
+        last,
+        ends_clean: tail.last() == Some(&b'\n'),
+    })
 }
 
-/// Adds a line for `five_hour` and `seven_day` read at `now`, when the last
-/// line is at least [`MIN_GAP_SECONDS`] older and a percentage changed. Drops
-/// old lines and keeps the file under [`MAX_BYTES`]. Does nothing when both
-/// are `None`.
+/// Adds a line for the windows a statusline reading carried, read at `now`,
+/// when the last line is at least [`MIN_GAP_SECONDS`] older and one of those
+/// percentages changed. A window the reading did not carry is written as
+/// `null`. Drops old lines and keeps the file under [`MAX_BYTES`]. Does
+/// nothing when both are `None`.
 pub fn record(usage_dir: &Path, five_hour: Option<f64>, seven_day: Option<f64>, now: i64) {
     if five_hour.is_none() && seven_day.is_none() {
         return;
@@ -107,6 +122,16 @@ pub fn record(usage_dir: &Path, five_hour: Option<f64>, seven_day: Option<f64>, 
         seven_day,
     };
     let _ = append(&history_path(usage_dir), &new);
+}
+
+/// Whether every window `new` carries has the value the line `last` has.
+fn same_as(last: &Reading, new: &Reading) -> bool {
+    [
+        (new.five_hour, last.five_hour),
+        (new.seven_day, last.seven_day),
+    ]
+    .iter()
+    .all(|(n, l)| n.is_none() || n == l)
 }
 
 fn append(path: &Path, new: &Reading) -> std::io::Result<()> {
@@ -120,28 +145,40 @@ fn append(path: &Path, new: &Reading) -> std::io::Result<()> {
         // New, or too big to trust: start again from this line.
         return write_atomic_private(path, line);
     }
-    let Some((first, last, ends_clean)) = edges(path, len) else {
+    let Some(edges) = edges(path, len) else {
         return Ok(());
     };
-    if let Some(last) = last {
-        let unchanged = last.five_hour == new.five_hour && last.seven_day == new.seven_day;
-        if new.t - last.t < MIN_GAP_SECONDS || unchanged {
+    // A last line in the future means the clock went back: write anyway, and
+    // drop the lines from the future so the file stays in time order.
+    let future = edges.last.is_some_and(|l| l.t > new.t);
+    if let Some(last) = edges.last.filter(|_| !future) {
+        if new.t - last.t < MIN_GAP_SECONDS || same_as(&last, new) {
             return Ok(());
         }
     }
     let cutoff = new.t - KEEP_SECONDS;
-    let old = first.is_some_and(|f| f.t < cutoff);
-    if ends_clean && !old && len + line.len() as u64 <= MAX_BYTES {
+    let old = edges
+        .first
+        .is_none_or(|f| f.t < cutoff - TRIM_SLACK_SECONDS);
+    if edges.ends_clean && !old && !future && len + line.len() as u64 <= MAX_BYTES {
         let mut f = OpenOptions::new().append(true).open(path)?;
         return f.write_all(line.as_bytes());
     }
-    trim_and_append(path, cutoff, &line)
+    trim_and_append(path, cutoff, future.then_some(new.t), &line)
 }
 
-/// Rewrites the file without the lines older than `cutoff`, and without the
-/// oldest ones until it fits [`TRIM_TO_BYTES`], then adds `line`.
-fn trim_and_append(path: &Path, cutoff: i64, line: &str) -> std::io::Result<()> {
-    let text = String::from_utf8_lossy(&fs::read(path)?).into_owned();
+/// Rewrites the file without the lines older than `cutoff`, without those
+/// after `until` when it is given, and without the oldest ones until it fits
+/// [`TRIM_TO_BYTES`], then adds `line`.
+fn trim_and_append(
+    path: &Path,
+    cutoff: i64,
+    until: Option<i64>,
+    line: &str,
+) -> std::io::Result<()> {
+    let bytes = fs::read(path)?;
+    let text = String::from_utf8(bytes)
+        .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
     let mut kept: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     // The lines are in time order, so the old ones are at the front.
     let old = kept
@@ -149,44 +186,22 @@ fn trim_and_append(path: &Path, cutoff: i64, line: &str) -> std::io::Result<()> 
         .take_while(|l| parse_line(l).is_none_or(|r| r.t < cutoff))
         .count();
     kept.drain(..old);
+    if let Some(until) = until {
+        kept.retain(|l| parse_line(l).is_some_and(|r| r.t <= until));
+    }
     let mut size: u64 = kept.iter().map(|l| l.len() as u64 + 1).sum::<u64>() + line.len() as u64;
     let mut skip = 0;
     while size > TRIM_TO_BYTES && skip < kept.len() {
         size -= kept[skip].len() as u64 + 1;
         skip += 1;
     }
-    let mut out = String::with_capacity(size as usize);
+    let mut out = String::with_capacity(usize::try_from(size).unwrap_or(0));
     for l in &kept[skip..] {
         out.push_str(l);
         out.push('\n');
     }
     out.push_str(line);
-    replace(path, out.as_bytes())
-}
-
-/// Replaces the file through an owner-only temp file and a rename, without the
-/// flush to disk that `write_atomic_private` does. A trim runs inside the
-/// statusline, the history can be lost with the machine, and nothing else
-/// depends on it.
-fn replace(path: &Path, content: &[u8]) -> std::io::Result<()> {
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let tmp = dir.join(format!(".rate_limits.jsonl.{}.tmp", std::process::id()));
-    let _ = fs::remove_file(&tmp);
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let result = options
-        .open(&tmp)
-        .and_then(|mut f| f.write_all(content))
-        .and_then(|()| fs::rename(&tmp, path));
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    result
+    write_atomic_private_unsynced(path, out)
 }
 
 /// The readings in the file as `(window, time, percent)`, oldest first. An
@@ -305,34 +320,90 @@ mod tests {
         assert!(!history_path(&d).exists());
     }
 
+    fn reading_at(t: i64, five: f64) -> String {
+        line_of(&Reading {
+            t,
+            five_hour: Some(five),
+            seven_day: None,
+        })
+    }
+
     #[test]
-    fn lines_older_than_8_days_are_pruned_at_the_next_append() {
+    fn lines_older_than_8_days_are_pruned_once_the_oldest_is_a_day_past_that() {
         let d = dir("prune");
-        let old = NOW - KEEP_SECONDS - 1;
+        let past = NOW - KEEP_SECONDS - TRIM_SLACK_SECONDS - 1;
         let edge = NOW - KEEP_SECONDS;
-        let body = format!(
-            "{}{}{}",
-            line_of(&Reading {
-                t: old,
-                five_hour: Some(1.0),
-                seven_day: None
-            }),
-            line_of(&Reading {
-                t: edge,
-                five_hour: Some(2.0),
-                seven_day: None
-            }),
-            line_of(&Reading {
-                t: NOW - 600,
-                five_hour: Some(3.0),
-                seven_day: None
-            }),
-        );
+        let body = [
+            reading_at(past, 1.0),
+            reading_at(NOW - KEEP_SECONDS - 100, 2.0),
+            reading_at(edge, 3.0),
+            reading_at(NOW - 600, 4.0),
+        ]
+        .concat();
         fs::write(history_path(&d), body).unwrap();
 
-        record(&d, Some(4.0), None, NOW);
+        record(&d, Some(5.0), None, NOW);
 
         assert_eq!(times(&d), vec![edge, NOW - 600, NOW]);
+    }
+
+    #[test]
+    fn the_file_is_not_rewritten_for_a_line_inside_the_day_of_slack() {
+        let d = dir("slack");
+        let first = NOW - KEEP_SECONDS - TRIM_SLACK_SECONDS;
+        fs::write(
+            history_path(&d),
+            [reading_at(first, 1.0), reading_at(NOW - 600, 4.0)].concat(),
+        )
+        .unwrap();
+
+        record(&d, Some(5.0), None, NOW);
+
+        assert_eq!(times(&d), vec![first, NOW - 600, NOW]);
+    }
+
+    #[test]
+    fn a_window_the_reading_did_not_carry_is_written_as_null_and_does_not_count() {
+        let d = dir("carried");
+        record(&d, Some(10.0), Some(20.0), NOW);
+
+        record(&d, Some(11.0), None, NOW + 300);
+        // the weekly figure of the first line is not a new value of this one
+        record(&d, None, Some(20.0), NOW + 600);
+        // same as the last line for the window it carries
+        record(&d, None, Some(20.0), NOW + 900);
+
+        let got = lines(&d);
+        assert_eq!(got.len(), 3, "{got:?}");
+        assert!(got[1].contains(r#""seven_day":null"#), "{got:?}");
+        assert!(got[2].contains(r#""five_hour":null"#), "{got:?}");
+    }
+
+    #[test]
+    fn a_clock_that_went_back_does_not_freeze_the_history() {
+        let d = dir("clock");
+        record(&d, Some(10.0), None, NOW + 86_400);
+        record(&d, Some(11.0), None, NOW - 1000);
+        assert_eq!(times(&d), vec![NOW - 1000]);
+
+        record(&d, Some(12.0), None, NOW - 1000 + 300);
+
+        assert_eq!(times(&d), vec![NOW - 1000, NOW - 700]);
+    }
+
+    #[test]
+    fn a_first_line_that_is_not_valid_is_cleaned_out_by_the_next_write() {
+        let d = dir("badfirst");
+        fs::write(
+            history_path(&d),
+            format!("garbage\n{}", reading_at(NOW - 600, 4.0)),
+        )
+        .unwrap();
+
+        record(&d, Some(5.0), None, NOW);
+
+        assert_eq!(lines(&d).len(), 2);
+        assert_eq!(times(&d), vec![NOW - 600, NOW]);
     }
 
     #[test]
@@ -470,19 +541,9 @@ mod tests {
     }
 
     #[test]
-    fn a_full_history_adds_at_most_5_ms_to_a_remember_call() {
+    fn a_full_history_adds_at_most_5_ms_to_a_statusline_reading() {
         use std::time::{Duration, Instant};
-        let reading = format!(
-            r#"{{"rate_limits":{{"five_hour":{{"used_percentage":55,"resets_at":{}}}}}}}"#,
-            NOW + 3600
-        );
-        let one = |t: i64| {
-            line_of(&Reading {
-                t,
-                five_hour: Some(1.0),
-                seven_day: Some(2.0),
-            })
-        };
+        let one = |t: i64| reading_line(t, 1.0, 2.0);
         let n = MAX_BYTES as usize / one(NOW - 100_000).len();
         let body: String = (0..n as i64).map(|i| one(NOW - 100_000 + i)).collect();
         let best = |with_history: bool| {
@@ -492,11 +553,11 @@ mod tests {
                     if with_history {
                         fs::write(history_path(&d), &body).unwrap();
                     } else {
-                        // a folder in the file's place: the history step is a no-op
+                        // a folder in the file's place: the history step does nothing
                         fs::create_dir(history_path(&d)).unwrap();
                     }
                     let start = Instant::now();
-                    crate::limits_source::remember(&d, &reading, NOW);
+                    record(&d, Some(55.0), None, NOW);
                     start.elapsed()
                 })
                 .min()
@@ -509,5 +570,13 @@ mod tests {
             with <= without + Duration::from_millis(5),
             "with {with:?}, without {without:?}"
         );
+    }
+
+    fn reading_line(t: i64, five: f64, seven: f64) -> String {
+        line_of(&Reading {
+            t,
+            five_hour: Some(five),
+            seven_day: Some(seven),
+        })
     }
 }

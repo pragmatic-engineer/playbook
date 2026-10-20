@@ -192,7 +192,7 @@ impl LimitsView {
             .map(|c| c.age(now));
         let period = Period::of_range(range).unwrap_or(Period::Week(week));
         let (burn, previous) = limits_source::burn_pair(events, period, now);
-        let burnups = burnups_for(sources, &limits, events, &[], now);
+        let burnups = burnups_for(sources, &limits, events, now);
         let spend_only = spend_only(
             events,
             LimitPeriod::Monthly.containing(now, week),

@@ -392,12 +392,12 @@ fn period_zone(limit: &Limit) -> Zone {
 }
 
 /// The burn-ups for the limits shown: every limit above zero, in the order
-/// given. The local cost feeds dollar limits and the readings feed windows.
+/// given. The local cost feeds dollar limits and the saved readings of
+/// `Sources::history` feed windows.
 pub fn burnups_for(
     s: &Sources,
     limits: &[Limit],
     events: &[UsageEvent],
-    readings: &[(LimitPeriod, i64, f64)],
     now: i64,
 ) -> Vec<Option<Burnup>> {
     let billed = limits_source::billed_anchor(s, now);
@@ -405,9 +405,9 @@ pub fn burnups_for(
         .iter()
         .map(|l| {
             let zone = period_zone(l);
-            let own: Vec<(i64, f64)> = readings
+            let own: Vec<(i64, f64)> = s
+                .history
                 .iter()
-                .chain(&s.history)
                 .filter(|(period, _, _)| *period == l.period)
                 .map(|(_, at, p)| (*at, *p))
                 .collect();
@@ -499,11 +499,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(crate::limits_history::history_path(&dir), file).unwrap();
-        let s = Sources::new(Some(&dir), &dir.join("none.json"), Vec::new(), false);
+        let mut s = Sources::new(Some(&dir), &dir.join("none.json"), Vec::new(), false);
+        s.history = crate::limits_history::load(&dir);
         let l = window(JAN, 40.0);
-        burnups_for(&s, &[l], &[], &[], JAN + 4_000)
-            .remove(0)
-            .unwrap()
+        burnups_for(&s, &[l], &[], JAN + 4_000).remove(0).unwrap()
     }
 
     const HISTORY: &str = concat!(
@@ -511,6 +510,7 @@ mod tests {
         "{\"t\":1798762200,\"five_hour\":10,\"seven_day\":6}\n",
         "not a line\n",
         "{\"t\":1798763100,\"five_hour\":25,\"seven_day\":null}\n",
+        "{\"t\":1798763700,\"five_hour\":15}\n",
         "{\"t\":1798764600,\"five_hour\":40}\n",
     );
 
@@ -525,6 +525,7 @@ mod tests {
                 (JAN, 0.0),
                 (JAN + 600, 10.0),
                 (JAN + 1_500, 25.0),
+                (JAN + 2_100, 25.0),
                 (JAN + 3_000, 40.0),
                 (JAN + 4_000, 40.0)
             ]

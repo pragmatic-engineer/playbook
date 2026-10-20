@@ -132,6 +132,7 @@ pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<Stri
 ///
 /// The 429 times from `since` through `now` come from the usage store and are
 /// left empty when it cannot be read: the marker is a hint, never an error.
+/// The window readings come from `rate_limits.jsonl`.
 pub fn limit_sources(
     paths: &Paths,
     conn: &Connection,
@@ -143,6 +144,10 @@ pub fn limit_sources(
         &paths.claude_json,
         &super::host::home_dir(),
     );
+    sources.history = paths
+        .db
+        .parent()
+        .map_or_else(Vec::new, super::limits_history::load);
     sources.rate_limited = super::telemetry_db::rate_limited_at(conn, since, now.saturating_add(1))
         .unwrap_or_default();
     sources
