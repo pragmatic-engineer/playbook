@@ -679,7 +679,7 @@ fn dead_hook_scripts(ctx: &Ctx) -> Outcome {
         Ok(removed) => Outcome::Repeat(StepReport::wired(
             "dead-hooks",
             format!(
-                "removed {} hook(s) whose script is gone: {}",
+                "removed {} hook(s) that no longer exist: {}",
                 removed.len(),
                 removed.join(", ")
             ),

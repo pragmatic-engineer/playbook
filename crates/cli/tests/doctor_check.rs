@@ -821,14 +821,13 @@ fn the_probes_run_side_by_side_but_the_table_keeps_its_order() {
     b.settings("{}");
     let dir = b.stub("bin", "1.2.3", true);
     // The data folder row lists files and sizes, which settings reads change
-    // (the config store and its write-ahead log), and the disk row shows free
-    // space, which other programs change. Neither is part of the comparison.
+    // (the config store and its write-ahead log). It is not part of the comparison.
     let stable = |rows: Vec<Value>| -> Vec<Value> {
         rows.into_iter()
             .filter(|r| {
                 !r["message"]
                     .as_str()
-                    .is_some_and(|m| m.starts_with("data folder") || m.starts_with("disk: "))
+                    .is_some_and(|m| m.starts_with("data folder"))
             })
             .collect()
     };

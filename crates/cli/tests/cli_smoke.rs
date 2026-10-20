@@ -983,8 +983,6 @@ fn doctor_on_a_fresh_home_reports_only_known_not_installed_failures() {
                 "safety guards wired 0/",
                 "playbook binary not on PATH",
                 "plugin not installed",
-                // The machine's own disk can be below disk.blockFreeGb.
-                "disk: ",
             ];
             assert!(
                 documented.iter().any(|d| line.contains(d)),
