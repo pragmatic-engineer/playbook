@@ -244,10 +244,9 @@ fn auto_model_detect_is_silent_headless_and_speaks_otherwise() {
 fn safety_guards_behave_identically_headless_and_not() {
     let w = world("guards");
     let cases = [
-        ("rm-workspace-guard", "rm -rf /etc/passwd"),
+        ("rm-workspace-guard", "rm -rf /"),
         ("rm-workspace-guard", "ls"),
         ("bg-await-guard", "sleep 30 &"),
-        ("no-slop-guard", "echo hello"),
     ];
     for (guard, command) in cases {
         let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
@@ -260,7 +259,7 @@ fn safety_guards_behave_identically_headless_and_not() {
         );
         assert_eq!(plain, ci, "{guard} {command:?} changed under CI=true");
     }
-    let deny = serde_json::json!({ "tool_input": { "command": "rm -rf /etc/passwd" } }).to_string();
+    let deny = serde_json::json!({ "tool_input": { "command": "rm -rf /" } }).to_string();
     let (out, _) = run_hook(
         &w,
         "rm-workspace-guard",

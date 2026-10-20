@@ -77,10 +77,9 @@ impl Env {
     }
 }
 
-const PRE_GUARDS: [&str; 6] = [
+const PRE_GUARDS: [&str; 5] = [
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
     "policy-guard",
@@ -119,7 +118,7 @@ const PROBES: [Probe; 19] = [
     },
     |env| vec![attribution_row(env)],
     update_rows,
-    |env| vec![disk_row(env)],
+    |env| vec![policy_guard_row(env)],
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -708,48 +707,6 @@ fn config_rows(env: &Env) -> Vec<Row> {
     .collect()
 }
 
-/// Free disk space against `disk.warnFreeGb` and `disk.blockFreeGb`, on
-/// the volume with the least room.
-fn disk_row(env: &Env) -> Row {
-    use crate::disk::{ballast, policy};
-    let policy = policy::load(&env.home);
-    let paths = policy::measured_paths(&policy, &env.home, env.repo_root.as_deref());
-    let volumes = policy::volumes(&paths);
-    let Some(tight) = policy::tightest(&volumes) else {
-        return Row::new("-", Level::Info, "disk: could not read free space");
-    };
-    disk_row_for(&policy, tight, ballast::size(&env.home))
-}
-
-fn disk_row_for(
-    policy: &crate::disk::Policy,
-    tight: &crate::disk::policy::Volume,
-    ballast: Option<u64>,
-) -> Row {
-    use crate::disk::{size::gb, Level as Disk};
-    let level = match policy.level(tight.space.free) {
-        Disk::Ok => Level::Pass,
-        Disk::Low => Level::Warn,
-        Disk::Critical => Level::Fail,
-    };
-    let mut message = format!(
-        "disk: {} free on {} (warn below {} GB, block builds below {} GB)",
-        gb(tight.space.free),
-        tight.path.display(),
-        policy.warn_free_gb,
-        policy.block_free_gb
-    );
-    if let Some(bytes) = ballast {
-        message.push_str(&format!(", ballast {} reserved", gb(bytes)));
-    }
-    let row = Row::new("-", level, message);
-    if level == Level::Pass {
-        row
-    } else {
-        row.hint("run: playbook disk status to see what uses the space")
-    }
-}
-
 fn worktree_rows(env: &Env) -> Vec<Row> {
     let Some(root) = &env.repo_root else {
         return vec![Row::new(
@@ -788,6 +745,43 @@ fn marker_endpoint(home: &Path) -> Option<String> {
 }
 
 const TELEMETRY_SETUP_FIX: &str = "run: playbook setup --only telemetry";
+
+/// The policy guard is optional and off by default, so off is an Info row.
+fn policy_guard_row(env: &Env) -> Row {
+    use crate::hooks::policy_guard::{enabled_for, env_override, ENABLED_KEY};
+    if let Some(on) = env_override() {
+        let (level, state) = if on {
+            (Level::Pass, "on")
+        } else {
+            (Level::Info, "off")
+        };
+        return Row::new(
+            "-",
+            level,
+            format!("policy guard is {state}: POLICY_GUARD in the environment decides, whatever {ENABLED_KEY} holds"),
+        )
+        .hint("unset POLICY_GUARD to follow the stored key");
+    }
+    if enabled_for(&env.home) {
+        Row::new(
+            "-",
+            Level::Pass,
+            "policy guard is on: it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes, settings.json edits and protected config changes",
+        )
+        .hint(format!(
+            "to turn it off, run: playbook config set --global {ENABLED_KEY} false"
+        ))
+    } else {
+        Row::new(
+            "-",
+            Level::Info,
+            "policy guard is off (optional, off by default)",
+        )
+        .hint(format!(
+            "to turn it on, run: playbook config set --global {ENABLED_KEY} true"
+        ))
+    }
+}
 
 /// The `attribution` key in the user's settings.json (ADR 0042). With
 /// attribution OFF, the default: ok when every key holds the off value, a
@@ -1119,31 +1113,7 @@ fn data_rows(env: &Env) -> Vec<Row> {
     }
     let mut rows = vec![Row::new("-", Level::Info, msg)];
     rows.extend(orphan_rows(env, &dir));
-    rows.extend(backup_row(env));
     rows
-}
-
-/// One row when old migration backups sit in the playbook folder.
-fn backup_row(env: &Env) -> Option<Row> {
-    let found: Vec<_> = crate::disk::backups::leftovers(&env.home)
-        .into_iter()
-        .filter(|l| !l.junk)
-        .collect();
-    if found.is_empty() {
-        return None;
-    }
-    Some(
-        Row::new(
-            "-",
-            Level::Info,
-            format!(
-                "disk: {} old migration backup file(s), {} KB",
-                found.len(),
-                crate::disk::backups::total_bytes(&found) / 1024
-            ),
-        )
-        .hint("`playbook disk clean` removes those older than 7 days once data/config.db and data/memory.db hold their data, and keeps the newest"),
-    )
 }
 
 /// Databases in the data folder with no worktree of this clone. They belong
@@ -1260,13 +1230,18 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
         ));
     }
     for cmd in &found.stale {
+        let hint = if crate::init::retired_hooks::is_retired_command(cmd) {
+            "run: playbook setup --hooks"
+        } else {
+            "delete the entry from ~/.claude/settings.json by hand"
+        };
         rows.push(
             Row::new(
                 "-",
                 Level::Warn,
                 format!("settings.json has a hook the binary no longer writes: {cmd}"),
             )
-            .hint("delete the entry from ~/.claude/settings.json by hand"),
+            .hint(hint),
         );
     }
     let cwd = env.repo_root.clone().unwrap_or_else(|| env.home.clone());
@@ -1445,35 +1420,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_backup_row_counts_old_migration_copies_and_not_junk() {
-        let home =
-            std::env::temp_dir().join(format!("pb-doctor-backups-{}", crate::testing::run_id()));
-        let root = home.join(".config/playbook");
-        std::fs::create_dir_all(&root).unwrap();
-        let env = Env {
-            home: home.clone(),
-            claude_home: home.join(".claude"),
-            plugin_root: None,
-            shell: String::new(),
-            path_var: OsString::new(),
-            repo_root: None,
-            repo_slug: None,
-        };
-        std::fs::write(root.join(".DS_Store"), b"x").unwrap();
-        assert!(backup_row(&env).is_none(), "junk alone is not a backup");
-        std::fs::write(root.join("playbook.db.migrated"), vec![0u8; 2048]).unwrap();
-        std::fs::write(root.join("playbook.db.migrated-wal"), b"").unwrap();
-        let row = backup_row(&env).expect("row");
-        assert!(
-            row.message
-                .starts_with("disk: 2 old migration backup file(s), 2 KB"),
-            "{}",
-            row.message
-        );
-        std::fs::remove_dir_all(&home).unwrap();
-    }
-
-    #[test]
     fn a_paused_plugin_downgrades_only_the_hook_and_status_line_passes() {
         let rows = vec![
             Row::new("1", Level::Pass, "plugin enabled"),
@@ -1528,44 +1474,5 @@ mod tests {
         assert_eq!(without[1].level, Level::Fail);
         assert_eq!(failing.len(), 1);
         assert_eq!(failing[0].level, Level::Fail);
-    }
-
-    #[test]
-    fn the_disk_row_follows_the_thresholds() {
-        use crate::disk::policy::Volume;
-        use crate::disk::probe::{Space, GIB};
-        let volume = |gb: f64| Volume {
-            path: PathBuf::from("/Users/me"),
-            space: Space {
-                free: (gb * GIB as f64) as u64,
-                total: 460 * GIB,
-                device: 1,
-            },
-        };
-        let policy = crate::disk::Policy::default();
-        let cases = [
-            (0.0, Level::Fail),
-            (5.9, Level::Fail),
-            (6.0, Level::Warn),
-            (14.9, Level::Warn),
-            (15.0, Level::Pass),
-        ];
-        for (gb, want) in cases {
-            let row = disk_row_for(&policy, &volume(gb), None);
-            assert_eq!(row.level, want, "{gb} GB");
-            assert_eq!(row.hint.is_some(), want != Level::Pass, "{gb} GB");
-            assert!(
-                row.message
-                    .contains("warn below 15 GB, block builds below 6 GB"),
-                "{}",
-                row.message
-            );
-        }
-        let row = disk_row_for(&policy, &volume(20.0), Some(GIB));
-        assert!(
-            row.message.ends_with("ballast 1.0 GB reserved"),
-            "{}",
-            row.message
-        );
     }
 }

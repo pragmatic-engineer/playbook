@@ -102,14 +102,13 @@ pub fn run(payload: &Payload) {
     }
 
     let (mut system_message, mut extra_context) = check_config_drift(payload, &dir, &home);
-    let claude_home = crate::disk::status::claude_home(&home_dir());
-    let disk_line = crate::hooks::disk_guard::wired(&claude_home)
-        .then(|| crate::hooks::disk_guard::session_start(payload, headless))
-        .flatten();
-    if let Some(line) = &disk_line {
-        push_context(&mut extra_context, line);
-    }
-    for line in heal_line(&home).into_iter().chain(disk_line) {
+    // Before the heal line: a started update hides the plugin fix from it.
+    let plugin_lines = if headless {
+        Vec::new()
+    } else {
+        plugin_update_lines(&home)
+    };
+    for line in heal_line(&home).into_iter().chain(plugin_lines) {
         if !system_message.is_empty() {
             system_message.push('\n');
         }
@@ -146,6 +145,50 @@ pub fn run(payload: &Payload) {
 /// `crate::pending` shows them in a session (ADR 0034).
 fn heal_line(home: &str) -> Option<String> {
     crate::heal::session_line(Path::new(home))
+}
+
+/// The stored results of earlier background refreshes, shown once, then the
+/// line for a plugin update started now. Without one, a detached
+/// `skills sync --refresh` starts when a synced agent is behind the plugin.
+/// It deletes the notices it shows and writes the claim marker, and never
+/// waits: the work runs in a detached child and the hook never writes
+/// skills. Any panic is dropped so the hook cannot fail.
+fn plugin_update_lines(home: &str) -> Vec<String> {
+    std::panic::catch_unwind(|| {
+        use crate::notices::{take_notice, PLUGIN_UPDATE_KEY, SKILLS_SYNC_KEY};
+        use crate::plugin_update::{
+            claim, due, now, record_done, seen, settle_spawn, spawn_refresh_plugin,
+            spawn_refresh_skills, Due, Mode,
+        };
+        let home = Path::new(home);
+        let root = crate::common::paths::playbook_root_from(home);
+        let mut lines: Vec<String> = [PLUGIN_UPDATE_KEY, SKILLS_SYNC_KEY]
+            .into_iter()
+            .filter_map(|key| take_notice(&root, key))
+            .collect();
+        let running = env!("CARGO_PKG_VERSION");
+        let seen_before = seen(&root);
+        let mut plugin_started = false;
+        match due(home, seen_before.as_deref()) {
+            Due::Run(Mode::Auto)
+                if claim(&root, seen_before.as_deref(), running, now())
+                    && settle_spawn(&root, running, spawn_refresh_plugin(), now()) =>
+            {
+                plugin_started = true;
+                lines.push(format!(
+                    "playbook: updating the playbook plugin to {running} in the background. \
+                    Start Claude Code again to load it."
+                ));
+            }
+            Due::Current => record_done(&root, running, now()),
+            _ => {}
+        }
+        if !plugin_started && crate::skills_sync::refresh_needed(home) {
+            spawn_refresh_skills();
+        }
+        lines
+    })
+    .unwrap_or_default()
 }
 
 /// Starts the telemetry collector when Claude Code's settings point at it and
