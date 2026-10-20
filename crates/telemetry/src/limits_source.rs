@@ -5,7 +5,8 @@
 //! Claude Code passes to the statusline command on stdin (documented at
 //! code.claude.com/docs/en/statusline). The statusline keeps the latest copy
 //! in a small private file next to the usage database, and the usage views read
-//! it back. Only percentages, reset times and, behind a Claude apps gateway,
+//! it back. A short history of the two window percentages sits beside it (see
+//! `limits_history`). Only percentages, reset times and, behind a Claude apps gateway,
 //! the dollar spend limit are kept: no account, no token, no session id. The
 //! rate limit fields exist only for Pro and Max subscribers (or a gateway), so
 //! on an API key there is nothing to read and the file is never written.
@@ -304,7 +305,14 @@ pub fn save(usage_dir: &Path, snap: &Snapshot) {
 /// JSON or has no usable part. Best effort, like [`save`].
 pub fn remember(usage_dir: &Path, input: &str, now: i64) {
     if let Some(new) = Snapshot::from_statusline(input, now) {
-        save(usage_dir, &new.merged_over(load(usage_dir), now));
+        let merged = new.merged_over(load(usage_dir), now);
+        save(usage_dir, &merged);
+        super::limits_history::record(
+            usage_dir,
+            merged.five_hour.as_ref().map(|w| w.used_percentage),
+            merged.seven_day.as_ref().map(|w| w.used_percentage),
+            now,
+        );
     }
 }
 
@@ -342,6 +350,9 @@ pub struct Sources {
     /// store. Set by the caller that holds the connection (`run::limit_sources`);
     /// empty until then.
     pub rate_limited: Vec<i64>,
+    /// The window readings of `rate_limits.jsonl` as `(window, time, percent)`,
+    /// oldest first. Empty without the file.
+    pub history: Vec<(LimitPeriod, i64, f64)>,
 }
 
 impl Sources {
@@ -368,6 +379,7 @@ impl Sources {
                 super::plan::read(claude_json)
             },
             rate_limited: Vec::new(),
+            history: usage_dir.map_or_else(Vec::new, super::limits_history::load),
         }
     }
 
@@ -1333,6 +1345,7 @@ mod tests {
             budgets: vec![(LimitPeriod::Monthly, 100.0)],
             account: cache(600, spend(500.0, Some(120.0)), None),
             rate_limited: Vec::new(),
+            history: Vec::new(),
         };
 
         let l = all_limits(&s, &[], NOW, WeekStart::Monday);

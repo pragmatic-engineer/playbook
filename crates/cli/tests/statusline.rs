@@ -803,3 +803,57 @@ fn every_fixture_renders_the_same_bytes_on_two_runs() {
         .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+// ---- rate limit history ----------------------------------------------------
+
+fn statusline_status(home: &Path, payload: &str) -> std::process::ExitStatus {
+    use std::io::Write;
+    let mut child = Command::new(bin())
+        .arg("statusline")
+        .env_clear()
+        .env("HOME", home)
+        .env("PWD", home)
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
+    child.wait().unwrap()
+}
+
+#[test]
+fn a_reading_adds_one_history_line_and_a_second_one_right_after_adds_none() {
+    let s = Scratch::new();
+    let data = s.0.join(".config/playbook/data");
+    let body = payload(&s.0, FULL);
+
+    assert!(statusline_status(&s.0, &body).success());
+    assert!(statusline_status(&s.0, &body).success());
+
+    let history = std::fs::read_to_string(data.join("rate_limits.jsonl")).unwrap();
+    assert_eq!(history.lines().count(), 1, "{history}");
+    assert!(history.contains(r#""five_hour":55.4"#), "{history}");
+    assert!(!history.contains("sess-full"), "{history}");
+}
+
+#[test]
+fn an_unwritable_data_folder_still_exits_zero() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new();
+    let data = s.0.join(".config/playbook/data");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+    let status = statusline_status(&s.0, &payload(&s.0, FULL));
+
+    std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(status.success(), "{status:?}");
+}
