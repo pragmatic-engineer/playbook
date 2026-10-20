@@ -14,7 +14,7 @@
 
 use super::limits::{Burn, CrossState, Crossing, Limit, LimitPeriod, Origin, State, Unit};
 use super::period::Period;
-use super::plan::{Account, Capabilities};
+use super::plan::Account;
 use super::query::{utc_month_bounds, WeekStart};
 use super::spend::{BilledComparison, NotCompared, SpendFigure};
 use super::UsageEvent;
@@ -142,9 +142,18 @@ impl Snapshot {
             seven_day: window(v.get("seven_day")),
             spend_limit: spend(v.get("spend_limit")),
             read: ReadTimes {
-                five_hour: v.pointer("/read/five_hour").and_then(Value::as_i64),
-                seven_day: v.pointer("/read/seven_day").and_then(Value::as_i64),
-                spend_limit: v.pointer("/read/spend_limit").and_then(Value::as_i64),
+                five_hour: v
+                    .pointer("/read/five_hour")
+                    .and_then(Value::as_i64)
+                    .filter(|t| *t >= 0),
+                seven_day: v
+                    .pointer("/read/seven_day")
+                    .and_then(Value::as_i64)
+                    .filter(|t| *t >= 0),
+                spend_limit: v
+                    .pointer("/read/spend_limit")
+                    .and_then(Value::as_i64)
+                    .filter(|t| *t >= 0),
             },
         }
     }
@@ -165,7 +174,18 @@ impl Snapshot {
     }
 
     pub fn is_stale(&self, now: i64) -> bool {
-        now - self.oldest_read() > STALE_SECONDS
+        now.saturating_sub(self.oldest_read()) > STALE_SECONDS
+    }
+
+    /// When the part for `period` was read: its own read time, else when the
+    /// file was captured.
+    pub fn read_of(&self, period: LimitPeriod) -> i64 {
+        match period {
+            LimitPeriod::FiveHour => self.read.five_hour,
+            LimitPeriod::SevenDay => self.read.seven_day,
+            _ => self.read.spend_limit,
+        }
+        .unwrap_or(self.captured_at)
     }
 
     /// This reading laid over the one stored before it. A part this reading
@@ -417,10 +437,6 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
     // replaces one the statusline read before the cache was fetched. Only a
     // fresh cache is used: a percentage changes within minutes.
     if let Some(c) = s.account.cache.as_ref().filter(|c| c.is_fresh(now)) {
-        let newer = s
-            .snapshot
-            .as_ref()
-            .is_none_or(|sn| c.fetched_at > sn.captured_at);
         for (period, w) in [
             (LimitPeriod::FiveHour, &c.five_hour),
             (LimitPeriod::SevenDay, &c.seven_day),
@@ -428,6 +444,12 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
             let Some(w) = w.as_ref().filter(|w| w.resets_at > now) else {
                 continue;
             };
+            // The cache replaces a reading of the same window only when it was
+            // fetched after that window was read.
+            let newer = s
+                .snapshot
+                .as_ref()
+                .is_none_or(|sn| c.fetched_at > sn.read_of(period));
             let known = out.iter().any(|l| l.period == period);
             if known && !newer {
                 continue;
@@ -502,7 +524,11 @@ pub fn compare_billed(
                 .spend_limit
                 .as_ref()
                 .filter(|sp| sp.resets_at > now && sp.period == Some(LimitPeriod::Monthly))?;
-            SpendFigure::from_usd(sp.limit_usd, sp.used_usd, sn.captured_at)
+            SpendFigure::from_usd(
+                sp.limit_usd,
+                sp.used_usd,
+                sn.read.spend_limit.unwrap_or(sn.captured_at),
+            )
         })
         .filter(usable);
     let figure = statusline.or_else(|| {
@@ -649,9 +675,13 @@ impl Reason {
     }
 }
 
-/// Why no limit from Claude is shown, `None` when one is.
+/// Why no limit from Claude is shown, `None` when one is. A limit from Claude
+/// is any that did not come from a manual budget.
 pub fn reason(s: &Sources, now: i64) -> Option<Reason> {
-    if !Capabilities::from_sources(s, now).local_only {
+    let has_limit = all_limits(s, &[], now, WeekStart::Monday)
+        .iter()
+        .any(|l| l.origin != Origin::Manual);
+    if has_limit {
         return None;
     }
     let held = s.snapshot.as_ref().is_some_and(|sn| {
@@ -819,7 +849,9 @@ pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekS
             if c.is_fresh(now) { "" } else { " (stale)" }
         ));
     }
-    if let Some(note) = windows_note(s, &limits) {
+    // The reason line below says the same, so the note stays for the case where
+    // some limit is known but one window is not.
+    if let Some(note) = windows_note(s, &limits).filter(|_| reason(s, now).is_none()) {
         out.push_str(&format!("  {note}\n"));
     }
     for line in limit_lines(s, &limits, events, now) {
@@ -1608,32 +1640,39 @@ mod tests {
     #[test]
     fn each_window_keeps_its_own_reading_time_and_one_old_part_makes_it_stale() {
         let dir = merge_dir("stale");
-        remember(&dir, &reading(Some((10.0, NOW + 5 * 3600)), None), NOW);
-        let later = NOW + 7 * 3600;
+        let later = NOW + 7 * HOUR;
+        remember(&dir, &reading(Some((10.0, NOW + 10 * HOUR)), None), NOW);
         remember(&dir, &reading(None, Some((20.0, later + 86_400))), later);
 
         let s = stored_in(&dir);
 
-        // The five hour window is dropped (its reset time passed), so only the
-        // fresh seven day window is held.
-        assert!(s.five_hour.is_none());
-        assert!(!s.is_stale(later));
-        // A window read over six hours ago and still live makes the whole
-        // reading stale, whatever the other part says.
-        let held = Snapshot {
-            five_hour: Some(Window {
-                used_percentage: 10.0,
-                resets_at: later + 3600,
-            }),
-            read: ReadTimes {
-                five_hour: Some(later - STALE_SECONDS - 1),
-                ..ReadTimes::default()
-            },
-            captured_at: later,
+        // Both are held, each with the time it was read.
+        assert_eq!(s.read.five_hour, Some(NOW));
+        assert_eq!(s.read.seven_day, Some(later));
+        assert_eq!(s.captured_at, later);
+        assert_eq!(s.oldest_read(), NOW);
+        // The old five hour window, still live, makes the reading stale.
+        assert!(s.is_stale(later));
+        // Without it only the fresh part is left and the reading is fresh.
+        assert!(!Snapshot {
+            five_hour: None,
             ..s
-        };
-        assert!(held.is_stale(later));
-        assert_eq!(held.oldest_read(), later - STALE_SECONDS - 1);
+        }
+        .is_stale(later));
+    }
+
+    #[test]
+    fn a_dropped_window_leaves_no_read_time_behind() {
+        let dir = merge_dir("dropped");
+        let later = NOW + 7 * HOUR;
+        remember(&dir, &reading(Some((10.0, NOW + 5 * HOUR)), None), NOW);
+        remember(&dir, &reading(None, Some((20.0, later + 86_400))), later);
+
+        let s = stored_in(&dir);
+
+        assert!(s.five_hour.is_none());
+        assert_eq!(s.read.five_hour, None);
+        assert!(!s.is_stale(later));
     }
 
     #[test]
@@ -1704,8 +1743,11 @@ mod tests {
     #[test]
     fn the_gateway_spend_limit_is_kept_the_same_way() {
         let dir = merge_dir("spend");
-        let with_spend = r#"{"rate_limits":{"spend_limit":{"used_percentage":10,"resets_at":1800086400,"used_usd":1.0,"limit_usd":10.0,"period":"monthly"}}}"#;
-        remember(&dir, with_spend, NOW);
+        let with_spend = format!(
+            r#"{{"rate_limits":{{"spend_limit":{{"used_percentage":10,"resets_at":{},"used_usd":1.0,"limit_usd":10.0,"period":"monthly"}}}}}}"#,
+            NOW + 86_400
+        );
+        remember(&dir, &with_spend, NOW);
 
         remember(&dir, &reading(Some((5.0, NOW + 3600)), None), NOW + 60);
 
@@ -1827,10 +1869,18 @@ mod tests {
             .lines()
             .find(|l| l.contains("five hour crossings (measured):"))
             .unwrap_or_else(|| panic!("{text}"));
-        assert!(line.contains("50% crossed about"), "{line}");
-        // 50 percent after 1.5 of 5 hours projects 62.5 percent at the end.
-        assert!(line.contains("80% not before the period ends"), "{line}");
-        assert!(line.contains("100% not before the period ends"), "{line}");
+        // The window began 4 hours before NOW and ends 1 hour after it, and 50
+        // percent of it is used, so 50 percent is crossed at NOW.
+        let at = |secs: i64| stamp(secs);
+        assert_eq!(
+            line.trim(),
+            format!(
+                "five hour crossings (measured): 50% crossed about {}, 80% not before the period ends {end}, 100% not before the period ends {end}",
+                at(NOW),
+                end = at(NOW + HOUR)
+            )
+        );
+        // 50 percent after 4 of 5 hours projects 62.5 percent at the end.
     }
 
     #[test]

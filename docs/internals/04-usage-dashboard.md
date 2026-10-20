@@ -194,10 +194,9 @@ The Budget panel, `--summary` and `--json` (`limits`) show how much of a limit y
 | API organization | Nothing automatic. The organization budget is set in the Console and no documented API reads it. The Admin API needs an organization admin key and returns usage and cost reports, not the limit. | `usage.budget.monthlyUsd` and `usage.budget.weeklyUsd`, set by you. | `manual` |
 | Any account | Your own estimated spend, from the session transcripts. | The usage store. | `local history` |
 
-Two things to know:
+Three things to know:
 
 - A statusline reading that carries one window keeps the other window as it was stored, with its own read time, until that window resets. A reading is stale as soon as one part held is over 6 hours old.
-
 - The statusline input has no limit data on an API key account, and a Pro or Max account gets it only after the first response of a session. So the plan windows show up once you have used Claude Code with the playbook statusline (`playbook statusline`) in this setup. Each window can be missing, and Claude Code drops a window after its reset time, so playbook does the same. A reading older than six hours is tagged `stale`.
 - Playbook reads only what Claude Code already passes to a local command and a few plan and usage fields of the Claude Code config file. It calls no endpoint with your login, reads no credential store, keeps no email, name, id or organization in the limits code (the account tag on each event is described under ingest), and writes nothing into Claude Code settings or memory. The stored file holds percentages, reset times and the gateway dollar limit, and no account, token or session id.
 

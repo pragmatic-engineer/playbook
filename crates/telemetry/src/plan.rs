@@ -126,14 +126,16 @@ impl Capabilities {
         let live = |w: &Option<Window>| w.clone().filter(|w| w.resets_at > now);
         let cache = s.account.cache.as_ref().filter(|c| c.is_fresh(now));
         let mut windows = Vec::new();
-        for (name, from_snapshot, from_cache) in [
+        for (name, period, from_snapshot, from_cache) in [
             (
                 "five_hour",
+                LimitPeriod::FiveHour,
                 s.snapshot.as_ref().map(|sn| &sn.five_hour),
                 cache.map(|c| &c.five_hour),
             ),
             (
                 "seven_day",
+                LimitPeriod::SevenDay,
                 s.snapshot.as_ref().map(|sn| &sn.seven_day),
                 cache.map(|c| &c.seven_day),
             ),
@@ -142,7 +144,7 @@ impl Capabilities {
             let cached = from_cache.and_then(live);
             let newer = cache
                 .zip(s.snapshot.as_ref())
-                .is_none_or(|(c, sn)| c.fetched_at > sn.captured_at);
+                .is_none_or(|(c, sn)| c.fetched_at > sn.read_of(period));
             if let Some(w) = if newer {
                 cached.or(measured)
             } else {
@@ -527,7 +529,7 @@ fn statusline_lines(usage_dir: &Path, now: i64) -> Vec<String> {
             "    it appears after a session that uses `playbook statusline` on a plan with usage windows".to_string(),
         ];
     };
-    let age = (now - s.captured_at).max(0);
+    let age = (now - s.oldest_read()).max(0);
     let state = if s.is_stale(now) { "stale" } else { "fresh" };
     let yes = |b: bool| if b { "present" } else { "absent" };
     vec![
