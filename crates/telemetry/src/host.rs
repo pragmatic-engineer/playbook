@@ -69,6 +69,12 @@ pub trait Host: Send + Sync {
     fn spend_ack(&self) -> bool {
         false
     }
+
+    /// Runs `usage spend enable|disable|status`. A program without the
+    /// feature says so.
+    fn spend_command(&self, _action: &super::command::SpendAction) -> Result<String, String> {
+        Err("the server spend limit is not available in this program".to_string())
+    }
 }
 
 static HOST: RwLock<Option<&'static dyn Host>> = RwLock::new(None);
@@ -190,6 +196,10 @@ pub fn config_value(key: &str, home: &Path) -> Option<Value> {
 /// [`config_value`] for the current user's home.
 pub fn config_value_now(key: &str) -> Option<Value> {
     config_value(key, &home_dir())
+}
+
+pub(crate) fn spend_command(action: &super::command::SpendAction) -> Result<String, String> {
+    current().spend_command(action)
 }
 
 /// The folder holding the usage database under `home`.

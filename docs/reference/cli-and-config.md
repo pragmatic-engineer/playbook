@@ -1527,7 +1527,7 @@ Example: `playbook usage --range today`
 - `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 - `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 
-Subcommands: `collect`, `doctor`, `prune`, `status`, `stop`
+Subcommands: `collect`, `doctor`, `prune`, `spend`, `status`, `stop`
 
 ### `playbook usage collect`
 
@@ -1563,6 +1563,41 @@ Removes telemetry rows older than `usage.telemetryRetentionDays` (default 90, 0 
 Example: `playbook usage prune --dry-run`
 
 - `--dry-run`: Say what would be removed without deleting anything
+- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+
+### `playbook usage spend`
+
+Turn the server spend limit on or off
+
+Reads the spend limit your account has on the server and shows what it billed next to the local estimate. It needs your Claude Code login token, so it is off until you run `enable`, which prints what is read and sent and asks first. Anthropic does not document this call and its terms may not allow it, so the choice is yours. `status` never reads the token.
+
+Example: `playbook usage spend enable`
+
+- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+
+Subcommands: `disable`, `enable`, `status`
+
+### `playbook usage spend disable`
+
+Turn it off and remove the acknowledgement and the cached figure
+
+- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+
+### `playbook usage spend enable`
+
+Print the notice, ask, and turn the server spend limit on
+
+- `--yes`: Answer yes to the question
+- `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+- `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
+
+### `playbook usage spend status`
+
+Show whether it is on, the acknowledgement and the last result
+
 - `--utc`: Show times and group days in UTC (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 - `--local`: Show times and group days in your local time zone, the default (overrides `usage.timeZone` and `PLAYBOOK_TELEMETRY_TZ`)
 

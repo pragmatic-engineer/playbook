@@ -86,6 +86,20 @@ pub enum UsageCommand {
         #[arg(long)]
         raw: bool,
     },
+    /// Turn the server spend limit on or off
+    ///
+    /// Reads the spend limit your account has on the server and shows what it
+    /// billed next to the local estimate. It needs your Claude Code login
+    /// token, so it is off until you run `enable`, which prints what is read
+    /// and sent and asks first. Anthropic does not document this call and its
+    /// terms may not allow it, so the choice is yours. `status` never reads
+    /// the token.
+    ///
+    /// Example: `playbook usage spend enable`
+    Spend {
+        #[command(subcommand)]
+        action: SpendAction,
+    },
     /// Delete old telemetry rows
     ///
     /// Removes telemetry rows older than `usage.telemetryRetentionDays` (default
@@ -100,4 +114,19 @@ pub enum UsageCommand {
         #[arg(long)]
         dry_run: bool,
     },
+}
+
+/// `playbook usage spend` actions.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum SpendAction {
+    /// Print the notice, ask, and turn the server spend limit on
+    Enable {
+        /// Answer yes to the question
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Turn it off and remove the acknowledgement and the cached figure
+    Disable,
+    /// Show whether it is on, the acknowledgement and the last result
+    Status,
 }
