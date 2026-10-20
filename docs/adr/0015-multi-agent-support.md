@@ -88,7 +88,7 @@ Alternative B. Playbook gets a thin agent-neutral core in the `playbook` binary 
 
 Each slice is its own issue and PR. Slice 1 is the only one this ADR authorizes to start immediately, and slices 2 and 3 each get a short design note before work.
 
-**Status of slices.** Slice 1 (Codex usage source) shipped in #519 (`crates/telemetry/src/codex.rs`). Slice 3 shipped for Codex skills: `playbook skills sync` copies skills to `~/.agents/skills`, and playbook commands are rendered as Codex skills. See [Codex skills](../internals/15-codex-skills.md). Cursor skills and slice 2, the hooks adapter, are not started. The Context above stays as the record of the state when this ADR was written.
+**Status of slices.** Slice 1 (Codex usage source) shipped in #519 (`crates/telemetry/src/codex.rs`). Slice 3 shipped for Codex skills: `playbook skills sync` copies skills to `~/.agents/skills`, and playbook commands are rendered as Codex skills. See [Codex skills](../internals/15-codex-skills.md). Cursor skills and slice 2, the hooks adapter, are not started. The Context above stays as the record of the state when this ADR was written. Its Codex rows for subagents and hooks were checked on 2026-10-07 and are superseded by the [Codex support matrix](../reference/codex-support.md).
 
 ## Out of Scope
 
