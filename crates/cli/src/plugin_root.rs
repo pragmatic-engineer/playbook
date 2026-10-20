@@ -162,7 +162,12 @@ pub fn resolve(inputs: &Inputs) -> Result<Resolved, NotFound> {
 /// `resolve` for this process: the real home, `CLAUDE_PLUGIN_ROOT` and the
 /// current directory.
 pub fn resolve_here() -> Result<Resolved, NotFound> {
-    let claude_home = crate::common::home_dir().join(".claude");
+    resolve_from(&crate::common::home_dir())
+}
+
+/// [`resolve_here`] for the Claude Code folder under `home`.
+pub fn resolve_from(home: &Path) -> Result<Resolved, NotFound> {
+    let claude_home = home.join(".claude");
     let env = std::env::var("CLAUDE_PLUGIN_ROOT").ok();
     let override_env = std::env::var(OVERRIDE_ENV).ok();
     let cwd = std::env::current_dir().unwrap_or_default();

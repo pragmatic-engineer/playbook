@@ -286,11 +286,11 @@ pub fn run_for_command(home: &Path, no_plugin: bool) -> Option<Outcome> {
 const MARKER_KEY: &str = "versions/plugin-update";
 
 /// A failed or unchanged update is tried again after this long.
-const FAILED_RETRY: Duration = Duration::from_secs(24 * 60 * 60);
+pub(crate) const FAILED_RETRY: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// A `running` marker older than this belongs to a run that never finished
 /// (Ctrl-C, a crash), so the update is due again.
-const RUNNING_STALE: Duration = Duration::from_secs(10 * 60);
+pub(crate) const RUNNING_STALE: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -560,7 +560,12 @@ pub fn refresh_plugin(home: &Path) {
     }
     let (outcome, state) = attempt(home, &root);
     if let Some(line) = notice_line(&outcome, state) {
-        crate::notices::store_notice(&root, &line);
+        crate::notices::store_notice(&root, crate::notices::PLUGIN_UPDATE_KEY, &line);
+    }
+    // The plugin may have moved, so synced agents follow it now.
+    let refreshed = crate::skills_sync::refresh_report(home, false);
+    if let Some(line) = crate::skills_sync::notice_line(&refreshed) {
+        crate::notices::store_notice(&root, crate::notices::SKILLS_SYNC_KEY, &line);
     }
 }
 
@@ -577,6 +582,15 @@ const NO_SPAWN_VALUE: &str = "1";
 /// the child is not mistaken for a nested run. Returns whether the child
 /// started; the no-spawn seam counts as started, since nothing failed.
 pub(crate) fn spawn_refresh_plugin() -> bool {
+    spawn_detached(&["update", "--refresh-plugin"])
+}
+
+/// Starts `<exe> skills sync --refresh` detached, the same way.
+pub(crate) fn spawn_refresh_skills() -> bool {
+    spawn_detached(&["skills", "sync", "--refresh"])
+}
+
+fn spawn_detached(args: &[&str]) -> bool {
     #[cfg(debug_assertions)]
     if std::env::var_os(NO_SPAWN_ENV).is_some_and(|v| v == NO_SPAWN_VALUE) {
         return true;
@@ -585,7 +599,7 @@ pub(crate) fn spawn_refresh_plugin() -> bool {
         return false;
     };
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(["update", "--refresh-plugin"])
+    cmd.args(args)
         .env_remove(SKIP_ENV)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

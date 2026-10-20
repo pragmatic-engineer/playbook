@@ -1369,7 +1369,12 @@ fn main() {
                 agent,
                 dry_run,
                 json,
-            } => std::process::exit(run_skills_sync(agent.as_deref(), dry_run, json)),
+                refresh,
+            } => std::process::exit(if refresh {
+                run_skills_refresh()
+            } else {
+                run_skills_sync(agent.as_deref(), dry_run, json)
+            }),
         },
         Command::Config { sub } => {
             let home = common::home_dir();
@@ -2596,10 +2601,21 @@ fn print_resolved(
     );
 }
 
+/// The detached body behind `skills sync --refresh`: prints nothing and
+/// leaves its summary for the next session.
+fn run_skills_refresh() -> i32 {
+    let home = common::home_dir();
+    let refreshed = skills_sync::refresh_report(&home, false);
+    if let Some(line) = skills_sync::notice_line(&refreshed) {
+        let root = common::paths::playbook_root_from(&home);
+        playbook::notices::store_notice(&root, playbook::notices::SKILLS_SYNC_KEY, &line);
+    }
+    0
+}
+
 /// `playbook skills sync`: returns the exit code.
 fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
     use skills_sync::{apply, Agent};
-    const TARGET_DIR: &str = ".agents/skills";
     const NO_AGENTS: &str = "no other agents found (looked for Codex at ~/.codex)";
     let home = common::home_dir();
     let path = std::env::var("PATH").unwrap_or_default();
@@ -2636,7 +2652,7 @@ fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
         return 1;
     }
     let root = common::paths::playbook_root_from(&home);
-    let target_root = home.join(TARGET_DIR);
+    let target_root = home.join(skills_sync::TARGET_DIR);
     let mut lines = Vec::new();
     let mut clean = true;
     for agent in agents {
