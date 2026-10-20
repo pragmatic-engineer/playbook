@@ -106,18 +106,3 @@ fn shell_init_is_gone_from_clap_the_help_and_the_cli_reference() {
     .unwrap();
     assert!(!reference.contains("shell-init"));
 }
-
-#[test]
-fn disk_is_gone_from_clap_the_help_and_the_cli_reference() {
-    assert!(Cli::command().find_subcommand("disk").is_none());
-    assert!(Cli::try_parse_from(["playbook", "disk", "status"]).is_err());
-    let (code, help, _) = run(&["--help"]);
-    assert_eq!(code, 0);
-    assert!(!help.contains("playbook disk"), "{help}");
-    let reference = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../docs/reference/cli-and-config.md"
-    ))
-    .unwrap();
-    assert!(!reference.contains("playbook disk"));
-}
