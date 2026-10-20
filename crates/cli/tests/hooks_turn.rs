@@ -708,8 +708,118 @@ mod precompact_warn {
     }
 
     #[test]
-    fn log_is_capped_at_500_lines() {
-        // Arrange: 600 distinguishable, numbered lines, so the surviving
+    fn a_payload_without_a_session_id_warns_but_does_not_log() {
+        // Arrange
+        let home = scratch_home("pcw-nosid");
+
+        // Act
+        let (stdout, code) = run_hook("precompact-warn", &home, r#"{"trigger":"auto"}"#);
+
+        // Assert
+        assert_eq!(code, 0);
+        assert!(stdout.contains("(auto)"), "{stdout}");
+        assert!(!compactions_log(&home).exists(), "a probe must not log");
+    }
+
+    #[test]
+    fn a_full_payload_logs_session_trigger_project_and_context_tokens() {
+        // Arrange
+        let home = scratch_home("pcw-full");
+        let transcript = home.join("t.jsonl");
+        fs::write(
+            &transcript,
+            concat!(
+                r#"{"type":"user","message":{"content":"secret text"}}"#,
+                "\n",
+                r#"{"type":"assistant","message":{"usage":{"input_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":400}}}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+        let payload = format!(
+            r#"{{"trigger":"auto","session_id":"s9","cwd":"/work/acme-api","model":"m-1","transcript_path":"{}"}}"#,
+            transcript.display()
+        );
+
+        // Act
+        let (_stdout, code) = run_hook("precompact-warn", &home, &payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        let log = fs::read_to_string(compactions_log(&home)).unwrap();
+        let cols: Vec<&str> = log.trim_end().split('\t').collect();
+        assert_eq!(cols.len(), 6, "{log}");
+        assert_eq!(
+            &cols[1..],
+            [
+                "session=s9",
+                "trigger=auto",
+                "project=acme-api",
+                "model=m-1",
+                "tokens=505"
+            ]
+        );
+        assert!(!log.contains("secret"), "message text must not be logged");
+    }
+
+    #[test]
+    fn a_missing_transcript_leaves_tokens_empty_and_still_logs() {
+        // Arrange
+        let home = scratch_home("pcw-notranscript");
+        let payload =
+            r#"{"trigger":"manual","session_id":"s4","transcript_path":"/nonexistent/t.jsonl"}"#;
+
+        // Act
+        let (_stdout, code) = run_hook("precompact-warn", &home, payload);
+
+        // Assert
+        assert_eq!(code, 0);
+        let log = fs::read_to_string(compactions_log(&home)).unwrap();
+        assert!(log.contains("session=s4\ttrigger=manual"), "{log}");
+        assert!(log.trim_end().ends_with("tokens="), "{log}");
+    }
+
+    #[test]
+    fn the_same_event_reported_twice_in_one_second_logs_one_line() {
+        // Arrange
+        let home = scratch_home("pcw-dedupe");
+        let payload = r#"{"trigger":"auto","session_id":"s5"}"#;
+
+        // Act: two back-to-back runs share the same second almost always, so
+        // retry until a pair lands inside one second.
+        let mut deduped = false;
+        for _ in 0..5 {
+            let _ = fs::remove_file(compactions_log(&home));
+            run_hook("precompact-warn", &home, payload);
+            run_hook("precompact-warn", &home, payload);
+            let log = fs::read_to_string(compactions_log(&home)).unwrap();
+            if log.lines().count() == 1 {
+                deduped = true;
+                break;
+            }
+        }
+
+        // Assert
+        assert!(deduped, "two runs in one second should write one line");
+    }
+
+    #[test]
+    fn two_sessions_in_the_same_second_both_log() {
+        // Arrange
+        let home = scratch_home("pcw-two-sessions");
+
+        // Act
+        run_hook("precompact-warn", &home, r#"{"session_id":"a"}"#);
+        run_hook("precompact-warn", &home, r#"{"session_id":"b"}"#);
+
+        // Assert
+        let log = fs::read_to_string(compactions_log(&home)).unwrap();
+        assert_eq!(log.lines().count(), 2, "{log}");
+    }
+
+    #[test]
+    fn log_is_capped_at_2000_lines() {
+        // Arrange: 2100 distinguishable, numbered lines, so the surviving
         // window can be checked for content, not just count. A mutation
         // that kept the oldest 500 lines instead of the newest 500 would
         // still pass a bare `line_count <= 500` check, so this also pins
@@ -718,13 +828,17 @@ mod precompact_warn {
         let log = compactions_log(&home);
         fs::create_dir_all(log.parent().expect("log path should have a parent")).unwrap();
         let mut seeded = String::new();
-        for i in 1..=600 {
+        for i in 1..=2100 {
             seeded.push_str(&format!("old line {i}\n"));
         }
         fs::write(&log, seeded).unwrap();
 
         // Act
-        let (_stdout, code) = run_hook("precompact-warn", &home, r#"{"trigger":"manual"}"#);
+        let (_stdout, code) = run_hook(
+            "precompact-warn",
+            &home,
+            r#"{"trigger":"manual","session_id":"s3"}"#,
+        );
 
         // Assert
         assert_eq!(code, 0);
@@ -732,8 +846,8 @@ mod precompact_warn {
         let lines: Vec<&str> = contents.lines().collect();
         assert_eq!(
             lines.len(),
-            500,
-            "expected exactly 500 lines after capping, got {}",
+            2000,
+            "expected exactly 2000 lines after capping, got {}",
             lines.len()
         );
         assert_eq!(
@@ -741,13 +855,13 @@ mod precompact_warn {
             "the oldest surviving line should be the start of the newest window, not line 1"
         );
         assert_eq!(
-            lines[498], "old line 600",
+            lines[1998], "old line 2100",
             "the newest seeded line should be the second to last, right before the freshly appended entry"
         );
         assert!(
-            lines[499].contains("trigger=manual"),
+            lines[1999].contains("trigger=manual"),
             "the last line should be the entry this run just appended, got: {}",
-            lines[499]
+            lines[1999]
         );
     }
 
@@ -766,7 +880,11 @@ mod precompact_warn {
         fs::create_dir(&lock_dir).expect("pre-creating the lock dir should succeed");
 
         // Act
-        let (_stdout, code) = run_hook("precompact-warn", &home, r#"{"trigger":"manual"}"#);
+        let (_stdout, code) = run_hook(
+            "precompact-warn",
+            &home,
+            r#"{"trigger":"manual","session_id":"s3"}"#,
+        );
 
         // Assert
         assert_eq!(
