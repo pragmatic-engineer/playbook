@@ -72,5 +72,6 @@ BODY="$lines" awk -v v="$version" '
   /^ *releases = \{$/ { print; printf "        version = \"%s\";\n%s", v, ENVIRON["BODY"]; skip = 1; next }
   skip && /^ *\};$/ { skip = 0 }
   !skip { print }
-' "$flake" > "$tmp"
+  END { if (skip) exit 1 }
+' "$flake" > "$tmp" || fail "no end of the releases block in $flake"
 cat "$tmp" > "$flake"

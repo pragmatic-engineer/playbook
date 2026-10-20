@@ -66,9 +66,12 @@ sums_full() {
 
 # expect_fail <message> <args...>: the script exits 1 and prints <message>.
 expect_fail() {
-  local msg="$1" out rc=0
+  local msg="$1" out rc=0 snap="$TMP/snap.nix" flake=""
   shift
+  # The flake is the last argument of a render run. A refusal must leave it as it was.
+  if [ "$1" != sri ] && [ $# -eq 3 ] && [ -f "$3" ]; then flake="$3"; cp "$flake" "$snap"; fi
   out="$("$SCRIPT" "$@" 2>&1)" || rc=$?
+  if [ -n "$flake" ]; then cmp -s "$snap" "$flake" || fail "a refused run changed the flake: $*"; fi
   [ "$rc" -eq 1 ] || fail "expected exit 1, got $rc for: $* ($out)"
   grep -qF -- "$msg" <<<"$out" || fail "expected message '$msg', got: $out"
   ok
@@ -90,7 +93,8 @@ grep -qF "aarch64-linux = \"$(sri_of b)\";" "$CASE/flake.nix" || fail "aarch64-l
 grep -qF "x86_64-darwin = \"$(sri_of c)\";" "$CASE/flake.nix" || fail "x86_64-darwin hash"
 grep -qF "aarch64-darwin = \"$(sri_of a)\";" "$CASE/flake.nix" || fail "aarch64-darwin hash"
 [ "$(grep -c 'sha256-' "$CASE/flake.nix")" -eq 4 ] || fail "expected 4 hashes"
-grep -qF '# render-flake.sh rewrites' "$CASE/flake.nix" || fail "the rest of the file changed"
+grep -qF '# render-flake.sh rewrites' "$CASE/flake.nix" || fail "the head of the file changed"
+[ "$(tail -n 3 "$CASE/flake.nix")" = "$(printf '    };\n  in releases;\n}')" ] || fail "the tail of the file changed"
 ok
 
 # 9. Idempotent: a second run leaves the file byte-identical.
@@ -102,7 +106,7 @@ ok
 # 3. Empty file.
 new_case empty
 : > "$CASE/SHA256SUMS"
-expect_fail 'no sums' 1.2.3 "$CASE/SHA256SUMS" "$CASE/flake.nix"
+expect_fail 'is empty' 1.2.3 "$CASE/SHA256SUMS" "$CASE/flake.nix"
 
 # 4. A missing system, and the flake is left untouched.
 new_case missing
@@ -144,5 +148,29 @@ new_case noblock
 sums_full 1.2.3 "$CASE/SHA256SUMS"
 echo '{ }' > "$CASE/flake.nix"
 expect_fail 'no releases block' 1.2.3 "$CASE/SHA256SUMS" "$CASE/flake.nix"
+
+# An unterminated block is refused and the flake stays as it was.
+new_case open
+sums_full 1.2.3 "$CASE/SHA256SUMS"
+sed 's/^    };$/    }; # pinned/' "$CASE/flake.nix" > "$CASE/x" && mv "$CASE/x" "$CASE/flake.nix"
+expect_fail 'no end of the releases block' 1.2.3 "$CASE/SHA256SUMS" "$CASE/flake.nix"
+
+# Refusals of the sri subcommand, and of bad paths and arguments.
+expect_fail 'bad hash length' sri abcd
+expect_fail 'bad hash length' sri "$(hex_of a | tr a-f A-F)"
+expect_fail 'usage' sri
+new_case paths
+sums_full 1.2.3 "$CASE/SHA256SUMS"
+expect_fail 'is not a file' 1.2.3 "$CASE/none" "$CASE/flake.nix"
+expect_fail 'no flake' 1.2.3 "$CASE/SHA256SUMS" "$CASE/none.nix"
+expect_fail 'usage' 1.2.3 "$CASE/SHA256SUMS"
+
+# Look-alike names of another version or with a suffix are ignored.
+new_case lookalike
+sums_full 1.2.3 "$CASE/SHA256SUMS"
+printf '%s  playbook-1.2.30-%s\n%s  playbook-1.2.3-%s.sig\n' "$(hex_of x)" "$T_LINUX_X" "$(hex_of y)" "$T_LINUX_X" >> "$CASE/SHA256SUMS"
+"$SCRIPT" 1.2.3 "$CASE/SHA256SUMS" "$CASE/flake.nix"
+grep -qF "x86_64-linux = \"$(sri_of d)\";" "$CASE/flake.nix" || fail "a look-alike name was used"
+ok
 
 echo "OK render-flake: $pass checks"
