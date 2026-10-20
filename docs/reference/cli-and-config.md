@@ -84,11 +84,6 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
 | `update.checkIntervalHours` | `24` | a number, see the config keys page for the range |
 | `update.plugin` | `auto` | `auto`, `ask`, `off` |
-| `disk.warnFreeGb` | `15` | a number, see the config keys page for the range |
-| `disk.blockFreeGb` | `6` | a number, see the config keys page for the range |
-| `disk.autoCleanup` | `true` | `true`, `false` |
-| `disk.paths` | `[]` | see the config keys page |
-| `disk.maxTargetDirs` | `4` | a number, see the config keys page for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
@@ -1374,15 +1369,13 @@ Example: `playbook setup --no-hooks --system-prompt`
 - `--no-system-prompt`: Do not install the system prompt, and store `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own
 - `--telemetry`: Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry`
 - `--no-telemetry`: Do not write telemetry variables into settings.json
-- `--collector-service`: Keep the usage collector running in a per-user background service (launchd agent or systemd user unit), when telemetry points at it
-- `--no-collector-service`: Do not install the background service for the usage collector
 - `--short-name`: Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
 - `--no-short-name`: Do not add the `pb` short name
 - `--policy-guard`: Turn the policy guard on (`hooks.policyGuard.enabled`): it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
 - `--no-policy-guard`: Do not turn the policy guard on; it is off by default and a stored choice is not changed
 - `--attribution`: Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true
 - `--no-attribution`: Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values
-- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
+- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing
@@ -1534,7 +1527,7 @@ Example: `playbook usage prune --dry-run`
 
 Show whether the telemetry receiver is running
 
-Prints how telemetry is configured (on with the collector running, off because you disabled it in your Claude Code settings, or off because nothing sets it) with a one-line fix, then the pid, port, idle limit, how many telemetry rows are stored (API requests, tool calls, API errors, metric points), the retention limits, the time of the newest event and the background service that runs the collector, if one is installed. Like most playbook commands it can start the collector first. It never prints the token. With `--json` it prints the same as JSON. Exit code 0 whether or not a receiver runs.
+Prints how telemetry is configured (on with the collector running, off because you disabled it in your Claude Code settings, or off because nothing sets it) with a one-line fix, then the pid, port, idle limit, how many telemetry rows are stored (API requests, tool calls, API errors, metric points), the retention limits, and the time of the newest event. Like most playbook commands it can start the collector first. It never prints the token. With `--json` it prints the same as JSON. Exit code 0 whether or not a receiver runs.
 
 Example: `playbook usage status --json`
 
