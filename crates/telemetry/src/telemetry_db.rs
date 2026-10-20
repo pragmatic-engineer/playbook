@@ -308,6 +308,24 @@ pub fn insert_error(conn: &Connection, e: &TelemetryError) -> Result<usize, Stri
     .map_err(|err| format!("failed to insert telemetry error: {err}"))
 }
 
+/// When Claude Code logged an HTTP 429 in `[since, until)`, oldest first. One
+/// entry per `(session, sequence)`, the key of the table, so one failed attempt
+/// counts once however often its row is sent again.
+pub fn rate_limited_at(conn: &Connection, since: i64, until: i64) -> Result<Vec<i64>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT timestamp FROM telemetry_errors
+             WHERE status_code = 429 AND timestamp >= ?1 AND timestamp < ?2
+             ORDER BY timestamp",
+        )
+        .map_err(|e| format!("failed to read rate limit errors: {e}"))?;
+    let rows = stmt
+        .query_map(params![since, until], |r| r.get::<_, i64>(0))
+        .map_err(|e| format!("failed to read rate limit errors: {e}"))?;
+    rows.collect::<Result<_, _>>()
+        .map_err(|e| format!("failed to read rate limit errors: {e}"))
+}
+
 /// Tool calls of one tool in a window.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ToolStat {
@@ -910,6 +928,42 @@ mod tests {
             success: ok,
             duration_ms: ms,
         }
+    }
+
+    fn throttled(session: &str, seq: u64, attempt: u64, ts: i64, code: u64) -> TelemetryError {
+        TelemetryError {
+            session_id: session.into(),
+            status_code: code,
+            ..failure(seq, attempt, ts)
+        }
+    }
+
+    #[test]
+    fn only_a_429_inside_the_window_is_a_rate_limit_and_each_call_counts_once() {
+        let conn = mem();
+        let (start, end) = (1_000, 2_000);
+        let rows = [
+            throttled("s1", 1, 1, start - 1, 429),
+            throttled("s1", 2, 1, start, 429),
+            throttled("s1", 3, 1, end - 1, 429),
+            throttled("s1", 4, 1, end, 429),
+            // the same row sent again with another attempt is ignored, and a
+            // 529 in the window is not a rate limit
+            throttled("s1", 3, 2, end - 1, 429),
+            // a later row of a retried call has its own sequence and time
+            throttled("s1", 6, 2, start + 3, 429),
+            throttled("s1", 5, 1, start + 5, 529),
+            // another session may reuse a sequence number
+            throttled("s2", 2, 1, start + 7, 429),
+        ];
+        for r in &rows {
+            insert_error(&conn, r).unwrap();
+        }
+
+        let got = rate_limited_at(&conn, start, end).unwrap();
+
+        assert_eq!(got, vec![start, start + 3, start + 7, end - 1]);
+        assert!(rate_limited_at(&conn, 5_000, 6_000).unwrap().is_empty());
     }
 
     fn failure(seq: u64, attempt: u64, ts: i64) -> TelemetryError {

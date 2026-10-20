@@ -87,6 +87,20 @@ mise use github:pragmatic-engineer/playbook
 
 Neither route checks `SHA256SUMS` or the attestation for you, so use [Without `curl | bash`](#without-curl--bash) below when you want those checks. Each release installs playbook both ways in an empty `HOME` and compares the file with its `SHA256SUMS` line and its attestation. A test (`scripts/asset-names.test.sh`) fails when the asset names change, because both tools depend on them. Neither tool links `pb`, so run `playbook setup` for the link.
 
+||||||| 43b3fb3c
+
+### Debian, Ubuntu and Fedora packages
+
+Each release has a `.deb` and an `.rpm` for x86_64 and arm64. They hold the static `playbook` and `pbtop` binaries and the `pb` link in `/usr/bin`, with no dependencies. Download the file for your machine and `SHA256SUMS` from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest), check them as in [Without `curl | bash`](#without-curl--bash) below, then install with your package manager, which asks for its own privileges (`playbook` never runs `sudo`):
+
+```bash
+sudo apt install ./playbook_<version>_amd64.deb     # Debian, Ubuntu (arm64: _arm64.deb)
+sudo dnf install ./playbook-<version>.x86_64.rpm    # Fedora, RHEL (arm64: aarch64.rpm)
+playbook setup
+```
+
+An upgrade installs the newer file the same way. The package owns no file under `/etc` or your home folder, so an upgrade or a removal leaves your config alone, and `playbook migrate` runs on first use. The package manager owns `/usr/bin/playbook`, so update with it. Do not run `playbook update` on a package install, because it would replace a file the package manager owns. Each release installs, reinstalls and removes the packages in Debian, Ubuntu and Fedora containers before and after it is published.
+
 ### Optional: pbtop alone
 
 You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. Install `pbtop`, the usage dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
