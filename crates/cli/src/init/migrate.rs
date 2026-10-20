@@ -50,6 +50,13 @@ pub const RETIRED_DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
 pub const NO_SLOP_GUARD_MIGRATION: &str = "no-slop-guard-entry";
 /// The `Owned` move of a stored `update.plugin` boolean to `auto` or `off`.
 pub const PLUGIN_UPDATE_MODE_MIGRATION: &str = "plugin-update-mode";
+/// The `Owned` notice that the policy guard is now off by default. It changes
+/// nothing and is recorded once it has run.
+pub const POLICY_GUARD_NOTICE_MIGRATION: &str = "policy-guard-off-by-default";
+/// The step name of that notice, which the heal line shows in full.
+pub const POLICY_GUARD_NOTICE_STEP: &str = "policy guard";
+/// What the notice says (docs/guides/08-policy-guard.md).
+const POLICY_GUARD_NOTICE: &str = "the policy guard is now off by default; to turn it on, run: playbook config set --global hooks.policyGuard.enabled true";
 /// The `Owned` notice that the rm guard is now a short fixed rule (ADR 0045,
 /// 2026-10-19 amendment). It changes nothing and is recorded once it has run.
 pub const RM_GUARD_NOTICE_MIGRATION: &str = "rm-guard-simplified";
@@ -399,6 +406,13 @@ pub fn registry() -> Vec<Migration> {
             run: plugin_update_mode,
         },
         Migration {
+            id: POLICY_GUARD_NOTICE_MIGRATION,
+            since: "next",
+            kind: Kind::Auto,
+            scope: Scope::Owned,
+            run: policy_guard_off_notice,
+        },
+        Migration {
             id: RM_GUARD_NOTICE_MIGRATION,
             since: "next",
             kind: Kind::Auto,
@@ -406,6 +420,32 @@ pub fn registry() -> Vec<Migration> {
             run: rm_guard_simplified_notice,
         },
     ]
+}
+
+/// One notice for an install that has the policy guard wired and never stored
+/// `hooks.policyGuard.enabled`: it had the guard on by default and now has it
+/// off. It changes nothing and never turns the guard on. A fresh install, or
+/// one that stored the key either way, gets nothing.
+fn policy_guard_off_notice(ctx: &Ctx) -> Outcome {
+    let settings = ctx.claude_home.join("settings.json");
+    let wired =
+        crate::doctor::field::hook_commands_for_event(&settings, "PreToolUse", &["policy-guard"])
+            .iter()
+            .any(|(_, n)| *n > 0);
+    let stored = matches!(
+        crate::config::resolve(crate::hooks::policy_guard::ENABLED_KEY, &ctx.home, None),
+        Ok((_, source)) if source != crate::config::Source::Default
+    );
+    if !wired || stored {
+        return Outcome::Done(StepReport::skipped(
+            POLICY_GUARD_NOTICE_STEP,
+            "the policy guard was not relying on its old default",
+        ));
+    }
+    Outcome::Done(StepReport::wired(
+        POLICY_GUARD_NOTICE_STEP,
+        POLICY_GUARD_NOTICE,
+    ))
 }
 
 /// One notice for an install that had the rm guard wired: it now denies only
@@ -2290,6 +2330,69 @@ mod tests {
         assert!(open
             .iter()
             .any(|i| i.id == "other-playbook-plugins" && i.command.is_none()));
+    }
+
+    #[test]
+    fn the_policy_guard_notice_shows_once_and_only_where_the_key_was_never_stored() {
+        let h = home("policy-guard-notice");
+        let ctx = ctx(&h);
+        let shown = |o: Outcome| match o {
+            Outcome::Done(step) => step.status == crate::init::run::StepStatus::Wired,
+            _ => panic!("the notice is an Auto migration that finishes"),
+        };
+        assert!(!shown(policy_guard_off_notice(&ctx)), "fresh install");
+        let settings = ctx.claude_home.join("settings.json");
+        let doc = serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "playbook hook policy-guard"}]}]}});
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(&settings, doc.to_string()).unwrap();
+        let ms = [Migration {
+            id: POLICY_GUARD_NOTICE_MIGRATION,
+            since: "0.1.0",
+            kind: Kind::Auto,
+            scope: Scope::Owned,
+            run: policy_guard_off_notice,
+        }];
+        let (mut first, mut second) = (Report::default(), Report::default());
+        run_auto(&ms, &ctx, &mut first, None);
+        run_auto(&ms, &ctx, &mut second, None);
+        assert_eq!(first.steps.len(), 1, "shown on the first run");
+        assert!(first.steps[0]
+            .detail
+            .contains("playbook config set --global hooks.policyGuard.enabled true"));
+        assert!(second.steps.is_empty(), "recorded, so not shown again");
+        assert!(
+            !crate::hooks::policy_guard::stored_enabled(&h),
+            "the notice never turns the guard on"
+        );
+    }
+
+    #[test]
+    fn the_policy_guard_notice_is_silent_when_the_key_is_stored_either_way() {
+        for value in [true, false] {
+            let h = home(&format!("policy-guard-stored-{value}"));
+            let ctx = ctx(&h);
+            let settings = ctx.claude_home.join("settings.json");
+            let doc = serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+                {"type": "command", "command": "playbook hook policy-guard"}]}]}});
+            std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+            std::fs::write(&settings, doc.to_string()).unwrap();
+            crate::config::write::set(
+                crate::config::write::Tier::Global,
+                crate::hooks::policy_guard::ENABLED_KEY,
+                serde_json::Value::Bool(value),
+                &h,
+                None,
+            )
+            .unwrap();
+            let Outcome::Done(step) = policy_guard_off_notice(&ctx) else {
+                panic!("the notice finishes");
+            };
+            assert!(
+                step.status != crate::init::run::StepStatus::Wired,
+                "stored as {value}"
+            );
+        }
     }
 
     #[test]

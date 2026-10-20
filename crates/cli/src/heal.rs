@@ -214,11 +214,11 @@ impl Outcome {
     /// report. The items that need the user go through `crate::pending`.
     pub fn line(&self) -> Option<String> {
         let mut parts = Vec::new();
-        // The rm guard notice changes no file, so it is not counted.
-        let (notices, files): (Vec<_>, Vec<_>) = self
-            .changed
-            .iter()
-            .partition(|s| s.name == migrate::RM_GUARD_NOTICE_STEP);
+        // The policy guard and rm guard notices change no file, so they are not
+        // counted.
+        let (notices, files): (Vec<_>, Vec<_>) = self.changed.iter().partition(|s| {
+            s.name == migrate::RM_GUARD_NOTICE_STEP || s.name == migrate::POLICY_GUARD_NOTICE_STEP
+        });
         if !files.is_empty() {
             parts.push(format!(
                 "updated {} of its own files after the upgrade",
@@ -1229,6 +1229,21 @@ mod tests {
             text.contains("    Fix: playbook setup --statusline\n"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_heal_line_shows_the_policy_guard_notice_in_full_and_does_not_count_it() {
+        let out = Outcome {
+            changed: vec![StepReport::wired(
+                crate::init::migrate::POLICY_GUARD_NOTICE_STEP,
+                "the policy guard is now off by default; run: playbook config set --global hooks.policyGuard.enabled true",
+            )],
+            recorded: true,
+            ..Outcome::default()
+        };
+        let line = out.line().expect("a line");
+        assert!(line.contains("hooks.policyGuard.enabled true"), "{line}");
+        assert!(!line.contains("updated 1 of its own files"), "{line}");
     }
 
     #[test]
