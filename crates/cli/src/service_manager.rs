@@ -502,7 +502,7 @@ fn set_mode(_: &Path, _: u32) -> std::io::Result<()> {
     Ok(())
 }
 
-/// A fake launchd for the tests of this module and of the `collector-service-label` migration.
+/// A fake launchd for the tests of this module and of the `collector-service-removed` migration.
 #[cfg(test)]
 pub(crate) mod fake {
     use super::{Manager, OLD_LABEL};
