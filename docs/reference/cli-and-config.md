@@ -79,7 +79,6 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `launcher.shortName` | `false` | `true`, `false` |
 | `systemPrompt.enabled` | `true` | `true`, `false` |
 | `attribution.enabled` | `false` | `true`, `false` |
-| `hooks.rmGuard.allowedRoots` | `[]` | see the config keys page |
 | `hooks.proseLint.mode` | `warn` | `warn`, `block`, `off` |
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
 | `update.checkIntervalHours` | `24` | a number, see the config keys page for the range |
@@ -861,17 +860,7 @@ Print the rules and template for writing a handoff
 
 List the hooks that `playbook setup` wires into Claude Code, or explain a guard verdict
 
-Subcommands: `explain-rm`, `list`
-
-### `playbook hooks explain-rm`
-
-Show what the rm guard does with a Bash command
-
-Reads the command the way the guard does and prints each path it deletes or overwrites, with the verdict and the rule that matched, then the denial text Claude would see. Runs nothing and changes nothing.
-
-- `<COMMAND>`: The Bash command, quoted as one argument
-- `--cwd <CWD>`: The folder the command runs in (default: the current folder)
-- `--json`: Print JSON instead of text
+Subcommands: `list`
 
 ### `playbook hooks list`
 
@@ -1565,7 +1554,7 @@ Example: `playbook usage prune --dry-run`
 
 Show whether the telemetry receiver is running
 
-Prints how telemetry is configured (on with the collector running, off because you disabled it in your Claude Code settings, or off because nothing sets it) with a one-line fix, then the pid, port, idle limit, how many telemetry rows are stored (API requests, tool calls, API errors, metric points), the retention limits, the time of the newest event and the background service that runs the collector, if one is installed. It starts nothing and never prints the token. With `--json` it prints the same as JSON. Exit code 0 whether or not a receiver runs.
+Prints how telemetry is configured (on with the collector running, off because you disabled it in your Claude Code settings, or off because nothing sets it) with a one-line fix, then the pid, port, idle limit, how many telemetry rows are stored (API requests, tool calls, API errors, metric points), the retention limits, the time of the newest event and the background service that runs the collector, if one is installed. Like most playbook commands it can start the collector first. It never prints the token. With `--json` it prints the same as JSON. Exit code 0 whether or not a receiver runs.
 
 Example: `playbook usage status --json`
 

@@ -8,6 +8,7 @@
 //! [`crate::usage::service`]; this module decides, records the answer, and
 //! reports.
 
+use crate::cc::telemetry::telemetry_points_here;
 use crate::init::run::{StepReport, StepStatus};
 use crate::service_manager::{self as manager, Installed, Manager};
 use crate::usage::service::{self, Kind};
@@ -70,14 +71,6 @@ fn record_declined(home: &Path, no: bool) {
 fn collector_state(home: &Path) -> Option<crate::usage::collector::State> {
     let paths = crate::usage::run::Paths::from_home(home);
     crate::usage::collector::read_state(&crate::usage::collector::state_path(&paths))
-}
-
-/// Whether the Claude Code user settings point telemetry at the playbook
-/// collector, the case where a receiver is needed.
-pub fn telemetry_points_here(home: &Path) -> bool {
-    use crate::usage::telemetry_detect::{configured_from_files, Configured};
-    let port = collector_state(home).map(|s| s.port).filter(|p| *p != 0);
-    configured_from_files(home, home, port) == Configured::Playbook
 }
 
 /// Whether a collector answers for the user at `home`.
