@@ -14,7 +14,6 @@ set -euo pipefail
 if git ls-files -z -- \
     ':!scripts/check-identifiers.sh' \
     ':!docs/adr/**' \
-    ':!crates/cli/src/hooks/rm_workspace_guard.rs' \
     ':!crates/cli/src/hooks/commit_message_sanitizer/engine.rs' \
     ':!crates/cli/src/hooks/commit_message_sanitizer/git.rs' \
     ':!crates/cli/src/init/wire.rs' \

@@ -115,10 +115,9 @@ fn text(rows: &[&Value]) -> String {
         .join("\n")
 }
 
-const GUARDS: [&str; 6] = [
+const GUARDS: [&str; 5] = [
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
     "policy-guard",
@@ -166,7 +165,7 @@ fn a_paused_plugin_turns_the_guard_row_into_a_warning_and_says_why() {
     assert_eq!(l1[0]["level"], "WARN", "{}", text(&l1));
     assert!(text(&l1).contains("paused"), "{}", text(&l1));
     assert_eq!(l2[0]["level"], "WARN", "{}", text(&l2));
-    assert!(text(&l2).contains("7 of 7"), "{}", text(&l2));
+    assert!(text(&l2).contains("6 of 6"), "{}", text(&l2));
     assert!(text(&l2).contains("plugin is paused"), "{}", text(&l2));
     assert_eq!(l5[0]["level"], "WARN", "{}", text(&l5));
     assert!(text(&l5).contains("plugin is paused"), "{}", text(&l5));
@@ -211,7 +210,7 @@ fn l2_all_guards_and_the_backstop_wired_passes() {
     let rows = b.run(&[], "/bin/zsh", None);
     let l2 = layer(&rows, "2");
     assert_eq!(l2[0]["level"], "PASS", "{}", text(&l2));
-    assert!(text(&l2).contains("7 of 7"));
+    assert!(text(&l2).contains("6 of 6"));
 }
 
 #[test]
@@ -220,7 +219,6 @@ fn l2_a_legacy_command_is_not_wired() {
     let pre = [
         hook("playbook hook rm-workspace-guard"),
         hook("playbook hook bg-await-guard"),
-        hook("playbook hook no-slop-guard"),
         hook("~/.claude/hooks/precommit-check.sh"),
         hook("playbook hook commit-message-sanitizer"),
         hook("playbook hook policy-guard"),
@@ -234,7 +232,7 @@ fn l2_a_legacy_command_is_not_wired() {
     let t = text(&layer(&rows, "2"));
     assert!(t.starts_with("FAIL"), "{t}");
     assert!(
-        t.contains("6/7") && t.contains("precommit-check:NOT_WIRED"),
+        t.contains("5/6") && t.contains("precommit-check:NOT_WIRED"),
         "{t}"
     );
 }
@@ -245,7 +243,6 @@ fn l2_a_near_miss_command_does_not_count() {
     let pre = [
         hook("playbook hook rm-workspace-guard-legacy"),
         hook("playbook hook bg-await-guard"),
-        hook("playbook hook no-slop-guard"),
         hook("playbook hook precommit-check"),
         hook("playbook hook commit-message-sanitizer"),
         hook("playbook hook policy-guard"),
@@ -266,7 +263,7 @@ fn l2_each_missing_guard_drops_the_count_and_is_named() {
         let pre: Vec<&str> = GUARDS.iter().copied().filter(|g| *g != missing).collect();
         b.settings(&guard_settings(&pre, &["commit-message-sanitizer"]));
         let t = text(&layer(&b.run(&[], "/bin/zsh", None), "2"));
-        assert!(t.contains("6/7"), "{missing}: {t}");
+        assert!(t.contains("5/6"), "{missing}: {t}");
         assert!(
             t.contains(&format!(" {missing}:NOT_WIRED")),
             "{missing}: {t}"
@@ -279,7 +276,7 @@ fn l2_the_backstop_is_checked_on_posttooluse() {
     let b = Box::new("l2g");
     b.settings(&guard_settings(&GUARDS, &[]));
     let t = text(&layer(&b.run(&[], "/bin/zsh", None), "2"));
-    assert!(t.contains("6/7"), "{t}");
+    assert!(t.contains("5/6"), "{t}");
     assert!(
         t.contains("commit-message-sanitizer(PostToolUse):NOT_WIRED"),
         "{t}"
@@ -821,14 +818,13 @@ fn the_probes_run_side_by_side_but_the_table_keeps_its_order() {
     b.settings("{}");
     let dir = b.stub("bin", "1.2.3", true);
     // The data folder row lists files and sizes, which settings reads change
-    // (the config store and its write-ahead log), and the disk row shows free
-    // space, which other programs change. Neither is part of the comparison.
+    // (the config store and its write-ahead log). It is not part of the comparison.
     let stable = |rows: Vec<Value>| -> Vec<Value> {
         rows.into_iter()
             .filter(|r| {
                 !r["message"]
                     .as_str()
-                    .is_some_and(|m| m.starts_with("data folder") || m.starts_with("disk: "))
+                    .is_some_and(|m| m.starts_with("data folder"))
             })
             .collect()
     };
@@ -965,6 +961,30 @@ fn an_entry_for_a_hook_the_binary_no_longer_writes_is_stale() {
         rows.iter().any(|r| r.starts_with("WARN settings.json has a hook the binary no longer writes: playbook hook migration-check")),
         "{rows:?}"
     );
+}
+
+#[test]
+fn a_retired_hook_entry_points_at_setup_and_another_stale_entry_at_a_hand_edit() {
+    let b = Box::new("hooks-stale-retired");
+    let path = wire_all(&b);
+    let mut v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    for cmd in [
+        "playbook hook no-slop-guard",
+        "playbook hook migration-check",
+    ] {
+        v["hooks"]["SessionStart"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"hooks":[{"type":"command","command":cmd}]}));
+    }
+    fs::write(&path, v.to_string()).unwrap();
+
+    let rows = hook_rows(&b.run(&[], "/bin/sh", None));
+
+    let row = |cmd: &str| rows.iter().find(|r| r.contains(cmd)).expect("row").clone();
+    assert!(row("hook no-slop-guard").ends_with("-- run: playbook setup --hooks"));
+    assert!(row("hook migration-check")
+        .ends_with("-- delete the entry from ~/.claude/settings.json by hand"));
 }
 
 #[test]
@@ -1233,7 +1253,130 @@ fn a_collector_that_is_not_running_and_has_no_rows_warns_with_each_fix() {
     );
     assert!(all.contains("WARN collector not running"), "{all}");
     assert!(all.contains("WARN no telemetry rows yet"), "{all}");
-    assert!(hints(&mine).contains("playbook usage collect"));
+    assert!(hints(&mine).contains(playbook::usage::daemon::START_HINT));
+}
+
+/// A daemon file of the home in `b`, such as the lock or the stamp.
+fn daemon_paths(b: &Box, file: fn(&playbook::usage::run::Paths) -> PathBuf) -> PathBuf {
+    file(&playbook::usage::run::Paths::from_home(&b.home()))
+}
+
+/// Holds `collector.lock` in this test process, with `version` in the
+/// holder line, the way a running collector does. The lock lasts as long as
+/// the returned file.
+fn hold_collector_lock(b: &Box, version: &str) -> fs::File {
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(daemon_paths(b, playbook::usage::daemon::lock_path))
+        .unwrap();
+    lock.try_lock().unwrap();
+    std::io::Write::write_all(
+        &mut &lock,
+        format!("{} {version}\n", std::process::id()).as_bytes(),
+    )
+    .unwrap();
+    lock
+}
+
+/// The one daemon row, as `LEVEL message`, and its hint.
+fn daemon_row(rows: &[Value]) -> (String, String) {
+    let row = rows
+        .iter()
+        .find(|r| {
+            r["message"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("collector daemon:"))
+        })
+        .expect("a collector daemon row");
+    (
+        text(&[row]),
+        row["hint"].as_str().unwrap_or_default().to_string(),
+    )
+}
+
+#[test]
+fn a_held_lock_at_this_version_passes_with_its_pid_and_version() {
+    let b = Box::new("daemon-held");
+    point_settings_at_collector(&b, free_port());
+    let _lock = hold_collector_lock(&b, env!("CARGO_PKG_VERSION"));
+
+    let (row, _) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(
+        row,
+        format!(
+            "PASS collector daemon: pid {}, version {}, lock held",
+            std::process::id(),
+            env!("CARGO_PKG_VERSION")
+        )
+    );
+}
+
+#[test]
+fn a_free_lock_warns_with_the_start_fix() {
+    let b = Box::new("daemon-free");
+    point_settings_at_collector(&b, free_port());
+
+    let (row, hint) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(row, "WARN collector daemon: lock free");
+    assert_eq!(hint, "run any playbook command or start a session");
+    assert!(
+        !daemon_paths(&b, playbook::usage::daemon::lock_path).exists(),
+        "doctor must not create the lock file"
+    );
+    assert!(
+        !daemon_paths(&b, playbook::usage::daemon::stamp_path).exists(),
+        "doctor must not take the respawn stamp"
+    );
+}
+
+#[test]
+fn a_held_lock_from_another_version_warns_naming_both_versions() {
+    const OLD: &str = "0.0.1";
+    let b = Box::new("daemon-old");
+    point_settings_at_collector(&b, free_port());
+    let _lock = hold_collector_lock(&b, OLD);
+
+    let (row, hint) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(
+        row,
+        format!(
+            "WARN collector daemon: version {OLD} (pid {}) differs from this binary ({})",
+            std::process::id(),
+            env!("CARGO_PKG_VERSION")
+        )
+    );
+    assert_eq!(hint, "run: playbook usage stop, then any playbook command");
+}
+
+#[test]
+fn a_stamp_left_by_a_busy_port_warns_with_the_reason_and_the_move_fix() {
+    const PORT: u16 = 47_999;
+    let b = Box::new("daemon-port");
+    point_settings_at_collector(&b, PORT);
+    let reason = playbook::usage::daemon::port_busy_reason(PORT);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let window = playbook::usage::daemon::PORT_BUSY_WINDOW.as_secs();
+    fs::write(
+        daemon_paths(&b, playbook::usage::daemon::stamp_path),
+        format!("{now} {window} {reason}\n"),
+    )
+    .unwrap();
+
+    let (row, hint) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(row, format!("WARN collector daemon: lock free, {reason}"));
+    assert_eq!(
+        hint,
+        format!("free port {PORT}, or move with playbook usage collect --port <N> and playbook setup --only telemetry")
+    );
 }
 
 #[test]
@@ -1549,146 +1692,172 @@ fn doctor_passes_attribution_on_by_choice_and_warns_when_off_values_remain() {
     assert!(row["message"].as_str().unwrap().contains("your own value"));
 }
 
+/// The one row doctor keeps for the retired collector service.
+const LEFTOVER_SERVICE: &str = "WARN a collector service file is still installed";
+
 #[test]
-fn doctor_names_the_collector_service_and_the_command_that_adds_it() {
-    use playbook::usage::service::{find, log_path, render, Kind};
+fn doctor_warns_once_about_a_leftover_collector_service_file() {
+    use playbook::usage::service::{log_path, old_file, render, render_old, Kind};
     let Some(kind) = Kind::current() else {
         return;
     };
-    // Arrange
+    // Arrange: no file, the current file, and on macOS the agent under the
+    // 0.37.0 label, both playbook's and one playbook did not write.
     let none = Box::new("svc-none");
     point_settings_at_collector(&none, free_port());
-    let installed = Box::new("svc-ok");
-    point_settings_at_collector(&installed, free_port());
-    let gone = Box::new("svc-gone");
-    point_settings_at_collector(&gone, free_port());
-    for (b, program) in [
-        (&installed, PathBuf::from(env!("CARGO_BIN_EXE_playbook"))),
-        (&gone, gone.root.join("no/playbook")),
-    ] {
-        let file = kind.file(&b.home());
-        fs::create_dir_all(file.parent().unwrap()).unwrap();
-        fs::write(&file, render(kind, &program, &log_path(&b.home()))).unwrap();
-        assert!(find(&b.home()).is_some());
+    let current = Box::new("svc-current");
+    let file = kind.file(&current.home());
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let program = PathBuf::from(env!("CARGO_BIN_EXE_playbook"));
+    fs::write(&file, render(kind, &program, &log_path(&current.home()))).unwrap();
+    let mut leftovers = vec![current];
+    if kind == Kind::Launchd {
+        let ours = Box::new("svc-old-label");
+        let foreign = Box::new("svc-old-foreign");
+        let body = render_old(&program, &log_path(&ours.home()));
+        for (b, body) in [(&ours, body.as_str()), (&foreign, "<plist/>")] {
+            let file = old_file(&b.home());
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, body).unwrap();
+        }
+        leftovers.extend([ours, foreign]);
     }
 
     // Act
     let none = none.run_with_env(&[]);
-    let installed = installed.run_with_env(&[]);
-    let gone = gone.run_with_env(&[]);
+    let leftovers: Vec<Vec<Value>> = leftovers.iter().map(|b| b.run_with_env(&[])).collect();
 
     // Assert
     let none = telemetry_rows(&none);
+    assert!(!text(&none).contains("service"), "{}", text(&none));
     assert!(
-        text(&none).contains("INFO no collector service"),
-        "{}",
-        text(&none)
-    );
-    assert!(
-        hints(&none).contains("playbook usage collect, or keep it running")
-            || hints(&none).contains("`playbook usage collect`, or keep it running"),
+        !hints(&none).contains("collector-service"),
         "{}",
         hints(&none)
     );
-    assert!(hints(&none).contains("playbook setup --only collector-service"));
-    let installed = telemetry_rows(&installed);
-    assert!(
-        text(&installed).contains("PASS collector service installed"),
-        "{}",
-        text(&installed)
-    );
-    let gone = telemetry_rows(&gone);
-    assert!(
-        text(&gone).contains("WARN the collector service starts a program that is gone"),
-        "{}",
-        text(&gone)
-    );
-}
-
-#[test]
-fn a_no_to_the_collector_service_shows_in_doctor() {
-    let b = Box::new("svc-declined");
-    point_settings_at_collector(&b, free_port());
-    let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
-        .args([
-            "setup",
-            "--no-collector-service",
-            "--no-hooks",
-            "--no-statusline",
-            "--no-path",
-            "--no-telemetry",
-            "--attribution",
-        ])
-        .env("HOME", b.home())
-        .current_dir(b.home())
-        .env_remove("CLAUDE_CODE_ENABLE_TELEMETRY")
-        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
-        .output()
-        .unwrap();
-
-    let rows = b.run_with_env(&[]);
-
-    let mine = telemetry_rows(&rows);
-    assert!(
-        String::from_utf8_lossy(&out.stdout).contains("you said no"),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
-    );
-    if playbook::usage::service::Kind::current().is_some() {
+    for rows in &leftovers {
+        let rows = telemetry_rows(rows);
+        let text = text(&rows);
+        assert_eq!(text.matches(LEFTOVER_SERVICE).count(), 1, "{text}");
+        let service: Vec<&&Value> = rows
+            .iter()
+            .filter(|r| r["message"].as_str().unwrap().contains("service"))
+            .collect();
+        assert_eq!(service.len(), 1, "{text}");
+        let row = service[0];
+        if text.contains("was not written by playbook, so it stays") {
+            let hint = row["hint"].as_str().unwrap();
+            assert!(hint.starts_with("run: launchctl bootout gui/"), "{row}");
+            assert!(hint.contains("; rm "), "{row}");
+        } else {
+            assert_eq!(row["hint"], "run: playbook migrate", "{row}");
+        }
         assert!(
-            text(&mine).contains("INFO no collector service (you said no)"),
+            !hints(&rows).contains("collector-service"),
             "{}",
-            text(&mine)
+            hints(&rows)
         );
     }
 }
 
 #[test]
-fn doctor_flags_a_collector_agent_left_under_the_old_label() {
-    use playbook::usage::service::{log_path, old_file, render_old};
-    // Arrange
-    let ours = Box::new("svc-old-label");
-    let foreign = Box::new("svc-old-foreign");
-    for (b, body) in [
-        (
-            &ours,
-            render_old(
-                Path::new("/opt/homebrew/bin/playbook"),
-                &log_path(&ours.home()),
-            ),
-        ),
-        (&foreign, "<plist/>".to_string()),
-    ] {
-        let file = old_file(&b.home());
-        fs::create_dir_all(file.parent().unwrap()).unwrap();
-        fs::write(&file, body).unwrap();
-    }
+fn a_stopped_collector_names_the_start_hint_and_no_setup_part() {
+    // Arrange: telemetry points at a recorded collector that does not run.
+    let b = Box::new("svc-down");
+    point_settings_at_collector(&b, free_port());
 
     // Act
-    let ours = ours.run_with_env(&[]);
-    let foreign = foreign.run_with_env(&[]);
+    let rows = b.run_with_env(&[]);
 
     // Assert
-    let ours = telemetry_rows(&ours);
-    assert!(
-        text(&ours).contains("WARN the collector service still uses the old label: launchd agent io.github.pragmatic-engineer.playbook.collector"),
-        "{}",
-        text(&ours)
-    );
-    assert!(
-        hints(&ours).contains("run: playbook migrate"),
-        "{}",
-        hints(&ours)
-    );
-    let foreign = telemetry_rows(&foreign);
-    assert!(
-        text(&foreign).contains("uses the old collector label but playbook did not write it"),
-        "{}",
-        text(&foreign)
-    );
-    assert!(
-        hints(&foreign).contains("launchctl bootout gui/"),
-        "{}",
-        hints(&foreign)
-    );
+    let rows = telemetry_rows(&rows);
+    let row = rows
+        .iter()
+        .find(|r| r["message"] == "collector not running, so telemetry sent now is lost")
+        .unwrap_or_else(|| panic!("{}", text(&rows)));
+    assert_eq!(row["hint"], playbook::usage::daemon::START_HINT, "{row}");
+    assert!(!hints(&rows).contains("setup --only collector-service"));
+}
+
+fn policy_guard_row(rows: &[Value]) -> &Value {
+    rows.iter()
+        .find(|r| r["message"].as_str().unwrap().starts_with("policy guard"))
+        .expect("a policy guard row")
+}
+
+#[test]
+fn doctor_reports_the_policy_guard_as_off_until_the_key_is_true() {
+    // Arrange
+    let off = Box::new("pg-off");
+    off.settings("{}");
+    let on = Box::new("pg-on");
+    on.settings("{}");
+    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args([
+            "config",
+            "set",
+            "--global",
+            "hooks.policyGuard.enabled",
+            "true",
+        ])
+        .env("HOME", on.home())
+        .current_dir(on.home())
+        .output()
+        .unwrap();
+    assert!(set.status.success());
+
+    // Act
+    let off = off.run_with_env(&[]);
+    let on = on.run_with_env(&[]);
+
+    // Assert
+    let row = policy_guard_row(&off);
+    assert_eq!(row["level"], "INFO");
+    assert!(row["hint"]
+        .as_str()
+        .unwrap()
+        .contains("hooks.policyGuard.enabled true"));
+    let row = policy_guard_row(&on);
+    assert_eq!(row["level"], "PASS");
+    assert!(row["hint"]
+        .as_str()
+        .unwrap()
+        .contains("hooks.policyGuard.enabled false"));
+}
+
+#[test]
+fn doctor_honors_policy_guard_in_the_environment_like_the_hook() {
+    // Arrange
+    let b = Box::new("pg-env");
+    b.settings("{}");
+    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args([
+            "config",
+            "set",
+            "--global",
+            "hooks.policyGuard.enabled",
+            "true",
+        ])
+        .env("HOME", b.home())
+        .current_dir(b.home())
+        .output()
+        .unwrap();
+    assert!(set.status.success());
+
+    // Act
+    let off = b.run_with_env(&[("POLICY_GUARD", "0")]);
+    let on = Box::new("pg-env-on");
+    on.settings("{}");
+    let on = on.run_with_env(&[("POLICY_GUARD", "1")]);
+
+    // Assert
+    let row = policy_guard_row(&off);
+    assert_eq!(row["level"], "INFO");
+    assert!(row["message"]
+        .as_str()
+        .unwrap()
+        .contains("policy guard is off"));
+    let row = policy_guard_row(&on);
+    assert_eq!(row["level"], "PASS");
+    assert!(row["message"].as_str().unwrap().contains("POLICY_GUARD"));
 }

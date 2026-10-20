@@ -192,12 +192,9 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         security: paths.security,
         telemetry: paths.telemetry,
         telemetry_replace_off: paths.telemetry_replace_off,
-        // Previewed from the files below, so the dry run installs nothing.
-        collector_service: crate::init::collector_service::Choice::Skip,
         only: paths.only,
         short_name: paths.short_name,
-        // Previewed below, so the dry run writes no ballast.
-        disk_ballast: false,
+        policy_guard: false,
         pb_target: paths.pb_target.clone(),
         attribution: paths.attribution,
         path_setup: paths.path_setup.as_ref().map(|s| path::Setup {
@@ -236,9 +233,8 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("path", choices.path),
         ("system-prompt", choices.system_prompt),
         ("telemetry", choices.telemetry),
-        ("collector-service", choices.collector_service),
         ("short-name", choices.short_name),
-        ("disk-ballast", choices.disk_ballast),
+        ("policy-guard", choices.policy_guard),
         ("attribution", paths.attribution != Attribution::Skip),
     ];
     for (id, enabled) in flags {
@@ -287,16 +283,8 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
             }
             "telemetry" => own_key_lines(&changes, id, &settings_file, &telemetry_step),
             "attribution" => own_key_lines(&changes, id, &settings_file, &attribution_step),
-            "collector-service" => vec![crate::init::collector_service::preview(
-                &paths.home,
-                // The scratch copy has the telemetry this run writes; the
-                // real home has the collector state the copy lacks.
-                crate::init::collector_service::telemetry_points_here(&sh)
-                    || crate::init::collector_service::telemetry_points_here(&paths.home),
-                &crate::init::collector_service::program(),
-            )],
             "short-name" => vec![format!("pb: {short_line}")],
-            "disk-ballast" => vec![ballast_line(&paths.home)],
+            "policy-guard" => vec![policy_guard_line(&paths.home)],
             "path" => file_lines(&before_rc, &after_path, &path_step),
             _ => vec![system_prompt_line(paths)],
         };
@@ -322,21 +310,12 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
     out
 }
 
-/// What the disk-ballast part would do. Writes nothing.
-fn ballast_line(home: &Path) -> String {
-    use crate::disk::{ballast, size};
-    let file = ballast::file(home);
-    match ballast::size(home) {
-        Some(bytes) => format!(
-            "{}: a {} ballast is already in place",
-            file.display(),
-            size::gb(bytes)
-        ),
-        None => format!(
-            "{}: writes {}, unless that would leave less than disk.warnFreeGb free",
-            file.display(),
-            size::gb(ballast::BALLAST_BYTES)
-        ),
+/// What the policy-guard part would do. Writes nothing.
+fn policy_guard_line(home: &Path) -> String {
+    use crate::hooks::policy_guard::{stored_enabled, ENABLED_KEY};
+    match stored_enabled(home) {
+        true => format!("{ENABLED_KEY} is already true"),
+        false => format!("stores {ENABLED_KEY} true in ~/.config/playbook"),
     }
 }
 

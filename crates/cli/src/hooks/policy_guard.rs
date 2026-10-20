@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Denies these things the system prompt used to ask for in prose:
+//! Optional and off by default. It denies nothing until
+//! `hooks.policyGuard.enabled` is true (or `POLICY_GUARD=1`); see
+//! `docs/guides/` "The policy guard". When on, it denies these things the
+//! system prompt used to ask for in prose:
 //!
 //! - skipping git hooks or signing (`--no-verify`, `-n` on commit,
 //!   `--no-gpg-sign`, `-c commit.gpgsign=false`),
@@ -11,18 +14,16 @@
 //! - writing memory outside playbook's store: Claude Code's own auto memory
 //!   (`~/.claude/projects/*/memory/`) or the retired `~/.claude/memory/`.
 //!
-//! - changing the `rm` guard's own allowance: `playbook config set` on a
-//!   `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`,
-//!   `pr.ticketPatterns` or `disk.*` key, `config import`, `config unset` or `config edit`,
+//! - changing protected settings: `playbook config set` on a
+//!   `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`,
+//!   `pr.ticketPatterns` key, `config import`, `config unset` or `config edit`,
 //!   a write to the config database or a config file (a redirect into it, a
 //!   writer program, an interpreter, `sed -i`, or `sqlite3` with anything but
-//!   a read), or an inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`
-//!   assignment. Reading the store is allowed, and each denial names the
-//!   rule that matched. A model
-//!   that could widen the roots could delete anything it likes, so this holds
-//!   in `ask` mode too, unlike the `auto_cost` guard, which covers `mode`,
-//!   `auto.*` and `fix.*` in `auto` mode only. The inline assignments cannot
-//!   reach the hook process, so denying them is defense in depth.
+//!   a read), or an inline `WORKTREE_BASE_DIR=` assignment. Reading the
+//!   store is allowed, and each denial names the rule that matched. This
+//!   holds in `ask` mode too, unlike the `auto_cost` guard, which covers
+//!   `mode`, `auto.*` and `fix.*` in `auto` mode only. The inline assignment
+//!   cannot reach the hook process, so denying it is defense in depth.
 //!
 //! - writing a Claude Code settings file (`settings.json` or
 //!   `settings.local.json`, user or project). Settings change only through the
@@ -42,7 +43,8 @@
 //! One hook on two matchers: Bash looks at the command, Edit and Write look at
 //! the target path. It fails safe: a payload it cannot read, a command the
 //! reader cannot split, or anything unexpected allows the call, and it never
-//! spawns a process. `POLICY_GUARD=0` turns it off. It only denies, it never
+//! spawns a process. It denies nothing until `hooks.policyGuard.enabled` is
+//! true or `POLICY_GUARD=1` is set; `POLICY_GUARD=0` turns it off. It only denies, it never
 //! writes anything.
 //!
 //! A guardrail against an agent drifting, not a security boundary: it does not
@@ -130,7 +132,7 @@ macro_rules! protected_reason {
         concat!(
             "Matched rule: ",
             $rule,
-            ". The rm guard's allowed roots, the prose lint mode, the pull request rules and the disk guard's thresholds are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Reading the config store is fine. Until then, work within the current setting and say so."
+            ". The prose lint mode and the pull request rules are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.proseLint.mode warn`. Reading the config store is fine. Until then, work within the current setting and say so."
         )
     };
 }
@@ -141,8 +143,7 @@ const CONFIG_SET_REASON: &str =
 const CONFIG_STORE_REASON: &str =
     protected_reason!("a write to playbook's config database a config file or the memory store (write a fact with the Write tool)");
 
-const SAFE_ROOTS_ENV_REASON: &str =
-    protected_reason!("an inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=` assignment");
+const WORKTREE_ENV_REASON: &str = protected_reason!("an inline `WORKTREE_BASE_DIR=` assignment");
 
 /// The part both settings reasons share: what to ask the user and what the
 /// model may run itself.
@@ -166,6 +167,40 @@ const SETTINGS_EDIT_REASON: &str = concat!(
 
 const MEMORY_REASON: &str = "Claude Code's own memory is off limits here. Save the fact in playbook's store instead, with the Write tool: ~/.config/playbook/memory/ for a global fact, <owner>/<repo>/ under it for a project fact.";
 
+/// The per-user key that switches the denials on. Off unless set to true.
+pub const ENABLED_KEY: &str = "hooks.policyGuard.enabled";
+
+/// Whether the denials are on: `POLICY_GUARD=1` or `0` decides, else the
+/// stored `hooks.policyGuard.enabled`, which is off by default.
+pub fn enabled() -> bool {
+    enabled_for(&crate::common::home_dir())
+}
+
+/// [`enabled`] for a given home, so doctor reads what the hook reads.
+pub fn enabled_for(home: &Path) -> bool {
+    match env_override() {
+        Some(on) => on,
+        None => stored_enabled(home),
+    }
+}
+
+/// `POLICY_GUARD=1` or `0` from the environment; any other value is ignored.
+pub fn env_override() -> Option<bool> {
+    match std::env::var("POLICY_GUARD").as_deref() {
+        Ok("0") => Some(false),
+        Ok("1") => Some(true),
+        _ => None,
+    }
+}
+
+/// `hooks.policyGuard.enabled` as stored. An unreadable value counts as off.
+pub fn stored_enabled(home: &Path) -> bool {
+    matches!(
+        crate::config::resolve_valid(ENABLED_KEY, home, None),
+        Ok((serde_json::Value::Bool(true), _, _))
+    )
+}
+
 pub fn run(payload: &Payload) {
     if std::env::var("POLICY_GUARD").as_deref() == Ok("0") {
         return;
@@ -173,7 +208,11 @@ pub fn run(payload: &Payload) {
     let home = std::env::var("HOME").unwrap_or_default();
     let command = payload.field(".tool_input.command");
     let path = payload.field(".tool_input.file_path");
-    let reason = decide(&command, &path, &home);
+    let reason = if enabled() {
+        decide(&command, &path, &home)
+    } else {
+        None
+    };
     if let Some(reason) = reason {
         emit_pre_deny(reason);
     } else if payload.field(".tool_name") == "Write"
@@ -203,16 +242,15 @@ fn is_fact_file(path: &str, memory_dir: &Path) -> bool {
         && !path.components().any(|c| c == Component::ParentDir)
 }
 
-/// The config keys the model may not change: the `rm` guard's roots, the
-/// prose lint mode, the pull request rules and the disk guard's thresholds.
+/// The config keys the model may not change: the policy guard's own switch,
+/// the prose lint mode and the pull request rules.
 /// Matched on lowercase prefixes.
-const PROTECTED_KEY_PREFIXES: [&str; 6] = [
-    "hooks.rmguard",
+const PROTECTED_KEY_PREFIXES: [&str; 5] = [
+    "hooks.policyguard",
     "hooks.proselint",
     "pr.rules.",
     "pr.bodymaxchars",
     "pr.ticketpatterns",
-    "disk.",
 ];
 
 fn is_protected_config_key(word: &str) -> bool {
@@ -220,17 +258,17 @@ fn is_protected_config_key(word: &str) -> bool {
     PROTECTED_KEY_PREFIXES.iter().any(|p| key.starts_with(p))
 }
 
-/// The reason to deny this simple command because it can widen the `rm`
-/// guard's allowance, or `None`.
-fn changes_rm_guard_config(
+/// The reason to deny this simple command because it changes a protected
+/// setting or the config store, or `None`.
+fn changes_protected_config(
     words: &[String],
     program_at: usize,
     home: &str,
 ) -> Option<&'static str> {
-    changes_rm_guard_config_at(words, program_at, home, 0)
+    changes_protected_config_at(words, program_at, home, 0)
 }
 
-fn changes_rm_guard_config_at(
+fn changes_protected_config_at(
     words: &[String],
     program_at: usize,
     home: &str,
@@ -238,10 +276,10 @@ fn changes_rm_guard_config_at(
 ) -> Option<&'static str> {
     let assigns = words[..program_at].iter().any(|w| {
         w.split_once('=')
-            .is_some_and(|(name, _)| matches!(name, "WORKTREE_BASE_DIR" | "PLAYBOOK_SAFE_ROOTS"))
+            .is_some_and(|(name, _)| name == "WORKTREE_BASE_DIR")
     });
     if assigns {
-        return Some(SAFE_ROOTS_ENV_REASON);
+        return Some(WORKTREE_ENV_REASON);
     }
     let program = program_name(&words[program_at]);
     let rest = &words[program_at + 1..];
@@ -256,7 +294,7 @@ fn changes_rm_guard_config_at(
                 if let Some(script) = rest.get(at) {
                     return simple_commands(script).iter().find_map(|inner| {
                         program_index(inner)
-                            .and_then(|i| changes_rm_guard_config_at(inner, i, home, depth + 1))
+                            .and_then(|i| changes_protected_config_at(inner, i, home, depth + 1))
                     });
                 }
             }
@@ -264,7 +302,7 @@ fn changes_rm_guard_config_at(
         if let Some(takes_value) = runner_value_options(&program) {
             let inner = &rest[skip_options(rest, 0, takes_value)..];
             return program_index(inner)
-                .and_then(|i| changes_rm_guard_config_at(inner, i, home, depth + 1));
+                .and_then(|i| changes_protected_config_at(inner, i, home, depth + 1));
         }
     }
     let mut args = rest;
@@ -490,7 +528,7 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
             continue;
         };
         let args = &words[at + 1..];
-        if let Some(reason) = changes_rm_guard_config(&words, at, home) {
+        if let Some(reason) = changes_protected_config(&words, at, home) {
             return Some(reason);
         }
         if uninstalls_playbook(&words, at, 0) {
@@ -532,7 +570,6 @@ fn mentions_a_guarded_program(command: &str) -> bool {
         "uninstall",
         "cargo",
         "worktree_base_dir",
-        "safe_roots",
     ]
     .iter()
     .any(|needle| bare.contains(needle))
@@ -711,36 +748,30 @@ mod tests {
     #[test]
     fn changes_to_protected_config_are_denied() {
         for command in [
-            "playbook config set --global hooks.rmGuard.allowedRoots '[\"/opt/a/b\"]'",
-            "playbook config set hooks.rmGuard.allowedRoots ~/x/y",
-            "playbook config set --org hooks.rmguard.allowedroots x",
+            "playbook config set --org hooks.policyguard.enabled true",
             "playbook config set hooks.proseLint.mode off",
             "pb config set hooks.proseLint.mode off",
             "nohup pb config set pr.rules.template off",
             "playbook config set --global pr.rules.prose off",
             "playbook config set pr.bodyMaxChars 100000",
             "playbook config set --org acme pr.ticketPatterns '[\"X-1\"]'",
-            "playbook config set disk.blockFreeGb 0",
-            "playbook config set --global disk.warnFreeGb 1",
             "playbook config unset pr.rules.length",
             "/usr/local/bin/playbook config import cfg.json",
-            "playbook config unset hooks.rmGuard.allowedRoots",
             "playbook config edit",
-            "cargo run -q -- config set hooks.rmGuard.allowedRoots /a/b",
-            "cd x && playbook config set hooks.rmGuard.allowedRoots /a/b",
-            "ksh -c 'playbook config set hooks.rmGuard.allowedRoots /a/b'",
-            "doas -u root playbook config set hooks.rmGuard.allowedRoots /a/b",
-            "doas sh -c 'playbook config set hooks.rmGuard.allowedRoots /a/b'",
-            "env playbook config set hooks.rmGuard.allowedRoots /a/b",
+            "cargo run -q -- config set pr.rules.prose off",
+            "cd x && playbook config set pr.rules.prose off",
+            "ksh -c 'playbook config set pr.rules.prose off'",
+            "doas -u root playbook config set pr.rules.prose off",
+            "doas sh -c 'playbook config set pr.rules.prose off'",
+            "env playbook config set pr.rules.prose off",
             "sqlite3 ~/.config/playbook/playbook.db 'update x'",
             "WORKTREE_BASE_DIR=/tmp/x rm -rf /tmp/x/y",
-            "PLAYBOOK_SAFE_ROOTS=/ rm -rf /etc/x",
             "env WORKTREE_BASE_DIR=/Users/me playbook worktree sweep",
-            "nohup playbook config set --global hooks.rmGuard.allowedRoots /a/b",
-            "xargs playbook config set hooks.rmGuard.allowedRoots /a/b",
-            "bash -c 'playbook config set hooks.rmGuard.allowedRoots /a/b'",
+            "nohup playbook config set --global pr.rules.prose off",
+            "xargs playbook config set pr.rules.prose off",
+            "bash -c 'playbook config set pr.rules.prose off'",
             "sh -c \"cd x && playbook config import f.json\"",
-            "playbook config set --org acme hooks.rmGuard.allowedRoots /a/b",
+            "playbook config set --org acme pr.rules.prose off",
             "printf x > ~/.config/playbook/config.json",
             "echo '{}' | tee $HOME/.config/playbook/orgs/acme/config.json",
             "python3 -c 'x' ~/.config/playbook/playbook.db",
@@ -751,10 +782,8 @@ mod tests {
             "cd ~/.config/playbook/data && sqlite3 config.db 'update x'",
             "sed -i s/a/b/ ~/.config/playbook/d*/c*.db",
         ] {
-            let expected = if command.contains("WORKTREE_BASE_DIR=")
-                || command.contains("PLAYBOOK_SAFE_ROOTS=")
-            {
-                SAFE_ROOTS_ENV_REASON
+            let expected = if command.contains("WORKTREE_BASE_DIR=") {
+                WORKTREE_ENV_REASON
             } else if command.contains(" config ") {
                 CONFIG_SET_REASON
             } else {
@@ -767,17 +796,18 @@ mod tests {
     #[test]
     fn ordinary_config_use_and_prose_are_left_alone() {
         for command in [
-            "playbook config get hooks.rmGuard.allowedRoots",
+            "playbook config get hooks.policyGuard.enabled",
             "playbook config get hooks.proseLint.mode",
             "playbook config set --global pr.draft false",
             "playbook config set pr.rulesX true",
+            "playbook config set disk.blockFreeGb 0",
             "playbook config get pr.rules.prose",
             "echo \"playbook config set hooks.proseLint.mode off\"",
             "playbook config list",
             "playbook config export",
             "playbook config set --global commit.signOff true",
-            "echo \"playbook config set hooks.rmGuard.allowedRoots x\"",
-            "git commit -m 'document hooks.rmGuard.allowedRoots'",
+            "echo \"playbook config set pr.rules.prose off\"",
+            "git commit -m 'document hooks.policyGuard.enabled'",
             "cargo test --test hooks_guards",
             "cargo test -- config import",
             "git commit -m 'handle playbook.db lock'",
@@ -812,9 +842,9 @@ mod tests {
             "ls ~/.config/playbook/data/ 2>/dev/null | head",
             "grep x ~/.config/playbook/*/config.db 2>/dev/null",
             "sed -n 1,5p ~/.config/playbook/config.json",
-            "grep -n rmGuard ~/.claude/settings.json",
+            "grep -n hooks ~/.claude/settings.json",
             "playbook migrate --status 2>/dev/null",
-            "rg \"playbook config set hooks.rmGuard\" docs/",
+            "rg \"playbook config set pr.rules\" docs/",
         ] {
             assert_eq!(deny(command), None, "{command}");
         }
@@ -851,11 +881,8 @@ mod tests {
                 "echo x 2>~/.config/playbook/config.json",
                 CONFIG_STORE_REASON,
             ),
-            (
-                "playbook config set hooks.rmGuard.allowedRoots /a/b",
-                CONFIG_SET_REASON,
-            ),
-            ("PLAYBOOK_SAFE_ROOTS=/ ls", SAFE_ROOTS_ENV_REASON),
+            ("playbook config set pr.rules.prose off", CONFIG_SET_REASON),
+            ("WORKTREE_BASE_DIR=/ ls", WORKTREE_ENV_REASON),
         ] {
             assert_eq!(deny(command), Some(reason), "{command}");
         }

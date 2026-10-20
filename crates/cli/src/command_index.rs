@@ -44,7 +44,7 @@ impl Access {
 
 /// What the clap tree cannot say about one command.
 pub(crate) struct Meta {
-    /// The command words after `playbook`, for example `disk clean`.
+    /// The command words after `playbook`, for example `config set`.
     pub(crate) path: &'static str,
     pub(crate) access: Access,
     /// Used instead of the doc comment's first sentence when that is too
@@ -124,16 +124,11 @@ pub(crate) const META: &[Meta] = &[
     ro("config get"),
     user("config import"),
     ro("config list"),
-    free("config set").purpose("Change a setting; protected keys such as `disk.*` are the user's"),
+    free("config set")
+        .purpose("Change a setting; protected keys such as `pr.rules.*` are the user's"),
     free("deliver"),
     user("deps"),
     user("deps ensure").purpose("Install the missing tools of a Brewfile with Homebrew"),
-    free("disk"),
-    user("disk clean"),
-    user("disk release"),
-    user("disk reserve").purpose("Write a 1 GB ballast file that `disk release` gives back"),
-    ro("disk status").purpose("Show free space, the thresholds and the biggest folders"),
-    ro("disk target-dir").purpose("Print the private cargo target folder for this worktree"),
     ro("doc").purpose("Read a PDF or Office file as text with anydoc"),
     ro("doc read"),
     ro("doc status"),
@@ -170,8 +165,7 @@ pub(crate) const META: &[Meta] = &[
     ro("handoff show"),
     ro("handoff status"),
     ro("handoff template"),
-    ro("hooks").purpose("List the hooks setup adds and explain rm guard verdicts"),
-    ro("hooks explain-rm"),
+    ro("hooks").purpose("List the hooks that setup adds to settings.json"),
     ro("hooks list"),
     ro("learn").purpose("Gather repo facts for the `/playbook:learn-project` collectors"),
     ro("learn collect"),
@@ -229,6 +223,8 @@ pub(crate) const META: &[Meta] = &[
     ro("settings check"),
     free("settings gen"),
     user("setup"),
+    ro("skills"),
+    user("skills sync"),
     ro("state"),
     ro("state list"),
     ro("statusline"),
@@ -241,10 +237,6 @@ pub(crate) const META: &[Meta] = &[
     user("usage collect"),
     ro("usage doctor"),
     user("usage prune"),
-    free("usage spend").purpose("Turn the server spend limit on or off"),
-    user("usage spend disable"),
-    user("usage spend enable"),
-    ro("usage spend status"),
     ro("usage status"),
     user("usage stop"),
     ro("version"),
@@ -730,9 +722,9 @@ mod tests {
     #[test]
     fn a_group_lists_each_subcommand_with_its_flags() {
         let root = tree();
-        let text = render(&root, &["disk".to_string()]).unwrap();
-        assert!(text.starts_with("disk: "), "{text}");
-        assert!(text.contains("\ndisk status"), "{text}");
+        let text = render(&root, &["config".to_string()]).unwrap();
+        assert!(text.starts_with("config: "), "{text}");
+        assert!(text.contains("\nconfig set"), "{text}");
         assert!(text.contains("(user-only)"), "{text}");
         let nested = render(&root, &["worktree".into(), "review".into()]).unwrap();
         assert!(nested.contains("\nworktree review setup <"), "{nested}");
@@ -768,7 +760,7 @@ mod tests {
             let c = r["command"].as_str().unwrap();
             c == "pr" || c.starts_with("pr ")
         }));
-        assert_eq!(row("disk")["access"], serde_json::Value::Null);
+        assert_eq!(row("config")["access"], serde_json::Value::Null);
         assert_eq!(row("doctor")["access"], "user-only");
     }
 

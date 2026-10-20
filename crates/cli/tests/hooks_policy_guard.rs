@@ -16,7 +16,7 @@ fn run(stdin: &str, env: &[(&str, &str)]) -> (String, i32, Duration) {
     command
         .args(["hook", "policy-guard"])
         .env("HOME", HOME)
-        .env_remove("POLICY_GUARD")
+        .env("POLICY_GUARD", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -223,10 +223,10 @@ fn denials_tell_an_unattended_run_what_to_do_when_the_sanctioned_path_fails() {
 }
 
 #[test]
-fn the_rm_guard_allowance_cannot_be_changed_by_the_model() {
+fn protected_settings_cannot_be_changed_by_the_model() {
     let reason_of = |input: String| denial(&run(&input, &[]).0);
     for command in [
-        "playbook config set --global hooks.rmGuard.allowedRoots '[\"/a/b\"]'",
+        "playbook config set --global pr.rules.prose off",
         "nohup playbook config import f.json",
         "WORKTREE_BASE_DIR=/ rm -rf /tmp/x",
         "printf x > /Users/tester/.config/playbook/config.json",
@@ -249,7 +249,7 @@ fn the_rm_guard_allowance_cannot_be_changed_by_the_model() {
     }})
     .to_string();
     assert!(reason_of(settings).is_some());
-    assert!(reason_of(bash("playbook config get hooks.rmGuard.allowedRoots")).is_none());
+    assert!(reason_of(bash("playbook config get pr.rules.prose")).is_none());
     assert!(reason_of(bash("git commit -m 'mention playbook.db'")).is_none());
 }
 
@@ -265,7 +265,7 @@ fn reading_playbook_state_is_never_denied() {
         "cat ~/.config/playbook/config.json 2>/dev/null",
         "jq . ~/.config/playbook/config.json",
         "ls -la ~/.config/playbook/memory ~/.config/playbook/data > /private/tmp/pb-ls",
-        "grep -n rmGuard ~/.claude/settings.json 2>/dev/null",
+        "grep -n hooks ~/.claude/settings.json 2>/dev/null",
         "playbook migrate --status 2>/dev/null",
     ] {
         assert_eq!(reason_of(command), None, "{command}");
@@ -343,4 +343,120 @@ fn a_claude_settings_file_cannot_be_written_by_the_model() {
         let (out, code, _) = run(&input, &[]);
         assert_eq!((out.as_str(), code), ("", 0), "{input}");
     }
+}
+
+fn run_in_home(stdin: &str, home: &std::path::Path, switch: Option<&str>) -> String {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_playbook"));
+    command
+        .args(["hook", "policy-guard"])
+        .env("HOME", home)
+        .env_remove("POLICY_GUARD")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    if let Some(value) = switch {
+        command.env("POLICY_GUARD", value);
+    }
+    let mut child = command.spawn().expect("playbook spawns");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout).into_owned()
+}
+
+fn scratch_home(tag: &str) -> std::path::PathBuf {
+    let home = std::env::temp_dir().join(format!(
+        "playbook-policy-guard-{}-{tag}",
+        playbook::testing::run_id()
+    ));
+    std::fs::create_dir_all(&home).expect("scratch home should be creatable");
+    home
+}
+
+fn enable_in(home: &std::path::Path, value: bool) {
+    playbook::config::write::set(
+        playbook::config::write::Tier::Global,
+        "hooks.policyGuard.enabled",
+        json!(value),
+        home,
+        None,
+    )
+    .expect("the key should be settable");
+}
+
+const DENIED_COMMAND: &str = "git commit --no-verify -m x";
+
+#[test]
+fn a_fresh_install_allows_every_call_because_the_guard_is_off_by_default() {
+    let home = scratch_home("default-off");
+
+    for input in [
+        bash(DENIED_COMMAND),
+        bash("gh pr create --title t --body b"),
+        write_to(&format!("{}/.claude/settings.json", home.display())),
+        write_to(&format!("{}/.claude/memory/x.md", home.display())),
+    ] {
+        let out = run_in_home(&input, &home, None);
+
+        assert_eq!(denial(&out), None, "{input}");
+    }
+}
+
+#[test]
+fn the_stored_key_turns_the_denials_on_and_false_turns_them_off_again() {
+    let home = scratch_home("stored-key");
+    enable_in(&home, true);
+
+    let on = run_in_home(&bash(DENIED_COMMAND), &home, None);
+    enable_in(&home, false);
+    let off = run_in_home(&bash(DENIED_COMMAND), &home, None);
+
+    assert!(denial(&on).is_some(), "{on}");
+    assert_eq!(denial(&off), None, "{off}");
+}
+
+#[test]
+fn the_environment_switch_wins_over_the_stored_key_in_both_directions() {
+    let home = scratch_home("env-wins");
+    enable_in(&home, true);
+    let forced_off = run_in_home(&bash(DENIED_COMMAND), &home, Some("0"));
+    enable_in(&home, false);
+    let forced_on = run_in_home(&bash(DENIED_COMMAND), &home, Some("1"));
+
+    assert_eq!(denial(&forced_off), None, "{forced_off}");
+    assert!(denial(&forced_on).is_some(), "{forced_on}");
+}
+
+#[test]
+fn the_fact_format_is_still_shown_while_the_guard_is_off() {
+    let home = scratch_home("fact-off");
+    let path = format!("{}/.config/playbook/memory/o/r/fact.md", home.display());
+
+    let out = run_in_home(&write_to(&path), &home, None);
+
+    assert_eq!(denial(&out), None, "{out}");
+    assert!(out.contains("supersedes"), "{out}");
+}
+
+#[test]
+fn an_unrecognized_environment_value_falls_back_to_the_stored_key() {
+    let home = scratch_home("env-other");
+    enable_in(&home, true);
+
+    let out = run_in_home(&bash(DENIED_COMMAND), &home, Some("true"));
+
+    assert!(denial(&out).is_some(), "{out}");
+}
+
+#[test]
+fn the_model_cannot_turn_the_guard_off_with_config_set() {
+    let (out, _, _) = run(
+        &bash("playbook config set --global hooks.policyGuard.enabled false"),
+        &[],
+    );
+
+    assert!(denial(&out).is_some(), "{out}");
 }

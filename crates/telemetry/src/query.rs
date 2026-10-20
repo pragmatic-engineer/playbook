@@ -181,6 +181,17 @@ pub(super) fn month_first_day(day: i64) -> i64 {
     day - (civil_from_days(day).2 - 1)
 }
 
+/// The UTC month that holds `at`, as `(start, end)` in seconds. Claude bills by
+/// the UTC month, whatever zone this machine is in.
+pub(super) fn utc_month_bounds(at: i64) -> (i64, i64) {
+    let utc = crate::tz::Zone::Utc;
+    let first = month_first_day(utc.day_of(at));
+    (
+        utc.day_start(first),
+        utc.day_start(month_first_day(first + 31)),
+    )
+}
+
 pub fn day_of(timestamp: i64) -> i64 {
     crate::tz::day_of(timestamp)
 }
@@ -632,6 +643,17 @@ pub fn load_live(conn: &Connection, now: i64) -> Result<LiveView, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_utc_month_runs_from_the_first_to_the_first_whatever_the_zone() {
+        // 2027-01-01 and 2027-02-01 at 00:00 UTC.
+        let (jan, feb) = (1_798_761_600, 1_801_440_000);
+
+        assert_eq!(utc_month_bounds(jan), (jan, feb));
+        assert_eq!(utc_month_bounds(jan + 12_345), (jan, feb));
+        assert_eq!(utc_month_bounds(feb - 1), (jan, feb));
+        assert_eq!(utc_month_bounds(feb).0, feb);
+    }
+
     use super::*;
     use crate::aggregate::SECONDS_PER_DAY;
 

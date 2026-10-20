@@ -4,14 +4,10 @@
 //! Connects `usage` to playbook: the layered config, playbook's state folder
 //! and repo layout, and the sessions view. Installed once at startup.
 
-use crate::usage::command::SpendAction;
 use crate::usage::host::{self, Host};
 use crate::usage::run::Paths;
 use crate::usage::session_view::Record;
-use crate::usage::spend_fetch::SpendFetcher;
-use crate::usage_spend::{self, UreqSpendFetcher};
 use serde_json::Value;
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 struct Playbook;
@@ -27,6 +23,11 @@ impl Host for Playbook {
 
     fn setup_command(&self, part: &str) -> String {
         format!("playbook setup --only {part}")
+    }
+
+    /// Every playbook command and the session hook start the collector.
+    fn start_hint(&self) -> String {
+        crate::usage::daemon::START_HINT.to_string()
     }
 
     fn launch_args(&self) -> Vec<String> {
@@ -57,28 +58,6 @@ impl Host for Playbook {
 
     fn sessions(&self, paths: &Paths, home: &Path) -> Result<(Vec<Record>, i64), String> {
         crate::sessions::load(paths, home)
-    }
-
-    fn spend_fetcher(&self) -> Option<Box<dyn SpendFetcher>> {
-        Some(Box::new(UreqSpendFetcher::real(&self.home_dir())))
-    }
-
-    fn spend_ack(&self) -> bool {
-        usage_spend::acknowledged(&self.home_dir())
-    }
-
-    fn spend_command(&self, action: &SpendAction) -> Result<String, String> {
-        let home = self.home_dir();
-        let data_dir = self.state_dir_from(&home);
-        let env = usage_spend::Env {
-            home: &home,
-            data_dir: &data_dir,
-            now: crate::usage::util::time::now_secs(),
-            interactive: std::io::stdin().is_terminal(),
-        };
-        usage_spend::run(action, &env, &mut std::io::stdout(), &mut || {
-            crate::init::attribution::ask_on_terminal("Turn it on?", false)
-        })
     }
 }
 

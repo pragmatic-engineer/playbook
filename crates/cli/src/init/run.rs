@@ -48,16 +48,13 @@ pub struct InitPaths {
     /// may be replaced. True only for an answer to the question or an explicit
     /// `--telemetry`; `--yes` alone leaves a value the user set.
     pub telemetry_replace_off: bool,
-    /// What the collector-service part does: skip, record a no, or install
-    /// the background service for `playbook usage collect`.
-    pub collector_service: crate::init::collector_service::Choice,
     /// An `--only` run: only the parts that are on run, and the migrations,
     /// the trust entry and the old launcher notes are skipped.
     pub only: bool,
     /// What the short-name part does: skip, record a no, or link `pb`.
     pub short_name: crate::init::pb_link::Choice,
-    /// Whether to write the 1 GB disk ballast (`playbook disk reserve`).
-    pub disk_ballast: bool,
+    /// Whether to turn the policy guard on (`hooks.policyGuard.enabled`).
+    pub policy_guard: bool,
     /// Where the `pb` link may go. `None` when the binary's location is unknown.
     pub pb_target: Option<crate::init::pb_link::Target>,
     /// What the attribution part does: skip, OFF (add the missing
@@ -174,6 +171,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     };
     // Before the heal, so the record it writes sees the attribution answer.
     let attribution_step = attribution_step(paths, epoch);
+    // Before the migrations, so the off-by-default notice sees a key this run stores.
+    let policy_guard_step = policy_guard_step(paths);
     let migrated = migrate::run_pending_for(&ctx, paths.statusline, paths.hooks);
     // Record this binary in the version record, so the session hook does not
     // run the same migrations again (ADR 0034).
@@ -205,10 +204,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let (settings_step, hooks_step) = settings_and_hooks_steps(paths, epoch);
 
     let telemetry_step = telemetry_step(paths, epoch);
-    // After telemetry, so the service sees the settings that step wrote.
-    let service_step = collector_service_step(paths);
     let short_name_step = short_name_step(paths);
-    let ballast_step = disk_ballast_step(paths);
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
 
     let trust_step = trust_config_dir_step(&paths.home);
@@ -218,10 +214,9 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         settings_step,
         hooks_step,
         telemetry_step,
-        service_step,
         attribution_step,
         short_name_step,
-        ballast_step,
+        policy_guard_step,
         path_step,
     ];
     steps.extend(migrated.steps);
@@ -256,17 +251,14 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     if paths.telemetry {
         steps.push(telemetry_step(paths, epoch));
     }
-    if paths.collector_service != crate::init::collector_service::Choice::Skip {
-        steps.push(collector_service_step(paths));
-    }
     if paths.attribution != crate::init::attribution::Choice::Skip {
         steps.push(attribution_step(paths, epoch));
     }
     if paths.short_name != crate::init::pb_link::Choice::Skip {
         steps.push(short_name_step(paths));
     }
-    if paths.disk_ballast {
-        steps.push(disk_ballast_step(paths));
+    if paths.policy_guard {
+        steps.push(policy_guard_step(paths));
     }
     if paths.path_setup.is_some() {
         steps.push(path_step(&paths.home, paths.path_setup.as_ref()));
@@ -317,20 +309,6 @@ pub(crate) fn settings_and_hooks_steps(paths: &InitPaths, epoch: u64) -> (StepRe
     (settings_step, hooks_step)
 }
 
-/// The collector-service part, as `paths.collector_service` says. The real
-/// service manager runs only when `paths.home` is the home of the account.
-pub(crate) fn collector_service_step(paths: &InitPaths) -> StepReport {
-    use crate::init::collector_service::{program, step};
-    let manager = crate::service_manager::manager_for(&paths.home);
-    step(
-        &paths.home,
-        &program(),
-        paths.collector_service,
-        crate::usage::service::Kind::current(),
-        manager.as_ref(),
-    )
-}
-
 /// The attribution part, as `paths.attribution` says.
 pub(crate) fn attribution_step(paths: &InitPaths, epoch: u64) -> StepReport {
     crate::init::attribution::step(
@@ -346,29 +324,35 @@ pub(crate) fn short_name_step(paths: &InitPaths) -> StepReport {
     crate::init::pb_link::step(&paths.home, paths.short_name, paths.pb_target.as_ref())
 }
 
-/// The disk-ballast part: `playbook disk reserve` on a yes.
-pub(crate) fn disk_ballast_step(paths: &InitPaths) -> StepReport {
-    use crate::disk::{ballast, policy, size};
-    const PART: &str = "disk-ballast";
-    if !paths.disk_ballast {
-        return StepReport::skipped(PART, "not requested; pass --disk-ballast to opt in");
-    }
-    match ballast::reserve_for(&paths.home, &policy::load(&paths.home)) {
-        Ok(ballast::Reserved::Wrote(bytes)) => StepReport::wired(
-            PART,
-            format!(
-                "wrote a {} ballast to {}; `playbook disk release` gives it back",
-                size::gb(bytes),
-                ballast::file(&paths.home).display()
+/// The policy-guard part: stores `hooks.policyGuard.enabled` true on a yes.
+/// Without one it changes nothing, so a stored choice survives a rerun.
+pub(crate) fn policy_guard_step(paths: &InitPaths) -> StepReport {
+    use crate::hooks::policy_guard::{stored_enabled, ENABLED_KEY};
+    const PART: &str = "policy-guard";
+    if !paths.policy_guard {
+        let detail = match stored_enabled(&paths.home) {
+            true => format!(
+                "not requested; {ENABLED_KEY} stays true, set it to false to turn the guard off"
             ),
-        ),
-        Ok(ballast::Reserved::Existing(bytes)) => StepReport::already_correct(
+            false => "not requested; pass --policy-guard to turn it on".to_string(),
+        };
+        return StepReport::skipped(PART, detail);
+    }
+    if stored_enabled(&paths.home) {
+        return StepReport::already_correct(PART, format!("{ENABLED_KEY} is already true"));
+    }
+    match crate::config::write::set(
+        crate::config::write::Tier::Global,
+        ENABLED_KEY,
+        serde_json::Value::Bool(true),
+        &paths.home,
+        None,
+    ) {
+        Ok(_) => StepReport::wired(
             PART,
-            format!("a {} ballast is already in place", size::gb(bytes)),
+            format!("stored {ENABLED_KEY} true; `playbook config set --global {ENABLED_KEY} false` turns it off"),
         ),
-        // Expected on a nearly full disk or a busy lock: setup goes on.
-        Err(err) if ballast::is_expected_refusal(&err) => StepReport::skipped(PART, err),
-        Err(err) => StepReport::failed(PART, err),
+        Err(err) => StepReport::failed(PART, format!("could not store {ENABLED_KEY}: {err}")),
     }
 }
 

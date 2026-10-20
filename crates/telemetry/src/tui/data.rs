@@ -7,9 +7,9 @@
 
 use super::theme::SERIES;
 use crate::aggregate::{group_usage, unpriced_models, Dimension, Group};
-use crate::burnup::{burnup_for, Burnup};
+use crate::burnup::{burnups_for, spend_only, Burnup};
 use crate::db;
-use crate::limits::{Burn, Limit, Origin, State};
+use crate::limits::{Burn, Limit, LimitPeriod, Origin, State};
 use crate::limits_source::{self, Sources};
 use crate::period::{Comparison, Period};
 use crate::query::{self, LiveView, Range, SessionDay, Totals, WeekStart};
@@ -122,8 +122,27 @@ pub struct LimitsView {
     pub previous: Burn,
     /// Spend of the last 24 hours, all projects, for the recent pace.
     pub recent_cost_24h: f64,
-    /// Cumulative spend over the billing period, whatever range is shown.
-    pub burnup: Option<Burnup>,
+    /// The burn-up of each limit, in the order of `limits`.
+    pub burnups: Vec<Option<Burnup>>,
+    /// This month's local spend with a projection and no limit, for the
+    /// Burn-up panel when no limit is known.
+    pub spend_only: Option<Burnup>,
+}
+
+impl LimitsView {
+    /// The burn-up the panel draws: the limit that is the most used, or the
+    /// local spend when no limit is known.
+    pub fn charted(&self) -> Option<&Burnup> {
+        self.burnups
+            .iter()
+            .flatten()
+            .filter(|b| b.limit.is_some())
+            .max_by(|a, b| {
+                let share = |x: &Burnup| x.percent_of_limit(x.total).unwrap_or(0.0);
+                share(a).total_cmp(&share(b))
+            })
+            .or(self.spend_only.as_ref())
+    }
 }
 
 impl Default for LimitsView {
@@ -137,7 +156,8 @@ impl Default for LimitsView {
             burn: Burn::new(0.0, 0),
             previous: Burn::new(0.0, 0),
             recent_cost_24h: 0.0,
-            burnup: None,
+            burnups: Vec::new(),
+            spend_only: None,
         }
     }
 }
@@ -172,10 +192,17 @@ impl LimitsView {
             .map(|c| c.age(now));
         let period = Period::of_range(range).unwrap_or(Period::Week(week));
         let (burn, previous) = limits_source::burn_pair(events, period, now);
-        let burnup = Some(burnup_for(sources, &limits, events, now));
+        let burnups = burnups_for(sources, &limits, events, &[], now);
+        let spend_only = spend_only(
+            events,
+            LimitPeriod::Monthly.containing(now, week),
+            crate::tz::current(),
+            now,
+        );
         LimitsView {
-            burnup,
             limits,
+            burnups,
+            spend_only,
             stale: sources.stale(now),
             cache_age,
             windows_note,
@@ -400,18 +427,16 @@ pub fn load(conn: &Connection, range: Range, filter: &str, now: i64) -> Result<D
 }
 
 /// Reads the plan limits the statusline kept and the manual budgets, and the
-/// events the burn rate needs. `network` lets it ask the server for the spend
-/// limit; false shows only what was kept from an earlier ask.
+/// events the burn rate needs.
 pub fn load_limits(
     conn: &Connection,
     paths: &Paths,
     range: Range,
     now: i64,
-    network: bool,
 ) -> Result<LimitsView, String> {
     let week = crate::entry::configured_week_start();
     let events = db::load_usage_events_since(conn, limits_source::events_since(now, week))?;
-    let sources = crate::run::limit_sources(paths, network);
+    let sources = crate::run::limit_sources(paths);
     Ok(LimitsView::build(&sources, &events, now, week, range))
 }
 

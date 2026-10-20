@@ -12,7 +12,7 @@
 //! and `used` is the percent consumed.
 
 use super::aggregate::SECONDS_PER_DAY;
-use super::query::{day_of, month_first_day, week_first_day, WeekStart};
+use super::query::{day_of, month_first_day, utc_month_bounds, week_first_day, WeekStart};
 use super::UsageEvent;
 use serde_json::{json, Value};
 
@@ -77,8 +77,7 @@ impl LimitPeriod {
             LimitPeriod::Monthly => {
                 // `end` is a reset time chosen by the server, not a local
                 // calendar boundary, so its month is found in UTC.
-                let utc = crate::tz::Zone::Utc;
-                utc.day_start(month_first_day(utc.day_of(end - 1)))
+                utc_month_bounds(end - 1).0
             }
         };
         (start, end)
@@ -119,9 +118,6 @@ pub enum Origin {
     /// Read from the usage numbers Claude Code caches in its config file.
     /// The age of that cache is shown next to it.
     Cached,
-    /// The amount the server billed, fetched by playbook with the user's
-    /// consent.
-    Server,
 }
 
 impl Origin {
@@ -130,7 +126,6 @@ impl Origin {
             Origin::Measured => "measured",
             Origin::Manual => "manual",
             Origin::Cached => "cached",
-            Origin::Server => "server",
         }
     }
 }
@@ -340,17 +335,6 @@ pub fn thresholds(start: i64, end: i64, now: i64, used: f64, limit: f64) -> Opti
     ])
 }
 
-/// The cost of the `events` from `start` through `until`. `+ 0.0` turns the
-/// -0.0 of an empty sum into 0.0.
-pub fn spent(events: &[UsageEvent], start: i64, until: i64) -> f64 {
-    events
-        .iter()
-        .filter(|e| e.timestamp >= start && e.timestamp <= until)
-        .map(|e| e.cost_usd)
-        .sum::<f64>()
-        + 0.0
-}
-
 impl Limit {
     pub fn headroom(&self, now: i64) -> Option<Headroom> {
         headroom(self.start, self.end, now, self.used, self.limit)
@@ -374,7 +358,12 @@ impl Limit {
             unit: Unit::Dollars,
             period,
             origin: Origin::Manual,
-            used: spent(events, start, now),
+            used: events
+                .iter()
+                .filter(|e| e.timestamp >= start && e.timestamp <= now)
+                .map(|e| e.cost_usd)
+                .sum::<f64>()
+                + 0.0,
             limit: limit_usd,
             start,
             end,
@@ -399,7 +388,6 @@ impl Limit {
             map.insert("allowed_per_hour".into(), json!(h.allowed_per_hour));
             map.insert("allowed_per_day".into(), json!(h.allowed_per_day));
             map.insert("projected".into(), json!(h.projected));
-            map.insert("remaining_seconds".into(), json!(h.remaining_seconds));
             map.insert("state".into(), json!(h.state.key()));
             if let State::WillExceed { at } = h.state {
                 map.insert("exceeds_at".into(), json!(at));
@@ -800,7 +788,7 @@ mod tests {
         let l = Limit {
             unit: Unit::Dollars,
             period: LimitPeriod::Monthly,
-            origin: Origin::Server,
+            origin: Origin::Cached,
             used: 20.0,
             limit: 100.0,
             start: 0,
@@ -816,6 +804,5 @@ mod tests {
         assert_eq!(t[1]["state"], "beyond");
         assert_eq!(t[1]["period_end"], MONTH);
         assert!(t[1]["at"].is_null());
-        assert_eq!(v["remaining_seconds"], 20 * D);
     }
 }

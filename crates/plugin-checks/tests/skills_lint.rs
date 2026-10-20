@@ -211,6 +211,7 @@ fn writing_style_keeps_the_loading_heading_and_every_reference() {
         "commits-and-prs",
         "github-review-comments",
         "github-prohibited",
+        "worktree-guard",
     ] {
         assert!(skill.contains(&format!("`{name}`")), "{name}");
         read_skill(&format!("writing-style/references/{name}.md"));

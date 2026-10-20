@@ -28,8 +28,9 @@ pub enum UsageCommand {
     /// Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no
     /// telemetry are read from transcripts as before. While it runs, `cc`
     /// points its sessions at it unless `usage.telemetry` is `off` or you set
-    /// telemetry yourself. When none runs, `cc` starts one itself in the
-    /// background (once the usage database exists) under the same conditions.
+    /// telemetry yourself. When the settings that `setup` wrote point at it and
+    /// none runs, playbook commands and hooks start one with `--idle-seconds 0`
+    /// (see `docs/internals/04-usage-dashboard.md`).
     ///
     /// Example: `playbook usage collect --idle-seconds 1800`
     Collect {
@@ -45,8 +46,8 @@ pub enum UsageCommand {
     /// Prints how telemetry is configured (on with the collector running, off because you
     /// disabled it in your Claude Code settings, or off because nothing sets it) with a one-line
     /// fix, then the pid, port, idle limit, how many telemetry rows are stored
-    /// (API requests, tool calls, API errors, metric points), the retention limits, the time of the newest
-    /// event and the background service that runs the collector, if one is installed. It starts nothing and never prints the token. With `--json` it
+    /// (API requests, tool calls, API errors, metric points), the retention limits, and the time of the newest
+    /// event. Like most playbook commands it can start the collector first. It never prints the token. With `--json` it
     /// prints the same as JSON. Exit code 0 whether or not a receiver runs.
     ///
     /// Example: `playbook usage status --json`
@@ -86,20 +87,6 @@ pub enum UsageCommand {
         #[arg(long)]
         raw: bool,
     },
-    /// Turn the server spend limit on or off
-    ///
-    /// Reads the spend limit your account has on the server and shows what it
-    /// billed next to the local estimate. It needs your Claude Code login
-    /// token, so it is off until you run `enable`, which prints what is read
-    /// and sent and asks first. Anthropic does not document this call and its
-    /// terms may not allow it, so the choice is yours. `status` never reads
-    /// the token.
-    ///
-    /// Example: `playbook usage spend enable`
-    Spend {
-        #[command(subcommand)]
-        action: SpendAction,
-    },
     /// Delete old telemetry rows
     ///
     /// Removes telemetry rows older than `usage.telemetryRetentionDays` (default
@@ -114,19 +101,4 @@ pub enum UsageCommand {
         #[arg(long)]
         dry_run: bool,
     },
-}
-
-/// `playbook usage spend` actions.
-#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
-pub enum SpendAction {
-    /// Print the notice, ask, and turn the server spend limit on
-    Enable {
-        /// Answer yes to the question
-        #[arg(long)]
-        yes: bool,
-    },
-    /// Turn it off and remove the acknowledgement and the cached figure
-    Disable,
-    /// Show whether it is on, the acknowledgement and the last result
-    Status,
 }

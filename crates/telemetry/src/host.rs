@@ -27,10 +27,15 @@ pub trait Host: Send + Sync {
     /// for a program that is the usage tool itself.
     fn command(&self, args: &str) -> String;
 
-    /// The command that runs one part of playbook's setup, for messages:
-    /// `telemetry` or `collector-service`. A host that may run next to an
-    /// older playbook adds the old command name.
+    /// The command that runs one part of playbook's setup, such as
+    /// `telemetry`, for messages. A host that may run next to an older
+    /// playbook adds the old command name.
     fn setup_command(&self, part: &str) -> String;
+
+    /// What to do when telemetry points at the collector and none runs, for
+    /// messages. Only a host whose commands start the collector can say
+    /// [`daemon::START_HINT`](super::daemon::START_HINT).
+    fn start_hint(&self) -> String;
 
     /// The arguments, before any usage subcommand, that make the program run
     /// usage. Used to start a detached `warm` run of the same program.
@@ -57,24 +62,6 @@ pub trait Host: Send + Sync {
 
     /// The records for the sessions panel, with the time they were read at.
     fn sessions(&self, paths: &Paths, home: &Path) -> Result<(Vec<Record>, i64), String>;
-
-    /// The way to ask the server for the spend limit, or `None` when this
-    /// program has none (the default). Read in one place, `spend_fetch::for_views`.
-    fn spend_fetcher(&self) -> Option<Box<dyn super::spend_fetch::SpendFetcher>> {
-        None
-    }
-
-    /// Whether the user has confirmed the spend limit notice. Without it no
-    /// fetch is made, whatever the config says.
-    fn spend_ack(&self) -> bool {
-        false
-    }
-
-    /// Runs `usage spend enable|disable|status`. A program without the
-    /// feature says so.
-    fn spend_command(&self, _action: &super::command::SpendAction) -> Result<String, String> {
-        Err("the server spend limit is not available in this program".to_string())
-    }
 }
 
 static HOST: RwLock<Option<&'static dyn Host>> = RwLock::new(None);
@@ -121,6 +108,10 @@ impl Host for TestHost {
 
     fn setup_command(&self, part: &str) -> String {
         format!("{} setup --only {part}", self.program())
+    }
+
+    fn start_hint(&self) -> String {
+        super::daemon::START_HINT.to_string()
     }
 
     fn launch_args(&self) -> Vec<String> {
@@ -173,6 +164,11 @@ pub fn setup_command(part: &str) -> String {
     current().setup_command(part)
 }
 
+/// What to do while the collector is down, for messages.
+pub fn start_hint() -> String {
+    current().start_hint()
+}
+
 /// The arguments that make the program run usage, for a detached child.
 pub fn launch_args() -> Vec<String> {
     current().launch_args()
@@ -196,10 +192,6 @@ pub fn config_value(key: &str, home: &Path) -> Option<Value> {
 /// [`config_value`] for the current user's home.
 pub fn config_value_now(key: &str) -> Option<Value> {
     config_value(key, &home_dir())
-}
-
-pub(crate) fn spend_command(action: &super::command::SpendAction) -> Result<String, String> {
-    current().spend_command(action)
 }
 
 /// The folder holding the usage database under `home`.

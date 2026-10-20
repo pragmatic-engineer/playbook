@@ -100,16 +100,10 @@ pub fn run(
             &daemon::lock_path(paths),
         );
     }
-    // The spend commands read and write config and state, not the data file.
-    if let Some(UsageCommand::Spend { action }) = &sub {
-        return super::host::spend_command(action);
-    }
     super::db::open_db(&paths.db).map(drop)?;
     match sub {
         // Answered above, before the data file is created.
-        Some(UsageCommand::Doctor { .. } | UsageCommand::Stop | UsageCommand::Spend { .. }) => {
-            Ok(String::new())
-        }
+        Some(UsageCommand::Doctor { .. } | UsageCommand::Stop) => Ok(String::new()),
         Some(UsageCommand::Ingest) => Err(INGEST_REMOVED.to_string()),
         Some(UsageCommand::Warm) => super::warm::run_warm(paths).map(|()| String::new()),
         Some(UsageCommand::Collect { port, idle_seconds }) => {
