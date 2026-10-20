@@ -74,7 +74,7 @@ fn reason(slug: &str) -> Option<&'static str> {
             "every new shell loads a playbook launcher that is retired"
         }
         migrate::DEAD_HOOKS_MIGRATION => {
-            "Claude Code runs these hooks on every event and each one fails"
+            "Claude Code runs these hooks on every event and they no longer do anything useful"
         }
         migrate::COLLECTOR_SERVICE_MIGRATION => {
             "the usage collector runs only while a session keeps it alive, so usage data has gaps"

@@ -30,7 +30,7 @@ The first time the store opens, playbook reads the old files and moves them into
 - `~/.config/playbook/migrations.state` (lines `applied <id>` and `shipped <key> <hash>`)
 - every `worktree-sweep-marker-*` file
 
-The import is one transaction. After it commits, each old file is renamed to `<name>.migrated`, and a renamed marker is not imported again. If any file cannot be read, nothing is imported and nothing is renamed, and the next run tries again. The `state-files-to-sqlite` migration makes sure this has happened and `playbook setup` reports how many files it moved.
+The import is one transaction. After it commits, each old file is renamed to `<name>.migrated`, and a renamed marker is not imported again. The `.migrated` files are kept; delete them by hand once the new store works. If any file cannot be read, nothing is imported and nothing is renamed, and the next run tries again. The `state-files-to-sqlite` migration makes sure this has happened and `playbook setup` reports how many files it moved.
 
 ## Safety
 

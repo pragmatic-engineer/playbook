@@ -104,7 +104,7 @@ pub fn pending(settings_path: &Path, home: &Path, claude_home: &Path) -> Option<
     let dead = dead_commands(&read_settings(settings_path)?, home, claude_home);
     (!dead.is_empty()).then(|| {
         format!(
-            "settings.json has {} hook(s) whose script is gone: {}",
+            "settings.json has {} hook(s) that no longer exist: {}",
             dead.len(),
             dead.join(", ")
         )
