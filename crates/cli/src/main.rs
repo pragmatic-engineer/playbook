@@ -5,38 +5,16 @@ use clap::{CommandFactory, Parser};
 use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::{
-<<<<<<< HEAD
     adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor,
     effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
-    plan_cleanup, planning, pr, prose, review, sanitize, settings, statusline, storage, tools_map,
-    trust, update, usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli,
-    Command, CommitCommand, ConfigCommand, DepsCommand, DocCommand, DoctorCommand, EvalCommand,
-    GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand,
-    MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ProseCommand, ReviewCommand,
-    ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand,
-    SettingsCommand, ToolsCommand, WorktreeCommand,
-||||||| 88a1e289
-    adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, disk, doc,
-    doctor, effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
-    plan_cleanup, planning, pr, prose, review, sanitize, settings, statusline, storage, tools_map,
-    trust, update, usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli,
-    Command, CommitCommand, ConfigCommand, DepsCommand, DiskCommand, DocCommand, DoctorCommand,
-    EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand,
-    ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ProseCommand,
-    ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology,
-    SessionsCommand, SettingsCommand, ToolsCommand, WorktreeCommand,
-=======
-    adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, disk, doc,
-    doctor, effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
     plan_cleanup, planning, pr, prose, review, sanitize, settings, skills_sync, statusline,
     storage, tools_map, trust, update, usage, worktree, AdrCommand, AgentsCommand,
     AtlassianCommand, CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand,
-    DiskCommand, DocCommand, DoctorCommand, EvalCommand, GateCommand, GlossaryCommand,
-    HandoffCommand, JsonCommand, LearnCommand, ManifestCommand, MemoryCommand, ModeArg,
-    ModeCommand, PlanCommand, PrCommand, ProseCommand, ReviewCommand, ReviewWorktreeCommand,
-    SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand, SettingsCommand,
-    SkillsCommand, ToolsCommand, WorktreeCommand,
->>>>>>> origin/refactor/remove-disk-setup-and-doctor
+    DocCommand, DoctorCommand, EvalCommand, GateCommand, GlossaryCommand, HandoffCommand,
+    JsonCommand, LearnCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand,
+    PrCommand, ProseCommand, ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SegmentCommand,
+    SegmentTopology, SessionsCommand, SettingsCommand, SkillsCommand, ToolsCommand,
+    WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 

@@ -98,13 +98,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-<<<<<<< HEAD
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
-||||||| 88a1e289
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `disk`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
-=======
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `disk`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
->>>>>>> origin/refactor/remove-disk-setup-and-doctor
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
