@@ -18,7 +18,6 @@ pub mod common;
 pub mod config;
 pub mod deliver;
 pub mod deps;
-pub mod disk;
 #[cfg(unix)]
 pub mod doc;
 /// Document conversion needs process groups and signals, so on other
@@ -116,6 +115,30 @@ Docs: https://github.com/pragmatic-engineer/playbook"
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
+}
+
+/// `playbook skills` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum SkillsCommand {
+    /// Copy the playbook skills into another agent's skill folder
+    ///
+    /// Without `--agent`, every agent found on this machine is synced. A
+    /// second run with nothing new changes nothing.
+    Sync {
+        /// Sync only this agent
+        #[arg(long, value_parser = ["codex"])]
+        agent: Option<String>,
+        /// Show what would change and write nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Print the report lines as a JSON array
+        #[arg(long)]
+        json: bool,
+        /// Refresh the agents already synced and store a summary for the
+        /// next session (started in the background)
+        #[arg(long, hide = true)]
+        refresh: bool,
+    },
 }
 
 /// `playbook state` subcommands.
@@ -315,7 +338,7 @@ pub enum Command {
         #[command(flatten)]
         flags: init::choices::Flags,
     },
-    /// List the hooks that `playbook setup` wires into Claude Code, or explain a guard verdict
+    /// List the hooks that `playbook setup` wires into Claude Code
     Hooks {
         #[command(subcommand)]
         sub: HooksCommand,
@@ -375,6 +398,10 @@ pub enum Command {
         /// Refresh the cached release check and exit (started in the background)
         #[arg(long, hide = true)]
         refresh_check: bool,
+        /// Update the plugin and store the outcome line for the next session
+        /// (started in the background)
+        #[arg(long, hide = true)]
+        refresh_plugin: bool,
         /// Print the release notes of this binary from a release-notes.json
         /// the install script checked, record them as shown, and exit
         #[arg(long, hide = true, value_name = "FILE")]
@@ -517,6 +544,17 @@ pub enum Command {
     State {
         #[command(subcommand)]
         sub: StateCommand,
+    },
+    /// Share the playbook skills with other agents
+    ///
+    /// `sync` copies the plugin's skills and commands into the folder that
+    /// Codex reads, `~/.agents/skills`, as `playbook-*` folders. It never
+    /// touches folders you made yourself or edited.
+    ///
+    /// Example: `playbook skills sync --dry-run`
+    Skills {
+        #[command(subcommand)]
+        sub: SkillsCommand,
     },
     /// Set playbook's own ceiling on effort, or inspect one component's
     ///
@@ -684,17 +722,6 @@ pub enum Command {
     Worktree {
         #[command(subcommand)]
         sub: WorktreeCommand,
-    },
-    /// Check free disk space and keep builds from filling the disk
-    ///
-    /// Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb` and
-    /// the folders that use the most of it. `disk reserve` can keep a ballast
-    /// file that gives space back when the disk is full.
-    ///
-    /// Example: `playbook disk status`
-    Disk {
-        #[command(subcommand)]
-        sub: DiskCommand,
     },
     /// Manage the memory graph that sessions read from
     Memory {
@@ -2046,57 +2073,6 @@ pub enum SessionsCommand {
     },
 }
 
-/// `playbook disk` subcommands.
-#[derive(Subcommand, Debug)]
-pub enum DiskCommand {
-    /// Show free space per volume, the thresholds, and the biggest folders
-    /// playbook and its agents made: cargo target folders, worktrees, caches
-    /// and the ballast. Also lists cargo target folders of any project under
-    /// the home folder and `disk.paths`
-    Status {
-        /// Print JSON for tools
-        #[arg(long)]
-        json: bool,
-    },
-    /// Write a 1 GB ballast file under ~/.cache/playbook/ballast that `disk
-    /// release` deletes to give space back on a full disk. The folder carries
-    /// a CACHEDIR.TAG and, on macOS, a Time Machine exclusion.
-    /// Refuses, with exit code 1, when less than `disk.warnFreeGb` would stay
-    /// free
-    Reserve,
-    /// Delete the ballast file and print the space it gave back
-    Release,
-    /// Remove what playbook can prove is disposable and print what it freed
-    ///
-    /// Removes idle `cargo-*` target folders under this repo's worktrees
-    /// root that no build holds, `/tmp/pb-*` scratch older than an hour,
-    /// playbook's own cache and tmp entries, plugin cache versions Claude
-    /// Code marked orphaned a day ago or more, and landed worktrees through
-    /// `playbook worktree sweep`. Never removes uncommitted work, a branch,
-    /// the memory store or the config database.
-    ///
-    /// Example: `playbook disk clean --dry-run`
-    Clean {
-        /// Show what would be removed without removing anything
-        #[arg(long)]
-        dry_run: bool,
-        /// Run only when `disk.autoCleanup` is on and free space is below
-        /// `disk.warnFreeGb`, as the disk guard hooks do
-        #[arg(long)]
-        auto: bool,
-    },
-    /// Print the private cargo target folder for this worktree
-    ///
-    /// Prints `<worktrees root>/cargo-<worktree name>-<hash>`, the folder an
-    /// agent sets as `CARGO_TARGET_DIR` so each worktree builds into its own
-    /// target folder. `playbook worktree remove`, the sweep and the
-    /// worktree-remove hook delete it with the worktree. Warns on stderr when
-    /// more than `disk.maxTargetDirs` target folders exist.
-    ///
-    /// Example: `CARGO_TARGET_DIR="$(playbook disk target-dir)" cargo test`
-    TargetDir,
-}
-
 /// `playbook worktree` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum WorktreeCommand {
@@ -2259,6 +2235,8 @@ pub enum HookName {
     MemoryCapture,
     RmWorkspaceGuard,
     BgAwaitGuard,
+    /// Retired: kept as a no-op for one release so old settings entries still run.
+    #[value(hide = true)]
     NoSlopGuard,
     CommitMessageSanitizer,
     PolicyGuard,
@@ -2270,6 +2248,13 @@ pub enum HookName {
     ContextHygiene,
     DocReadHint,
     UsageWarm,
+    /// Retired with the disk guard. A `settings.json` entry written by
+    /// 0.38.0 still runs it until `playbook setup --hooks` removes the
+    /// entry, so it exits 0 and does nothing.
+    // Keep this variant while RETIRED_HOOKS in init/dead_hooks.rs lists the
+    // entry; without it clap rejects the stale command with a non-zero exit
+    // on every call. A plain comment, because doc text becomes help text.
+    #[value(hide = true)]
     DiskGuard,
     /// Kept so a playbook-hooks plugin cached on disk from an older release
     /// still exits 0 on SessionStart. Does nothing. Remove it once those
@@ -2286,21 +2271,12 @@ pub enum HooksCommand {
     /// Lists the hooks setup adds to settings.json, grouped by purpose.
     /// Changes nothing.
     List,
-    /// Show what the rm guard does with a Bash command
-    ///
-    /// Reads the command the way the guard does and prints each path it
-    /// deletes or overwrites, with the verdict and the rule that matched,
-    /// then the denial text Claude would see. Runs nothing and changes
-    /// nothing.
+    /// Removed: the rm guard is a short fixed rule now (prints a note)
+    #[command(hide = true)]
     ExplainRm {
-        /// The Bash command, quoted as one argument
-        command: String,
-        /// The folder the command runs in (default: the current folder)
-        #[arg(long)]
-        cwd: Option<std::path::PathBuf>,
-        /// Print JSON instead of text
-        #[arg(long)]
-        json: bool,
+        /// Ignored
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
 }
 
@@ -2410,7 +2386,6 @@ mod tests {
             "usage-warm",
             "rm-workspace-guard",
             "bg-await-guard",
-            "no-slop-guard",
             "precommit-check",
             "commit-message-sanitizer",
             "policy-guard",
@@ -2425,6 +2400,10 @@ mod tests {
         for name in names {
             assert!(help.contains(name), "hook --help is missing '{name}'");
         }
+        assert!(
+            !help.contains("no-slop-guard"),
+            "retired hook shows in help"
+        );
     }
 
     #[test]

@@ -115,10 +115,9 @@ fn text(rows: &[&Value]) -> String {
         .join("\n")
 }
 
-const GUARDS: [&str; 6] = [
+const GUARDS: [&str; 5] = [
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
     "policy-guard",
@@ -166,7 +165,7 @@ fn a_paused_plugin_turns_the_guard_row_into_a_warning_and_says_why() {
     assert_eq!(l1[0]["level"], "WARN", "{}", text(&l1));
     assert!(text(&l1).contains("paused"), "{}", text(&l1));
     assert_eq!(l2[0]["level"], "WARN", "{}", text(&l2));
-    assert!(text(&l2).contains("7 of 7"), "{}", text(&l2));
+    assert!(text(&l2).contains("6 of 6"), "{}", text(&l2));
     assert!(text(&l2).contains("plugin is paused"), "{}", text(&l2));
     assert_eq!(l5[0]["level"], "WARN", "{}", text(&l5));
     assert!(text(&l5).contains("plugin is paused"), "{}", text(&l5));
@@ -211,7 +210,7 @@ fn l2_all_guards_and_the_backstop_wired_passes() {
     let rows = b.run(&[], "/bin/zsh", None);
     let l2 = layer(&rows, "2");
     assert_eq!(l2[0]["level"], "PASS", "{}", text(&l2));
-    assert!(text(&l2).contains("7 of 7"));
+    assert!(text(&l2).contains("6 of 6"));
 }
 
 #[test]
@@ -220,7 +219,6 @@ fn l2_a_legacy_command_is_not_wired() {
     let pre = [
         hook("playbook hook rm-workspace-guard"),
         hook("playbook hook bg-await-guard"),
-        hook("playbook hook no-slop-guard"),
         hook("~/.claude/hooks/precommit-check.sh"),
         hook("playbook hook commit-message-sanitizer"),
         hook("playbook hook policy-guard"),
@@ -234,7 +232,7 @@ fn l2_a_legacy_command_is_not_wired() {
     let t = text(&layer(&rows, "2"));
     assert!(t.starts_with("FAIL"), "{t}");
     assert!(
-        t.contains("6/7") && t.contains("precommit-check:NOT_WIRED"),
+        t.contains("5/6") && t.contains("precommit-check:NOT_WIRED"),
         "{t}"
     );
 }
@@ -245,7 +243,6 @@ fn l2_a_near_miss_command_does_not_count() {
     let pre = [
         hook("playbook hook rm-workspace-guard-legacy"),
         hook("playbook hook bg-await-guard"),
-        hook("playbook hook no-slop-guard"),
         hook("playbook hook precommit-check"),
         hook("playbook hook commit-message-sanitizer"),
         hook("playbook hook policy-guard"),
@@ -266,7 +263,7 @@ fn l2_each_missing_guard_drops_the_count_and_is_named() {
         let pre: Vec<&str> = GUARDS.iter().copied().filter(|g| *g != missing).collect();
         b.settings(&guard_settings(&pre, &["commit-message-sanitizer"]));
         let t = text(&layer(&b.run(&[], "/bin/zsh", None), "2"));
-        assert!(t.contains("6/7"), "{missing}: {t}");
+        assert!(t.contains("5/6"), "{missing}: {t}");
         assert!(
             t.contains(&format!(" {missing}:NOT_WIRED")),
             "{missing}: {t}"
@@ -279,7 +276,7 @@ fn l2_the_backstop_is_checked_on_posttooluse() {
     let b = Box::new("l2g");
     b.settings(&guard_settings(&GUARDS, &[]));
     let t = text(&layer(&b.run(&[], "/bin/zsh", None), "2"));
-    assert!(t.contains("6/7"), "{t}");
+    assert!(t.contains("5/6"), "{t}");
     assert!(
         t.contains("commit-message-sanitizer(PostToolUse):NOT_WIRED"),
         "{t}"
@@ -821,14 +818,13 @@ fn the_probes_run_side_by_side_but_the_table_keeps_its_order() {
     b.settings("{}");
     let dir = b.stub("bin", "1.2.3", true);
     // The data folder row lists files and sizes, which settings reads change
-    // (the config store and its write-ahead log), and the disk row shows free
-    // space, which other programs change. Neither is part of the comparison.
+    // (the config store and its write-ahead log). It is not part of the comparison.
     let stable = |rows: Vec<Value>| -> Vec<Value> {
         rows.into_iter()
             .filter(|r| {
                 !r["message"]
                     .as_str()
-                    .is_some_and(|m| m.starts_with("data folder") || m.starts_with("disk: "))
+                    .is_some_and(|m| m.starts_with("data folder"))
             })
             .collect()
     };
@@ -965,6 +961,30 @@ fn an_entry_for_a_hook_the_binary_no_longer_writes_is_stale() {
         rows.iter().any(|r| r.starts_with("WARN settings.json has a hook the binary no longer writes: playbook hook migration-check")),
         "{rows:?}"
     );
+}
+
+#[test]
+fn a_retired_hook_entry_points_at_setup_and_another_stale_entry_at_a_hand_edit() {
+    let b = Box::new("hooks-stale-retired");
+    let path = wire_all(&b);
+    let mut v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    for cmd in [
+        "playbook hook no-slop-guard",
+        "playbook hook migration-check",
+    ] {
+        v["hooks"]["SessionStart"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"hooks":[{"type":"command","command":cmd}]}));
+    }
+    fs::write(&path, v.to_string()).unwrap();
+
+    let rows = hook_rows(&b.run(&[], "/bin/sh", None));
+
+    let row = |cmd: &str| rows.iter().find(|r| r.contains(cmd)).expect("row").clone();
+    assert!(row("hook no-slop-guard").ends_with("-- run: playbook setup --hooks"));
+    assert!(row("hook migration-check")
+        .ends_with("-- delete the entry from ~/.claude/settings.json by hand"));
 }
 
 #[test]
@@ -1751,4 +1771,87 @@ fn a_stopped_collector_names_the_start_hint_and_no_setup_part() {
         .unwrap_or_else(|| panic!("{}", text(&rows)));
     assert_eq!(row["hint"], playbook::usage::daemon::START_HINT, "{row}");
     assert!(!hints(&rows).contains("setup --only collector-service"));
+}
+
+fn policy_guard_row(rows: &[Value]) -> &Value {
+    rows.iter()
+        .find(|r| r["message"].as_str().unwrap().starts_with("policy guard"))
+        .expect("a policy guard row")
+}
+
+#[test]
+fn doctor_reports_the_policy_guard_as_off_until_the_key_is_true() {
+    // Arrange
+    let off = Box::new("pg-off");
+    off.settings("{}");
+    let on = Box::new("pg-on");
+    on.settings("{}");
+    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args([
+            "config",
+            "set",
+            "--global",
+            "hooks.policyGuard.enabled",
+            "true",
+        ])
+        .env("HOME", on.home())
+        .current_dir(on.home())
+        .output()
+        .unwrap();
+    assert!(set.status.success());
+
+    // Act
+    let off = off.run_with_env(&[]);
+    let on = on.run_with_env(&[]);
+
+    // Assert
+    let row = policy_guard_row(&off);
+    assert_eq!(row["level"], "INFO");
+    assert!(row["hint"]
+        .as_str()
+        .unwrap()
+        .contains("hooks.policyGuard.enabled true"));
+    let row = policy_guard_row(&on);
+    assert_eq!(row["level"], "PASS");
+    assert!(row["hint"]
+        .as_str()
+        .unwrap()
+        .contains("hooks.policyGuard.enabled false"));
+}
+
+#[test]
+fn doctor_honors_policy_guard_in_the_environment_like_the_hook() {
+    // Arrange
+    let b = Box::new("pg-env");
+    b.settings("{}");
+    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args([
+            "config",
+            "set",
+            "--global",
+            "hooks.policyGuard.enabled",
+            "true",
+        ])
+        .env("HOME", b.home())
+        .current_dir(b.home())
+        .output()
+        .unwrap();
+    assert!(set.status.success());
+
+    // Act
+    let off = b.run_with_env(&[("POLICY_GUARD", "0")]);
+    let on = Box::new("pg-env-on");
+    on.settings("{}");
+    let on = on.run_with_env(&[("POLICY_GUARD", "1")]);
+
+    // Assert
+    let row = policy_guard_row(&off);
+    assert_eq!(row["level"], "INFO");
+    assert!(row["message"]
+        .as_str()
+        .unwrap()
+        .contains("policy guard is off"));
+    let row = policy_guard_row(&on);
+    assert_eq!(row["level"], "PASS");
+    assert!(row["message"].as_str().unwrap().contains("POLICY_GUARD"));
 }

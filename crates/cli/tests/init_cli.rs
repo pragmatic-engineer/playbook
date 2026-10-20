@@ -155,13 +155,17 @@ fn a_yes_run_places_settings_guards_and_the_prompt_and_touches_no_rc_file() {
     sb.init("/bin/zsh", &[]);
     let settings = json(&sb.read(".claude/settings.json"));
     let hooks = settings["hooks"].to_string();
-    for guard in ["rm-workspace-guard", "bg-await-guard", "no-slop-guard"] {
+    for guard in ["rm-workspace-guard", "bg-await-guard"] {
         assert!(
             hooks.contains(&format!("playbook hook {guard}")),
             "{guard} unwired"
         );
         assert!(!sb.path(&format!(".claude/hooks/{guard}.sh")).exists());
     }
+    assert!(
+        !hooks.contains("no-slop-guard"),
+        "the retired guard is wired"
+    );
     assert!(sb.path(".claude/.settings.base.json").is_file());
     assert!(!sb.path(".config/playbook/statusline.sh").exists());
     assert!(!sb.path(".zshrc").exists());

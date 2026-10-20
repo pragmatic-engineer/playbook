@@ -380,7 +380,7 @@ fn fires(f: &Fire, name: &str) -> bool {
             let out = run_hook(
                 &f.playbook,
                 name,
-                r#"{"tool_input":{"command":"rm -rf /etc/hosts"}}"#,
+                r#"{"tool_input":{"command":"rm -rf /"}}"#,
                 &home,
                 &home,
                 &[],
@@ -404,28 +404,6 @@ fn fires(f: &Fire, name: &str) -> bool {
             .1
             .is_empty()
         }
-        "disk-guard" => {
-            let home = f.home.clone();
-            run_hook(
-                &f.playbook,
-                name,
-                r#"{"tool_name":"Bash","tool_input":{"command":"cargo build"}}"#,
-                &home,
-                &home,
-                &[("PLAYBOOK_TEST_DISK_FREE_GB", "1")],
-                &[],
-            )
-            .1
-            .contains("\"permissionDecision\":\"deny\"")
-        }
-        "no-slop-guard" => {
-            let home = f.home.clone();
-            let cmd = "git commit -m \"x \u{2014} y\"";
-            let payload = format!("{{\"tool_input\":{{\"command\":{}}}}}", json_str(cmd));
-            run_hook(&f.playbook, name, &payload, &home, &home, &[], &[])
-                .1
-                .contains("\"permissionDecision\":\"deny\"")
-        }
         "policy-guard" => {
             let home = f.home.clone();
             run_hook(
@@ -434,7 +412,7 @@ fn fires(f: &Fire, name: &str) -> bool {
                 r#"{"tool_input":{"command":"git commit --no-verify -m x"}}"#,
                 &home,
                 &home,
-                &[],
+                &[("POLICY_GUARD", "1")],
                 &[],
             )
             .1
