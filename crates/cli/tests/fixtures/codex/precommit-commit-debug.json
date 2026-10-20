@@ -1,0 +1,23 @@
+{
+  "_fixture": {
+    "origin": "schema-derived",
+    "codex_version": null,
+    "source": "Codex hooks docs, read 2026-10-20",
+    "guard": "precommit-check",
+    "expect": "context",
+    "description": "a commit with a staged debug line emits additionalContext",
+    "setup": "staged-debug-repo"
+  },
+  "session_id": "019a0000-0000-7000-8000-000000000001",
+  "transcript_path": null,
+  "cwd": "/private/tmp",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6.1-sol",
+  "turn_id": "turn-1",
+  "permission_mode": "default",
+  "tool_name": "Bash",
+  "tool_use_id": "call-1",
+  "tool_input": {
+    "command": "git commit -m 'feat: add x'"
+  }
+}
