@@ -135,16 +135,27 @@ fn compare_pre(a: &str, b: &str) -> Ordering {
     }
 }
 
+fn target_triple(os: &str, arch: &str) -> Result<&'static str, String> {
+    match (os, arch) {
+        ("macos", "aarch64") => Ok("aarch64-apple-darwin"),
+        ("macos", "x86_64") => Ok("x86_64-apple-darwin"),
+        ("linux", "aarch64") => Ok("aarch64-unknown-linux-musl"),
+        ("linux", "x86_64") => Ok("x86_64-unknown-linux-musl"),
+        _ => Err(format!("no release binary for {os} {arch}")),
+    }
+}
+
 /// The asset a release publishes for this platform, matching install.sh.
 pub fn asset_name(version: &str, os: &str, arch: &str) -> Result<String, String> {
-    let triple = match (os, arch) {
-        ("macos", "aarch64") => "aarch64-apple-darwin",
-        ("macos", "x86_64") => "x86_64-apple-darwin",
-        ("linux", "aarch64") => "aarch64-unknown-linux-musl",
-        ("linux", "x86_64") => "x86_64-unknown-linux-musl",
-        _ => return Err(format!("no release binary for {os} {arch}")),
-    };
-    Ok(format!("playbook-{version}-{triple}"))
+    Ok(format!("playbook-{version}-{}", target_triple(os, arch)?))
+}
+
+/// The tarball holding the `pbdoc` helper for this platform.
+pub fn pbdoc_asset_name(version: &str, os: &str, arch: &str) -> Result<String, String> {
+    Ok(format!(
+        "pbdoc-{version}-{}.tar.gz",
+        target_triple(os, arch)?
+    ))
 }
 
 #[cfg(test)]
@@ -211,5 +222,14 @@ mod tests {
             "playbook-0.17.0-aarch64-apple-darwin"
         );
         assert!(asset_name("0.17.0", "freebsd", "x86_64").is_err());
+    }
+
+    #[test]
+    fn the_pbdoc_asset_is_a_tarball_for_the_same_triple() {
+        assert_eq!(
+            pbdoc_asset_name("0.17.0", "macos", "aarch64").unwrap(),
+            "pbdoc-0.17.0-aarch64-apple-darwin.tar.gz"
+        );
+        assert!(pbdoc_asset_name("0.17.0", "freebsd", "x86_64").is_err());
     }
 }
