@@ -2210,9 +2210,10 @@ pub enum HookName {
     UsageWarm,
     /// Retired with the disk guard. A `settings.json` entry written by
     /// 0.38.0 still runs it until `playbook setup --hooks` removes the
-    /// entry, so it exits 0 and does nothing. Keep this variant while
-    /// `RETIRED_HOOKS` in `init/dead_hooks.rs` lists the entry; without it
-    /// clap rejects the stale command with a non-zero exit on every call.
+    /// entry, so it exits 0 and does nothing.
+    // Keep this variant while RETIRED_HOOKS in init/dead_hooks.rs lists the
+    // entry; without it clap rejects the stale command with a non-zero exit
+    // on every call. A plain comment, because doc text becomes help text.
     #[value(hide = true)]
     DiskGuard,
     /// Kept so a playbook-hooks plugin cached on disk from an older release
