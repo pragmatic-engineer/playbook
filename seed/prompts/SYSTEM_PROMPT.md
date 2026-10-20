@@ -53,7 +53,7 @@ The `playbook:playbook-usage` skill lists every `/playbook:*` command.
 
 **Reading first**: load LSP through `ToolSearch` for cross-file navigation before falling back to grep.
 
-**Implementation**: no speculative features or scope creep. Name every magic value (details in `playbook:engineering-standards`). Keep code self-explanatory with clear names, small functions, and obvious control flow. Comment only to warn that an operation is expensive or destructive, to explain why code does something odd, or to mark a deprecation. Never restate what the code shows. Never reference a plan, brief, Work Unit, or ticket in a comment, because its reader never sees this session. The `no-slop-guard` hook blocks the worst cases at the tool call. Treat a block as the rule working.
+**Implementation**: no speculative features or scope creep. Name every magic value (details in `playbook:engineering-standards`). Keep code self-explanatory with clear names, small functions, and obvious control flow. Comment only to warn that an operation is expensive or destructive, to explain why code does something odd, or to mark a deprecation. Never restate what the code shows. Never reference a plan, brief, Work Unit, ticket, or dispatch id in a comment, because its reader never sees this session (an ADR or a documented convention is fine). Wrap comment lines at the project's line length.
 
 **Self-review**: after implementing a solution, do a second pass over your changes. Be ruthless and pedantic. Commit and push only when asked. Never force-push to a shared branch.
 

@@ -254,7 +254,6 @@ fn every_ported_hook_command_is_a_bare_playbook_hook_invocation_that_resolves() 
         "worktree-remove",
         "rm-workspace-guard",
         "bg-await-guard",
-        "no-slop-guard",
         "precommit-check",
         "commit-message-sanitizer",
         "policy-guard",
@@ -330,7 +329,6 @@ fn every_guard_gets_its_bare_command_and_a_user_script_command_stays() {
     for name in [
         "rm-workspace-guard",
         "bg-await-guard",
-        "no-slop-guard",
         "precommit-check",
         "commit-message-sanitizer",
         "policy-guard",
@@ -505,7 +503,6 @@ fn a_user_command_named_like_a_guard_script_is_kept_and_the_bare_form_is_added()
     for wired in [
         "rm-workspace-guard",
         "bg-await-guard",
-        "no-slop-guard",
         "precommit-check",
         "policy-guard",
     ] {
@@ -516,44 +513,6 @@ fn a_user_command_named_like_a_guard_script_is_kept_and_the_bare_form_is_added()
             "{bare}: {commands:?}"
         );
     }
-}
-
-/// A rename must heal an install already wired to the OLD bare name:
-/// `also_replaces` makes that possible.
-#[test]
-fn renamed_guard_replaces_an_already_bare_old_name_not_orphan_it() {
-    // Arrange: a settings.json already wired to the pre-rename bare form.
-    let path = scratch_settings_path("renamed-guard");
-    write_json(
-        &path,
-        &json!({
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "Bash",
-                        "hooks": [
-                            {"type": "command", "command": "playbook hook no-dash-guard", "timeout": 10}
-                        ]
-                    }
-                ]
-            }
-        }),
-    );
-
-    // Act
-    wire(&path).expect("wire should succeed");
-    let settings = read_json(&path);
-    let commands = all_hook_commands(&settings);
-
-    // Assert
-    assert!(
-        !commands.contains(&"playbook hook no-dash-guard".to_string()),
-        "the old bare name must not survive as an orphan: {commands:?}"
-    );
-    assert!(
-        commands.contains(&"playbook hook no-slop-guard".to_string()),
-        "the renamed guard must be wired: {commands:?}"
-    );
 }
 
 /// Every `(matcher, command)` pair registered under `event`, with the matcher
