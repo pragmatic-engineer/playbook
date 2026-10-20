@@ -121,6 +121,27 @@ both report the release version, and runs `playbook doctor check` in an empty
 with `version=X.Y.Z` starts it again. A dry run skips it, because nothing is
 published to install.
 
+After `verify`, the `nix` job moves the Nix flake (root `flake.nix`). It
+checks `SHA256SUMS` and the four Nix assets against their attestation, then
+`scripts/render-flake.sh` rewrites the `releases` block (the version and one
+SRI hash per system), and the job opens `release/nix-vX.Y.Z` titled
+`chore(release): nix flake X.Y.Z` with the app token, auto-merge on, and waits
+up to 30 minutes for the merge. `scripts/release-notes.sh` leaves that
+commit out of the next notes. The job skips when the release is not the
+latest or `flake.nix` is already ahead, so a backport does not move the flake
+back. Without the app secrets it warns and passes. If `main` moved between the
+checkout and the commit, `release-gh.sh` fails with "Run again": run the
+workflow with `version=X.Y.Z`. Then `verify-nix-linux` and `verify-nix-macos`
+run `nix run github:pragmatic-engineer/playbook/<commit>#playbook --
+--version` at the commit that carries the flake and compare it with the
+version; the Linux job also builds a copy
+with a wrong hash, which must fail. Both are leaf jobs, and they are skipped in a dry run and when the `nix`
+job moved nothing. A dry run of `nix` renders from a stand-in `SHA256SUMS`, shows the diff
+and opens nothing. The tag `vX.Y.Z` carries the flake of the release before
+it, so users pin `main` or the merge commit of the flake pull request.
+To roll the flake back, open a pull request that reverts the flake change:
+the older hashes stay valid because release assets do not change.
+
 A dry run plans, shows the diff of the release pull request in the run
 summary, and builds the five targets from `main`. It also shows the tap and
 marketplace diffs, with placeholder checksums for the formulas, and checks the
