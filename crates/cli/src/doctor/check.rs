@@ -94,7 +94,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 19] = [
+const PROBES: [Probe; 20] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -119,6 +119,7 @@ const PROBES: [Probe; 19] = [
     |env| vec![attribution_row(env)],
     update_rows,
     |env| vec![disk_row(env)],
+    |env| vec![policy_guard_row(env)],
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -787,6 +788,43 @@ fn marker_endpoint(home: &Path) -> Option<String> {
 }
 
 const TELEMETRY_SETUP_FIX: &str = "run: playbook setup --only telemetry";
+
+/// The policy guard is optional and off by default, so off is an Info row.
+fn policy_guard_row(env: &Env) -> Row {
+    use crate::hooks::policy_guard::{enabled_for, env_override, ENABLED_KEY};
+    if let Some(on) = env_override() {
+        let (level, state) = if on {
+            (Level::Pass, "on")
+        } else {
+            (Level::Info, "off")
+        };
+        return Row::new(
+            "-",
+            level,
+            format!("policy guard is {state}: POLICY_GUARD in the environment decides, whatever {ENABLED_KEY} holds"),
+        )
+        .hint("unset POLICY_GUARD to follow the stored key");
+    }
+    if enabled_for(&env.home) {
+        Row::new(
+            "-",
+            Level::Pass,
+            "policy guard is on: it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes, settings.json edits and protected config changes",
+        )
+        .hint(format!(
+            "to turn it off, run: playbook config set --global {ENABLED_KEY} false"
+        ))
+    } else {
+        Row::new(
+            "-",
+            Level::Info,
+            "policy guard is off (optional, off by default)",
+        )
+        .hint(format!(
+            "to turn it on, run: playbook config set --global {ENABLED_KEY} true"
+        ))
+    }
+}
 
 /// The `attribution` key in the user's settings.json (ADR 0042). With
 /// attribution OFF, the default: ok when every key holds the off value, a
