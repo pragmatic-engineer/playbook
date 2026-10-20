@@ -39,6 +39,7 @@ pub mod migrate;
 pub mod path;
 pub mod pb_link;
 pub mod preview;
+pub mod retired_hooks;
 pub mod run;
 pub mod self_root;
 pub mod shim;

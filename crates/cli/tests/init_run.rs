@@ -149,11 +149,10 @@ const PORTED_HOOK_NAMES: &[&str] = &[
     "worktree-remove",
 ];
 
-/// The 6 safety guards, wired the same as `PORTED_HOOK_NAMES`.
+/// The 5 safety guards, wired the same as `PORTED_HOOK_NAMES`.
 const GUARD_HOOK_NAMES: &[&str] = &[
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
     "policy-guard",

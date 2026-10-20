@@ -504,7 +504,13 @@ fn notice(home: &Path, out: &Outcome, now: u64, shown: bool) -> Option<String> {
             migrations: out.listed_open(),
             session_plugin: std::env::var_os("CLAUDE_PLUGIN_ROOT").is_some_and(|v| !v.is_empty()),
         };
-        crate::pending::session_notice(&root, &out.items(home), now, shown, prune)
+        let mut open = out.items(home);
+        // An update already started says it is updating, so the manual fix
+        // would contradict it.
+        if crate::plugin_update::in_flight(&root, env!("CARGO_PKG_VERSION"), now) {
+            open.retain(|i| !i.fix.starts_with(crate::plugin_update::COMMAND_PREFIX));
+        }
+        crate::pending::session_notice(&root, &open, now, shown, prune)
     };
     let block = out.notices.render();
     let parts: Vec<String> = out
