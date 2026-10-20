@@ -225,8 +225,6 @@ pub struct Sources {
     pub snapshot: Option<Snapshot>,
     pub budgets: Vec<(LimitPeriod, f64)>,
     pub account: Account,
-    /// The figure the server billed, when one was fetched.
-    pub server: Option<SpendFigure>,
 }
 
 impl Sources {
@@ -252,7 +250,6 @@ impl Sources {
             } else {
                 super::plan::read(claude_json)
             },
-            server: None,
         }
     }
 
@@ -268,15 +265,6 @@ pub enum Monthly {
     /// The statusline reported one (behind a Claude apps gateway). The cache
     /// is not used then, and a manual budget is shown beside it.
     Measured,
-    /// The spend limit the server reported. `fresh` is false once the figure
-    /// is over six hours old.
-    Server {
-        limit_usd: f64,
-        used_usd: Option<f64>,
-        fetched_at: i64,
-        age: i64,
-        fresh: bool,
-    },
     /// The spend limit in the Claude Code cache. `fresh` is false once the
     /// cache is over six hours old.
     Cached {
@@ -291,19 +279,10 @@ pub enum Monthly {
     Unset,
 }
 
-/// The first second of the UTC month that holds `now`.
-fn utc_month_start(now: i64) -> i64 {
-    let utc = crate::tz::Zone::Utc;
-    utc.day_start(month_first_day(utc.day_of(now)))
-}
-
-/// The monthly limit to use. A measured one comes first. Then a server figure
-/// under six hours old that is newer than the cache, because it is the amount
-/// billed. Then a cached spend limit under six hours old, because it is what
-/// Claude Code enforces. Then the manual budget, because it is what the user
-/// chose on purpose. An older figure is the last resort, the later fetched of
-/// the two. A server figure fetched before this month began describes the
-/// last month and is never used.
+/// The monthly limit to use. A measured one comes first. Then a cached spend
+/// limit under six hours old, because it is what Claude Code enforces. Then
+/// the manual budget, because it is what the user chose on purpose. An older
+/// cache is the last resort.
 pub fn monthly(s: &Sources, now: i64) -> Monthly {
     let measured = s.snapshot.as_ref().is_some_and(|sn| {
         sn.limits(now)
@@ -332,43 +311,11 @@ pub fn monthly(s: &Sources, now: i64) -> Monthly {
                 fresh: c.is_fresh(now),
             })
         });
-    // The server bills by the UTC month, whatever zone this machine is in.
-    let month_start = utc_month_start(now);
-    let server = s
-        .server
-        .as_ref()
-        .filter(|f| !f.is_from_the_future(now) && f.fetched_at >= month_start)
-        .and_then(|f| {
-            f.limit_usd().map(|limit_usd| Monthly::Server {
-                limit_usd,
-                used_usd: f.used_usd(),
-                fetched_at: f.fetched_at,
-                age: f.age(now),
-                fresh: f.is_fresh(now),
-            })
-        });
-    let fetched = |m: &Monthly| match m {
-        Monthly::Server { fetched_at, .. } | Monthly::Cached { fetched_at, .. } => *fetched_at,
-        _ => i64::MIN,
-    };
-    match (server, cached, manual) {
-        (Some(sv @ Monthly::Server { fresh: true, .. }), c, _)
-            if !matches!(c, Some(Monthly::Cached { fresh: true, .. }))
-                || c.is_some_and(|c| fetched(&sv) > fetched(&c)) =>
-        {
-            sv
-        }
-        (_, Some(c @ Monthly::Cached { fresh: true, .. }), _) => c,
-        (_, _, Some(usd)) => Monthly::Manual(usd),
-        (Some(sv), Some(c), None) => {
-            if fetched(&sv) > fetched(&c) {
-                sv
-            } else {
-                c
-            }
-        }
-        (Some(only), None, None) | (None, Some(only), None) => only,
-        (None, None, None) => Monthly::Unset,
+    match (cached, manual) {
+        (Some(c @ Monthly::Cached { fresh: true, .. }), _) => c,
+        (_, Some(usd)) => Monthly::Manual(usd),
+        (Some(c), None) => c,
+        (None, None) => Monthly::Unset,
     }
 }
 
@@ -414,37 +361,27 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
         }
     }
     let choice = monthly(s, now);
-    let figure_wins = matches!(choice, Monthly::Cached { .. } | Monthly::Server { .. });
+    let cached_wins = matches!(choice, Monthly::Cached { .. });
     for (period, usd) in &s.budgets {
-        if *period == LimitPeriod::Monthly && figure_wins {
+        if *period == LimitPeriod::Monthly && cached_wins {
             continue;
         }
         out.push(Limit::manual_budget(*period, *usd, events, now, week));
     }
-    let figure = match choice {
-        Monthly::Cached {
-            limit_usd,
-            used_usd,
-            fetched_at,
-            fresh,
-            ..
-        } => Some((Origin::Cached, limit_usd, used_usd, fetched_at, fresh)),
-        Monthly::Server {
-            limit_usd,
-            used_usd,
-            fetched_at,
-            fresh,
-            ..
-        } => Some((Origin::Server, limit_usd, used_usd, fetched_at, fresh)),
-        _ => None,
-    };
-    if let Some((origin, limit_usd, used_usd, fetched_at, fresh)) = figure {
+    if let Monthly::Cached {
+        limit_usd,
+        used_usd,
+        fetched_at,
+        fresh,
+        ..
+    } = choice
+    {
         let mut l = Limit::manual_budget(LimitPeriod::Monthly, limit_usd, events, now, week);
-        l.origin = origin;
-        // A fresh figure knows the spend of every machine on the account, so
+        l.origin = Origin::Cached;
+        // A fresh cache knows the spend of every machine on the account, so
         // it replaces this machine's estimate, unless it was fetched before
         // this month began.
-        if let Some(used) = used_usd.filter(|_| fresh && fetched_at >= l.start) {
+        if let Some(used) = used_usd.filter(|_| fresh && fetched_at >= utc_month_start(now)) {
             l.used = used;
         }
         out.push(l);
@@ -452,24 +389,48 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
     out
 }
 
-/// The server billed amount next to this machine's estimate for the month
-/// that holds `now`. `None` when no server figure is used for the monthly
-/// limit. The inner error says why the two were not compared.
-pub fn compare_server(
+/// The first second of the UTC month that holds `now`. Claude bills by the UTC
+/// month, whatever zone this machine is in.
+fn utc_month_start(now: i64) -> i64 {
+    let utc = crate::tz::Zone::Utc;
+    utc.day_start(month_first_day(utc.day_of(now)))
+}
+
+/// The amount Claude Code reports as used next to this machine's estimate for
+/// the UTC month that holds `now`. The figure is the statusline gateway
+/// `spend_limit` when there is one, else the `spend` block of the usage cache.
+/// `None` when neither carries an amount used this month, or the cache is dated
+/// in the future. The inner error says why the two were not compared, so a
+/// figure in another currency or without one is reported and never dropped.
+pub fn compare_billed(
     s: &Sources,
     events: &[UsageEvent],
     now: i64,
 ) -> Option<Result<Comparison, NotCompared>> {
-    if !matches!(monthly(s, now), Monthly::Server { .. }) {
-        return None;
-    }
-    let figure = s.server.clone()?;
-    // The server billed up to the moment it was asked, so only the local
-    // spend up to then is comparable.
+    let month_start = utc_month_start(now);
+    let statusline = s
+        .snapshot
+        .as_ref()
+        .and_then(|sn| {
+            let sp = sn.spend_limit.as_ref().filter(|sp| sp.resets_at > now)?;
+            SpendFigure::from_usd(sp.limit_usd, sp.used_usd, sn.captured_at)
+        })
+        .filter(|f| f.used.is_some());
+    let figure = statusline
+        .or_else(|| {
+            s.account
+                .cache
+                .as_ref()
+                .filter(|c| !c.is_from_the_future(now))
+                .and_then(|c| c.billed.clone())
+        })
+        .filter(|f| f.used.is_some() && f.fetched_at >= month_start)?;
+    // Claude reported the amount at `fetched_at`, so only the local spend up
+    // to then is comparable.
     let until = now.min(figure.fetched_at);
     let local = events
         .iter()
-        .filter(|e| e.timestamp >= utc_month_start(now) && e.timestamp <= until)
+        .filter(|e| e.timestamp >= month_start && e.timestamp <= until)
         .map(|e| e.cost_usd)
         .sum::<f64>()
         + 0.0;
@@ -570,7 +531,6 @@ pub fn describe(l: &Limit, now: i64) -> String {
         Origin::Measured => "measured from Claude Code",
         Origin::Manual => "manual limit",
         Origin::Cached => "cached by Claude Code",
-        Origin::Server => "server billed",
     };
     let head = format!(
         "{} {}: {} of {} used ({source})",
@@ -629,16 +589,6 @@ pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekS
         out.push_str(&format!(
             "  note: the cached limits were fetched by Claude Code {} ago\n",
             super::period::elapsed_text(c.age(now))
-        ));
-    }
-    if let Some(f) = s
-        .server
-        .as_ref()
-        .filter(|_| limits.iter().any(|l| l.origin == Origin::Server))
-    {
-        out.push_str(&format!(
-            "  note: the server billed figure was fetched {} ago\n",
-            super::period::elapsed_text(f.age(now))
         ));
     }
     if let Some(note) = windows_note(s, &limits) {
@@ -826,6 +776,7 @@ mod tests {
                 five_hour,
                 seven_day,
                 spend,
+                billed: None,
             }),
         }
     }
@@ -1039,7 +990,6 @@ mod tests {
             snapshot: Some(gateway_snapshot()),
             budgets: vec![(LimitPeriod::Monthly, 100.0)],
             account: cache(600, spend(500.0, Some(120.0)), None),
-            ..Sources::default()
         };
 
         let l = all_limits(&s, &[], NOW, WeekStart::Monday);
@@ -1190,282 +1140,108 @@ mod tests {
         assert!(text.contains("manual limit"), "{text}");
     }
 
-    use crate::spend::{Money, SpendFigure};
+    #[test]
+    fn the_cache_used_amount_is_compared_with_the_local_estimate_of_the_utc_month() {
+        let mut account = cache(60, spend(1500.0, Some(1059.5)), None);
+        let fetched = NOW - 60;
+        let c = account.cache.as_mut().unwrap();
+        c.billed = SpendFigure::from_usd(Some(1500.0), Some(1059.5), fetched);
+        let s = Sources {
+            account,
+            ..Sources::default()
+        };
+        let month_start = utc_month_start(NOW);
+        let events = [
+            cost(month_start - 1, 50.0),
+            cost(month_start, 3.0),
+            cost(fetched, 4.0),
+            cost(fetched + 1, 100.0),
+        ];
 
-    const HOUR: i64 = 3600;
-    const MONTH_START: i64 = 1_798_761_600;
+        let c = compare_billed(&s, &events, NOW).unwrap().unwrap();
 
-    fn dollars(minor: i64) -> Option<Money> {
-        Some(Money {
-            minor,
-            decimals: 2,
-            currency: Some("USD".to_string()),
-        })
+        assert_eq!(c.billed_usd, 1059.5);
+        assert_eq!(c.local_estimate_usd, 7.0);
     }
 
-    fn server_at(fetched_at: i64, limit_minor: i64, used_minor: Option<i64>) -> SpendFigure {
-        SpendFigure {
-            limit: dollars(limit_minor),
-            used: used_minor.and_then(dollars),
-            percent: None,
-            severity: None,
-            resets_at: None,
-            limit_reached: None,
-            windows: Vec::new(),
-            fetched_at,
-            origin: Origin::Server,
+    #[test]
+    fn a_figure_in_another_currency_or_without_one_is_reported_not_dropped() {
+        let money = |currency: Option<&str>| {
+            Some(crate::spend::Money {
+                minor: 105_950,
+                decimals: 2,
+                currency: currency.map(str::to_string),
+            })
+        };
+        for (currency, text) in [
+            (Some("EUR"), "currency EUR, not compared"),
+            (None, "currency not reported, not compared"),
+        ] {
+            let mut account = cache(60, None, None);
+            account.cache.as_mut().unwrap().billed = Some(SpendFigure {
+                limit: None,
+                used: money(currency),
+                fetched_at: NOW - 60,
+            });
+            let s = Sources {
+                account,
+                ..Sources::default()
+            };
+
+            let r = compare_billed(&s, &[], NOW).unwrap();
+
+            assert_eq!(r.unwrap_err().to_string(), text);
         }
     }
 
-    fn monthly_of(l: &[Limit]) -> Vec<&Limit> {
-        l.iter()
-            .filter(|x| x.period == LimitPeriod::Monthly)
-            .collect()
+    #[test]
+    fn nothing_is_compared_without_an_amount_used_this_utc_month() {
+        let fig = |fetched_at, used: Option<f64>| {
+            let mut account = cache_at(fetched_at, None, None, None);
+            account.cache.as_mut().unwrap().billed =
+                SpendFigure::from_usd(Some(100.0), used, fetched_at);
+            Sources {
+                account,
+                ..Sources::default()
+            }
+        };
+
+        assert!(compare_billed(&Sources::default(), &[], NOW).is_none());
+        assert!(compare_billed(&fig(NOW - 60, None), &[], NOW).is_none());
+        assert!(compare_billed(&fig(utc_month_start(NOW) - 1, Some(5.0)), &[], NOW).is_none());
+        assert!(compare_billed(&fig(NOW + 3600, Some(5.0)), &[], NOW).is_none());
     }
 
     #[test]
-    fn a_measured_limit_beats_a_fresh_server_figure() {
+    fn the_statusline_gateway_amount_is_compared_too() {
         let s = Sources {
             snapshot: Some(gateway_snapshot()),
-            server: Some(server_at(NOW - 60, 50_000, Some(20_000))),
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
             ..Sources::default()
         };
 
-        assert_eq!(monthly(&s, NOW), Monthly::Measured);
-        let l = all_limits(&s, &[], NOW, WeekStart::Monday);
-        assert!(monthly_of(&l).iter().all(|x| x.origin != Origin::Server));
+        let c = compare_billed(&s, &[cost(NOW - 120, 4.0)], NOW)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(c.billed_usd, 10.0);
+        assert_eq!(c.local_estimate_usd, 4.0);
     }
 
     #[test]
-    fn a_fresh_server_figure_replaces_the_local_sum_and_the_manual_budget() {
+    fn the_cached_used_amount_counts_from_the_utc_month_not_the_local_one() {
+        let month_start = utc_month_start(NOW);
         let s = Sources {
-            server: Some(server_at(NOW - 60, 150_000, Some(105_950))),
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
+            account: cache_at(month_start, spend(500.0, Some(120.0)), None, None),
             ..Sources::default()
         };
 
-        let l = all_limits(&s, &[cost(NOW - 10, 3.0)], NOW, WeekStart::Monday);
+        let l = all_limits(&s, &[], month_start + 60, WeekStart::Monday);
 
-        let m = monthly_of(&l);
+        let m: Vec<_> = l
+            .iter()
+            .filter(|x| x.period == LimitPeriod::Monthly)
+            .collect();
         assert_eq!(m.len(), 1);
-        assert_eq!(m[0].origin, Origin::Server);
-        assert_eq!(m[0].limit, 1500.0);
-        assert_eq!(m[0].used, 1059.5);
-        assert_eq!(m[0].to_json(NOW)["origin"], "server");
-    }
-
-    #[test]
-    fn the_later_fetched_of_a_fresh_server_figure_and_a_fresh_cache_wins() {
-        let cache_5h_old = Account {
-            ..cache(5 * HOUR, spend(500.0, Some(120.0)), None)
-        };
-        let cache_1m_old = cache(60, spend(500.0, Some(120.0)), None);
-
-        let server_newer = Sources {
-            server: Some(server_at(NOW - 60, 150_000, None)),
-            account: cache_5h_old,
-            ..Sources::default()
-        };
-        let server_older = Sources {
-            server: Some(server_at(NOW - 5 * HOUR, 150_000, None)),
-            account: cache_1m_old,
-            ..Sources::default()
-        };
-
-        assert!(matches!(
-            monthly(&server_newer, NOW),
-            Monthly::Server { .. }
-        ));
-        assert!(matches!(
-            monthly(&server_older, NOW),
-            Monthly::Cached { .. }
-        ));
-    }
-
-    #[test]
-    fn a_fresh_measured_cache_is_not_outranked_by_an_equally_old_server_figure() {
-        let s = Sources {
-            server: Some(server_at(NOW - 60, 150_000, None)),
-            account: cache(60, spend(500.0, Some(120.0)), None),
-            ..Sources::default()
-        };
-
-        assert!(matches!(monthly(&s, NOW), Monthly::Cached { .. }));
-    }
-
-    #[test]
-    fn a_fresh_server_figure_is_used_when_it_is_the_only_source() {
-        let s = Sources {
-            server: Some(server_at(NOW - 60, 150_000, Some(1))),
-            ..Sources::default()
-        };
-
-        assert!(matches!(
-            monthly(&s, NOW),
-            Monthly::Server { fresh: true, .. }
-        ));
-    }
-
-    #[test]
-    fn a_stale_server_figure_loses_to_a_fresh_cache_and_to_the_manual_budget() {
-        let stale = server_at(NOW - 7 * HOUR, 150_000, Some(105_950));
-        let with_cache = Sources {
-            server: Some(stale.clone()),
-            account: cache(600, spend(500.0, Some(120.0)), None),
-            ..Sources::default()
-        };
-        let with_manual = Sources {
-            server: Some(stale),
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
-            ..Sources::default()
-        };
-
-        assert!(matches!(monthly(&with_cache, NOW), Monthly::Cached { .. }));
-        assert_eq!(monthly(&with_manual, NOW), Monthly::Manual(100.0));
-    }
-
-    #[test]
-    fn a_stale_server_figure_is_the_last_resort_and_keeps_the_local_sum() {
-        let s = Sources {
-            server: Some(server_at(NOW - 7 * HOUR, 150_000, Some(105_950))),
-            ..Sources::default()
-        };
-
-        assert!(matches!(
-            monthly(&s, NOW),
-            Monthly::Server { fresh: false, .. }
-        ));
-        let l = all_limits(&s, &[cost(NOW - 10, 3.0)], NOW, WeekStart::Monday);
-        assert_eq!(monthly_of(&l)[0].used, 3.0);
-    }
-
-    #[test]
-    fn the_later_of_a_stale_server_figure_and_a_stale_cache_is_the_last_resort() {
-        let server_later = Sources {
-            server: Some(server_at(NOW - 8 * HOUR, 150_000, None)),
-            account: cache(9 * HOUR, spend(500.0, None), None),
-            ..Sources::default()
-        };
-        let cache_later = Sources {
-            server: Some(server_at(NOW - 9 * HOUR, 150_000, None)),
-            account: cache(8 * HOUR, spend(500.0, None), None),
-            ..Sources::default()
-        };
-
-        assert!(matches!(
-            monthly(&server_later, NOW),
-            Monthly::Server { .. }
-        ));
-        assert!(matches!(monthly(&cache_later, NOW), Monthly::Cached { .. }));
-    }
-
-    #[test]
-    fn a_server_figure_fetched_before_the_month_began_is_ignored() {
-        let s = Sources {
-            server: Some(server_at(MONTH_START - 1, 150_000, Some(105_950))),
-            ..Sources::default()
-        };
-
-        assert_eq!(monthly(&s, MONTH_START + HOUR), Monthly::Unset);
-    }
-
-    #[test]
-    fn a_server_figure_from_the_future_or_without_a_dollar_limit_is_ignored() {
-        let future = Sources {
-            server: Some(server_at(NOW + HOUR, 150_000, None)),
-            ..Sources::default()
-        };
-        let mut euro = server_at(NOW - 60, 150_000, None);
-        euro.limit.as_mut().unwrap().currency = Some("EUR".to_string());
-        let other = Sources {
-            server: Some(euro),
-            ..Sources::default()
-        };
-
-        assert_eq!(monthly(&future, NOW), Monthly::Unset);
-        assert_eq!(monthly(&other, NOW), Monthly::Unset);
-    }
-
-    #[test]
-    fn the_summary_says_server_billed_and_how_old_the_figure_is() {
-        let s = Sources {
-            server: Some(server_at(NOW - 600, 150_000, Some(105_950))),
-            ..Sources::default()
-        };
-
-        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
-
-        assert!(
-            text.contains("monthly budget: $1059.50 of $1500.00 used (server billed)"),
-            "{text}"
-        );
-        assert!(
-            text.contains("server billed figure was fetched 10m ago"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn a_fresh_server_figure_beats_a_stale_cache_and_the_manual_budget() {
-        let s = Sources {
-            server: Some(server_at(NOW - 60, 150_000, None)),
-            account: cache(7 * HOUR, spend(500.0, Some(120.0)), None),
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
-            ..Sources::default()
-        };
-
-        assert!(matches!(
-            monthly(&s, NOW),
-            Monthly::Server { fresh: true, .. }
-        ));
-    }
-
-    #[test]
-    fn the_comparison_ignores_local_spend_after_the_figure_was_fetched() {
-        let s = Sources {
-            server: Some(server_at(NOW - 5 * HOUR, 150_000, Some(90_000))),
-            ..Sources::default()
-        };
-        let events = [cost(NOW - 6 * HOUR, 900.0), cost(NOW - HOUR, 400.0)];
-
-        let c = compare_server(&s, &events, NOW).unwrap().unwrap();
-
-        assert_eq!(c.local_estimate_usd, 900.0);
-        assert!(!c.disagrees);
-    }
-
-    #[test]
-    fn the_month_is_the_utc_month_in_any_zone() {
-        assert_eq!(utc_month_start(MONTH_START), MONTH_START);
-        assert_eq!(utc_month_start(MONTH_START - 1), MONTH_START - 31 * 86_400);
-        assert_eq!(utc_month_start(NOW), MONTH_START);
-    }
-
-    #[test]
-    fn the_server_figure_is_compared_with_the_local_sum_of_the_month() {
-        let s = Sources {
-            server: Some(server_at(NOW - 60, 150_000, Some(105_950))),
-            ..Sources::default()
-        };
-        let events = [
-            cost(MONTH_START + 10, 900.0),
-            cost(MONTH_START - 10, 5000.0),
-        ];
-
-        let c = compare_server(&s, &events, NOW).unwrap().unwrap();
-
-        assert_eq!(c.local_estimate_usd, 900.0);
-        assert!(c.disagrees);
-    }
-
-    #[test]
-    fn nothing_is_compared_when_no_server_figure_is_used() {
-        let s = Sources {
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
-            ..Sources::default()
-        };
-
-        assert!(compare_server(&s, &[], NOW).is_none());
+        assert_eq!(m[0].used, 120.0);
     }
 }

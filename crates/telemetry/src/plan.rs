@@ -18,6 +18,7 @@ use crate::claude_code::parse_iso8601_utc;
 use crate::limits::{LimitPeriod, Unit};
 use crate::limits_source::{self, Window};
 use crate::period::elapsed_text;
+use crate::spend::SpendFigure;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -35,7 +36,7 @@ const PLAN_FIELDS: [&str; 6] = [
 ];
 
 /// How far ahead of this clock a fetch time may be before it is not believed.
-pub(crate) const CLOCK_SKEW_SECONDS: i64 = 300;
+const CLOCK_SKEW_SECONDS: i64 = 300;
 
 /// What the account looks like from the tier names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +98,9 @@ pub struct UsageCache {
     pub five_hour: Option<Window>,
     pub seven_day: Option<Window>,
     pub spend: Option<SpendLimit>,
+    /// The same `spend` block in any currency, for the comparison with the
+    /// local estimate. `spend` above keeps only a usable dollar limit.
+    pub billed: Option<SpendFigure>,
 }
 
 impl UsageCache {
@@ -139,7 +143,7 @@ fn load(path: &Path) -> Option<Value> {
 /// An ISO 8601 time with an optional fraction and an optional `Z` or
 /// `+hh:mm` / `-hh:mm` offset, as UTC seconds. Claude Code writes
 /// `2026-09-03T05:00:00.123456+00:00`.
-pub(crate) fn parse_time(text: &str) -> Option<i64> {
+fn parse_time(text: &str) -> Option<i64> {
     let (date, time) = text.split_once('T')?;
     let cut = time.find(['.', 'Z', '+', '-']).unwrap_or(time.len());
     let base = parse_iso8601_utc(&format!("{date}T{}Z", &time[..cut]))?;
@@ -155,7 +159,7 @@ pub(crate) fn parse_time(text: &str) -> Option<i64> {
     Some(base - offset)
 }
 
-pub(crate) fn window(v: Option<&Value>) -> Option<Window> {
+fn window(v: Option<&Value>) -> Option<Window> {
     let v = v?;
     let pct = v.get("utilization")?.as_f64()?;
     let at = parse_time(v.get("resets_at")?.as_str()?)?;
@@ -190,11 +194,15 @@ fn spend(v: Option<&Value>) -> Option<SpendLimit> {
 fn cache(root: &Value) -> Option<UsageCache> {
     let c = root.get("cachedUsageUtilization")?;
     let u = c.get("utilization")?;
+    let fetched_at = c.get("fetchedAtMs")?.as_i64()? / 1000;
     Some(UsageCache {
-        fetched_at: c.get("fetchedAtMs")?.as_i64()? / 1000,
+        fetched_at,
         five_hour: window(u.get("five_hour")),
         seven_day: window(u.get("seven_day")),
         spend: spend(u.get("spend")),
+        billed: u
+            .get("spend")
+            .and_then(|s| SpendFigure::from_cache(s, fetched_at)),
     })
 }
 
@@ -433,17 +441,6 @@ fn verdict_lines(s: &limits_source::Sources, now: i64) -> Vec<String> {
             "  monthly limit: from the statusline reading (a manual budget is shown beside it)"
                 .to_string()
         }
-        limits_source::Monthly::Server {
-            limit_usd,
-            age,
-            fresh,
-            ..
-        } => format!(
-            "  monthly limit: {} billed by the server, fetched {} ago{}",
-            limits_source::amount(Unit::Dollars, limit_usd),
-            elapsed_text(age),
-            if fresh { "" } else { " (stale)" }
-        ),
         limits_source::Monthly::Cached {
             limit_usd,
             age,
@@ -1017,38 +1014,5 @@ mod tests {
             std::env::temp_dir().join(format!("pb-plan-{}-gone/.claude.json", std::process::id()));
 
         assert_eq!(read_cached(&missing), Account::default());
-    }
-
-    #[test]
-    fn a_server_figure_is_named_in_the_verdict_with_its_age_and_staleness() {
-        let figure = |age: i64| crate::spend::SpendFigure {
-            limit: Some(crate::spend::Money {
-                minor: 150_000,
-                decimals: 2,
-                currency: Some("USD".to_string()),
-            }),
-            used: None,
-            percent: None,
-            severity: None,
-            resets_at: None,
-            limit_reached: None,
-            windows: Vec::new(),
-            fetched_at: NOW - age,
-            origin: crate::limits::Origin::Server,
-        };
-        let sources = |age| limits_source::Sources {
-            server: Some(figure(age)),
-            ..limits_source::Sources::default()
-        };
-
-        let fresh = verdict_lines(&sources(600), NOW).join("\n");
-        let stale = verdict_lines(&sources(7 * 3600), NOW).join("\n");
-
-        assert!(
-            fresh.contains("monthly limit: $1500.00 billed by the server, fetched 10m ago\n")
-                || fresh.ends_with("fetched 10m ago"),
-            "{fresh}"
-        );
-        assert!(stale.contains("(stale)"), "{stale}");
     }
 }

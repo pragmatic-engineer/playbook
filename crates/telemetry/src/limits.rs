@@ -119,9 +119,6 @@ pub enum Origin {
     /// Read from the usage numbers Claude Code caches in its config file.
     /// The age of that cache is shown next to it.
     Cached,
-    /// The amount the server billed, fetched by playbook with the user's
-    /// consent.
-    Server,
 }
 
 impl Origin {
@@ -130,7 +127,6 @@ impl Origin {
             Origin::Measured => "measured",
             Origin::Manual => "manual",
             Origin::Cached => "cached",
-            Origin::Server => "server",
         }
     }
 }
