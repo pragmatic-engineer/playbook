@@ -204,6 +204,11 @@ pub fn is_homebrew(exe: &Path) -> bool {
         .any(|m| text.contains(m))
 }
 
+/// Whether `exe` sits in `/usr/bin`, where the .deb and .rpm packages put it.
+pub fn is_system_package(exe: &Path) -> bool {
+    exe.parent() == Some(Path::new("/usr/bin"))
+}
+
 const MANUAL_STEPS: &str = "To update by hand, download the asset for your platform from \
 https://github.com/pragmatic-engineer/playbook/releases/latest, check it against SHA256SUMS, \
 and replace the binary, or re-run install.sh.";
@@ -217,6 +222,14 @@ fn refusals(env: &Env) -> Result<(), String> {
     if is_homebrew(&env.exe) {
         return Err(format!(
             "{} is managed by Homebrew; update it there: brew upgrade playbook. Or install a \
+             standalone copy with install.sh and put it first on PATH.",
+            env.exe.display()
+        ));
+    }
+    if is_system_package(&env.exe) {
+        return Err(format!(
+            "{} was installed from a .deb or .rpm package; update it with your package manager: \
+             sudo apt install --only-upgrade playbook, or sudo dnf upgrade playbook. Or install a \
              standalone copy with install.sh and put it first on PATH.",
             env.exe.display()
         ));
@@ -851,6 +864,29 @@ echo ran\n",
         )
         .unwrap_err();
         assert!(err.contains("brew upgrade playbook"), "{err}");
+    }
+
+    #[test]
+    fn a_usr_bin_binary_is_refused_with_the_package_manager_commands() {
+        let mut env = env_in("up-usr-bin");
+        env.exe = PathBuf::from("/usr/bin/playbook");
+        let err = run(
+            &Options::default(),
+            &env,
+            &fixture(b"", b""),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap_err();
+        assert!(err.contains("apt install --only-upgrade playbook"), "{err}");
+        assert!(err.contains("dnf upgrade playbook"), "{err}");
+    }
+
+    #[test]
+    fn only_a_binary_directly_in_usr_bin_counts_as_a_system_package() {
+        assert!(is_system_package(Path::new("/usr/bin/playbook")));
+        assert!(!is_system_package(Path::new("/usr/local/bin/playbook")));
+        assert!(!is_system_package(Path::new("/home/a/usr/bin/playbook/x")));
     }
 
     #[test]
