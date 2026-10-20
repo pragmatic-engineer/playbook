@@ -12,7 +12,7 @@
 //! `tui::burnup` and the plain table here serves `--summary`, a pipe and a
 //! narrow panel.
 
-use super::limits::{Crossing, Limit, Origin, Unit, MIN_PROJECTION_SECONDS};
+use super::limits::{Crossing, Limit, LimitPeriod, Unit, MIN_PROJECTION_SECONDS};
 use super::limits_source::{self, Sources};
 use super::tz::Zone;
 use super::UsageEvent;
@@ -247,10 +247,9 @@ impl Burnup {
         let last_day = self.days().saturating_sub(1);
         let today = ((self.zone.day_of(self.now) - first).max(0) as usize).min(last_day);
         let mut per_day = vec![0.0; today + 1];
-        for e in events
-            .iter()
-            .filter(|e| e.timestamp >= self.start && e.timestamp <= self.now)
-        {
+        for e in events.iter().filter(|e| {
+            e.timestamp >= self.start && e.timestamp <= self.now && e.timestamp < self.end
+        }) {
             let day = ((self.zone.day_of(e.timestamp) - first).max(0) as usize).min(today);
             per_day[day] += e.cost_usd;
         }
@@ -276,7 +275,9 @@ impl Burnup {
         let mut held: Vec<(i64, f64)> = readings
             .iter()
             .copied()
-            .filter(|(at, p)| *at > self.start && *at < self.now && p.is_finite() && *p >= 0.0)
+            .filter(|(at, p)| {
+                *at > self.start && *at < self.now && *at < self.end && p.is_finite() && *p >= 0.0
+            })
             .collect();
         held.sort_by_key(|(at, _)| *at);
         self.basis = if held.is_empty() {
@@ -289,11 +290,24 @@ impl Burnup {
         for (at, p) in held {
             // A window only fills up, so a lower reading is an older value
             // for the same window and the line stays where it was.
-            top = top.max(p).min(used);
+            top = top.max(p);
             self.points.push((at, top));
         }
         self.points.push((self.now.min(self.end), used.max(top)));
         self.total = used.max(top);
+    }
+}
+
+/// The zone whose midnights split the period of `limit` into days: the chosen
+/// zone when the period starts at its midnight, else UTC when it starts at a
+/// UTC midnight (a period Claude's reset time gave), else the chosen zone.
+fn period_zone(limit: &Limit) -> Zone {
+    let aligned = |z: Zone| z.day_start(z.day_of(limit.start)) == limit.start;
+    let chosen = crate::tz::current();
+    if aligned(chosen) || !aligned(Zone::Utc) {
+        chosen
+    } else {
+        Zone::Utc
     }
 }
 
@@ -303,23 +317,22 @@ pub fn burnups_for(
     s: &Sources,
     limits: &[Limit],
     events: &[UsageEvent],
-    readings: &[(i64, f64)],
+    readings: &[(LimitPeriod, i64, f64)],
     now: i64,
 ) -> Vec<Option<Burnup>> {
     let billed = limits_source::billed_anchor(s, now);
     limits
         .iter()
         .map(|l| {
-            // A period the server's reset time gave starts at a UTC midnight,
-            // so its days are UTC days. A manual budget uses the chosen zone.
-            let zone = if l.origin == Origin::Manual {
-                crate::tz::current()
-            } else {
-                Zone::Utc
-            };
+            let zone = period_zone(l);
+            let own: Vec<(i64, f64)> = readings
+                .iter()
+                .filter(|(period, _, _)| *period == l.period)
+                .map(|(_, at, p)| (*at, *p))
+                .collect();
             let inputs = Inputs {
                 events,
-                readings,
+                readings: &own,
                 billed: billed.filter(|_| limits_source::is_monthly_dollars(l)),
                 now,
             };
@@ -332,7 +345,7 @@ pub fn burnups_for(
 mod tests {
     use super::*;
     use crate::aggregate::SECONDS_PER_DAY;
-    use crate::limits::{CrossState, LimitPeriod};
+    use crate::limits::{CrossState, LimitPeriod, Origin};
 
     const D: i64 = SECONDS_PER_DAY;
     /// 2027-01-01 00:00 UTC.
@@ -592,13 +605,40 @@ mod tests {
     }
 
     #[test]
-    fn a_reading_above_the_latest_used_amount_is_capped_by_it() {
+    fn a_reading_above_the_latest_used_amount_is_the_newer_value_and_is_kept() {
         let l = window(1000, 10.0);
 
         let b = percent(&l, 10_000, &[(5000, 40.0)]);
 
-        assert_eq!(b.points.last(), Some(&(10_000, 10.0)));
-        assert!(b.points.iter().all(|(_, p)| *p <= 10.0));
+        assert_eq!(b.points.last(), Some(&(10_000, 40.0)));
+        assert_eq!(b.total, 40.0);
+    }
+
+    #[test]
+    fn a_reading_after_the_window_end_or_an_event_after_it_is_not_counted() {
+        let l = window(1000, 10.0);
+        let b = percent(&l, 30_000, &[(19_500, 90.0)]);
+        let over = month(
+            30,
+            JAN + 31 * D,
+            &[cost(JAN, 1.0), cost(JAN + 30 * D + 5, 50.0)],
+        );
+
+        assert_eq!(b.points, [(1000, 0.0), (19_000, 10.0)]);
+        assert_eq!(over.total, 1.0);
+    }
+
+    #[test]
+    fn a_period_that_starts_at_a_utc_midnight_is_split_in_utc_whatever_the_chosen_zone() {
+        let mut l = dollars_limit(30, 0.0, 100.0);
+        l.start = JAN;
+
+        // The chosen zone is UTC in unit tests, so both agree here.
+        assert_eq!(period_zone(&l), Zone::Utc);
+        l.start = JAN + 15 * 3600;
+        // Not a UTC midnight and not aligned to the chosen zone: the chosen
+        // zone is kept.
+        assert_eq!(period_zone(&l), crate::tz::current());
     }
 
     #[test]

@@ -2045,6 +2045,7 @@ mod tests {
 
     #[test]
     fn the_json_gives_every_limit_a_series_by_its_unit() {
+        crate::tz::set(crate::tz::Zone::Utc);
         let s = Sources {
             snapshot: Some(window_snapshot(3600)),
             budgets: vec![(LimitPeriod::Monthly, 100.0), (LimitPeriod::Weekly, 40.0)],
