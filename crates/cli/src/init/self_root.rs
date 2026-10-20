@@ -3,7 +3,7 @@
 
 //! Resolves `InitPaths::self_root`, the files `init` seeds from:
 //! `CLAUDE_PLUGIN_ROOT` when it holds them, or its `seed/` folder when it is
-//! a dev checkout (ADR 0048), else the copies compiled into this binary. A plugin cache directory is never a source,
+//! a dev checkout (ADR 0047), else the copies compiled into this binary. A plugin cache directory is never a source,
 //! because an old plugin there ships an old settings template (ADR 0034).
 //! The plugin's skills, commands and agents are found by `crate::plugin_root`.
 
