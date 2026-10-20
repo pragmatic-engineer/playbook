@@ -48,9 +48,6 @@ pub struct InitPaths {
     /// may be replaced. True only for an answer to the question or an explicit
     /// `--telemetry`; `--yes` alone leaves a value the user set.
     pub telemetry_replace_off: bool,
-    /// What the collector-service part does: skip, record a no, or install
-    /// the background service for `playbook usage collect`.
-    pub collector_service: crate::init::collector_service::Choice,
     /// An `--only` run: only the parts that are on run, and the migrations,
     /// the trust entry and the old launcher notes are skipped.
     pub only: bool,
@@ -207,8 +204,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let (settings_step, hooks_step) = settings_and_hooks_steps(paths, epoch);
 
     let telemetry_step = telemetry_step(paths, epoch);
-    // After telemetry, so the service sees the settings that step wrote.
-    let service_step = collector_service_step(paths);
     let short_name_step = short_name_step(paths);
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
 
@@ -219,7 +214,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         settings_step,
         hooks_step,
         telemetry_step,
-        service_step,
         attribution_step,
         short_name_step,
         policy_guard_step,
@@ -256,9 +250,6 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     }
     if paths.telemetry {
         steps.push(telemetry_step(paths, epoch));
-    }
-    if paths.collector_service != crate::init::collector_service::Choice::Skip {
-        steps.push(collector_service_step(paths));
     }
     if paths.attribution != crate::init::attribution::Choice::Skip {
         steps.push(attribution_step(paths, epoch));
@@ -316,20 +307,6 @@ pub(crate) fn settings_and_hooks_steps(paths: &InitPaths, epoch: u64) -> (StepRe
         StepReport::skipped("hooks", "not requested; pass --hooks to opt in")
     };
     (settings_step, hooks_step)
-}
-
-/// The collector-service part, as `paths.collector_service` says. The real
-/// service manager runs only when `paths.home` is the home of the account.
-pub(crate) fn collector_service_step(paths: &InitPaths) -> StepReport {
-    use crate::init::collector_service::{program, step};
-    let manager = crate::service_manager::manager_for(&paths.home);
-    step(
-        &paths.home,
-        &program(),
-        paths.collector_service,
-        crate::usage::service::Kind::current(),
-        manager.as_ref(),
-    )
 }
 
 /// The attribution part, as `paths.attribution` says.

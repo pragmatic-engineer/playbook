@@ -53,11 +53,6 @@ fn extra_lines(id: &str) -> Vec<String> {
         "telemetry" => {
             crate::init::telemetry::plan_lines(&crate::common::home_dir().join(".claude"))
         }
-        "collector-service" => vec![format!(
-            "Runs: {} {}",
-            crate::init::collector_service::program().display(),
-            crate::usage::service::ARGS.join(" ")
-        )],
         "short-name" => vec![
             "Adds the same link install.sh makes: pb -> playbook, in the playbook install folder."
                 .to_string(),
@@ -82,7 +77,6 @@ pub fn decline_line(id: &str) -> &'static str {
         "path" => "Your shell files are not touched. Hooks may not find playbook unless it is already on PATH.",
         "system-prompt" => "No file is copied, and `systemPrompt.enabled` is set to false, so `pb cc` starts with Claude Code's own prompt.",
         "telemetry" => "No variables are written. `playbook usage` reads transcripts instead.",
-        "collector-service" => "No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`.",
         "short-name" => "No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing.",
         "policy-guard" => "The policy guard setting is not changed. It is off by default, and its hook entry allows every call while off. A guard you turned on stays on until `hooks.policyGuard.enabled` is set to false. Turn it on later with `playbook config set --global hooks.policyGuard.enabled true`.",
         "attribution" => "Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link.",
@@ -209,7 +203,7 @@ pub fn status_of(step: &StepReport) -> Status {
 }
 
 /// The progress phase: one line per step, the totals and what to do next.
-pub fn progress(caps: &Caps, steps: &[StepReport], extra: &[String]) -> String {
+pub fn progress(caps: &Caps, steps: &[StepReport]) -> String {
     let mut out = render::heading(caps, "Applying");
     let mut statuses = Vec::new();
     for s in steps {
@@ -224,10 +218,6 @@ pub fn progress(caps: &Caps, steps: &[StepReport], extra: &[String]) -> String {
         "Run `playbook doctor` to check the result.",
         "Run `playbook uninstall --dry-run` to see how to undo everything.",
     ];
-    // Before the generic steps, since telemetry is lost until it is done.
-    for (n, line) in extra.iter().enumerate() {
-        next.insert(n, line);
-    }
     if counts.failed > 0 {
         next.insert(
             0,
@@ -258,7 +248,6 @@ mod tests {
             path: true,
             system_prompt: true,
             telemetry: true,
-            collector_service: true,
             short_name: true,
             policy_guard: true,
             attribution: true,
@@ -300,22 +289,13 @@ mod tests {
             StepReport::skipped("short-name", "you chose off"),
             StepReport::failed("trust", "cannot write"),
         ];
-        let got = progress(
-            &Caps::plain(80),
-            &steps,
-            &["Start the collector.".to_string()],
-        );
+        let got = progress(&Caps::plain(80), &steps);
         assert!(got.contains("[ok] hooks  29 entries added\n"));
         assert!(got.contains("[=] path  already set\n"));
         assert!(got.contains("[skip] short-name  you chose off\n"));
         assert!(got.contains("[fail] trust  cannot write\n"));
         assert!(got.contains("1 done, 1 unchanged, 1 skipped, 1 failed"));
         assert!(got.contains("Fix the failed lines"));
-        let next = got.split("Next steps").nth(1).unwrap_or_default();
-        assert!(
-            next.find("Start the collector") < next.find("Open a new terminal"),
-            "{got}"
-        );
     }
 
     #[test]
@@ -343,8 +323,8 @@ mod tests {
         assert!(!c.hooks && !c.statusline && !c.path);
         assert!(!c.system_prompt && !c.short_name);
         assert!(
-            !c.telemetry && !c.collector_service,
-            "these parts are on by default, so a no flips them off"
+            !c.telemetry,
+            "telemetry is on by default, so a no flips it off"
         );
         assert_eq!(
             c.attribution,
@@ -357,16 +337,15 @@ mod tests {
     fn the_telemetry_question_is_left_out_when_it_is_skipped() {
         let flags = Flags::default();
 
-        let skipped = items_for(&flags, false, &["telemetry", "collector-service"], &[], &[]);
+        let skipped = items_for(&flags, false, &["telemetry"], &[], &[]);
         let asked = items_for(&flags, false, &[], &["system-prompt"], &["attribution"]);
         let default =
             |list: &[Item], id: &str| list.iter().find(|i| i.choice.id == id).map(|i| i.default);
 
         assert!(!skipped.iter().any(|i| i.choice.id == "telemetry"));
-        assert!(!skipped.iter().any(|i| i.choice.id == "collector-service"));
         assert!(asked.iter().any(|i| i.choice.id == "telemetry"));
-        assert!(asked.iter().any(|i| i.choice.id == "collector-service"));
-        assert_eq!(skipped.len() + 2, asked.len());
+        assert!(!asked.iter().any(|i| i.choice.id == "collector-service"));
+        assert_eq!(skipped.len() + 1, asked.len());
         assert_eq!(default(&skipped, "attribution"), Some(false));
         assert_eq!(default(&asked, "attribution"), Some(true));
         assert_eq!(default(&asked, "system-prompt"), Some(false));

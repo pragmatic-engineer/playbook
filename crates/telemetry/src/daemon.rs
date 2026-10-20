@@ -37,6 +37,10 @@ const RETRY_PAUSE: Duration = Duration::from_millis(50);
 /// a descheduled starter's probe must not make a lone new collector give up.
 const INCOMPLETE_HOLDER_WAIT: Duration = Duration::from_secs(1);
 
+/// What to do when telemetry points at the collector and none runs: the
+/// commands and the session hook start it (`ensure`), so no service is needed.
+pub const START_HINT: &str = "run any playbook command or start a session";
+
 /// Test-only: the respawn stamp window in seconds, so a test can let every
 /// starter spawn. Read only in debug builds.
 pub const STAMP_SECS_VAR: &str = "PLAYBOOK_COLLECTOR_STAMP_SECS";

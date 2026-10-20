@@ -32,7 +32,7 @@ impl Host for Standalone {
     }
 
     /// `pbtop` may run next to a playbook from before the rename to `setup`,
-    /// or from before the collector-service part.
+    /// or from before the part existed.
     fn setup_command(&self, part: &str) -> String {
         match part {
             "telemetry" => {
@@ -42,6 +42,11 @@ impl Host for Standalone {
                 "playbook setup --only {other} (older versions: playbook init has no {other} part)"
             ),
         }
+    }
+
+    /// `pbtop` does not start a collector, so name the command that does.
+    fn start_hint(&self) -> String {
+        self.command("usage collect")
     }
 
     fn launch_args(&self) -> Vec<String> {
@@ -83,6 +88,20 @@ mod tests {
         assert_eq!(h.command("usage --summary"), "pbtop --summary");
         assert_eq!(h.command("usage"), "pbtop");
         assert_eq!(h.command("usage collect"), "pbtop collect");
+    }
+
+    #[test]
+    fn a_down_collector_names_the_collect_command() {
+        use crate::telemetry_status::{empty_panel_lines_for, Mode};
+
+        let down = empty_panel_lines_for(Some(Mode::OnCollectorDown), &Standalone);
+
+        assert_eq!(Standalone.start_hint(), "pbtop collect");
+        assert!(down.contains(&"pbtop collect".to_string()), "{down:?}");
+        assert!(
+            !down.iter().any(|l| l == crate::daemon::START_HINT),
+            "{down:?}"
+        );
     }
 
     #[test]
