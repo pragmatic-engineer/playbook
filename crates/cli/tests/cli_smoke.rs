@@ -498,6 +498,7 @@ fn table() -> Vec<Case> {
         case("init", &["init", "--yes"]).out("Applying").writes(),
         case("hooks list", &["hooks", "list"]).out("Safety guards").plain(),
         case("hooks explain-rm", &["hooks", "explain-rm", "ls"]).code(2).err("was removed"),
+        case("skills sync", &["skills", "sync", "--dry-run"]).out("no other agents found"),
         case("uninstall", &["uninstall"]).code(1).err("nothing was changed"),
         case("uninstall", &["uninstall", "--dry-run"]).pre(&["setup", "--yes"]),
         case("uninstall", &["uninstall", "--yes"]).pre(&["setup", "--yes"]).writes(),
