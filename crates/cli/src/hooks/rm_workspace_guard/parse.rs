@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Igor Santos
+// SPDX-License-Identifier: Apache-2.0
+
 /// The operator between `before` and `after`, such as `&&`, `||`, `;` or
 /// `|`, with whitespace and parentheses left out, or `;` for the first
 /// command. A line break alone reads as empty, which is not `&&`.
