@@ -17,7 +17,7 @@ permissions:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]'
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.event.sender.login == 'dependabot[bot]'
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -38,6 +38,8 @@ jobs:
         with:
           client-id: ${{ secrets.BOT_APP_CLIENT_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Auto-approve patch and minor updates
         if: steps.metadata.outputs.update-type != 'version-update:semver-major'
