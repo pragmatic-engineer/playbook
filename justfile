@@ -51,6 +51,14 @@ settings-shared write="0": build
 build:
     @cargo build --release --quiet
 
+# Print the lean build settings and a private target folder for this worktree (eval the output).
+dev-env:
+    @scripts/dev-disk.sh env
+
+# Remove idle target folders of the other worktrees of this repo (add --dry-run to preview).
+dev-clean *args:
+    @scripts/dev-disk.sh clean {{ args }}
+
 # The checks CI runs, so a green local run means a green PR.
 check: build
     cargo fmt --all --check
