@@ -15,20 +15,19 @@
 //!   block of a Claude Code settings file (user, project, local, managed),
 //! - a live `playbook usage collect` receiver is recorded in `collector.json`.
 //!
-//! When the first two hold, the usage database already exists (the user has
-//! used the usage view) and no receiver runs, `cc` starts one itself as a
-//! detached child (`playbook usage collect`, loopback only, owner-only state
-//! file) and waits briefly for it. It stops by itself after ten minutes with
-//! no traffic, and a second `cc` that starts at the same moment waits for the
-//! first one's receiver instead of starting another (a short lock file). If
-//! the receiver does not come up, the session starts without telemetry and
-//! falls back to transcripts. Nothing outside playbook's own data directory is
-//! written: no launchd or systemd file and no Claude Code setting.
+//! The collector itself is started by `ensure_for`: the `session-init` hook,
+//! the two prompt-only hooks and most playbook commands (`cc` included) ask
+//! for one, when telemetry points at it. It is a daemon that holds a lock for
+//! its whole life (see `playbook_telemetry::daemon`), so a running one costs a
+//! starter one open and one `try_lock`. Nothing outside playbook's own data
+//! directory is written: no launchd or systemd file and no Claude Code setting.
 //!
 //! Prompt, tool detail, tool content and raw body logging are never turned on
 //! and the account uuid is left out of the metrics.
 
-use crate::usage::collector::{probe, read_state, running, state_path, Probe, State};
+use crate::usage::collector::{read_state, running, state_path, State};
+pub use crate::usage::daemon::Ensured;
+use crate::usage::daemon::{self, EnsureOpts, LockState};
 use crate::usage::run::Paths;
 pub use crate::usage::telemetry_detect::{
     configured, files_configured, process_configured, Configured,
@@ -74,219 +73,195 @@ pub fn decide(
     }
 }
 
-const LOCK_STALE_SECONDS: u64 = 10;
-const START_WAIT: Duration = Duration::from_millis(1500);
-
-/// Spawns `cmd`, retrying a few times while the program file is busy. A binary
-/// that was just written or replaced (an update, or a script in a test) can
-/// report ETXTBSY for a moment while a concurrent fork still holds its write
-/// handle, and one failed spawn would leave the session without telemetry.
-fn spawn_retrying_busy(cmd: &mut std::process::Command) -> bool {
-    for attempt in 0..10 {
-        match cmd.spawn() {
-            Ok(_) => return true,
-            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 9 => {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return false,
-        }
-    }
-    false
-}
-
-/// Where the collector's messages go: appended to `log` when it can be opened,
-/// else dropped. Never the session's terminal.
-fn log_stdio(log: Option<&Path>) -> std::process::Stdio {
-    log.and_then(|p| {
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        options.open(p).ok()
-    })
-    .map_or_else(std::process::Stdio::null, std::process::Stdio::from)
-}
-
-/// Starts `exe usage collect` detached and waits for it to record itself in
-/// `state_file`. Returns the state when it is live. `started` is set only
-/// when this call started the process, so the note is printed once.
-fn start_collector(
-    state_file: &Path,
-    exe: &Path,
-    started: &mut bool,
-    wait: Duration,
-    log: Option<&Path>,
-) -> Option<State> {
-    let dir = state_file.parent()?;
-    let lock = dir.join("collector.spawn");
-    let lock_is_fresh = |p: &Path| {
-        std::fs::metadata(p)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-            .is_some_and(|age| age.as_secs() < LOCK_STALE_SECONDS)
-    };
-    let mut owner = false;
-    for _ in 0..2 {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock)
-        {
-            Ok(_) => {
-                owner = true;
-                break;
-            }
-            Err(_) if lock_is_fresh(&lock) => break,
-            Err(_) => {
-                let _ = std::fs::remove_file(&lock);
-            }
-        }
-    }
-    if owner {
-        let mut cmd = std::process::Command::new(exe);
-        cmd.args(["usage", "collect"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(log_stdio(log));
-        #[cfg(unix)]
-        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-        *started = spawn_retrying_busy(&mut cmd);
-    }
-    let mut found = None;
-    let deadline = std::time::Instant::now() + wait;
-    loop {
-        if let Some(state) = read_state(state_file).filter(running) {
-            found = Some(state);
-            break;
-        }
-        if std::time::Instant::now() >= deadline {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    // A lock whose collector has not shown up yet stays, and goes stale by
-    // itself, so a session that starts a moment later does not spawn a second
-    // one while the first is still coming up.
-    if owner && (found.is_some() || !*started) {
-        let _ = std::fs::remove_file(&lock);
-    }
-    found
-}
-
 /// The variables to set for a session started in `cwd`, empty when none.
+/// It only reads the recorded state: the command trigger (`on_start`) has
+/// already asked for a collector before `cc` gets here.
 pub fn session_env(home: &Path, cwd: &Path) -> Vec<(String, String)> {
-    let mode_auto = matches!(
-        crate::config::resolve_valid("usage.telemetry", home, None),
-        Ok((Value::String(v), _, _)) if v == "auto"
-    );
-    if !mode_auto {
+    if !telemetry_auto(home) {
         return Vec::new();
     }
-    let mut paths = Paths::from_home(home);
-    paths.db = crate::common::paths::usage_db_dir().join("usage.db");
-    let state_file = state_path(&paths);
-    let mut collector = read_state(&state_file);
+    let collector = read_state(&state_path(&Paths::from_home(home)));
     let kind = configured(home, cwd, collector.as_ref().map(|s| s.port));
-    // Settings that init wrote already point the session at the collector,
-    // so only the collector needs to be up; nothing more is set here.
-    let wanted = matches!(kind, Configured::Nothing | Configured::Playbook);
-    // A listener that is not a playbook collector (a reused port) is down.
-    let down = !collector
-        .as_ref()
-        .is_some_and(|s| running(s) && probe(s.port) == Probe::Collector);
-    if wanted && down && state_file.with_file_name("usage.db").exists() {
-        if let Ok(exe) = std::env::current_exe() {
-            let mut started = false;
-            collector =
-                start_collector(&state_file, &exe, &mut started, START_WAIT, None).or(collector);
-            if started && collector.is_some() {
-                eprintln!(
-                    "playbook: started the usage collector for telemetry (it stops after 10 idle minutes, see playbook usage status)"
-                );
-            }
+    decide(true, kind != Configured::Nothing, false, collector.as_ref())
+}
+
+/// What asks for a collector. Each has its own wait and stop budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trigger {
+    /// The `session-init` hook: may wait, probe and kill a hung collector.
+    SessionStart,
+    /// A hook wired only on `UserPromptSubmit`: no wait, no network call
+    /// while a collector at this version runs.
+    Prompt,
+    /// A playbook command (see `on_start`): like `Prompt`.
+    Command,
+}
+
+/// How long the session hook waits for a new collector to listen. Short,
+/// because the session start must not feel it.
+const SESSION_START_WAIT: Duration = Duration::from_millis(1200);
+/// How long the session hook gives a collector to stop before a `SIGKILL`.
+const SESSION_STOP_BUDGET: Duration = Duration::from_secs(2);
+/// How long a prompt or a command waits for an old collector to hand over.
+const QUICK_STOP_BUDGET: Duration = Duration::from_millis(400);
+
+impl Trigger {
+    fn opts(self) -> EnsureOpts {
+        match self {
+            Trigger::SessionStart => EnsureOpts {
+                wait: SESSION_START_WAIT,
+                probe: true,
+                stop_budget: SESSION_STOP_BUDGET,
+                may_kill: true,
+            },
+            Trigger::Prompt | Trigger::Command => EnsureOpts {
+                wait: Duration::ZERO,
+                probe: false,
+                stop_budget: QUICK_STOP_BUDGET,
+                may_kill: false,
+            },
         }
     }
-    decide(
-        mode_auto,
-        kind != Configured::Nothing,
-        false,
-        collector.as_ref(),
+}
+
+/// Test-only opt-in. A debug build that cargo or nextest started spawns no
+/// collector without it: a spawned collector never idles out, so a test home
+/// that sets telemetry up would leave one running on a free port for good.
+pub const TEST_SPAWN_VAR: &str = "PLAYBOOK_COLLECTOR_TEST_SPAWN";
+
+/// Whether this process may spawn or replace a collector.
+fn spawn_allowed() -> bool {
+    let test_run = cfg!(debug_assertions) && crate::common::real_home::started_by_cargo();
+    !test_run || std::env::var_os(TEST_SPAWN_VAR).is_some_and(|v| v == "1")
+}
+
+/// Whether `usage.telemetry` is `auto`.
+fn telemetry_auto(home: &Path) -> bool {
+    matches!(
+        crate::config::resolve_valid("usage.telemetry", home, None),
+        Ok((Value::String(v), _, _)) if v == "auto"
     )
 }
 
-/// How long the SessionStart hook waits for a new collector to record itself.
-/// It stays short because the session start must not feel it.
-const SESSION_START_WAIT: Duration = Duration::from_millis(1200);
-
-/// What the SessionStart hook found and did about the collector.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Ensured {
-    /// Telemetry is not set up to use the playbook collector, or is switched
-    /// off, so nothing was started.
-    NotConfigured,
-    /// A collector was already answering.
-    Running,
-    /// This call started one.
-    Started,
-    /// It was down and did not come up in time (see `collector.log`).
-    Down,
+/// Whether the Claude Code user settings point telemetry at the playbook
+/// collector, the state the `telemetry` setup part writes. This is the
+/// consent for starting one.
+pub fn telemetry_points_here(home: &Path) -> bool {
+    use crate::usage::telemetry_detect::configured_from_files;
+    let port = read_state(&state_path(&Paths::from_home(home)))
+        .map(|s| s.port)
+        .filter(|p| *p != 0);
+    configured_from_files(home, home, port) == Configured::Playbook
 }
 
-/// Makes sure the collector runs when the Claude Code settings point at it.
-/// One collector at a time: a fresh spawn lock means another session is
-/// already starting it. Bounded by `wait`, never panics, and its messages go
-/// to `collector.log` next to the state file.
-pub fn ensure_collector(home: &Path, cwd: &Path, exe: &Path, wait: Duration) -> Ensured {
-    let mode_auto = matches!(
-        crate::config::resolve_valid("usage.telemetry", home, None),
-        Ok((Value::String(v), _, _)) if v == "auto"
-    );
-    if !mode_auto {
-        return Ensured::NotConfigured;
-    }
-    let state_file = state_path(&Paths::from_home(home));
-    let Some(state) = read_state(&state_file).filter(|s| s.port != 0 && !s.token.is_empty()) else {
-        return Ensured::NotConfigured;
-    };
-    if configured(home, cwd, Some(state.port)) != Configured::Playbook {
-        return Ensured::NotConfigured;
-    }
-    if running(&state) && probe(state.port) == Probe::Collector {
-        return Ensured::Running;
-    }
-    // Something else listens on the recorded port: a new collector could not
-    // bind it, so do not spawn one or make the session wait. Doctor says why.
-    if crate::usage::collector::port_answers(state.port) {
-        return Ensured::Down;
-    }
-    let log = state_file.with_file_name("collector.log");
-    let mut started = false;
-    match start_collector(&state_file, exe, &mut started, wait, Some(&log)) {
-        Some(_) if started => Ensured::Started,
-        Some(_) => Ensured::Running,
-        None => Ensured::Down,
-    }
-}
-
-/// `ensure_collector` for the SessionStart hook: the real binary and the real
-/// wait.
-pub fn ensure_collector_for_session(home: &Path, cwd: &Path) -> Ensured {
+/// Makes sure a collector at this version runs for the user's home, as
+/// `trigger` allows. Never panics on its own and never prints.
+pub fn ensure_for(trigger: Trigger) -> Ensured {
     let Ok(exe) = std::env::current_exe() else {
         return Ensured::NotConfigured;
     };
-    ensure_collector(home, cwd, &exe, SESSION_START_WAIT)
+    ensure_at(&crate::common::home_dir(), &exe, trigger, false)
+}
+
+/// Like `ensure_for(Command)`, but also for a headless process. The service
+/// removal migration stops the collector the service ran, and open sessions
+/// of any kind still send to it, so the migration restarts one even when the
+/// heal that runs it is headless.
+pub fn ensure_after_removal() -> Ensured {
+    let Ok(exe) = std::env::current_exe() else {
+        return Ensured::NotConfigured;
+    };
+    ensure_at(&crate::common::home_dir(), &exe, Trigger::Command, true)
+}
+
+/// The gates, cheapest first, then `daemon::ensure`. A collector at this
+/// version costs the file gates plus one open and one `try_lock`. The
+/// `usage.telemetry` lookup can open `config.db`, so it runs after the lock
+/// check, with the consent check, whenever `daemon::ensure` could spawn: a
+/// missing or older holder, or a probe, which replaces a silent one. Only a
+/// current holder with no probe skips them.
+fn ensure_at(home: &Path, exe: &Path, trigger: Trigger, allow_headless: bool) -> Ensured {
+    if crate::common::home_error(home).is_some() {
+        return Ensured::NotConfigured;
+    }
+    let paths = Paths::from_home(home);
+    let recorded =
+        read_state(&state_path(&paths)).is_some_and(|s| s.port != 0 && !s.token.is_empty());
+    if !recorded
+        || (!allow_headless && crate::common::headless::is_headless())
+        || crate::common::real_home::refused(home)
+    {
+        return Ensured::NotConfigured;
+    }
+    let opts = trigger.opts();
+    // A holder still starting (no version yet) counts as current.
+    let current = matches!(
+        daemon::lock_state(&paths),
+        LockState::Held(h) if h.version.as_deref().is_none_or(|v| v == env!("CARGO_PKG_VERSION"))
+    );
+    if current && !opts.probe {
+        return Ensured::Running;
+    }
+    // Past this point `ensure` may spawn: a missing or older holder, or a
+    // probe that finds a current one silent and replaces it.
+    if !telemetry_auto(home) || !spawn_allowed() || !telemetry_points_here(home) {
+        return Ensured::NotConfigured;
+    }
+    daemon::ensure(&paths, exe, opts)
+}
+
+/// The two hooks wired only on `UserPromptSubmit`. The others that also
+/// run there (`memory-anchors`, `auto-guard`) are PreToolUse hooks too, and
+/// no tool hook may start anything.
+pub fn is_prompt_trigger(name: crate::HookName) -> bool {
+    matches!(
+        name,
+        crate::HookName::AutoModelDetect | crate::HookName::ContextHygiene
+    )
+}
+
+/// The prompt trigger for hook `name`: asks for a collector when it is one
+/// of the prompt-only hooks. A panic is dropped, so the hook never fails.
+pub fn on_hook(name: crate::HookName) {
+    if is_prompt_trigger(name) {
+        let _ = std::panic::catch_unwind(|| ensure_for(Trigger::Prompt));
+    }
+}
+
+/// Commands that never start a collector: the hot paths, the ones that
+/// inspect or change the install, and the collector's own commands.
+fn skips_start(command: &crate::Command) -> bool {
+    use crate::Command as C;
+    use crate::UsageCommand as U;
+    command.is_hot_path()
+        || matches!(
+            command,
+            C::Version
+                | C::Doctor { .. }
+                | C::Update { .. }
+                | C::Uninstall { .. }
+                | C::Migrate { .. }
+                | C::Setup { .. }
+                | C::Init { .. }
+                | C::State { .. }
+                | C::Usage {
+                    sub: Some(U::Collect { .. } | U::Warm | U::Prune { .. } | U::Stop),
+                    ..
+                }
+        )
+}
+
+/// The command trigger: before `command` runs, asks for a collector unless
+/// the command is skipped. A panic is dropped, so the command still runs.
+pub fn on_start(command: &crate::Command) {
+    if !skips_start(command) {
+        let _ = std::panic::catch_unwind(|| ensure_for(Trigger::Command));
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
-    use std::path::PathBuf;
-
-    /// Generous: the wait ends as soon as the collector is found, so it only
-    /// costs time when the host is too loaded to start a shell in 1.5 seconds.
-    const TEST_WAIT: Duration = Duration::from_secs(20);
 
     fn live() -> State {
         // Our own pid is alive; a bound listener makes the port answer.
@@ -354,253 +329,52 @@ mod tests {
         assert!(decide(true, false, false, Some(&dead)).is_empty());
     }
 
-    /// A fake `playbook` that records a live state (this test process and a
-    /// bound port) the way `usage collect` does, and counts its runs.
-    #[cfg(unix)]
-    fn fake_exe(dir: &Path, port: u16) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        let exe = dir.join("fake-playbook");
-        let script = format!(
-            "#!/bin/sh\necho \"$@\" >> '{d}/runs'\nprintf '{{\"pid\":{pid},\"port\":{port},\"token\":\"t\"}}' > '{d}/collector.json'\n",
-            d = dir.display(),
-            pid = std::process::id(),
-        );
-        std::fs::write(&exe, script).unwrap();
-        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-        exe
-    }
-
-    #[cfg(unix)]
-    fn listening() -> (std::net::TcpListener, u16) {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = l.local_addr().unwrap().port();
-        (l, port)
+    /// The prompt trigger is exactly the hooks wired only on
+    /// `UserPromptSubmit`, so no tool hook ever starts a collector.
+    #[test]
+    fn only_hooks_wired_on_the_prompt_alone_are_prompt_triggers() {
+        use clap::ValueEnum;
+        for name in crate::HookName::value_variants() {
+            let id = name.to_possible_value().unwrap();
+            let events: Vec<&str> = crate::init::wire::wired_hooks()
+                .filter(|h| h.name == id.get_name())
+                .map(|h| h.event)
+                .collect();
+            let prompt_only = !events.is_empty() && events.iter().all(|e| *e == "UserPromptSubmit");
+            assert_eq!(is_prompt_trigger(*name), prompt_only, "{}", id.get_name());
+        }
     }
 
     #[test]
-    #[cfg(unix)]
-    fn a_down_collector_is_started_detached_and_the_lock_is_released() {
-        let dir = scratch_dir("cc-start");
-        std::fs::create_dir_all(&dir).unwrap();
-        let (_l, port) = listening();
-        let exe = fake_exe(&dir, port);
-        let mut started = false;
-        let state = start_collector(
-            &dir.join("collector.json"),
-            &exe,
-            &mut started,
-            TEST_WAIT,
-            None,
-        )
-        .unwrap();
-        assert!(started);
-        assert_eq!((state.port, state.token.as_str()), (port, "t"));
-        assert_eq!(
-            std::fs::read_to_string(dir.join("runs")).unwrap().trim(),
-            "usage collect"
-        );
-        assert!(!dir.join("collector.spawn").exists());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn a_fresh_lock_means_another_cc_is_starting_one_so_nothing_is_spawned() {
-        let dir = scratch_dir("cc-lock");
-        std::fs::create_dir_all(&dir).unwrap();
-        let (_l, port) = listening();
-        let exe = fake_exe(&dir, port);
-        std::fs::write(dir.join("collector.spawn"), "").unwrap();
-        let mut started = false;
-        assert!(start_collector(
-            &dir.join("collector.json"),
-            &exe,
-            &mut started,
-            Duration::from_millis(300),
-            None
-        )
-        .is_none());
-        assert!(!started);
-        assert!(!dir.join("runs").exists());
-        assert!(dir.join("collector.spawn").exists(), "not ours to remove");
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn a_stale_lock_is_replaced() {
-        let dir = scratch_dir("cc-stale");
-        std::fs::create_dir_all(&dir).unwrap();
-        let (_l, port) = listening();
-        let exe = fake_exe(&dir, port);
-        let lock = std::fs::File::create(dir.join("collector.spawn")).unwrap();
-        lock.set_modified(std::time::SystemTime::now() - Duration::from_secs(60))
-            .unwrap();
-        let mut started = false;
-        assert!(start_collector(
-            &dir.join("collector.json"),
-            &exe,
-            &mut started,
-            TEST_WAIT,
-            None
-        )
-        .is_some());
-        assert!(started);
-    }
-
-    #[test]
-    fn a_missing_program_leaves_the_session_without_telemetry() {
-        let dir = scratch_dir("cc-missing");
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut started = false;
-        let state = start_collector(
-            &dir.join("collector.json"),
-            &dir.join("no-such-program"),
-            &mut started,
-            Duration::from_millis(100),
-            None,
-        );
-        assert!(state.is_none() && !started);
-        assert!(!dir.join("collector.spawn").exists());
-    }
-
-    /// A scratch home whose settings name the playbook collector on `port`,
-    /// with a state file for it, plus the folder the state file lives in.
-    #[cfg(unix)]
-    fn configured_home(name: &str, port: u16, pid: u32) -> (PathBuf, PathBuf) {
-        crate::usage_host::install();
-        let home = scratch_dir(name);
-        let state_file = state_path(&Paths::from_home(&home));
-        let data = state_file.parent().unwrap().to_path_buf();
-        std::fs::create_dir_all(&data).unwrap();
-        std::fs::write(
-            &state_file,
-            format!("{{\"pid\":{pid},\"port\":{port},\"token\":\"t\"}}"),
-        )
-        .unwrap();
-        std::fs::create_dir_all(home.join(".claude")).unwrap();
-        std::fs::write(
-            home.join(".claude/settings.json"),
-            format!(
-                "{{\"env\":{{\"CLAUDE_CODE_ENABLE_TELEMETRY\":\"1\",\"OTEL_EXPORTER_OTLP_ENDPOINT\":\"http://127.0.0.1:{port}\"}}}}"
-            ),
-        )
-        .unwrap();
-        (home, data)
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn the_session_hook_starts_a_down_collector_once_the_settings_point_at_it() {
-        let (_l, port) = listening();
-        let unused = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        // The state names a port nobody listens on; the fake collector then
-        // records the live one, as a real start would.
-        let (home, data) = configured_home("cc-ensure-start", unused, 0);
-        let exe = fake_exe(&data, port);
-
-        let got = ensure_collector(&home, &home, &exe, TEST_WAIT);
-
-        assert_eq!(got, Ensured::Started);
-        assert_eq!(
-            std::fs::read_to_string(data.join("runs")).unwrap().trim(),
-            "usage collect"
-        );
-        assert!(data.join("collector.log").is_file());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn a_second_session_at_the_same_moment_does_not_start_a_second_collector() {
-        let (_l, port) = listening();
-        let (home, data) = configured_home("cc-ensure-parallel", port, 0);
-        let exe = fake_exe(&data, port);
-        std::fs::write(data.join("collector.spawn"), "").unwrap();
-
-        let got = ensure_collector(&home, &home, &exe, Duration::from_millis(300));
-
-        assert_eq!(got, Ensured::Down);
-        assert!(!data.join("runs").exists());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn nothing_is_started_when_telemetry_is_not_pointed_at_the_collector() {
-        let (_l, port) = listening();
-        let (home, data) = configured_home("cc-ensure-other", port, 0);
-        std::fs::write(
-            home.join(".claude/settings.json"),
-            r#"{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"https://mine.example"}}"#,
-        )
-        .unwrap();
-        let exe = fake_exe(&data, port);
-
-        let got = ensure_collector(&home, &home, &exe, Duration::from_millis(300));
-
-        assert_eq!(got, Ensured::NotConfigured);
-        assert!(!data.join("runs").exists());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn nothing_is_started_before_init_has_recorded_a_collector() {
-        crate::usage_host::install();
-        let home = scratch_dir("cc-ensure-fresh");
-        let exe = home.join("no-such-program");
-
-        let got = ensure_collector(&home, &home, &exe, Duration::from_millis(300));
-
-        assert_eq!(got, Ensured::NotConfigured);
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn a_program_that_cannot_start_is_reported_down_and_never_panics() {
-        let (home, _data) = configured_home("cc-ensure-broken", 1, 0);
-        let exe = home.join("no-such-program");
-
-        let got = ensure_collector(&home, &home, &exe, Duration::from_millis(200));
-
-        assert_eq!(got, Ensured::Down);
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn a_foreign_listener_on_the_recorded_port_spawns_nothing_and_does_not_wait() {
-        let (_holder, port) = listening();
-        let (home, data) = configured_home("cc-ensure-foreign", port, 0);
-        let exe = fake_exe(&data, port);
-        let began = std::time::Instant::now();
-
-        let got = ensure_collector(&home, &home, &exe, Duration::from_secs(30));
-
-        assert_eq!(got, Ensured::Down);
-        assert!(!data.join("runs").exists());
-        assert!(began.elapsed() < Duration::from_secs(5));
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn a_lock_stays_when_the_collector_has_not_shown_up_yet() {
-        let dir = scratch_dir("cc-lock-stays");
-        std::fs::create_dir_all(&dir).unwrap();
-        let exe = dir.join("slow-playbook");
-        std::fs::write(&exe, "#!/bin/sh\nexit 0\n").unwrap();
-        std::fs::set_permissions(&exe, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-            .unwrap();
-        let mut started = false;
-
-        let state = start_collector(
-            &dir.join("collector.json"),
-            &exe,
-            &mut started,
-            Duration::from_millis(200),
-            None,
-        );
-
-        assert!(state.is_none() && started);
-        assert!(dir.join("collector.spawn").exists());
+    fn the_skip_list_keeps_install_and_collector_commands_from_starting_one() {
+        use clap::Parser;
+        let parse = |args: &[&str]| {
+            crate::Cli::try_parse_from(std::iter::once("playbook").chain(args.iter().copied()))
+                .unwrap()
+                .command
+        };
+        for args in [
+            &["version"][..],
+            &["doctor"],
+            &["migrate"],
+            &["setup", "--yes"],
+            &["uninstall"],
+            &["state", "list"],
+            &["usage", "collect"],
+            &["usage", "stop"],
+            &["usage", "warm"],
+            &["usage", "prune"],
+            &["hook", "context-hygiene"],
+        ] {
+            assert!(skips_start(&parse(args)), "{args:?}");
+        }
+        for args in [
+            &["sessions"][..],
+            &["cc"],
+            &["usage", "status"],
+            &["config", "list"],
+        ] {
+            assert!(!skips_start(&parse(args)), "{args:?}");
+        }
     }
 }

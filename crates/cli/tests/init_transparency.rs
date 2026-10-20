@@ -93,15 +93,15 @@ fn a_dry_run_changes_nothing_and_exits_zero() {
 }
 
 #[test]
-fn a_dry_run_with_the_disk_ballast_names_it_and_writes_no_file() {
-    let sb = Sandbox::new("dry-ballast");
+fn a_dry_run_with_the_policy_guard_names_the_key_and_stores_nothing() {
+    let sb = Sandbox::new("dry-policy-guard");
     let before = sb.snapshot();
 
-    let out = sb.run(&["setup", "--dry-run", "--disk-ballast"]);
+    let out = sb.run(&["setup", "--dry-run", "--policy-guard"]);
 
     let text = stdout(&out);
     assert!(out.status.success(), "{text}");
-    for needle in ["disk-ballast (on)", "ballast.bin: writes"] {
+    for needle in ["policy-guard (on)", "hooks.policyGuard.enabled"] {
         assert!(text.contains(needle), "missing `{needle}` in:\n{text}");
     }
     assert_eq!(sb.snapshot(), before, "a dry run wrote a file");
@@ -143,10 +143,6 @@ fn a_dry_run_describes_what_a_real_run_then_does() {
     let real = sb.run(&["setup", "--yes"]);
 
     assert!(real.status.success());
-    assert!(
-        !sb.home.join(".cache/playbook/ballast/ballast.bin").exists(),
-        "`--yes` wrote the ballast"
-    );
     let settings = fs::read_to_string(sb.home.join(".claude/settings.json")).unwrap();
     assert!(settings.contains("\"statusLine\"") && plan.contains("add statusLine"));
     assert!(!fs::read_to_string(sb.home.join(".zshrc"))

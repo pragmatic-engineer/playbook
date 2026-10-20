@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `playbook plan cleanup`: removes the scratch files `/playbook:plan` leaves in
-//! the plans folder, which sits outside the repo and so cannot be removed with
-//! `rm` under the `rm_workspace_guard` hook.
+//! the plans folder, so a model does not need an `rm` of the whole folder.
 //!
 //! Only three name shapes are ever touched: `<slug>.checkpoint.md`,
 //! `<slug>.checkpoint.md.lock` and `<slug>.gate-source*.md`. The final plan

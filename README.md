@@ -2,7 +2,24 @@
 
 An opinionated toolkit for Claude Code. It gives you slash commands, skills and subagents for planning, building, reviewing and remembering, plus a small Rust binary that runs the safety guards, hooks, launcher and status line.
 
+Only want the usage dashboard? Jump to [pbtop](#pbtop-the-usage-dashboard-on-its-own).
+
 The skills ship as a Claude Code plugin and work on their own. The binary, which adds the guards, hooks, status line and launcher, is optional.
+
+## pbtop: the usage dashboard on its own
+
+Looking for `pbtop`? It is the Claude Code usage and cost dashboard as one small program, for a machine without playbook. Install it with either command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install-pbtop.sh | sh
+brew install pragmatic-engineer/tap/pbtop
+```
+
+Then run `pbtop`, `pbtop --summary` or `pbtop --json`. With playbook installed you do not need it: `playbook usage` runs the same code.
+
+The script checks the checksum of the `pbtop` archive and its build attestation when `gh` can check it, then installs `pbtop` into `~/.local/bin`. It needs `bash` and `curl`. The [install guide](docs/guides/00-install.md#optional-pbtop-alone) has the details and a route without `curl | sh`. The code index has no standalone tool. It ships inside `playbook` as `playbook code`.
+
+The `playbook-telemetry` command and Homebrew formula are deprecated, and its old repository is archived. If you installed the formula, run `brew uninstall playbook-telemetry && brew install pragmatic-engineer/tap/pbtop`, or install playbook and use `playbook usage`. A script that calls `playbook-telemetry` should call `pbtop` with the same arguments.
 
 ## Quick start
 
@@ -50,8 +67,6 @@ A Homebrew install updates with `brew upgrade playbook`. On a brew-managed insta
 - `playbook doctor` checks that settings point at the collector, that it runs, and that rows arrived in the last day.
 - `playbook uninstall` removes exactly the keys setup wrote and puts back any value they replaced, unless you changed a key since.
 
-Optional: `pbtop`, the standalone usage dashboard for a machine without playbook. See [pbtop](#pbtop).
-
 Pin a version with `PLAYBOOK_REF=v0.38.0`. Everything else about installing, including a route with no `curl | bash`, is in the [install guide](docs/guides/00-install.md).
 
 | Mode | What you get | Commands |
@@ -61,17 +76,6 @@ Pin a version with `PLAYBOOK_REF=v0.38.0`. Everything else about installing, inc
 | Both (recommended) | Everything | Both of the above |
 
 The hooks, guards, status line and usage need the binary. Only the skill text works without it. See [Pick an install mode](docs/guides/00-install.md#pick-an-install-mode).
-
-## pbtop
-
-`pbtop` is the usage dashboard on its own, for a machine without playbook. With playbook installed you do not need it, because `playbook usage` runs the same code. From release 0.35.0 there are two ways to install it:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install-pbtop.sh | sh
-brew install pragmatic-engineer/tap/pbtop
-```
-
-The script checks the `pbtop` archive like the `playbook` binary (its line in `SHA256SUMS`, its build attestation when `gh` can check it, and `pbtop --version`) and installs `pbtop` into `~/.local/bin`. It needs `bash` and `curl`. Then run `pbtop`, `pbtop --summary` or `pbtop --json`. The code index has no standalone tool. It ships inside `playbook` as `playbook code`.
 
 ## A first session
 

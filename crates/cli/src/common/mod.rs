@@ -5,6 +5,7 @@
 //! Every hook in `src/hooks` uses this module instead of re-deriving these
 //! primitives, so there is exactly one implementation to keep correct.
 
+pub mod account;
 pub mod attribution;
 pub mod cli_opts;
 pub mod config_hash;

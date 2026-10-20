@@ -30,18 +30,9 @@ pub const KEYS: &[&str] = &[
     "usage.autoIngestMinutes",
     "usage.budget.monthlyUsd",
     "usage.budget.weeklyUsd",
-    "usage.plan",
-    "usage.spend.enabled",
-    "usage.spend.cacheSeconds",
     "usage.ui.layout",
     "usage.ui.state",
 ];
-
-/// The shortest and longest `usage.spend.cacheSeconds`.
-pub const SPEND_CACHE_SECONDS: std::ops::RangeInclusive<i64> = 30..=600;
-
-/// The default `usage.spend.cacheSeconds`.
-const DEFAULT_SPEND_CACHE_SECONDS: i64 = 60;
 
 /// The built-in default of `key`, `None` for a key that is not a usage key.
 pub fn default_value(key: &str) -> Option<Value> {
@@ -56,9 +47,6 @@ pub fn default_value(key: &str) -> Option<Value> {
         "usage.telemetryRetentionDays" => Value::from(90),
         "usage.telemetryMaxRows" => Value::from(500_000),
         "usage.budget.monthlyUsd" | "usage.budget.weeklyUsd" => Value::from(0),
-        "usage.plan" => Value::from("auto"),
-        "usage.spend.enabled" => Value::from(false),
-        "usage.spend.cacheSeconds" => Value::from(DEFAULT_SPEND_CACHE_SECONDS),
         "usage.ui.layout" | "usage.ui.state" => Value::from(""),
         _ => return None,
     })
@@ -70,16 +58,6 @@ pub fn allowed_values(key: &str) -> Option<&'static [&'static str]> {
         "usage.theme" => Some(&["default", "dark", "light", "mono"]),
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
         "usage.timeZone" => Some(&["local", "utc"]),
-        "usage.plan" => Some(&[
-            "auto",
-            "pro",
-            "max5x",
-            "max20x",
-            "team",
-            "enterprise",
-            "api",
-            "cloud",
-        ]),
         "usage.telemetry" => Some(&["auto", "off"]),
         _ => None,
     }
@@ -108,16 +86,6 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         },
         "usage.autoIngest" if !value.is_boolean() => Err("expected true or false".into()),
         "usage.autoIngest" => Ok(()),
-        "usage.spend.enabled" if !value.is_boolean() => Err("expected true or false".into()),
-        "usage.spend.enabled" => Ok(()),
-        "usage.spend.cacheSeconds" => match value.as_i64() {
-            Some(n) if SPEND_CACHE_SECONDS.contains(&n) => Ok(()),
-            _ => Err(format!(
-                "expected a whole number between {} and {}",
-                SPEND_CACHE_SECONDS.start(),
-                SPEND_CACHE_SECONDS.end()
-            )),
-        },
         _ => match value.as_f64() {
             Some(n) if n >= 0.0 => Ok(()),
             _ => Err("expected a number of zero or more".into()),
@@ -420,60 +388,5 @@ mod tests {
 
         assert!(other.is_err());
         assert!(bad.is_err());
-    }
-
-    #[test]
-    fn the_spend_and_plan_keys_default_to_off_sixty_seconds_and_auto() {
-        let h = home("cfg-spend-defaults");
-
-        assert_eq!(resolve(&h, "usage.spend.enabled"), Some(Value::from(false)));
-        assert_eq!(
-            resolve(&h, "usage.spend.cacheSeconds"),
-            Some(Value::from(60))
-        );
-        assert_eq!(resolve(&h, "usage.plan"), Some(Value::from("auto")));
-    }
-
-    #[test]
-    fn spend_enabled_is_read_from_the_global_tier_only() {
-        let h = home("cfg-spend-tiers");
-        let conn = rusqlite::Connection::open(root(&h).join("playbook.db")).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE config (tier TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (tier, scope, key)) WITHOUT ROWID;
-             INSERT INTO config VALUES ('repo', 'owner/repo', 'usage.spend.enabled', 'true', 0);
-             INSERT INTO config VALUES ('org', 'owner', 'usage.spend.enabled', 'true', 0);",
-        )
-        .unwrap();
-
-        assert_eq!(resolve(&h, "usage.spend.enabled"), Some(Value::from(false)));
-
-        put_store(&h, "usage.spend.enabled", "true");
-
-        assert_eq!(resolve(&h, "usage.spend.enabled"), Some(Value::from(true)));
-    }
-
-    #[test]
-    fn bad_spend_and_plan_values_fall_back_to_the_defaults() {
-        let h = home("cfg-spend-invalid");
-        put_store(&h, "usage.spend.enabled", "\"yes\"");
-        put_store(&h, "usage.spend.cacheSeconds", "5");
-        put_store(&h, "usage.plan", "\"free\"");
-
-        assert_eq!(resolve(&h, "usage.spend.enabled"), Some(Value::from(false)));
-        assert_eq!(
-            resolve(&h, "usage.spend.cacheSeconds"),
-            Some(Value::from(60))
-        );
-        assert_eq!(resolve(&h, "usage.plan"), Some(Value::from("auto")));
-    }
-
-    #[test]
-    fn the_cache_seconds_range_is_inclusive() {
-        let ok = |n: i64| validate("usage.spend.cacheSeconds", &Value::from(n)).is_ok();
-
-        assert!(!ok(29) && ok(30) && ok(600) && !ok(601));
-        assert!(validate("usage.spend.cacheSeconds", &Value::from(60.5)).is_err());
-        assert!(validate("usage.spend.enabled", &Value::from(true)).is_ok());
-        assert!(validate("usage.plan", &Value::from("max5x")).is_ok());
     }
 }

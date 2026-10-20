@@ -5,12 +5,18 @@
 //! `~/.claude/hooks/` that no longer exists (ADR 0034 decision 9). Older
 //! installs placed those scripts; the binary runs the hooks now, so a missing
 //! script means the entry is dead and fails on every event. An entry whose
-//! script still exists is the user's own and stays.
+//! script still exists is the user's own and stays. The `playbook hook` entry
+//! of a hook the binary no longer has (`RETIRED_HOOKS`) is dead too.
 
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
 
 const INTERPRETERS: [&str; 3] = ["bash", "sh", "python3"];
+
+/// Commands of hooks playbook wrote once and removed. Their entries are dead
+/// even though no script is missing. The disk guard went in 0.38.0 and was
+/// removed again.
+const RETIRED_HOOKS: [&str; 1] = ["playbook hook disk-guard"];
 
 /// Characters that make a command more than one program run, so a missing
 /// first script does not make the whole entry dead.
@@ -58,9 +64,11 @@ fn unquote(token: &str) -> Option<&str> {
     Some(token)
 }
 
-/// Whether `command` runs a script under a Claude `hooks` folder that is gone.
+/// Whether `command` runs a script under a Claude `hooks` folder that is gone,
+/// or is the entry of a retired hook.
 pub fn is_dead(command: &str, home: &Path, claude_home: &Path) -> bool {
-    hook_script(command, home, claude_home).is_some_and(|script| !script.exists())
+    RETIRED_HOOKS.contains(&command.trim())
+        || hook_script(command, home, claude_home).is_some_and(|script| !script.exists())
 }
 
 /// The dead hook commands in `settings`, each once, in file order.
@@ -87,7 +95,7 @@ pub fn dead_commands(settings: &Value, home: &Path, claude_home: &Path) -> Vec<S
     out
 }
 
-fn read_settings(path: &Path) -> Option<Value> {
+pub(super) fn read_settings(path: &Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
@@ -96,11 +104,47 @@ pub fn pending(settings_path: &Path, home: &Path, claude_home: &Path) -> Option<
     let dead = dead_commands(&read_settings(settings_path)?, home, claude_home);
     (!dead.is_empty()).then(|| {
         format!(
-            "settings.json has {} hook(s) whose script is gone: {}",
+            "settings.json has {} hook(s) that no longer exist: {}",
             dead.len(),
             dead.join(", ")
         )
     })
+}
+
+/// Removes every hook entry `is_target` accepts, then any matcher group or
+/// event that leaves empty. A group or event empty before stays. Returns how
+/// many entries went.
+pub(super) fn drop_entries(settings: &mut Value, is_target: impl Fn(&Value) -> bool) -> usize {
+    let mut removed = 0;
+    if let Some(events) = settings.get_mut("hooks").and_then(Value::as_object_mut) {
+        let mut emptied_events = Vec::new();
+        for (event, groups) in events.iter_mut() {
+            let Some(groups) = groups.as_array_mut() else {
+                continue;
+            };
+            let before = groups.len();
+            groups.retain_mut(|group| {
+                let Some(entries) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
+                    return true;
+                };
+                let had = entries.len();
+                entries.retain(|e| !is_target(e));
+                removed += had - entries.len();
+                entries.len() == had || !entries.is_empty()
+            });
+            if groups.is_empty() && before > 0 {
+                emptied_events.push(event.clone());
+            }
+        }
+        let emptied = !emptied_events.is_empty();
+        for event in emptied_events {
+            events.remove(&event);
+        }
+        if emptied && events.is_empty() {
+            settings.as_object_mut().map(|root| root.remove("hooks"));
+        }
+    }
+    removed
 }
 
 /// Removes the dead entries from `settings_path` after a backup under
@@ -120,38 +164,11 @@ pub fn remove(
     if dead.is_empty() {
         return Ok(dead);
     }
-    let is_dead_entry = |e: &Value| {
+    let _ = drop_entries(&mut settings, |e| {
         e.get("command")
             .and_then(Value::as_str)
             .is_some_and(|c| dead.iter().any(|d| d == c))
-    };
-    if let Some(events) = settings.get_mut("hooks").and_then(Value::as_object_mut) {
-        let mut emptied_events = Vec::new();
-        for (event, groups) in events.iter_mut() {
-            let Some(groups) = groups.as_array_mut() else {
-                continue;
-            };
-            let before = groups.len();
-            groups.retain_mut(|group| {
-                let Some(entries) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
-                    return true;
-                };
-                let had = entries.len();
-                entries.retain(|e| !is_dead_entry(e));
-                entries.len() == had || !entries.is_empty()
-            });
-            if groups.is_empty() && before > 0 {
-                emptied_events.push(event.clone());
-            }
-        }
-        let emptied = !emptied_events.is_empty();
-        for event in emptied_events {
-            events.remove(&event);
-        }
-        if emptied && events.is_empty() {
-            settings.as_object_mut().map(|root| root.remove("hooks"));
-        }
-    }
+    });
     let rendered = format!("{settings:#}\n");
     crate::init::run::backup_then_write(settings_path, &rendered, &[], epoch)?;
     Ok(dead)
@@ -185,6 +202,14 @@ mod tests {
         ] {
             assert!(is_dead(cmd, &home, &ch), "{cmd}");
         }
+    }
+
+    #[test]
+    fn the_entry_of_a_retired_hook_is_dead_and_a_live_hook_is_not() {
+        let (home, ch) = setup("dead-retired");
+        assert!(is_dead("playbook hook disk-guard", &home, &ch));
+        assert!(!is_dead("playbook hook policy-guard", &home, &ch));
+        assert!(!is_dead("playbook hook disk-guard-extra", &home, &ch));
     }
 
     #[test]

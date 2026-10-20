@@ -43,9 +43,13 @@ Combined flags are fine: `-Au`, `-a -u`, etc. No flags means commit only what is
 7. Never amend automatically: only when `AMEND_COMMIT=true`.
 8. Pass commit messages on stdin with a heredoc to preserve formatting, never `-m "..."` for multi-line.
 
+## Worktree guard (first)
+
+Before anything else, run the worktree guard in the `playbook:writing-style` skill's `references/worktree-guard.md` (invoke the skill and read the file from the skill base directory it shows). The caller gives "Worktree root: <path>, branch: <name>" in this command's prompt. On a mismatch stop with its `WRONG_DIRECTORY` line and commit nothing.
+
 ## Step 0: Read the run mode
 
-Do this first. Read the run mode. Intent: mode-status. If the session's tool map (printed at session start) lists it, use that command, with `--json`, adding `--flag auto` or `--flag ask` when the arguments hold `--auto` or `--ask` (check for both first and stop on a conflict). It reports `mode` (`ask` or `auto`), `source`, `hook_mode` and `warning`; if `warning` is not empty, print it once. If it fails, do not stop and do not retry: run in ask mode and print one line. Otherwise do this: if the arguments hold both `--auto` and `--ask`, stop with one line: "--auto and --ask conflict; pass one." `--auto` means auto mode. Anything else means ask mode, the default.
+Do this right after the guard. Read the run mode. Intent: mode-status. If the session's tool map (printed at session start) lists it, use that command, with `--json`, adding `--flag auto` or `--flag ask` when the arguments hold `--auto` or `--ask` (check for both first and stop on a conflict). It reports `mode` (`ask` or `auto`), `source`, `hook_mode` and `warning`; if `warning` is not empty, print it once. If it fails, do not stop and do not retry: run in ask mode and print one line. Otherwise do this: if the arguments hold both `--auto` and `--ask`, stop with one line: "--auto and --ask conflict; pass one." `--auto` means auto mode. Anything else means ask mode, the default.
 
 - **`ask` mode:** behave exactly as this file describes.
 - **`auto` mode:** follow the Auto path below, and treat Step 4 as auto.

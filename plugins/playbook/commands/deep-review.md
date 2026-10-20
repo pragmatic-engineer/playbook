@@ -154,8 +154,6 @@ Run the project's own check suite once in the worktree, picking the toolchain by
 | `go.mod` | none | `go vet ./...`, `go test ./...` |
 | `Cargo.toml` | none | `cargo check`, `cargo test` |
 
-In a Rust checkout, prefix each cargo command with the variable on the same command line, for example `cd "$WT" && CARGO_TARGET_DIR="$(playbook disk target-dir)" cargo test`, so the review build gets its own target folder and does not grow the main one. `playbook disk clean` removes it once idle.
-
 With none of these files, the output is `[no recognised toolchain; checks skipped]`.
 
 A failing install or check is printed as output, never an error: never block the review. Keep the output as `CHECK_OUTPUT` so Step 3 can embed it verbatim in each subagent prompt.

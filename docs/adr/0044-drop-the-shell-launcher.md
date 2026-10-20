@@ -1,8 +1,8 @@
 # ADR-0044: Drop the Shell Launcher and Turn Every Setup Part On With `--yes`
 
-- **Status:** Accepted. Amended on 2026-10-19, see [Amendment 2026-10-19: remove `shell-init`](#amendment-2026-10-19-remove-shell-init).
+- **Status:** Accepted. Amended on 2026-10-19, see [Amendment 2026-10-19: remove `shell-init`](#amendment-2026-10-19-remove-shell-init). The `collector-service` row of decision 5 and the collector start row below are superseded by [ADR 0050](0050-collector-daemon-started-by-commands.md): the part is gone, and playbook commands and hooks start the collector.
 - **Date created:** 2026-10-18
-- **Date modified:** 2026-10-19
+- **Date modified:** 2026-10-20
 - **Amends:** [ADR 0007](0007-rust-binary-for-hooks-and-launcher.md), which kept a small shell function per shell family for the `cd` into a worktree. Decision 6 of [ADR 0034](0034-self-healing-upgrades.md), for migration `0007-shell-init-rc-line`. The `--yes` defaults in [ADR 0033](0033-telemetry-on-by-default.md), [ADR 0042](0042-attribution-off-in-setup.md) and [ADR 0043](0043-collector-service-in-setup.md), which this record extends to every part. Decision 5 of [ADR 0040](0040-rename-init-to-setup.md), which kept the `shell-init` name, through the amendment of 2026-10-19.
 
 ## Context

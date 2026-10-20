@@ -214,12 +214,18 @@ impl Outcome {
     /// report. The items that need the user go through `crate::pending`.
     pub fn line(&self) -> Option<String> {
         let mut parts = Vec::new();
-        if !self.changed.is_empty() {
+        // The policy guard and rm guard notices change no file, so they are not
+        // counted.
+        let (notices, files): (Vec<_>, Vec<_>) = self.changed.iter().partition(|s| {
+            s.name == migrate::RM_GUARD_NOTICE_STEP || s.name == migrate::POLICY_GUARD_NOTICE_STEP
+        });
+        if !files.is_empty() {
             parts.push(format!(
                 "updated {} of its own files after the upgrade",
-                self.changed.len()
+                files.len()
             ));
         }
+        parts.extend(notices.iter().map(|s| s.detail.clone()));
         if !self.failed.is_empty() {
             parts.push(format!(
                 "{} migration(s) failed: run `playbook migrate`",
@@ -292,12 +298,6 @@ pub fn needs_you(message: &str, command: Option<&str>) -> String {
 
 /// Runs the heal for `trigger` at `now` (epoch seconds).
 pub fn run(ctx: &Ctx, trigger: Trigger, now: u64) -> Outcome {
-    run_shown(ctx, trigger, now, true)
-}
-
-/// [`run`], where `shown` says whether a person sees the open items. A
-/// headless session hook passes false, so it does not use up a reminder.
-fn run_shown(ctx: &Ctx, trigger: Trigger, now: u64, shown: bool) -> Outcome {
     if crate::common::real_home::refused(&ctx.home) {
         return Outcome::skipped(Skip::RealHomeUnderTest);
     }
@@ -315,15 +315,6 @@ fn run_shown(ctx: &Ctx, trigger: Trigger, now: u64, shown: bool) -> Outcome {
     // heal returns, whether it succeeded or not.
     let pending = crate::notices::prepare(&root, record.binary.as_deref(), older);
     let out = heal_for(ctx, trigger, now, &root, &record, order);
-    // Every trigger but setup prints the open items, so the one reminder of
-    // the `collector-service` migration counts as shown here. Setup asks the question itself.
-    let reminded = out
-        .open
-        .iter()
-        .any(|i| i.id == migrate::COLLECTOR_SERVICE_MIGRATION);
-    if reminded && shown && !matches!(trigger, Trigger::Init { .. }) {
-        crate::init::collector_service::record_reminder(&ctx.home);
-    }
     Outcome {
         notices: pending.commit(&root),
         ..out
@@ -477,7 +468,7 @@ pub fn session_line(home: &Path) -> Option<String> {
     let now = crate::common::time::now_epoch_secs();
     std::panic::catch_unwind(|| {
         let shown = !crate::common::headless::is_headless();
-        let out = run_shown(&ctx, Trigger::Hook, now, shown);
+        let out = run(&ctx, Trigger::Hook, now);
         notice(home, &out, now, shown)
     })
     .ok()?
@@ -498,7 +489,13 @@ fn notice(home: &Path, out: &Outcome, now: u64, shown: bool) -> Option<String> {
             migrations: out.listed_open(),
             session_plugin: std::env::var_os("CLAUDE_PLUGIN_ROOT").is_some_and(|v| !v.is_empty()),
         };
-        crate::pending::session_notice(&root, &out.items(home), now, shown, prune)
+        let mut open = out.items(home);
+        // An update already started says it is updating, so the manual fix
+        // would contradict it.
+        if crate::plugin_update::in_flight(&root, env!("CARGO_PKG_VERSION"), now) {
+            open.retain(|i| !i.fix.starts_with(crate::plugin_update::COMMAND_PREFIX));
+        }
+        crate::pending::session_notice(&root, &open, now, shown, prune)
     };
     let block = out.notices.render();
     let parts: Vec<String> = out
@@ -752,6 +749,20 @@ mod tests {
     }
 
     #[test]
+    fn the_rm_guard_notice_is_shown_but_not_counted_as_a_file() {
+        let out = Outcome {
+            changed: vec![crate::init::run::StepReport::wired(
+                migrate::RM_GUARD_NOTICE_STEP,
+                "the rm guard changed",
+            )],
+            ..Outcome::default()
+        };
+        let line = out.line().unwrap();
+        assert!(line.contains("the rm guard changed"), "{line}");
+        assert!(!line.contains("updated"), "{line}");
+    }
+
+    #[test]
     fn an_older_record_runs_the_owned_migrations_and_moves_the_record_up() {
         // Arrange: an old config-hash script left by an earlier install.
         let home = scratch_dir("heal-upgrade");
@@ -924,6 +935,27 @@ mod tests {
         assert!(Record::read(&root(&home)).unwrap().pending.is_empty());
     }
 
+    #[test]
+    fn a_pending_list_with_the_retired_collector_reminder_loads_and_drops_it() {
+        // Arrange: a 0.37.0 record with the retired reminder under both ids.
+        let home = scratch_dir("heal-retired-collector");
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        fs::write(home.join(".claude/settings.json"), r#"{"model":"x"}"#).unwrap();
+        seed_pending(&home, "0016-collector-service,collector-service");
+
+        // Act
+        let read = Record::read(&root(&home)).unwrap();
+        let out = run(&ctx(&home), Trigger::Hook, 1000);
+
+        // Assert
+        assert_eq!(
+            read.pending,
+            [migrate::RETIRED_COLLECTOR_SERVICE_MIGRATION; 2]
+        );
+        assert!(out.open.is_empty(), "{:?}", out.open);
+        assert!(Record::read(&root(&home)).unwrap().pending.is_empty());
+    }
+
     /// The record check of playbook 0.34.0 to 0.37.0: the version first,
     /// then the schema.
     fn old_compare(record: &Record, binary: &str, schema: u32) -> Ordering {
@@ -1070,50 +1102,6 @@ mod tests {
     }
 
     #[test]
-    fn the_collector_reminder_is_used_up_only_when_shown() {
-        if crate::usage::service::Kind::current().is_none() {
-            return;
-        }
-        // Arrange
-        let home = crate::init::collector_service::tests::telemetry_home("heal-remind");
-        let shown = |out: &Outcome| {
-            out.open
-                .iter()
-                .any(|i| i.id == migrate::COLLECTOR_SERVICE_MIGRATION)
-        };
-        let init = Trigger::Init {
-            failed: false,
-            statusline: true,
-        };
-
-        // Act
-        let planned = migrate::plan(&ctx(&home)).unwrap_or_default();
-        let by_setup = run(&ctx(&home), init, 1000);
-        let headless = run_shown(&ctx(&home), Trigger::Hook, 1000, false);
-        let first = run(&ctx(&home), Trigger::Hook, 1000);
-        let second = run(&ctx(&home), Trigger::Hook, 2000);
-        let fix = run(&ctx(&home), Trigger::Fix, 3000);
-        let pending = Record::read(&root(&home)).unwrap().pending;
-
-        // Assert
-        assert!(
-            planned
-                .iter()
-                .any(|p| p.id == migrate::COLLECTOR_SERVICE_MIGRATION
-                    && matches!(p.state, migrate::State::Open { .. })),
-            "the plan lists the reminder as open"
-        );
-        assert!(shown(&by_setup), "setup does not use up the reminder");
-        assert!(shown(&headless), "a headless hook still reports it");
-        assert!(shown(&first), "a plan or a headless hook did not use it up");
-        assert!(!shown(&second), "the reminder shows once");
-        assert!(!shown(&fix));
-        assert!(!pending
-            .iter()
-            .any(|id| id == migrate::COLLECTOR_SERVICE_MIGRATION));
-    }
-
-    #[test]
     fn init_records_only_when_its_migrations_did_not_fail() {
         let home = scratch_dir("heal-init");
         let init = |failed| Trigger::Init {
@@ -1203,6 +1191,21 @@ mod tests {
             text.contains("    Fix: playbook setup --statusline\n"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_heal_line_shows_the_policy_guard_notice_in_full_and_does_not_count_it() {
+        let out = Outcome {
+            changed: vec![StepReport::wired(
+                crate::init::migrate::POLICY_GUARD_NOTICE_STEP,
+                "the policy guard is now off by default; run: playbook config set --global hooks.policyGuard.enabled true",
+            )],
+            recorded: true,
+            ..Outcome::default()
+        };
+        let line = out.line().expect("a line");
+        assert!(line.contains("hooks.policyGuard.enabled true"), "{line}");
+        assert!(!line.contains("updated 1 of its own files"), "{line}");
     }
 
     #[test]

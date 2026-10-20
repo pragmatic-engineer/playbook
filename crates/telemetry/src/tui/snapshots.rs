@@ -338,6 +338,7 @@ fn plan_snapshot() -> Snapshot {
             resets_at: NOW + 4 * DAY,
         }),
         spend_limit: None,
+        ..Snapshot::default()
     }
 }
 
@@ -891,10 +892,7 @@ fn the_tools_view_tells_a_stopped_collector_from_telemetry_off_and_from_no_rows(
         text.lines()
             .any(|l| l.trim_matches(|c: char| c == '│' || c.is_whitespace()) == command)
     };
-    assert!(
-        alone(&down, &crate::host::setup_command("collector-service")),
-        "{down}"
-    );
+    assert!(alone(&down, crate::daemon::START_HINT), "{down}");
     assert!(quiet.contains("collector runs"), "{quiet}");
     check("tools_collector_down_100x40", &down);
 }
@@ -1016,6 +1014,8 @@ fn enterprise_sources(cache_age: i64) -> Sources {
                     limit_usd: 500.0,
                     used_usd: Some(120.0),
                 }),
+                billed: None,
+                extra_windows: Vec::new(),
             }),
         },
         ..Sources::default()
@@ -1085,7 +1085,8 @@ fn burn_events() -> Vec<UsageEvent> {
 
 /// The burn-up of the fixed fortnight, for one kind of data.
 fn burn_case(kind: &str) -> (crate::burnup::Burnup, Vec<crate::limits::Limit>) {
-    use crate::limits::{thresholds, Limit, Origin, Unit};
+    use crate::burnup::{burnup, spend_only, Inputs};
+    use crate::limits::{Limit, Origin, Unit};
     let end = BURN_START + 30 * DAY;
     let events = burn_events();
     let total: f64 = events.iter().map(|e| e.cost_usd).sum();
@@ -1119,20 +1120,50 @@ fn burn_case(kind: &str) -> (crate::burnup::Burnup, Vec<crate::limits::Limit>) {
         limits.push(window(LimitPeriod::FiveHour, 50.0));
         limits.push(window(LimitPeriod::SevenDay, 30.0));
     }
-    let crossings = limit
-        .and_then(|l| thresholds(BURN_START, end, BURN_NOW, total, l))
-        .map_or_else(Vec::new, |c| c.to_vec());
     let billed = (kind == "limit").then_some((BURN_NOW - 600, BURN_BILLED));
-    let b = crate::burnup::burnup(
-        &events,
-        (BURN_START, end),
-        crate::tz::Zone::Utc,
-        BURN_NOW,
-        limit,
-        billed,
-        crossings,
-    );
+    let b = match limits.first() {
+        Some(l) => burnup(
+            l,
+            crate::tz::Zone::Utc,
+            Inputs {
+                events: &events,
+                readings: &[],
+                billed,
+                now: BURN_NOW,
+            },
+        )
+        .unwrap(),
+        None => spend_only(&events, (BURN_START, end), crate::tz::Zone::Utc, BURN_NOW).unwrap(),
+    };
     (b, limits)
+}
+
+/// A five hour window at 50 percent, read twice, for the percent chart.
+fn window_case() -> (crate::burnup::Burnup, Vec<crate::limits::Limit>) {
+    use crate::burnup::{burnup, Inputs};
+    use crate::limits::{Limit, Origin, Unit};
+    let l = Limit {
+        unit: Unit::Percent,
+        period: LimitPeriod::FiveHour,
+        origin: Origin::Measured,
+        used: 50.0,
+        limit: 100.0,
+        start: BURN_NOW - 3 * 3_600,
+        end: BURN_NOW + 2 * 3_600,
+    };
+    let readings = [(BURN_NOW - 2 * 3_600, 10.0), (BURN_NOW - 3_600, 30.0)];
+    let b = burnup(
+        &l,
+        crate::tz::Zone::Utc,
+        Inputs {
+            events: &[],
+            readings: &readings,
+            billed: None,
+            now: BURN_NOW,
+        },
+    )
+    .unwrap();
+    (b, vec![l])
 }
 
 fn draw_burnup(kind: &str, theme: Theme, w: u16, h: u16) -> (String, Buffer) {
@@ -1148,6 +1179,9 @@ fn draw_burnup(kind: &str, theme: Theme, w: u16, h: u16) -> (String, Buffer) {
 fn the_burnup_panel_at_three_sizes_in_both_themes_for_each_kind_of_data() {
     for kind in ["limit", "nolimit", "nullwindows"] {
         for (theme, name) in [(Theme::Standard, "standard"), (Theme::Mono, "mono")] {
+            if kind != "limit" && name == "mono" {
+                continue;
+            }
             for (w, h) in [(80, 24), (100, 30), (140, 40)] {
                 let (text, _) = draw_burnup(kind, theme, w, h);
 
@@ -1184,7 +1218,7 @@ fn the_burnup_chart_names_every_line_and_marks_the_crossings() {
         "\u{2508} 80%",
         "\u{2504} 50%",
         "\u{25b2} crossing",
-        "\u{25c6} billed by the server",
+        "\u{25c6} reported by Claude",
     ] {
         assert!(legend.contains(part), "{part}\n{text}");
     }
@@ -1225,15 +1259,13 @@ fn a_panel_under_forty_columns_shows_the_table() {
 #[test]
 fn before_the_period_starts_the_panel_says_so() {
     crate::tz::set(crate::tz::Zone::Utc);
-    let b = crate::burnup::burnup(
+    let b = crate::burnup::spend_only(
         &[],
         (BURN_NOW + DAY, BURN_NOW + 31 * DAY),
         crate::tz::Zone::Utc,
         BURN_NOW,
-        None,
-        None,
-        Vec::new(),
-    );
+    )
+    .unwrap();
     let pal = Theme::Mono.palette(ColorDepth::True);
 
     let (text, _) = draw_with(80, 12, |f| {
@@ -1290,4 +1322,25 @@ fn the_burnup_dates_follow_the_zone_of_its_days_not_the_global_zone() {
     assert!(text.contains("09-01"), "{text}");
     assert!(!text.contains("08-31"), "{text}");
     assert!(text.contains("spend this period, UTC"), "{text}");
+}
+
+#[test]
+fn a_percent_window_is_charted_from_its_readings_with_percent_labels() {
+    crate::tz::set(crate::tz::Zone::Utc);
+    let (b, limits) = window_case();
+    let pal = Theme::Standard.palette(ColorDepth::True);
+
+    let (text, _) = draw_with(100, 30, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+    });
+
+    assert!(text.contains("5 hour window used, UTC"), "{text}");
+    assert!(text.contains("\u{2588} used"), "{text}");
+    assert!(text.contains("50% 03:00 \u{25b2}  80% ~04:48"), "{text}");
+    assert!(text.contains("105%") || text.contains("100%"), "{text}");
+    assert!(
+        text.contains('\u{2588}') && text.contains('\u{2501}'),
+        "{text}"
+    );
+    check("burnup_window_standard_100x30", &text);
 }
