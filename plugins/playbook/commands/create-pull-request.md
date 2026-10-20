@@ -45,6 +45,10 @@ There is no confirmation flag or gate: the command always runs end to end.
 5. Derive the title and body from the actual diff and commit log, never from the branch name alone or from memory.
 6. Pass the PR body with `--body-file`, never inline, to preserve formatting.
 
+## Worktree guard (first)
+
+Before anything else, run the worktree guard in the `playbook:writing-style` skill's `references/worktree-guard.md` (invoke the skill and read the file from the skill base directory it shows). The caller gives "Worktree root: <path>, branch: <name>" in this command's prompt. On a mismatch stop with its `WRONG_DIRECTORY` line and open nothing.
+
 ## Step 0: Read the run mode and load the skill rules (MUST run before drafting title or body)
 
 **Read the run mode first.** Intent: mode-status. If the session's tool map lists it, use that command, with `--json`, adding `--flag auto` or `--flag ask` when the arguments hold `--auto` or `--ask` (check for both first and stop on a conflict). It reports `mode` (`ask` or `auto`), `source`, `hook_mode` and `warning`; if `warning` is not empty, print it once. If it fails, do not stop and do not retry: run in ask mode and print one line. Otherwise do this: if the arguments hold both `--auto` and `--ask`, stop with one line: "--auto and --ask conflict; pass one." `--auto` means auto mode. Anything else means ask mode, the default.
