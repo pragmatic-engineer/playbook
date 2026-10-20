@@ -77,6 +77,15 @@ check() {
   --no-confirm --strategies crate-meta-data --root "$scratch/binstall" playbook)
 check "cargo binstall" "$scratch/binstall/bin/playbook"
 
+# The command the docs give reads the manifest at the head of the default
+# branch. A dry run on another branch has not got the metadata there yet, so
+# the workflow turns this off with CHECK_GIT=false.
+if [ "${CHECK_GIT:-true}" = true ]; then
+  (cd "$scratch" && "$scratch/tools/cargo-binstall" --git "https://github.com/$REPO" \
+    --no-confirm --strategies crate-meta-data --root "$scratch/binstall-git" playbook)
+  check "cargo binstall --git" "$scratch/binstall-git/bin/playbook"
+fi
+
 export MISE_DATA_DIR="$scratch/mise/data" MISE_CONFIG_DIR="$scratch/mise/config" MISE_CACHE_DIR="$scratch/mise/cache"
 mkdir -p "$MISE_DATA_DIR" "$MISE_CONFIG_DIR" "$MISE_CACHE_DIR"
 (cd "$scratch" && "$scratch/tools/mise/bin/mise" install "github:$REPO@$version")

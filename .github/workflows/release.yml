@@ -837,6 +837,10 @@ jobs:
               exit 0
             fi
           fi
+          # The documented --git command reads the default branch, which a
+          # dry run on another branch does not carry yet.
+          export CHECK_GIT=true
+          if [ "$DRY_RUN" = true ]; then CHECK_GIT=false; fi
           scripts/verify-installers.sh "$ver" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Moves the Homebrew tap and the marketplace to the release (ADR 0039

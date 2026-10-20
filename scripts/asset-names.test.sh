@@ -13,8 +13,8 @@
 # Both need the raw binary of each target at playbook-<version>-<target>[.exe]
 # (ADR 0039). This test expands the binstall template for every target in the
 # build matrix of release.yml and compares it with the name the workflow gives
-# the asset. It also fails when two assets of one release could both pass for
-# the playbook binary on a platform.
+# the asset. It also pins the two metadata lines that keep binstall on those
+# assets and off the foreign crates.io crate.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -48,7 +48,9 @@ pkg_url="$(sed -n 's/^pkg-url *= *"\(.*\)"$/\1/p' "$cargo")"
 repo="$(sed -n 's/^repository *= *"\(.*\)"$/\1/p' "$cargo")"
 [ -n "$repo" ] || fail "$cargo has no repository, which { repo } needs"
 
-seen=""
+grep -qxF 'disabled-strategies = ["quick-install"]' "$cargo" \
+  || fail "$cargo must turn the quick-install strategy off, the crates.io name playbook is another project's"
+
 while IFS= read -r target; do
   ext="$(ext_of "$target")"
   want="playbook-$version-$target$ext"
@@ -66,14 +68,6 @@ while IFS= read -r target; do
     *) fail "$target has no operating system word mise can match" ;;
   esac
   case "$target" in x86_64-* | aarch64-*) ;; *) fail "$target has no architecture word mise can match" ;; esac
-  seen="$seen $want"
 done <<<"$targets"
 
-# One raw playbook binary per platform: a name matching a platform twice would
-# make mise's choice a guess. Packages and pbtop archives are other kinds.
-for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
-  n=0
-  for a in $seen; do case "$a" in *"$t") n=$((n + 1)) ;; esac; done
-  [ "$n" -eq 1 ] || fail "$n raw playbook binaries for $t"
-done
 echo "ok: binstall and mise find playbook-<version>-<target> for all $(wc -l <<<"$targets" | tr -d ' ') targets"

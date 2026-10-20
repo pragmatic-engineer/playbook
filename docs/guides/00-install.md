@@ -76,7 +76,7 @@ playbook setup
 
 ### cargo binstall and mise
 
-Both fetch the release binary for your platform without a compile step.
+Both fetch the release binary for your platform. binstall builds from source only when no release binary matches.
 
 ```bash
 cargo binstall --git https://github.com/pragmatic-engineer/playbook playbook

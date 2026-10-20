@@ -61,7 +61,7 @@ A Homebrew install updates with `brew upgrade playbook`. On a brew-managed insta
 
 ### cargo binstall and mise
 
-Both download the release binary, with no compile step:
+Both download the release binary. binstall builds from source only when no release binary matches your platform:
 
 ```bash
 cargo binstall --git https://github.com/pragmatic-engineer/playbook playbook
