@@ -12,7 +12,7 @@
 //! and `used` is the percent consumed.
 
 use super::aggregate::SECONDS_PER_DAY;
-use super::query::{day_of, month_first_day, week_first_day, WeekStart};
+use super::query::{day_of, month_first_day, utc_month_bounds, week_first_day, WeekStart};
 use super::UsageEvent;
 use serde_json::{json, Value};
 
@@ -77,8 +77,7 @@ impl LimitPeriod {
             LimitPeriod::Monthly => {
                 // `end` is a reset time chosen by the server, not a local
                 // calendar boundary, so its month is found in UTC.
-                let utc = crate::tz::Zone::Utc;
-                utc.day_start(month_first_day(utc.day_of(end - 1)))
+                utc_month_bounds(end - 1).0
             }
         };
         (start, end)
