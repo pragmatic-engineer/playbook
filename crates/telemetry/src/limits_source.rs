@@ -780,6 +780,7 @@ mod tests {
                 seven_day,
                 spend,
                 billed: None,
+                extra_windows: Vec::new(),
             }),
         }
     }
