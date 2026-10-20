@@ -31,7 +31,7 @@ The prompt locks in once, at the start of a fresh session. Resumed sessions inhe
 - Design work uses this repo's own `/playbook:plan` and `/playbook:adr` commands, not the built-in plan mode. Plan runs without asking, ADR and implement are offered and wait for a yes, and implement only runs when an approved plan or blueprint exists. The `auto-model-detect` hook nudges on common phrasing in interactive runs.
 - Models and effort are not in the prompt. Each agent's frontmatter sets them, and `playbook route <kind>` prints the table.
 - Fan out independent subtasks via parallel `Agent` calls. Close agents the moment their work is done.
-- Comments stay rare and short. `no-slop-guard` blocks the worst cases at the tool call. The `playbook:engineering-standards` skill carries the rest of the code rules, including no magic values and testing.
+- Comments stay rare and short, wrapped, and never name a plan or ticket. The `playbook:engineering-standards` skill carries the rest of the code rules, including no magic values and testing.
 - Self-review after every implementation pass. Commit and push only when asked. Never force-push to a shared branch.
 - Three rules moved out of the prompt into the `policy-guard` hook, which denies them: no `--no-verify` or `--no-gpg-sign`, no hand-run `gh pr create` (use `/playbook:create-pull-request`), and no write to Claude Code's own memory.
 

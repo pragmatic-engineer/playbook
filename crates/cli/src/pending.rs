@@ -76,6 +76,9 @@ fn reason(slug: &str) -> Option<&'static str> {
         migrate::DEAD_HOOKS_MIGRATION => {
             "Claude Code runs these hooks on every event and each one fails"
         }
+        migrate::NO_SLOP_GUARD_MIGRATION => {
+            "Claude Code runs a hook entry for a hook playbook no longer has, on every tool call"
+        }
         migrate::COLLECTOR_SERVICE_MIGRATION => {
             "the usage collector runs only while a session keeps it alive, so usage data has gaps"
         }
