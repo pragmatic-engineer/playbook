@@ -12,7 +12,7 @@
 //!
 //! Manual limits come from the `usage.budget.*` config keys.
 
-use super::limits::{Burn, Limit, LimitPeriod, Origin, State, Unit};
+use super::limits::{Burn, CrossState, Crossing, Limit, LimitPeriod, Origin, State, Unit};
 use super::period::Period;
 use super::plan::Account;
 use super::query::{utc_month_bounds, WeekStart};
@@ -49,6 +49,18 @@ pub struct Snapshot {
     pub five_hour: Option<Window>,
     pub seven_day: Option<Window>,
     pub spend_limit: Option<Spend>,
+    /// When each part was read, where that differs from `captured_at`: a
+    /// reading that carries one window keeps the other as it was stored.
+    pub read: ReadTimes,
+}
+
+/// When each part of a [`Snapshot`] was read, UTC seconds. `None` means
+/// `captured_at`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ReadTimes {
+    pub five_hour: Option<i64>,
+    pub seven_day: Option<i64>,
+    pub spend_limit: Option<i64>,
 }
 
 fn window(v: Option<&Value>) -> Option<Window> {
@@ -93,6 +105,7 @@ impl Snapshot {
             five_hour: window(r.get("five_hour")),
             seven_day: window(r.get("seven_day")),
             spend_limit: spend(r.get("spend_limit")),
+            read: ReadTimes::default(),
         };
         (snap.five_hour.is_some() || snap.seven_day.is_some() || snap.spend_limit.is_some())
             .then_some(snap)
@@ -114,6 +127,11 @@ impl Snapshot {
                 "limit_usd": s.limit_usd,
                 "period": s.period.map(LimitPeriod::key),
             })),
+            "read": {
+                "five_hour": self.read.five_hour,
+                "seven_day": self.read.seven_day,
+                "spend_limit": self.read.spend_limit,
+            },
         })
     }
 
@@ -123,11 +141,89 @@ impl Snapshot {
             five_hour: window(v.get("five_hour")),
             seven_day: window(v.get("seven_day")),
             spend_limit: spend(v.get("spend_limit")),
+            read: ReadTimes {
+                five_hour: v
+                    .pointer("/read/five_hour")
+                    .and_then(Value::as_i64)
+                    .filter(|t| *t >= 0),
+                seven_day: v
+                    .pointer("/read/seven_day")
+                    .and_then(Value::as_i64)
+                    .filter(|t| *t >= 0),
+                spend_limit: v
+                    .pointer("/read/spend_limit")
+                    .and_then(Value::as_i64)
+                    .filter(|t| *t >= 0),
+            },
         }
     }
 
+    /// When the oldest part held was read. A snapshot is stale as soon as one
+    /// part is.
+    pub fn oldest_read(&self) -> i64 {
+        [
+            (self.five_hour.is_some(), self.read.five_hour),
+            (self.seven_day.is_some(), self.read.seven_day),
+            (self.spend_limit.is_some(), self.read.spend_limit),
+        ]
+        .into_iter()
+        .filter(|(held, _)| *held)
+        .map(|(_, at)| at.unwrap_or(self.captured_at))
+        .min()
+        .unwrap_or(self.captured_at)
+    }
+
     pub fn is_stale(&self, now: i64) -> bool {
-        now - self.captured_at > STALE_SECONDS
+        now.saturating_sub(self.oldest_read()) > STALE_SECONDS
+    }
+
+    /// When the part for `period` was read: its own read time, else when the
+    /// file was captured.
+    pub fn read_of(&self, period: LimitPeriod) -> i64 {
+        match period {
+            LimitPeriod::FiveHour => self.read.five_hour,
+            LimitPeriod::SevenDay => self.read.seven_day,
+            _ => self.read.spend_limit,
+        }
+        .unwrap_or(self.captured_at)
+    }
+
+    /// This reading laid over the one stored before it. A part this reading
+    /// carries replaces the stored one. A part it lacks is kept as stored, with
+    /// its own read time, unless its reset time has passed. Claude Code sends
+    /// one window at times, so overwriting the file would lose the other.
+    pub fn merged_over(self, stored: Option<Snapshot>, now: i64) -> Snapshot {
+        let Some(old) = stored else {
+            return self;
+        };
+        let stored_at = |at: Option<i64>| at.unwrap_or(old.captured_at);
+        let live = |at: i64| at > now;
+        let mut out = self;
+        let new_at = out.captured_at;
+        out.read = ReadTimes {
+            five_hour: out.five_hour.as_ref().map(|_| new_at),
+            seven_day: out.seven_day.as_ref().map(|_| new_at),
+            spend_limit: out.spend_limit.as_ref().map(|_| new_at),
+        };
+        if out.five_hour.is_none() {
+            if let Some(w) = old.five_hour.clone().filter(|w| live(w.resets_at)) {
+                out.five_hour = Some(w);
+                out.read.five_hour = Some(stored_at(old.read.five_hour));
+            }
+        }
+        if out.seven_day.is_none() {
+            if let Some(w) = old.seven_day.clone().filter(|w| live(w.resets_at)) {
+                out.seven_day = Some(w);
+                out.read.seven_day = Some(stored_at(old.read.seven_day));
+            }
+        }
+        if out.spend_limit.is_none() {
+            if let Some(sp) = old.spend_limit.clone().filter(|sp| live(sp.resets_at)) {
+                out.spend_limit = Some(sp);
+                out.read.spend_limit = Some(stored_at(old.read.spend_limit));
+            }
+        }
+        out
     }
 
     /// The measured limits that still apply at `now`. A window whose reset time
@@ -193,6 +289,15 @@ pub fn save(usage_dir: &Path, snap: &Snapshot) {
         return;
     }
     let _ = write_atomic_private(&snapshot_path(usage_dir), snap.to_value().to_string());
+}
+
+/// Keeps what the statusline input carries: reads `rate_limits`, lays it over
+/// the stored reading and saves the result. Does nothing when the input is not
+/// JSON or has no usable part. Best effort, like [`save`].
+pub fn remember(usage_dir: &Path, input: &str, now: i64) {
+    if let Some(new) = Snapshot::from_statusline(input, now) {
+        save(usage_dir, &new.merged_over(load(usage_dir), now));
+    }
 }
 
 /// The stored snapshot, or `None` when there is none or it is unreadable.
@@ -332,10 +437,6 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
     // replaces one the statusline read before the cache was fetched. Only a
     // fresh cache is used: a percentage changes within minutes.
     if let Some(c) = s.account.cache.as_ref().filter(|c| c.is_fresh(now)) {
-        let newer = s
-            .snapshot
-            .as_ref()
-            .is_none_or(|sn| c.fetched_at > sn.captured_at);
         for (period, w) in [
             (LimitPeriod::FiveHour, &c.five_hour),
             (LimitPeriod::SevenDay, &c.seven_day),
@@ -343,6 +444,12 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
             let Some(w) = w.as_ref().filter(|w| w.resets_at > now) else {
                 continue;
             };
+            // The cache replaces a reading of the same window only when it was
+            // fetched after that window was read.
+            let newer = s
+                .snapshot
+                .as_ref()
+                .is_none_or(|sn| c.fetched_at > sn.read_of(period));
             let known = out.iter().any(|l| l.period == period);
             if known && !newer {
                 continue;
@@ -417,7 +524,11 @@ pub fn compare_billed(
                 .spend_limit
                 .as_ref()
                 .filter(|sp| sp.resets_at > now && sp.period == Some(LimitPeriod::Monthly))?;
-            SpendFigure::from_usd(sp.limit_usd, sp.used_usd, sn.captured_at)
+            SpendFigure::from_usd(
+                sp.limit_usd,
+                sp.used_usd,
+                sn.read.spend_limit.unwrap_or(sn.captured_at),
+            )
         })
         .filter(usable);
     let figure = statusline.or_else(|| {
@@ -510,6 +621,8 @@ pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart
         "plan": s.account.plan.key(),
         "plan_label": plan_label(s),
         "windows_note": windows_note(s, &limits),
+        "reason": reason(s, now).map(Reason::key),
+        "comparison": comparison_json(s, events, now),
         "cache": s.account.cache.as_ref().map(|c| json!({
             "fetched_at": c.fetched_at,
             "age_seconds": c.age(now),
@@ -518,6 +631,147 @@ pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart
         "limits": limits.iter().map(|l| l.to_json(now)).collect::<Vec<_>>(),
         "burn": burn,
     })
+}
+
+/// Why no limit from Claude is shown. The words are the ones the output uses,
+/// in `--summary` and in the `reason` of `--json`. None of them is an error:
+/// every one has a line that says what to do, or that nothing can be done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reason {
+    /// No statusline reading and no usable cache yet.
+    NoReading,
+    /// The only reading is a cache over six hours old, which is not used.
+    Stale,
+    /// Nothing identifies a limit on this login and no source carries one.
+    CapUnknown,
+    /// The last reading held windows, and they have all reset.
+    WindowsReset,
+}
+
+impl Reason {
+    pub fn key(self) -> &'static str {
+        match self {
+            Reason::NoReading => "no-reading",
+            Reason::Stale => "stale",
+            Reason::CapUnknown => "cap-unknown",
+            Reason::WindowsReset => "windows-reset",
+        }
+    }
+
+    /// The one line that stands where the limit would be.
+    pub fn line(self) -> &'static str {
+        match self {
+            Reason::NoReading => {
+                "no limit reading yet: run a session with the playbook statusline"
+            }
+            Reason::Stale => {
+                "the last limit reading is over 6 hours old and is not used: run a session with the playbook statusline"
+            }
+            Reason::CapUnknown => "cap not reported by Claude Code on this login",
+            Reason::WindowsReset => {
+                "the windows of the last reading have reset: run a session with the playbook statusline for a new one"
+            }
+        }
+    }
+}
+
+/// Why no limit from Claude is shown, `None` when one is. A limit from Claude
+/// is any that did not come from a manual budget.
+pub fn reason(s: &Sources, now: i64) -> Option<Reason> {
+    let has_limit = all_limits(s, &[], now, WeekStart::Monday)
+        .iter()
+        .any(|l| l.origin != Origin::Manual);
+    if has_limit {
+        return None;
+    }
+    let held = s.snapshot.as_ref().is_some_and(|sn| {
+        sn.five_hour.is_some() || sn.seven_day.is_some() || sn.spend_limit.is_some()
+    });
+    Some(if held {
+        Reason::WindowsReset
+    } else if s.account.cache.as_ref().is_some_and(|c| !c.is_fresh(now)) {
+        Reason::Stale
+    } else if s.account.plan.has_windows() {
+        Reason::NoReading
+    } else {
+        Reason::CapUnknown
+    })
+}
+
+/// How old a reading is, with the stale marker once it is over six hours old.
+fn read_text(fetched_at: i64, now: i64) -> String {
+    let age = (now - fetched_at).max(0);
+    let ago = super::period::elapsed_text(age);
+    if age > STALE_SECONDS {
+        format!("stale, read {ago} ago")
+    } else {
+        format!("read {ago} ago")
+    }
+}
+
+/// The comparison of the amount Claude reports with the local estimate as
+/// JSON: the numbers, or why they were not compared, or `null`.
+fn comparison_json(s: &Sources, events: &[UsageEvent], now: i64) -> Value {
+    match compare_billed(s, events, now) {
+        Some(Ok(c)) => json!({
+            "billed_usd": c.billed_usd,
+            "local_estimate_usd": c.local_estimate_usd,
+            "delta_usd": c.delta_usd,
+            "delta_pct": c.delta_pct,
+            "disagrees": c.disagrees,
+            "read_at": c.billed.fetched_at,
+            "stale": now - c.billed.fetched_at > STALE_SECONDS,
+        }),
+        Some(Err(why)) => json!({"skipped": why.to_string()}),
+        None => Value::Null,
+    }
+}
+
+/// An instant as text, in the chosen zone.
+fn stamp(at: i64) -> String {
+    crate::tz::iso(at).replace('T', " ")
+}
+
+/// One threshold as a phrase.
+fn crossing_text(c: &Crossing) -> String {
+    let pct = c.pct;
+    match c.state {
+        CrossState::Crossed { at } => format!("{pct}% crossed about {}", stamp(at)),
+        CrossState::Projected { at } => format!("{pct}% projected about {}", stamp(at)),
+        CrossState::Beyond { period_end } => {
+            format!("{pct}% not before the period ends {}", stamp(period_end))
+        }
+        CrossState::Unknown => format!("{pct}% too early to say"),
+    }
+}
+
+/// The lines about what Claude reports for `--summary`: the amount used
+/// beside the local estimate, with its age, when 50, 80 and 100 percent are
+/// crossed for each limit, and the one line saying why there is no limit from
+/// Claude when there is none.
+pub fn limit_lines(s: &Sources, limits: &[Limit], events: &[UsageEvent], now: i64) -> Vec<String> {
+    let mut out = Vec::new();
+    match compare_billed(s, events, now) {
+        Some(Ok(c)) => out.push(format!(
+            "{} ({})",
+            c.line(),
+            read_text(c.billed.fetched_at, now)
+        )),
+        Some(Err(why)) => out.push(format!("local estimate not compared: {why}")),
+        None => {}
+    }
+    for l in limits {
+        if let Some(c) = l.thresholds(now) {
+            out.push(format!(
+                "{} crossings ({}): {}",
+                l.period.key().replace('_', " "),
+                l.origin.key(),
+                c.iter().map(crossing_text).collect::<Vec<_>>().join(", ")
+            ));
+        }
+    }
+    out.extend(reason(s, now).map(|r| r.line().to_string()));
+    out
 }
 
 /// A dollar or percent amount with its unit.
@@ -590,12 +844,18 @@ pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekS
         .filter(|_| limits.iter().any(|l| l.origin == Origin::Cached))
     {
         out.push_str(&format!(
-            "  note: the cached limits were fetched by Claude Code {} ago\n",
-            super::period::elapsed_text(c.age(now))
+            "  note: the cached limits were fetched by Claude Code {} ago{}\n",
+            super::period::elapsed_text(c.age(now)),
+            if c.is_fresh(now) { "" } else { " (stale)" }
         ));
     }
-    if let Some(note) = windows_note(s, &limits) {
+    // The reason line below says the same, so the note stays for the case where
+    // some limit is known but one window is not.
+    if let Some(note) = windows_note(s, &limits).filter(|_| reason(s, now).is_none()) {
         out.push_str(&format!("  {note}\n"));
+    }
+    for line in limit_lines(s, &limits, events, now) {
+        out.push_str(&format!("  {line}\n"));
     }
     for p in [Period::Today, Period::Week(week), Period::Month] {
         let (c, v) = burn_pair(events, p, now);
@@ -1332,5 +1592,370 @@ mod tests {
         snap.captured_at = utc_month_bounds(NOW).0 - 1;
         snap.spend_limit.as_mut().unwrap().period = Some(LimitPeriod::Monthly);
         assert_eq!(billed(&old), 77.0);
+    }
+
+    // The merge of a statusline reading over the stored one.
+
+    fn merge_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pb-limits-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn reading(five: Option<(f64, i64)>, seven: Option<(f64, i64)>) -> String {
+        let part = |name: &str, v: Option<(f64, i64)>| {
+            v.map(|(pct, at)| format!(r#""{name}":{{"used_percentage":{pct},"resets_at":{at}}}"#))
+        };
+        let parts: Vec<String> = [part("five_hour", five), part("seven_day", seven)]
+            .into_iter()
+            .flatten()
+            .collect();
+        format!(r#"{{"rate_limits":{{{}}}}}"#, parts.join(","))
+    }
+
+    fn stored_in(dir: &Path) -> Snapshot {
+        load(dir).unwrap()
+    }
+
+    #[test]
+    fn a_reading_with_one_window_keeps_the_other_as_stored() {
+        let dir = merge_dir("keep");
+        remember(
+            &dir,
+            &reading(Some((10.0, NOW + 3600)), Some((20.0, NOW + 86_400))),
+            NOW,
+        );
+
+        remember(&dir, &reading(None, Some((25.0, NOW + 86_400))), NOW + 60);
+
+        let s = stored_in(&dir);
+        assert_eq!(s.five_hour.unwrap().used_percentage, 10.0);
+        assert_eq!(s.seven_day.unwrap().used_percentage, 25.0);
+        assert_eq!(s.read.five_hour, Some(NOW));
+        assert_eq!(s.read.seven_day, Some(NOW + 60));
+        assert_eq!(s.captured_at, NOW + 60);
+    }
+
+    #[test]
+    fn each_window_keeps_its_own_reading_time_and_one_old_part_makes_it_stale() {
+        let dir = merge_dir("stale");
+        let later = NOW + 7 * HOUR;
+        remember(&dir, &reading(Some((10.0, NOW + 10 * HOUR)), None), NOW);
+        remember(&dir, &reading(None, Some((20.0, later + 86_400))), later);
+
+        let s = stored_in(&dir);
+
+        // Both are held, each with the time it was read.
+        assert_eq!(s.read.five_hour, Some(NOW));
+        assert_eq!(s.read.seven_day, Some(later));
+        assert_eq!(s.captured_at, later);
+        assert_eq!(s.oldest_read(), NOW);
+        // The old five hour window, still live, makes the reading stale.
+        assert!(s.is_stale(later));
+        // Without it only the fresh part is left and the reading is fresh.
+        assert!(!Snapshot {
+            five_hour: None,
+            ..s
+        }
+        .is_stale(later));
+    }
+
+    #[test]
+    fn a_dropped_window_leaves_no_read_time_behind() {
+        let dir = merge_dir("dropped");
+        let later = NOW + 7 * HOUR;
+        remember(&dir, &reading(Some((10.0, NOW + 5 * HOUR)), None), NOW);
+        remember(&dir, &reading(None, Some((20.0, later + 86_400))), later);
+
+        let s = stored_in(&dir);
+
+        assert!(s.five_hour.is_none());
+        assert_eq!(s.read.five_hour, None);
+        assert!(!s.is_stale(later));
+    }
+
+    #[test]
+    fn a_stored_window_is_dropped_when_its_reset_time_has_come_and_kept_one_second_before() {
+        for (resets_at, kept) in [(NOW, false), (NOW + 1, true), (NOW - 1, false)] {
+            let dir = merge_dir(&format!("edge{kept}{}", resets_at - NOW));
+            remember(&dir, &reading(Some((10.0, resets_at)), None), NOW - 60);
+
+            remember(&dir, &reading(None, Some((20.0, NOW + 86_400))), NOW);
+
+            assert_eq!(stored_in(&dir).five_hour.is_some(), kept, "{resets_at}");
+        }
+    }
+
+    #[test]
+    fn an_input_with_no_window_or_that_is_not_json_changes_nothing() {
+        let dir = merge_dir("noop");
+        remember(&dir, &reading(Some((10.0, NOW + 3600)), None), NOW);
+        let before = std::fs::read_to_string(snapshot_path(&dir)).unwrap();
+
+        for bad in [r#"{"rate_limits":{}}"#, "not json", r#"{"model":"x"}"#, ""] {
+            remember(&dir, bad, NOW + 60);
+        }
+
+        assert_eq!(
+            std::fs::read_to_string(snapshot_path(&dir)).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn an_unreadable_stored_file_is_replaced_by_the_new_reading_alone() {
+        let dir = merge_dir("broken");
+        std::fs::write(snapshot_path(&dir), "{{{").unwrap();
+
+        remember(&dir, &reading(Some((10.0, NOW + 3600)), None), NOW);
+
+        let s = stored_in(&dir);
+        assert_eq!(s.five_hour.unwrap().used_percentage, 10.0);
+        assert!(s.seven_day.is_none());
+    }
+
+    #[test]
+    fn two_writers_that_both_loaded_first_leave_the_last_writers_file() {
+        let dir = merge_dir("race");
+        remember(
+            &dir,
+            &reading(Some((10.0, NOW + 3600)), Some((20.0, NOW + 86_400))),
+            NOW,
+        );
+        // Both load the same stored reading, then save in turn.
+        let base = load(&dir);
+        let a = Snapshot::from_statusline(&reading(Some((11.0, NOW + 3600)), None), NOW + 1)
+            .unwrap()
+            .merged_over(base.clone(), NOW + 1);
+        let b = Snapshot::from_statusline(&reading(None, Some((21.0, NOW + 86_400))), NOW + 2)
+            .unwrap()
+            .merged_over(base, NOW + 2);
+
+        save(&dir, &a);
+        save(&dir, &b);
+
+        let s = stored_in(&dir);
+        assert_eq!(s.five_hour.unwrap().used_percentage, 10.0);
+        assert_eq!(s.seven_day.unwrap().used_percentage, 21.0);
+    }
+
+    #[test]
+    fn the_gateway_spend_limit_is_kept_the_same_way() {
+        let dir = merge_dir("spend");
+        let with_spend = format!(
+            r#"{{"rate_limits":{{"spend_limit":{{"used_percentage":10,"resets_at":{},"used_usd":1.0,"limit_usd":10.0,"period":"monthly"}}}}}}"#,
+            NOW + 86_400
+        );
+        remember(&dir, &with_spend, NOW);
+
+        remember(&dir, &reading(Some((5.0, NOW + 3600)), None), NOW + 60);
+
+        let s = stored_in(&dir);
+        assert_eq!(s.spend_limit.unwrap().limit_usd, Some(10.0));
+        assert_eq!(s.read.spend_limit, Some(NOW));
+        assert_eq!(s.five_hour.unwrap().used_percentage, 5.0);
+    }
+
+    // Why no limit is shown, the crossings and the comparison in the outputs.
+
+    const HOUR: i64 = 3600;
+
+    fn max_plan(cache: Option<crate::plan::UsageCache>) -> Account {
+        Account {
+            plan: crate::plan::Plan::Max5x,
+            cache,
+        }
+    }
+
+    fn window_snapshot(resets_in: i64) -> Snapshot {
+        Snapshot {
+            captured_at: NOW - 60,
+            five_hour: Some(window_at(50.0, NOW + resets_in)),
+            ..Snapshot::default()
+        }
+    }
+
+    #[test]
+    fn each_reason_word_has_its_case_and_its_line() {
+        let stale_cache = crate::plan::UsageCache {
+            fetched_at: NOW - 7 * HOUR,
+            ..crate::plan::UsageCache::default()
+        };
+        let cases: [(Sources, Option<Reason>, &str); 6] = [
+            (
+                Sources { account: max_plan(None), ..Sources::default() },
+                Some(Reason::NoReading),
+                "no limit reading yet: run a session with the playbook statusline",
+            ),
+            (
+                Sources::default(),
+                Some(Reason::CapUnknown),
+                "cap not reported by Claude Code on this login",
+            ),
+            (
+                Sources { account: max_plan(Some(stale_cache)), ..Sources::default() },
+                Some(Reason::Stale),
+                "the last limit reading is over 6 hours old and is not used: run a session with the playbook statusline",
+            ),
+            (
+                Sources { snapshot: Some(window_snapshot(0)), ..Sources::default() },
+                Some(Reason::WindowsReset),
+                "the windows of the last reading have reset: run a session with the playbook statusline for a new one",
+            ),
+            (
+                Sources { snapshot: Some(window_snapshot(3600)), ..Sources::default() },
+                None,
+                "",
+            ),
+            (
+                Sources { snapshot: Some(gateway_snapshot()), ..Sources::default() },
+                None,
+                "",
+            ),
+        ];
+
+        for (sources, want, line) in cases {
+            let got = reason(&sources, NOW);
+
+            assert_eq!(got, want);
+            if let Some(r) = got {
+                assert_eq!(r.line(), line);
+                let text = summary_section(&sources, &[], NOW, WeekStart::Monday);
+                assert!(text.contains(&format!("  {line}\n")), "{text}");
+                assert_eq!(
+                    report_json(&sources, &[], NOW, WeekStart::Monday)["reason"],
+                    r.key()
+                );
+            } else {
+                let json = report_json(&sources, &[], NOW, WeekStart::Monday);
+                assert!(json["reason"].is_null());
+            }
+        }
+        let keys = [
+            Reason::NoReading,
+            Reason::Stale,
+            Reason::CapUnknown,
+            Reason::WindowsReset,
+        ]
+        .map(Reason::key);
+        assert_eq!(
+            keys,
+            ["no-reading", "stale", "cap-unknown", "windows-reset"]
+        );
+    }
+
+    #[test]
+    fn a_manual_budget_alone_still_says_no_limit_comes_from_claude() {
+        let s = Sources {
+            budgets: vec![(LimitPeriod::Monthly, 200.0)],
+            ..Sources::default()
+        };
+
+        assert_eq!(reason(&s, NOW), Some(Reason::CapUnknown));
+    }
+
+    #[test]
+    fn the_summary_lists_when_50_80_and_100_percent_are_crossed_for_each_limit() {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let s = Sources {
+            snapshot: Some(window_snapshot(3600)),
+            ..Sources::default()
+        };
+
+        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
+
+        let line = text
+            .lines()
+            .find(|l| l.contains("five hour crossings (measured):"))
+            .unwrap_or_else(|| panic!("{text}"));
+        // The window began 4 hours before NOW and ends 1 hour after it, and 50
+        // percent of it is used, so 50 percent is crossed at NOW.
+        let at = |secs: i64| stamp(secs);
+        assert_eq!(
+            line.trim(),
+            format!(
+                "five hour crossings (measured): 50% crossed about {}, 80% not before the period ends {end}, 100% not before the period ends {end}",
+                at(NOW),
+                end = at(NOW + HOUR)
+            )
+        );
+        // 50 percent after 4 of 5 hours projects 62.5 percent at the end.
+    }
+
+    #[test]
+    fn the_comparison_shows_its_age_and_a_stale_marker_over_six_hours() {
+        let billed = |age: i64| {
+            let mut account = cache(age, spend(1500.0, Some(1059.5)), None);
+            account.cache.as_mut().unwrap().billed =
+                SpendFigure::from_usd(Some(1500.0), Some(1059.5), NOW - age);
+            Sources {
+                account,
+                ..Sources::default()
+            }
+        };
+        let events = [cost(NOW - 8 * HOUR, 5.0)];
+
+        let fresh = summary_section(&billed(600), &events, NOW, WeekStart::Monday);
+        let stale = summary_section(&billed(7 * HOUR), &events, NOW, WeekStart::Monday);
+
+        assert!(
+            fresh.contains("reported by Claude (read 10m ago)"),
+            "{fresh}"
+        );
+        assert!(
+            stale.contains("reported by Claude (stale, read 7h"),
+            "{stale}"
+        );
+        assert!(stale.contains("(stale)"), "{stale}");
+        let j = report_json(&billed(7 * HOUR), &events, NOW, WeekStart::Monday);
+        assert_eq!(j["comparison"]["stale"], true);
+        assert_eq!(j["comparison"]["billed_usd"], 1059.5);
+        assert!(
+            report_json(&Sources::default(), &[], NOW, WeekStart::Monday)["comparison"].is_null()
+        );
+    }
+
+    #[test]
+    fn a_figure_that_cannot_be_compared_says_why_in_text_and_json() {
+        let mut account = cache(60, None, None);
+        account.cache.as_mut().unwrap().billed = Some(SpendFigure {
+            limit: None,
+            used: Some(crate::spend::Money {
+                minor: 100,
+                decimals: 2,
+                currency: Some("EUR".to_string()),
+            }),
+            fetched_at: NOW - 60,
+        });
+        let s = Sources {
+            account,
+            ..Sources::default()
+        };
+
+        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
+        let json = report_json(&s, &[], NOW, WeekStart::Monday);
+
+        assert!(
+            text.contains("local estimate not compared: currency EUR, not compared"),
+            "{text}"
+        );
+        assert_eq!(json["comparison"]["skipped"], "currency EUR, not compared");
+    }
+
+    #[test]
+    fn every_limit_in_the_json_carries_three_thresholds() {
+        let s = Sources {
+            snapshot: Some(window_snapshot(3600)),
+            ..Sources::default()
+        };
+
+        let json = report_json(&s, &[], NOW, WeekStart::Monday);
+
+        let limits = json["limits"].as_array().unwrap();
+        assert!(!limits.is_empty());
+        for l in limits {
+            assert_eq!(l["thresholds"].as_array().unwrap().len(), 3);
+        }
     }
 }
