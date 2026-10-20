@@ -35,6 +35,9 @@ fn git(dir: &Path, args: &[&str]) {
         .current_dir(dir)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
         .status()
         .expect("git runs")
         .success();
@@ -56,6 +59,9 @@ fn run_guard(guard: &str, stdin: &[u8], dir: Option<&Path>) -> (bool, String) {
     cmd.env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")
         .env_remove("HOOK_INPUT")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
         .args(["hook", guard])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
@@ -95,7 +101,22 @@ fn hook_output(stdout: &str) -> Value {
 #[test]
 fn every_fixture_gets_the_outcome_it_declares() {
     let files = fixture_files();
-    assert!(files.len() >= 5, "fixtures are missing: {files:?}");
+    let mut seen = std::collections::BTreeSet::new();
+    for f in &files {
+        let v: Value = serde_json::from_str(&fs::read_to_string(f).expect("reads")).expect("JSON");
+        seen.insert(
+            v["_fixture"]["expect"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        );
+    }
+    for outcome in ["silent", "deny", "context", "rewrite"] {
+        assert!(
+            seen.contains(outcome),
+            "no fixture expects {outcome}: {files:?}"
+        );
+    }
     for file in files {
         // Arrange
         let name = file.display().to_string();
@@ -114,10 +135,19 @@ fn every_fixture_gets_the_outcome_it_declares() {
             );
         }
         let guard = head["guard"].as_str().expect("guard named");
-        let repo = (head["setup"] == "staged-debug-repo").then(staged_debug_repo);
+        // Every fixture runs in a scratch dir, never the real checkout, and
+        // its payload `cwd` points there too so no host path is read.
+        let dir = match head["setup"].as_str() {
+            Some("staged-debug-repo") => staged_debug_repo(),
+            None => scratch("empty"),
+            Some(other) => panic!("{name}: unknown setup {other}"),
+        };
+        let mut payload: Value = fixture.clone();
+        payload["cwd"] = Value::String(dir.display().to_string());
+        let raw = payload.to_string();
 
         // Act
-        let (ok, stdout) = run_guard(guard, raw.as_bytes(), repo.as_deref());
+        let (ok, stdout) = run_guard(guard, raw.as_bytes(), Some(&dir));
 
         // Assert
         assert!(ok, "{name}: a guard exits 0 even when it denies");
@@ -198,20 +228,46 @@ fn non_json_stdin_is_allowed_by_every_bash_guard() {
 }
 
 #[test]
-fn apply_patch_is_allowed_by_every_bash_guard() {
+fn apply_patch_without_shell_text_is_allowed_by_every_bash_guard() {
+    // The guards read only `tool_input.command`, never `tool_name`, so this
+    // passes because the patch holds no `rm` or `git commit`, not because of
+    // the tool name. The next test pins the other side.
     let payload = serde_json::json!({
         "hook_event_name": "PreToolUse",
         "tool_name": "apply_patch",
         "tool_input": {"command": "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch"}
     })
     .to_string();
+    let dir = scratch("patch");
     for guard in [
         "rm-workspace-guard",
         "precommit-check",
         "commit-message-sanitizer",
     ] {
-        let (ok, stdout) = run_guard(guard, payload.as_bytes(), None);
+        let (ok, stdout) = run_guard(guard, payload.as_bytes(), Some(&dir));
         assert!(ok, "{guard}: exits 0");
         assert!(stdout.trim().is_empty(), "{guard}: {stdout}");
     }
+}
+
+#[test]
+fn apply_patch_text_is_scanned_like_a_command() {
+    // A patch whose context line reads `rm -rf ~` is denied, because the guard
+    // splits `tool_input.command` into lines whatever the tool is.
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "apply_patch",
+        "tool_input": {"command": "*** Begin Patch\n*** Update File: a.sh\n rm -rf ~\n*** End Patch"}
+    })
+    .to_string();
+    let (ok, stdout) = run_guard(
+        "rm-workspace-guard",
+        payload.as_bytes(),
+        Some(&scratch("patch2")),
+    );
+    assert!(ok);
+    assert_eq!(
+        hook_output(&stdout)["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
 }
