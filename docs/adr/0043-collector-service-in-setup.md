@@ -1,8 +1,8 @@
 # ADR-0043: Keep the Usage Collector Running With a Per-User Service
 
-- **Status:** Accepted. Amended by [ADR 0044](0044-drop-the-shell-launcher.md), which makes `--yes` turn on every setup part. Amended on 2026-10-18 to change the launchd label, see [the amendment](#amendment-2026-10-18-the-launchd-label).
+- **Status:** Superseded by [ADR 0050](0050-collector-daemon-started-by-commands.md). Earlier amended by [ADR 0044](0044-drop-the-shell-launcher.md), which makes `--yes` turn on every setup part, and on 2026-10-18 to change the launchd label, see [the amendment](#amendment-2026-10-18-the-launchd-label).
 - **Date created:** 2026-10-17
-- **Date modified:** 2026-10-18
+- **Date modified:** 2026-10-20
 - **Amends:** [ADR 0041](0041-retire-playbook-telemetry.md), whose context says no launchd or systemd unit starts the collector.
 
 ## Context

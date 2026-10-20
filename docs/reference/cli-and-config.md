@@ -1454,7 +1454,7 @@ Writes to `~/.claude.json` so Claude Code's first-launch trust prompt does not b
 
 Remove what playbook installed from this machine
 
-Takes out the hook entries and status line that `playbook setup` wrote into `settings.json`, the launcher block in your shell rc files, and the files playbook placed under `~/.config/playbook`. It stops and removes the collector service, and also the agent that playbook 0.37.0 wrote under its old launchd label. Everything else in `settings.json` and the rc files stays, each changed file is backed up first, and memory, sessions and history are never touched. The `playbook` binary stays unless you pass `--remove-binary`. It changes nothing without `--yes`; `--dry-run` lists what would go.
+Takes out the hook entries and status line that `playbook setup` wrote into `settings.json`, the launcher block in your shell rc files, and the files playbook placed under `~/.config/playbook`. It stops and removes a collector service that an older setup installed, under the current or the 0.37.0 launchd label. Everything else in `settings.json` and the rc files stays, each changed file is backed up first, and memory, sessions and history are never touched. The `playbook` binary stays unless you pass `--remove-binary`. It changes nothing without `--yes`; `--dry-run` lists what would go.
 
 Example: `playbook uninstall --dry-run`
 
@@ -1496,7 +1496,7 @@ Subcommands: `collect`, `doctor`, `prune`, `status`, `stop`
 
 Run the local OpenTelemetry receiver in the foreground
 
-Listens on 127.0.0.1 only (default port 47318, chosen once and then kept; a free port is chosen on the first run when that one is taken; an existing install keeps the port it recorded) and stores API request cost and token rows, tool call timings and API errors from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector (`playbook usage status` shows it too). It stops by itself after the idle time, counted from the last real telemetry request, so a status check does not keep it alive. Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no telemetry are read from transcripts as before. While it runs, `cc` points its sessions at it unless `usage.telemetry` is `off` or you set telemetry yourself. When none runs, `cc` starts one itself in the background (once the usage database exists) under the same conditions.
+Listens on 127.0.0.1 only (default port 47318, chosen once and then kept; a free port is chosen on the first run when that one is taken; an existing install keeps the port it recorded) and stores API request cost and token rows, tool call timings and API errors from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector (`playbook usage status` shows it too). It stops by itself after the idle time, counted from the last real telemetry request, so a status check does not keep it alive. Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no telemetry are read from transcripts as before. While it runs, `cc` points its sessions at it unless `usage.telemetry` is `off` or you set telemetry yourself. When the settings that `setup` wrote point at it and none runs, playbook commands and hooks start one with `--idle-seconds 0` (see `docs/internals/04-usage-dashboard.md`).
 
 Example: `playbook usage collect --idle-seconds 1800`
 

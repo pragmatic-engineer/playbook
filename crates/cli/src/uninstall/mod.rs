@@ -6,7 +6,7 @@
 //! It removes only what playbook placed: the hook entries and status line
 //! `init` wrote into `settings.json`, the managed launcher block in the rc
 //! files, the files `init` copies under `~/.config/playbook`, and the two
-//! installer scripts in `~/.claude`, the collector's background service, and the
+//! installer scripts in `~/.claude`, a collector service file an older setup left, and the
 //! unedited skill folders `skills sync` wrote. The binary and its rc `PATH`
 //! block go only on request. Memory, the data folder with every database, settings the
 //! user owns, sessions, history and earlier backups are never touched.
