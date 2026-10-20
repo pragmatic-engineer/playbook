@@ -466,6 +466,42 @@ fn session_age_and_the_five_hour_countdown_use_the_given_clock() {
     assert!(!young.contains("Up"));
 }
 
+fn compact_line(window: Option<&str>) -> String {
+    let s = Scratch::new();
+    let body = payload(
+        &s.0,
+        r#""context_window":{"used_percentage":60,"context_window_size":1000000}"#,
+    );
+    let mut pairs = vec![
+        ("HOME", s.0.to_str().unwrap()),
+        ("PWD", s.0.to_str().unwrap()),
+        ("PATH", ""),
+    ];
+    if let Some(w) = window {
+        pairs.push(("CLAUDE_CODE_AUTO_COMPACT_WINDOW", w));
+    }
+    text(&render(&body, &Env::from_pairs(pairs), 1000))
+}
+
+#[test]
+fn a_configured_compact_window_sets_the_gap_from_the_model_window() {
+    let out = compact_line(Some("700000"));
+    assert!(out.contains("10%"), "{out:?}");
+    assert!(out.contains("to compact"), "{out:?}");
+}
+
+#[test]
+fn a_usage_past_the_configured_compact_window_says_compacting_next_turn() {
+    let out = compact_line(Some("500000"));
+    assert!(out.contains("COMPACTING NEXT TURN"), "{out:?}");
+}
+
+#[test]
+fn an_unset_compact_window_keeps_the_ninety_percent_default() {
+    let out = compact_line(None);
+    assert!(out.contains("30%"), "{out:?}");
+}
+
 #[test]
 fn a_non_integer_reset_drops_the_whole_five_hour_segment() {
     let s = Scratch::new();

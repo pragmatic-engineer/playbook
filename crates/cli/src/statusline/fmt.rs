@@ -120,6 +120,17 @@ pub fn compact_gap(used: &str, trigger: i64) -> Option<i64> {
     (used >= 50).then(|| (trigger - used).max(0))
 }
 
+/// Percent of the context window at which Claude Code compacts, from the
+/// `CLAUDE_CODE_AUTO_COMPACT_WINDOW` token count and the window size in the
+/// statusline payload. `None` when either is missing or not a usable number,
+/// so the caller falls back to the percentage override. The window is clamped
+/// to 100000 and to the model window, as Claude Code does.
+pub fn compact_trigger_pct(window: &str, window_size: &str) -> Option<i64> {
+    let size = strict_int(window_size).filter(|n| *n > 0)?;
+    let window = strict_int(window).filter(|n| *n >= 100_000)?.min(size);
+    Some(window * 100 / size)
+}
+
 /// Filesystem-safe slug for cache file names.
 pub fn cache_slug(s: &str) -> String {
     s.chars()
@@ -264,6 +275,24 @@ mod tests {
         assert_eq!(compact_gap("30", 90), None);
         assert_eq!(compact_gap("80", 90), Some(10));
         assert_eq!(compact_gap("95", 90), Some(0));
+    }
+
+    #[test]
+    fn a_window_smaller_than_the_model_window_gives_a_lower_trigger() {
+        assert_eq!(compact_trigger_pct("500000", "1000000"), Some(50));
+    }
+
+    #[test]
+    fn a_window_above_the_model_window_is_capped_at_one_hundred_percent() {
+        assert_eq!(compact_trigger_pct("900000", "200000"), Some(100));
+    }
+
+    #[test]
+    fn an_auto_unusable_or_missing_window_gives_no_trigger() {
+        assert_eq!(compact_trigger_pct("auto", "200000"), None);
+        assert_eq!(compact_trigger_pct("50000", "200000"), None);
+        assert_eq!(compact_trigger_pct("", "200000"), None);
+        assert_eq!(compact_trigger_pct("150000", ""), None);
     }
 
     #[test]
