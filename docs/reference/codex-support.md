@@ -26,7 +26,7 @@ Playbook runs best in Claude Code. Codex gets the skills and, if you wire them b
 ## How the guards behave in Codex
 
 - A hook that errors, times out or returns malformed output is reported and the tool call continues. Only an explicit deny or exit code 2 blocks. The Codex docs call hooks "a useful guardrail, not a complete enforcement boundary". Treat the guards as best effort.
-- The guards also allow when stdin is empty or not JSON, and for `apply_patch` calls. Tests pin this.
+- The guards allow when stdin is empty or not JSON. ADR-0015 says the hooks adapter must fail closed on a payload it cannot parse, so this is a known gap, not the intended design. The guards also read only `tool_input.command` and ignore `tool_name`, so an `apply_patch` call is allowed unless its patch text holds a command the guard denies. Tests pin both.
 - A hook is skipped until you review and trust its exact definition in `/hooks`.
 - `commit-message-sanitizer` rewrites a command by printing `updatedInput` and context, with no `permissionDecision`. The Codex docs describe a rewrite as `permissionDecision: "allow"` with `updatedInput`. Whether Codex applies the form playbook prints is `[unverified]`, and so is whether an allow would skip Codex's own approval prompt for the rewritten command. Do not rely on the sanitizer in Codex until both are checked.
 - `precommit-check` has no `if` filter in Codex, so it runs on every Bash call and exits quietly when the command is not a commit. Whether Codex rejects or ignores an `if` field is `[unverified]`.
