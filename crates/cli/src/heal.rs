@@ -214,17 +214,18 @@ impl Outcome {
     /// report. The items that need the user go through `crate::pending`.
     pub fn line(&self) -> Option<String> {
         let mut parts = Vec::new();
-        let (notices, files): (Vec<_>, Vec<_>) = self
-            .changed
-            .iter()
-            .partition(|step| step.name == crate::init::migrate::POLICY_GUARD_NOTICE_STEP);
+        // The policy guard and rm guard notices change no file, so they are not
+        // counted.
+        let (notices, files): (Vec<_>, Vec<_>) = self.changed.iter().partition(|s| {
+            s.name == migrate::RM_GUARD_NOTICE_STEP || s.name == migrate::POLICY_GUARD_NOTICE_STEP
+        });
         if !files.is_empty() {
             parts.push(format!(
                 "updated {} of its own files after the upgrade",
                 files.len()
             ));
         }
-        parts.extend(notices.iter().map(|step| step.detail.clone()));
+        parts.extend(notices.iter().map(|s| s.detail.clone()));
         if !self.failed.is_empty() {
             parts.push(format!(
                 "{} migration(s) failed: run `playbook migrate`",
@@ -503,7 +504,13 @@ fn notice(home: &Path, out: &Outcome, now: u64, shown: bool) -> Option<String> {
             migrations: out.listed_open(),
             session_plugin: std::env::var_os("CLAUDE_PLUGIN_ROOT").is_some_and(|v| !v.is_empty()),
         };
-        crate::pending::session_notice(&root, &out.items(home), now, shown, prune)
+        let mut open = out.items(home);
+        // An update already started says it is updating, so the manual fix
+        // would contradict it.
+        if crate::plugin_update::in_flight(&root, env!("CARGO_PKG_VERSION"), now) {
+            open.retain(|i| !i.fix.starts_with(crate::plugin_update::COMMAND_PREFIX));
+        }
+        crate::pending::session_notice(&root, &open, now, shown, prune)
     };
     let block = out.notices.render();
     let parts: Vec<String> = out
@@ -754,6 +761,20 @@ mod tests {
         // Assert
         assert!(out.line().is_none());
         assert_eq!(Record::read(&root(&home)).unwrap(), before);
+    }
+
+    #[test]
+    fn the_rm_guard_notice_is_shown_but_not_counted_as_a_file() {
+        let out = Outcome {
+            changed: vec![crate::init::run::StepReport::wired(
+                migrate::RM_GUARD_NOTICE_STEP,
+                "the rm guard changed",
+            )],
+            ..Outcome::default()
+        };
+        let line = out.line().unwrap();
+        assert!(line.contains("the rm guard changed"), "{line}");
+        assert!(!line.contains("updated"), "{line}");
     }
 
     #[test]

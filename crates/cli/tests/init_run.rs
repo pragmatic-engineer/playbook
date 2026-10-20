@@ -149,11 +149,10 @@ const PORTED_HOOK_NAMES: &[&str] = &[
     "worktree-remove",
 ];
 
-/// The 6 safety guards, wired the same as `PORTED_HOOK_NAMES`.
+/// The 5 safety guards, wired the same as `PORTED_HOOK_NAMES`.
 const GUARD_HOOK_NAMES: &[&str] = &[
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
     "policy-guard",
@@ -360,6 +359,30 @@ fn the_policy_guard_part_stores_nothing_unless_chosen_and_never_turns_it_off() {
     assert!(
         stored_enabled(&home),
         "a run without the part kept the choice"
+    );
+}
+
+#[test]
+fn choosing_the_policy_guard_in_setup_skips_the_off_by_default_notice() {
+    let home = scratch_home("policy-guard-no-notice");
+    let settings = home.join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let doc = json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "playbook hook policy-guard"}]}]}});
+    fs::write(&settings, doc.to_string()).unwrap();
+
+    let report = run(&InitPaths {
+        policy_guard: true,
+        ..base_paths(&home)
+    });
+
+    assert!(
+        !report
+            .steps
+            .iter()
+            .any(|s| s.detail.contains("now off by default")),
+        "{:?}",
+        report.steps.iter().map(|s| &s.detail).collect::<Vec<_>>()
     );
 }
 

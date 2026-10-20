@@ -115,10 +115,9 @@ fn text(rows: &[&Value]) -> String {
         .join("\n")
 }
 
-const GUARDS: [&str; 6] = [
+const GUARDS: [&str; 5] = [
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
     "policy-guard",
@@ -166,7 +165,7 @@ fn a_paused_plugin_turns_the_guard_row_into_a_warning_and_says_why() {
     assert_eq!(l1[0]["level"], "WARN", "{}", text(&l1));
     assert!(text(&l1).contains("paused"), "{}", text(&l1));
     assert_eq!(l2[0]["level"], "WARN", "{}", text(&l2));
-    assert!(text(&l2).contains("7 of 7"), "{}", text(&l2));
+    assert!(text(&l2).contains("6 of 6"), "{}", text(&l2));
     assert!(text(&l2).contains("plugin is paused"), "{}", text(&l2));
     assert_eq!(l5[0]["level"], "WARN", "{}", text(&l5));
     assert!(text(&l5).contains("plugin is paused"), "{}", text(&l5));
@@ -211,7 +210,7 @@ fn l2_all_guards_and_the_backstop_wired_passes() {
     let rows = b.run(&[], "/bin/zsh", None);
     let l2 = layer(&rows, "2");
     assert_eq!(l2[0]["level"], "PASS", "{}", text(&l2));
-    assert!(text(&l2).contains("7 of 7"));
+    assert!(text(&l2).contains("6 of 6"));
 }
 
 #[test]
@@ -220,7 +219,6 @@ fn l2_a_legacy_command_is_not_wired() {
     let pre = [
         hook("playbook hook rm-workspace-guard"),
         hook("playbook hook bg-await-guard"),
-        hook("playbook hook no-slop-guard"),
         hook("~/.claude/hooks/precommit-check.sh"),
         hook("playbook hook commit-message-sanitizer"),
         hook("playbook hook policy-guard"),
@@ -234,7 +232,7 @@ fn l2_a_legacy_command_is_not_wired() {
     let t = text(&layer(&rows, "2"));
     assert!(t.starts_with("FAIL"), "{t}");
     assert!(
-        t.contains("6/7") && t.contains("precommit-check:NOT_WIRED"),
+        t.contains("5/6") && t.contains("precommit-check:NOT_WIRED"),
         "{t}"
     );
 }
@@ -245,7 +243,6 @@ fn l2_a_near_miss_command_does_not_count() {
     let pre = [
         hook("playbook hook rm-workspace-guard-legacy"),
         hook("playbook hook bg-await-guard"),
-        hook("playbook hook no-slop-guard"),
         hook("playbook hook precommit-check"),
         hook("playbook hook commit-message-sanitizer"),
         hook("playbook hook policy-guard"),
@@ -266,7 +263,7 @@ fn l2_each_missing_guard_drops_the_count_and_is_named() {
         let pre: Vec<&str> = GUARDS.iter().copied().filter(|g| *g != missing).collect();
         b.settings(&guard_settings(&pre, &["commit-message-sanitizer"]));
         let t = text(&layer(&b.run(&[], "/bin/zsh", None), "2"));
-        assert!(t.contains("6/7"), "{missing}: {t}");
+        assert!(t.contains("5/6"), "{missing}: {t}");
         assert!(
             t.contains(&format!(" {missing}:NOT_WIRED")),
             "{missing}: {t}"
@@ -279,7 +276,7 @@ fn l2_the_backstop_is_checked_on_posttooluse() {
     let b = Box::new("l2g");
     b.settings(&guard_settings(&GUARDS, &[]));
     let t = text(&layer(&b.run(&[], "/bin/zsh", None), "2"));
-    assert!(t.contains("6/7"), "{t}");
+    assert!(t.contains("5/6"), "{t}");
     assert!(
         t.contains("commit-message-sanitizer(PostToolUse):NOT_WIRED"),
         "{t}"
@@ -968,6 +965,30 @@ fn an_entry_for_a_hook_the_binary_no_longer_writes_is_stale() {
 }
 
 #[test]
+fn a_retired_hook_entry_points_at_setup_and_another_stale_entry_at_a_hand_edit() {
+    let b = Box::new("hooks-stale-retired");
+    let path = wire_all(&b);
+    let mut v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    for cmd in [
+        "playbook hook no-slop-guard",
+        "playbook hook migration-check",
+    ] {
+        v["hooks"]["SessionStart"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"hooks":[{"type":"command","command":cmd}]}));
+    }
+    fs::write(&path, v.to_string()).unwrap();
+
+    let rows = hook_rows(&b.run(&[], "/bin/sh", None));
+
+    let row = |cmd: &str| rows.iter().find(|r| r.contains(cmd)).expect("row").clone();
+    assert!(row("hook no-slop-guard").ends_with("-- run: playbook setup --hooks"));
+    assert!(row("hook migration-check")
+        .ends_with("-- delete the entry from ~/.claude/settings.json by hand"));
+}
+
+#[test]
 fn a_binary_that_does_not_know_a_wired_hook_is_reported() {
     let b = Box::new("hooks-old-binary");
     wire_all(&b);
@@ -1234,6 +1255,129 @@ fn a_collector_that_is_not_running_and_has_no_rows_warns_with_each_fix() {
     assert!(all.contains("WARN collector not running"), "{all}");
     assert!(all.contains("WARN no telemetry rows yet"), "{all}");
     assert!(hints(&mine).contains("playbook usage collect"));
+}
+
+/// A daemon file of the home in `b`, such as the lock or the stamp.
+fn daemon_paths(b: &Box, file: fn(&playbook::usage::run::Paths) -> PathBuf) -> PathBuf {
+    file(&playbook::usage::run::Paths::from_home(&b.home()))
+}
+
+/// Holds `collector.lock` in this test process, with `version` in the
+/// holder line, the way a running collector does. The lock lasts as long as
+/// the returned file.
+fn hold_collector_lock(b: &Box, version: &str) -> fs::File {
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(daemon_paths(b, playbook::usage::daemon::lock_path))
+        .unwrap();
+    lock.try_lock().unwrap();
+    std::io::Write::write_all(
+        &mut &lock,
+        format!("{} {version}\n", std::process::id()).as_bytes(),
+    )
+    .unwrap();
+    lock
+}
+
+/// The one daemon row, as `LEVEL message`, and its hint.
+fn daemon_row(rows: &[Value]) -> (String, String) {
+    let row = rows
+        .iter()
+        .find(|r| {
+            r["message"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("collector daemon:"))
+        })
+        .expect("a collector daemon row");
+    (
+        text(&[row]),
+        row["hint"].as_str().unwrap_or_default().to_string(),
+    )
+}
+
+#[test]
+fn a_held_lock_at_this_version_passes_with_its_pid_and_version() {
+    let b = Box::new("daemon-held");
+    point_settings_at_collector(&b, free_port());
+    let _lock = hold_collector_lock(&b, env!("CARGO_PKG_VERSION"));
+
+    let (row, _) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(
+        row,
+        format!(
+            "PASS collector daemon: pid {}, version {}, lock held",
+            std::process::id(),
+            env!("CARGO_PKG_VERSION")
+        )
+    );
+}
+
+#[test]
+fn a_free_lock_warns_with_the_start_fix() {
+    let b = Box::new("daemon-free");
+    point_settings_at_collector(&b, free_port());
+
+    let (row, hint) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(row, "WARN collector daemon: lock free");
+    assert_eq!(hint, "run any playbook command or start a session");
+    assert!(
+        !daemon_paths(&b, playbook::usage::daemon::lock_path).exists(),
+        "doctor must not create the lock file"
+    );
+    assert!(
+        !daemon_paths(&b, playbook::usage::daemon::stamp_path).exists(),
+        "doctor must not take the respawn stamp"
+    );
+}
+
+#[test]
+fn a_held_lock_from_another_version_warns_naming_both_versions() {
+    const OLD: &str = "0.0.1";
+    let b = Box::new("daemon-old");
+    point_settings_at_collector(&b, free_port());
+    let _lock = hold_collector_lock(&b, OLD);
+
+    let (row, hint) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(
+        row,
+        format!(
+            "WARN collector daemon: version {OLD} (pid {}) differs from this binary ({})",
+            std::process::id(),
+            env!("CARGO_PKG_VERSION")
+        )
+    );
+    assert_eq!(hint, "run: playbook usage stop, then any playbook command");
+}
+
+#[test]
+fn a_stamp_left_by_a_busy_port_warns_with_the_reason_and_the_move_fix() {
+    const PORT: u16 = 47_999;
+    let b = Box::new("daemon-port");
+    point_settings_at_collector(&b, PORT);
+    let reason = playbook::usage::daemon::port_busy_reason(PORT);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let window = playbook::usage::daemon::PORT_BUSY_WINDOW.as_secs();
+    fs::write(
+        daemon_paths(&b, playbook::usage::daemon::stamp_path),
+        format!("{now} {window} {reason}\n"),
+    )
+    .unwrap();
+
+    let (row, hint) = daemon_row(&b.run_with_env(&[]));
+
+    assert_eq!(row, format!("WARN collector daemon: lock free, {reason}"));
+    assert_eq!(
+        hint,
+        format!("free port {PORT}, or move with playbook usage collect --port <N> and playbook setup --only telemetry")
+    );
 }
 
 #[test]
@@ -1737,4 +1881,41 @@ fn doctor_reports_the_policy_guard_as_off_until_the_key_is_true() {
         .as_str()
         .unwrap()
         .contains("hooks.policyGuard.enabled false"));
+}
+
+#[test]
+fn doctor_honors_policy_guard_in_the_environment_like_the_hook() {
+    // Arrange
+    let b = Box::new("pg-env");
+    b.settings("{}");
+    let set = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        .args([
+            "config",
+            "set",
+            "--global",
+            "hooks.policyGuard.enabled",
+            "true",
+        ])
+        .env("HOME", b.home())
+        .current_dir(b.home())
+        .output()
+        .unwrap();
+    assert!(set.status.success());
+
+    // Act
+    let off = b.run_with_env(&[("POLICY_GUARD", "0")]);
+    let on = Box::new("pg-env-on");
+    on.settings("{}");
+    let on = on.run_with_env(&[("POLICY_GUARD", "1")]);
+
+    // Assert
+    let row = policy_guard_row(&off);
+    assert_eq!(row["level"], "INFO");
+    assert!(row["message"]
+        .as_str()
+        .unwrap()
+        .contains("policy guard is off"));
+    let row = policy_guard_row(&on);
+    assert_eq!(row["level"], "PASS");
+    assert!(row["message"].as_str().unwrap().contains("POLICY_GUARD"));
 }

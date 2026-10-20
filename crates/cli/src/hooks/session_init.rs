@@ -92,7 +92,7 @@ pub fn run(payload: &Payload) {
         clear_auto_state(&dir);
     }
     clear_statusline_cache();
-    ensure_telemetry_collector(&home);
+    ensure_telemetry_collector();
     // Headless runs (CI, `claude -p`) have no stale worktrees, no person to nudge,
     // and no handoff to consume: they get the tool map and the auto mode note,
     // and memory only when it is opted in.
@@ -109,7 +109,17 @@ pub fn run(payload: &Payload) {
     if let Some(line) = &disk_line {
         push_context(&mut extra_context, line);
     }
-    for line in heal_line(&home).into_iter().chain(disk_line) {
+    // Before the heal line: a started update hides the plugin fix from it.
+    let plugin_lines = if headless {
+        Vec::new()
+    } else {
+        plugin_update_lines(&home)
+    };
+    for line in heal_line(&home)
+        .into_iter()
+        .chain(plugin_lines)
+        .chain(disk_line)
+    {
         if !system_message.is_empty() {
             system_message.push('\n');
         }
@@ -148,15 +158,45 @@ fn heal_line(home: &str) -> Option<String> {
     crate::heal::session_line(Path::new(home))
 }
 
+/// The stored result of an earlier plugin update, then the line for an
+/// update started now. It deletes the notice it shows and writes the claim
+/// marker, and never waits for the update: that runs in a detached child.
+/// Any panic is dropped so the hook cannot fail.
+fn plugin_update_lines(home: &str) -> Vec<String> {
+    std::panic::catch_unwind(|| {
+        use crate::plugin_update::{
+            claim, due, now, record_done, seen, settle_spawn, spawn_refresh_plugin, Due, Mode,
+        };
+        let home = Path::new(home);
+        let root = crate::common::paths::playbook_root_from(home);
+        let mut lines: Vec<String> = crate::notices::take_notice(&root).into_iter().collect();
+        let running = env!("CARGO_PKG_VERSION");
+        let seen_before = seen(&root);
+        match due(home, seen_before.as_deref()) {
+            Due::Run(Mode::Auto)
+                if claim(&root, seen_before.as_deref(), running, now())
+                    && settle_spawn(&root, running, spawn_refresh_plugin(), now()) =>
+            {
+                lines.push(format!(
+                    "playbook: updating the playbook plugin to {running} in the background. \
+                    Start Claude Code again to load it."
+                ));
+            }
+            Due::Current => record_done(&root, running, now()),
+            _ => {}
+        }
+        lines
+    })
+    .unwrap_or_default()
+}
+
 /// Starts the telemetry collector when Claude Code's settings point at it and
-/// it is not running, so plain `claude` sessions reach it. It waits a short,
-/// fixed time at most and never fails the hook: any panic or error is dropped,
-/// and the collector writes its own messages to `collector.log`.
-fn ensure_telemetry_collector(home: &str) {
-    let home = std::path::PathBuf::from(home);
-    let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
+/// none runs at this version, so plain `claude` sessions reach it. It waits a
+/// short, fixed time at most and never fails the hook: any panic or error is
+/// dropped, and the collector writes its own messages to `collector.log`.
+fn ensure_telemetry_collector() {
     let _ = std::panic::catch_unwind(|| {
-        crate::cc::telemetry::ensure_collector_for_session(&home, &cwd)
+        crate::cc::telemetry::ensure_for(crate::cc::telemetry::Trigger::SessionStart)
     });
 }
 

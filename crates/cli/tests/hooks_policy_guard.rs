@@ -444,10 +444,11 @@ fn the_fact_format_is_still_shown_while_the_guard_is_off() {
 #[test]
 fn an_unrecognized_environment_value_falls_back_to_the_stored_key() {
     let home = scratch_home("env-other");
+    enable_in(&home, true);
 
     let out = run_in_home(&bash(DENIED_COMMAND), &home, Some("true"));
 
-    assert_eq!(denial(&out), None, "{out}");
+    assert!(denial(&out).is_some(), "{out}");
 }
 
 #[test]

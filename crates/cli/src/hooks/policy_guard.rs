@@ -134,7 +134,7 @@ macro_rules! protected_reason {
         concat!(
             "Matched rule: ",
             $rule,
-            ". The rm guard's allowed roots, the prose lint mode, the pull request rules and the disk guard's thresholds are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Reading the config store is fine. Until then, work within the current setting and say so."
+            ". The prose lint mode, the pull request rules and the disk guard's thresholds are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.proseLint.mode warn`. Reading the config store is fine. Until then, work within the current setting and say so."
         )
     };
 }
@@ -176,10 +176,23 @@ pub const ENABLED_KEY: &str = "hooks.policyGuard.enabled";
 /// Whether the denials are on: `POLICY_GUARD=1` or `0` decides, else the
 /// stored `hooks.policyGuard.enabled`, which is off by default.
 pub fn enabled() -> bool {
+    enabled_for(&crate::common::home_dir())
+}
+
+/// [`enabled`] for a given home, so doctor reads what the hook reads.
+pub fn enabled_for(home: &Path) -> bool {
+    match env_override() {
+        Some(on) => on,
+        None => stored_enabled(home),
+    }
+}
+
+/// `POLICY_GUARD=1` or `0` from the environment; any other value is ignored.
+pub fn env_override() -> Option<bool> {
     match std::env::var("POLICY_GUARD").as_deref() {
-        Ok("0") => false,
-        Ok("1") => true,
-        _ => stored_enabled(&crate::common::home_dir()),
+        Ok("0") => Some(false),
+        Ok("1") => Some(true),
+        _ => None,
     }
 }
 

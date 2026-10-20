@@ -77,10 +77,9 @@ impl Env {
     }
 }
 
-const PRE_GUARDS: [&str; 6] = [
+const PRE_GUARDS: [&str; 5] = [
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
     "policy-guard",
@@ -792,8 +791,21 @@ const TELEMETRY_SETUP_FIX: &str = "run: playbook setup --only telemetry";
 
 /// The policy guard is optional and off by default, so off is an Info row.
 fn policy_guard_row(env: &Env) -> Row {
-    use crate::hooks::policy_guard::{stored_enabled, ENABLED_KEY};
-    if stored_enabled(&env.home) {
+    use crate::hooks::policy_guard::{enabled_for, env_override, ENABLED_KEY};
+    if let Some(on) = env_override() {
+        let (level, state) = if on {
+            (Level::Pass, "on")
+        } else {
+            (Level::Info, "off")
+        };
+        return Row::new(
+            "-",
+            level,
+            format!("policy guard is {state}: POLICY_GUARD in the environment decides, whatever {ENABLED_KEY} holds"),
+        )
+        .hint("unset POLICY_GUARD to follow the stored key");
+    }
+    if enabled_for(&env.home) {
         Row::new(
             "-",
             Level::Pass,
@@ -1067,6 +1079,7 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
     let Some(state) = state else {
         return rows;
     };
+    rows.push(daemon_row(&paths, state.port));
     let up = running(&state) && probe(state.port) == Reply::Collector;
     if up {
         rows.push(Row::new(
@@ -1125,6 +1138,53 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
             .hint("restart Claude Code so it reads the new settings, then start a session"),
     });
     rows
+}
+
+/// Who holds the collector's lifetime lock, or why none does. Read only: it
+/// opens the lock file without creating it and connects nowhere.
+fn daemon_row(paths: &crate::usage::run::Paths, port: u16) -> Row {
+    use crate::usage::daemon::{lock_path, lock_state, stamp_reason, LockState};
+    let ours = env!("CARGO_PKG_VERSION");
+    match lock_state(paths) {
+        LockState::Held(holder) => match (holder.pid, holder.version) {
+            (Some(pid), Some(version)) if version == ours => Row::new(
+                "-",
+                Level::Pass,
+                format!("collector daemon: pid {pid}, version {version}, lock held"),
+            ),
+            (Some(pid), Some(version)) => Row::new(
+                "-",
+                Level::Warn,
+                format!(
+                    "collector daemon: version {version} (pid {pid}) differs from this binary ({ours})"
+                ),
+            )
+            .hint("run: playbook usage stop, then any playbook command"),
+            // No whole holder line yet: it is still starting.
+            _ => Row::new("-", Level::Info, "collector daemon: starting, lock held"),
+        },
+        LockState::Free => match stamp_reason(paths) {
+            Some(reason) => Row::new(
+                "-",
+                Level::Warn,
+                format!("collector daemon: lock free, {reason}"),
+            )
+            .hint(format!(
+                "free port {port}, or move with playbook usage collect --port <N> and playbook setup --only telemetry"
+            )),
+            None => Row::new("-", Level::Warn, "collector daemon: lock free")
+                .hint("run any playbook command or start a session"),
+        },
+        LockState::Unavailable => Row::new(
+            "-",
+            Level::Warn,
+            format!(
+                "collector daemon: cannot read {}",
+                lock_path(paths).display()
+            ),
+        )
+        .hint("check the permissions of the playbook data folder"),
+    }
 }
 
 /// One row for the data folder: path, files, sizes and any `*.migrated`
@@ -1297,13 +1357,18 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
         ));
     }
     for cmd in &found.stale {
+        let hint = if crate::init::retired_hooks::is_retired_command(cmd) {
+            "run: playbook setup --hooks"
+        } else {
+            "delete the entry from ~/.claude/settings.json by hand"
+        };
         rows.push(
             Row::new(
                 "-",
                 Level::Warn,
                 format!("settings.json has a hook the binary no longer writes: {cmd}"),
             )
-            .hint("delete the entry from ~/.claude/settings.json by hand"),
+            .hint(hint),
         );
     }
     let cwd = env.repo_root.clone().unwrap_or_else(|| env.home.clone());

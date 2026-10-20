@@ -176,6 +176,8 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     };
     // Before the heal, so the record it writes sees the attribution answer.
     let attribution_step = attribution_step(paths, epoch);
+    // Before the migrations, so the off-by-default notice sees a key this run stores.
+    let policy_guard_step = policy_guard_step(paths);
     let migrated = migrate::run_pending_for(&ctx, paths.statusline, paths.hooks);
     // Record this binary in the version record, so the session hook does not
     // run the same migrations again (ADR 0034).
@@ -211,7 +213,6 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
     let service_step = collector_service_step(paths);
     let short_name_step = short_name_step(paths);
     let ballast_step = disk_ballast_step(paths);
-    let policy_guard_step = policy_guard_step(paths);
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
 
     let trust_step = trust_config_dir_step(&paths.home);

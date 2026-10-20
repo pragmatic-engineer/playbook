@@ -441,7 +441,7 @@ fn hook_cases() -> Vec<Case> {
                 // A worktree hook with no worktree name refuses and says so.
                 "worktree-create" => c.code(1).err("unsafe worktree name"),
                 "worktree-remove" => c.err("worktree_path is missing"),
-                "migration-check" => c,
+                "migration-check" | "no-slop-guard" => c,
                 // These keep a log or a counter, so a second run adds to it.
                 "session-init" | "session-clean-exit" | "search-counter" | "precompact-warn"
                 | "usage-warm" => c.grows(),
@@ -497,10 +497,8 @@ fn table() -> Vec<Case> {
         case("init", &["init", "--dry-run"]).out("nothing is changed"),
         case("init", &["init", "--yes"]).out("Applying").writes(),
         case("hooks list", &["hooks", "list"]).out("Safety guards").plain(),
-        case("hooks explain-rm", &["hooks", "explain-rm", "unlink /etc/hosts"])
-            .out("verdict: deny")
-            .plain(),
-        case("hooks explain-rm", &["hooks", "explain-rm", "--json", "ls"]).out(r#""verdict":"allow""#),
+        case("hooks explain-rm", &["hooks", "explain-rm", "ls"]).code(2).err("was removed"),
+        case("skills sync", &["skills", "sync", "--dry-run"]).out("no other agents found"),
         case("uninstall", &["uninstall"]).code(1).err("nothing was changed"),
         case("uninstall", &["uninstall", "--dry-run"]).pre(&["setup", "--yes"]),
         case("uninstall", &["uninstall", "--yes"]).pre(&["setup", "--yes"]).writes(),
