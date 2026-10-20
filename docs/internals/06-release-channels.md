@@ -224,6 +224,7 @@ no release of its own. `playbook-telemetry` uses the workspace version, and its
 | --- | --- |
 | playbook | `playbook-<version>-<target>`, the raw binary |
 | pbtop | `pbtop-<version>-<target>.tar.gz` holding `pbtop` alone |
+| pbdoc | `pbdoc-<version>-<target>.tar.gz` holding `pbdoc` and `NOTICE-pbdoc`, for the four macOS and Linux targets |
 | Debian, Ubuntu | `playbook_<version>_amd64.deb` and `playbook_<version>_arm64.deb` |
 | Fedora, RHEL | `playbook-<version>.x86_64.rpm` and `playbook-<version>.aarch64.rpm` |
 
@@ -235,7 +236,7 @@ describes it and `scripts/package-linux.sh` builds it with a pinned nfpm
 build legs build the packages from their own static binaries, install them in
 Debian, Ubuntu and Fedora containers with `scripts/package-smoke.sh`, and attest
 them with the other assets, so a bad package stops the release before the
-draft is published. The `publish` job puts them in `SHA256SUMS` and expects 14
+draft is published. The `publish` job puts them in `SHA256SUMS` and expects 18
 assets. After `verify`, the `verify-packages` job downloads the x86_64 pair
 from the published release, checks the sums and the attestation, and runs the
 same container test. It blocks no other channel, a red result fails the run, and
@@ -244,6 +245,17 @@ packages and publishes nothing. The container images are pinned by digest in
 `scripts/package-smoke.sh`.
 
 Every release also carries `release-notes.json` and `SHA256SUMS`. The Homebrew tap maps each formula to its asset.
+
+Only `install.sh` and Homebrew ship `pbdoc`, the document converter. The `.deb`
+and `.rpm` packages, `cargo binstall`, mise and the nix flake install
+`playbook` without it, and `playbook doc` then reports that no converter is
+installed. This is a known limit.
+
+Release checklist for the release that adds `pbdoc`: the tap pull request that
+adds `resource "pbdoc"` to `Formula/playbook.rb` (homebrew-tap #53) merges
+first, and the release workflow and the installer changes ship together. The
+`downstream` job fails when the tap formula has no `resource "pbdoc"`, so a tag
+cut before that pull request merges cannot ship silently.
 
 `cargo binstall` and mise install the raw `playbook-<version>-<target>` binary
 and depend on that name. `[package.metadata.binstall]` in `crates/cli/Cargo.toml`
