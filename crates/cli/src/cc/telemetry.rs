@@ -160,7 +160,18 @@ pub fn ensure_for(trigger: Trigger) -> Ensured {
     let Ok(exe) = std::env::current_exe() else {
         return Ensured::NotConfigured;
     };
-    ensure_at(&crate::common::home_dir(), &exe, trigger)
+    ensure_at(&crate::common::home_dir(), &exe, trigger, false)
+}
+
+/// Like `ensure_for(Command)`, but also for a headless process. The service
+/// removal migration stops the collector the service ran, and open sessions
+/// of any kind still send to it, so the migration restarts one even when the
+/// heal that runs it is headless.
+pub fn ensure_after_removal() -> Ensured {
+    let Ok(exe) = std::env::current_exe() else {
+        return Ensured::NotConfigured;
+    };
+    ensure_at(&crate::common::home_dir(), &exe, Trigger::Command, true)
 }
 
 /// The gates, cheapest first, then `daemon::ensure`. A collector at this
@@ -169,7 +180,7 @@ pub fn ensure_for(trigger: Trigger) -> Ensured {
 /// check, with the consent check, whenever `daemon::ensure` could spawn: a
 /// missing or older holder, or a probe, which replaces a silent one. Only a
 /// current holder with no probe skips them.
-fn ensure_at(home: &Path, exe: &Path, trigger: Trigger) -> Ensured {
+fn ensure_at(home: &Path, exe: &Path, trigger: Trigger, allow_headless: bool) -> Ensured {
     if crate::common::home_error(home).is_some() {
         return Ensured::NotConfigured;
     }
@@ -177,7 +188,7 @@ fn ensure_at(home: &Path, exe: &Path, trigger: Trigger) -> Ensured {
     let recorded =
         read_state(&state_path(&paths)).is_some_and(|s| s.port != 0 && !s.token.is_empty());
     if !recorded
-        || crate::common::headless::is_headless()
+        || (!allow_headless && crate::common::headless::is_headless())
         || crate::common::real_home::refused(home)
     {
         return Ensured::NotConfigured;
