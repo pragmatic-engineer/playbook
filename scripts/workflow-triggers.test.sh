@@ -28,13 +28,13 @@ problems() {
   awk -v file="$1" -v allowed="$ALLOWED" '
     function indent(s,   t) { t = s; sub(/[^ ].*$/, "", t); return length(t) }
     BEGIN { n = split(allowed, a, " "); for (i = 1; i <= n; i++) ok[a[i]] = 1 }
-    { code = $0; sub(/(^|[ \t])#.*/, "", code) }
+    { code = $0; if (code ~ /^[ \t]*#/) code = "" }
     code ~ /pull_request_target/ {
       prt = 1
       base = file; sub(/.*\//, "", base)
       if (!(base in ok)) print file ":" NR ": pull_request_target is not allowed"
     }
-    code ~ /(^|[ \t\[,-])issue_comment[ \t:,\]]*$/ { risky = 1 }
+    code ~ /(^|[^a-z_])issue_comment([^a-z_]|$)/ { risky = 1 }
     code ~ /pull_request_target/ { risky = 1 }
     { lines[NR] = code }
     END {
@@ -44,14 +44,14 @@ problems() {
         l = lines[i]
         if (l ~ /^[ \t]*$/) continue
         if (inrun && indent(l) <= runind) inrun = 0
-        if (l ~ /^[ \t-]*run:/) {
+        if (l ~ /^[ \t-]*(run|script):/) {
           runind = indent(l); sub(/^[ \t-]*/, "", l)
           # `- run:` puts the key two columns right of the dash
           if (lines[i] ~ /^[ \t]*- /) runind += 2
           inrun = 1
         }
-        if (inrun && lines[i] ~ /\$\{\{[ \t]*github\.event/)
-          print file ":" i ": ${{ github.event inside run: (use env)"
+        if (inrun && lines[i] ~ /\$\{\{[^}]*github\.event/)
+          print file ":" i ": ${{ github.event inside run: or script: (use env)"
         if (lines[i] ~ /^[ \t-]*ref:/ && lines[i] ~ /head|refs\/pull|merge/)
           print file ":" i ": checks out the PR head"
       }
@@ -76,6 +76,17 @@ jobs:
           echo hi
           echo "${{ github.event.comment.body }}"
 YAML
+cat > "$tmp/bad2.yml" <<'YAML'
+on: [push, issue_comment]
+jobs:
+  a:
+    steps:
+      - run: echo "see #1 ${{ github.event.issue.title }}"
+      - uses: actions/github-script@abc # v1
+        with:
+          script: |
+            const t = '${{ toJSON(github.event.comment) }}';
+YAML
 cat > "$tmp/good.yml" <<'YAML'
 on:
   issue_comment:
@@ -94,11 +105,18 @@ jobs:
 YAML
 want="$tmp/bad.yml:2: pull_request_target is not allowed
 $tmp/bad.yml:9: checks out the PR head
-$tmp/bad.yml:10: \${{ github.event inside run: (use env)
-$tmp/bad.yml:13: \${{ github.event inside run: (use env)"
+$tmp/bad.yml:10: \${{ github.event inside run: or script: (use env)
+$tmp/bad.yml:13: \${{ github.event inside run: or script: (use env)"
 got="$(problems "$tmp/bad.yml")"
 if [ "$got" != "$want" ]; then
   printf 'FAIL: the check missed the bad fixture.\nGot:\n%s\n' "$got" >&2
+  exit 1
+fi
+want2="$tmp/bad2.yml:5: \${{ github.event inside run: or script: (use env)
+$tmp/bad2.yml:9: \${{ github.event inside run: or script: (use env)"
+got2="$(problems "$tmp/bad2.yml")"
+if [ "$got2" != "$want2" ]; then
+  printf 'FAIL: the check missed the inline-trigger fixture.\nGot:\n%s\n' "$got2" >&2
   exit 1
 fi
 if [ -n "$(problems "$tmp/good.yml")" ]; then

@@ -97,10 +97,10 @@ jobs:
           allowed-endpoints: >
             api.github.com:443
             github.com:443
-      - name: Check CLA signature (base ref, no checkout)
+      - name: Check CLA signature (default branch, no checkout)
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         with:
           script: |
@@ -109,13 +109,15 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               path: '.github/CONTRIBUTORS.md',
-              ref: process.env.BASE_REF,
+              ref: process.env.BASE_BRANCH,
             });
             const content = Buffer.from(file.content, 'base64').toString('utf-8');
 
             // Parse table rows between CLA-BOT markers
             const match = content.match(/CLA-BOT:START[\s\S]*?CLA-BOT:END/);
-            const hasSigned = match ? match[0].toLowerCase().includes('@' + author) : false;
+            const hasSigned = match
+              ? match[0].toLowerCase().split('\n').some(l => l.trim().startsWith('| @' + author + ' |'))
+              : false;
 
             if (!hasSigned) {
               const text = [
@@ -123,7 +125,7 @@ jobs:
                 '',
                 '@' + author + ', sign the Individual CLA (.github/ICLA.md) before this PR can be merged.',
                 'Reply to this PR with: `I have read the CLA Document and I hereby sign the CLA.`',
-                'Then re-run this check. For an employer, see .github/CCLA.md.',
+                'Then push a new commit, or ask a maintainer to re-run this check. For an employer, see .github/CCLA.md.',
               ].join('\n');
               await core.summary.addRaw(text + '\n', true).write();
               core.setFailed('CLA: @' + author + ' has not signed');
@@ -140,7 +142,7 @@ jobs:
       contents: write
       pull-requests: write
     concurrency:
-      group: cla-signature
+      group: cla-signature-${{ github.event.comment.user.login }}
       cancel-in-progress: false
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
@@ -180,7 +182,7 @@ jobs:
 
                 const content = Buffer.from(file.content, 'base64').toString('utf-8');
 
-                if (content.toLowerCase().includes('@' + author.toLowerCase())) {
+                if (content.toLowerCase().split('\n').some(l => l.trim().startsWith('| @' + author.toLowerCase() + ' |'))) {
                   core.info('@' + author + ' already signed (detected on attempt ' + attempt + ').');
                   break;
                 }
@@ -210,7 +212,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: Number(process.env.ISSUE_NUMBER),
-                  body: 'Thank you @' + author + '! Your CLA signature has been recorded in [CONTRIBUTORS.md](.github/CONTRIBUTORS.md). Re-run the `cla-check` job on this PR to refresh its status.',
+                  body: 'Thank you @' + author + '! Your CLA signature has been recorded in [CONTRIBUTORS.md](.github/CONTRIBUTORS.md). Push a new commit to this PR, or ask a maintainer to re-run the `cla-check` job, to refresh its status.',
                 });
 
                 break;
