@@ -1745,7 +1745,13 @@ fn doctor_warns_once_about_a_leftover_collector_service_file() {
             .collect();
         assert_eq!(service.len(), 1, "{text}");
         let row = service[0];
-        assert_eq!(row["hint"], "run: playbook migrate", "{row}");
+        if text.contains("was not written by playbook, so it stays") {
+            let hint = row["hint"].as_str().unwrap();
+            assert!(hint.starts_with("run: launchctl bootout gui/"), "{row}");
+            assert!(hint.contains("; rm "), "{row}");
+        } else {
+            assert_eq!(row["hint"], "run: playbook migrate", "{row}");
+        }
         assert!(
             !hints(&rows).contains("collector-service"),
             "{}",

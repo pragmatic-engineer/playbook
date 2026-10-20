@@ -69,6 +69,13 @@ pub fn run(opts: &Options) -> Report {
             .errors
             .push(format!("collector service left in place: {err}")),
     }
+    for foreign in crate::init::collector_service::foreign_files(&opts.home) {
+        report.lines.push(format!(
+            "{}; to remove it, run: {}",
+            foreign.sentence(),
+            foreign.fix
+        ));
+    }
     if !settings.ok {
         report.lines.push(
             "kept the placed files and the binary, since settings.json still refers to them"

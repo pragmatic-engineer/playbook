@@ -32,15 +32,50 @@ pub fn declined(home: &Path) -> bool {
     has_key(home, DECLINED_KEY)
 }
 
-/// The commands that remove an agent file under the old label that
-/// playbook did not write, which playbook never touches itself.
-pub fn foreign_old_agent_fix(file: &Path) -> String {
-    format!(
-        "launchctl bootout gui/{}/{}; rm {}",
-        uid(),
-        service::OLD_LABEL,
-        crate::common::shell::word(&file.to_string_lossy())
-    )
+/// A file at one of playbook's service paths that playbook did not
+/// write, which playbook never touches itself.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Foreign {
+    /// The service and the path, as for a file playbook wrote.
+    pub describe: String,
+    /// The commands that stop the service and remove the file.
+    pub fix: String,
+}
+
+impl Foreign {
+    /// One sentence for `playbook migrate` and `playbook doctor`.
+    pub fn sentence(&self) -> String {
+        format!("{} was not written by playbook, so it stays", self.describe)
+    }
+
+    fn new(describe: String, unload: String, file: &Path) -> Self {
+        let fix = format!(
+            "{unload}; rm {}",
+            crate::common::shell::word(&file.to_string_lossy())
+        );
+        Foreign { describe, fix }
+    }
+}
+
+/// The files at playbook's service paths under `home` that playbook did not
+/// write. It reads only the files and runs nothing.
+pub fn foreign_files(home: &Path) -> Vec<Foreign> {
+    let kinds = KINDS
+        .iter()
+        .filter_map(|kind| service::find_kind(*kind, home))
+        .filter(|found| !found.ours)
+        .map(|found| {
+            let unload = match found.kind {
+                Kind::Launchd => format!("launchctl bootout gui/{}/{}", uid(), found.kind.id()),
+                Kind::Systemd => format!("systemctl --user disable --now {}", found.kind.id()),
+            };
+            Foreign::new(found.describe(), unload, &found.file)
+        });
+    let old = service::find_old(home).filter(|o| !o.ours).map(|old| {
+        let unload = format!("launchctl bootout gui/{}/{}", uid(), service::OLD_LABEL);
+        Foreign::new(old.describe(), unload, &old.file)
+    });
+    kinds.chain(old).collect()
 }
 
 /// The service managers playbook ever wrote a file for. Removal checks each
@@ -53,6 +88,7 @@ pub fn installed_names(home: &Path) -> Option<String> {
     let names: Vec<String> = KINDS
         .iter()
         .filter_map(|kind| service::find_kind(*kind, home))
+        .filter(|found| found.ours)
         .map(|found| found.describe())
         .chain(
             service::find_old(home)
@@ -115,6 +151,27 @@ mod tests {
         fs::write(&file, service::render(kind, Path::new(PROGRAM), &log)).unwrap();
     }
 
+    #[test]
+    fn a_foreign_or_non_utf8_file_is_kept_and_reported() {
+        let home = scratch_dir("collector-service-foreign");
+        let own = Kind::Launchd.file(&home);
+        let theirs = Kind::Systemd.file(&home);
+        put(Kind::Launchd, &home);
+        fs::create_dir_all(theirs.parent().unwrap()).unwrap();
+        fs::write(&theirs, [0xff, 0xfe, 0x00]).unwrap();
+
+        let done = remove_with(&home, &Launchd::default()).unwrap().unwrap();
+        let foreign = foreign_files(&home);
+
+        assert!(!own.exists(), "playbook's own file goes");
+        assert!(theirs.is_file(), "the foreign file stays");
+        assert!(!done.contains("systemd"), "{done}");
+        assert_eq!(foreign.len(), 1);
+        assert!(foreign[0].describe.starts_with("systemd user unit "));
+        assert!(foreign[0].fix.contains("disable --now") && foreign[0].fix.contains("rm "));
+        assert_eq!(installed_names(&home), None);
+    }
+
     /// Writes the agent 0.37.0 wrote into `home`.
     fn put_old(home: &Path) {
         let file = service::old_file(home);
@@ -164,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn removal_takes_a_service_file_that_is_not_text() {
+    fn removal_keeps_a_service_file_that_is_not_text() {
         let home = scratch_dir("collector-service-remove-binary");
         let file = Kind::Systemd.file(&home);
         fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -172,7 +229,7 @@ mod tests {
 
         let done = remove_with(&home, &Launchd::default()).unwrap();
 
-        assert!(done.is_some());
-        assert!(!file.exists());
+        assert_eq!(done, None);
+        assert!(file.is_file());
     }
 }
