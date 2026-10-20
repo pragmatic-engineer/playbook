@@ -169,25 +169,12 @@ fn window(v: Option<&Value>) -> Option<Window> {
     })
 }
 
-/// `{amount_minor, currency, exponent}` as dollars, only for USD.
-fn usd(v: Option<&Value>) -> Option<f64> {
-    let v = v?;
-    let currency = v.get("currency")?.as_str()?;
-    let minor = v.get("amount_minor")?.as_f64()?;
-    let exponent = v.get("exponent")?.as_i64()?;
-    ((0..=6).contains(&exponent) && currency.eq_ignore_ascii_case("USD") && minor >= 0.0)
-        .then(|| minor / 10f64.powi(exponent as i32))
-}
-
-fn spend(v: Option<&Value>) -> Option<SpendLimit> {
-    let v = v?;
-    if v.get("enabled").and_then(Value::as_bool) == Some(false) {
-        return None;
-    }
-    let limit_usd = usd(v.get("limit")).filter(|n| *n > 0.0)?;
+/// The usable dollar spend limit of a figure: USD, and a limit above zero.
+fn spend(billed: Option<&SpendFigure>) -> Option<SpendLimit> {
+    let billed = billed?;
     Some(SpendLimit {
-        limit_usd,
-        used_usd: usd(v.get("used")),
+        limit_usd: billed.limit_usd()?,
+        used_usd: billed.used_usd(),
     })
 }
 
@@ -195,14 +182,15 @@ fn cache(root: &Value) -> Option<UsageCache> {
     let c = root.get("cachedUsageUtilization")?;
     let u = c.get("utilization")?;
     let fetched_at = c.get("fetchedAtMs")?.as_i64()? / 1000;
+    let billed = u
+        .get("spend")
+        .and_then(|s| SpendFigure::from_cache(s, fetched_at));
     Some(UsageCache {
         fetched_at,
         five_hour: window(u.get("five_hour")),
         seven_day: window(u.get("seven_day")),
-        spend: spend(u.get("spend")),
-        billed: u
-            .get("spend")
-            .and_then(|s| SpendFigure::from_cache(s, fetched_at)),
+        spend: spend(billed.as_ref()),
+        billed,
     })
 }
 
@@ -624,6 +612,32 @@ mod tests {
     }
 
     #[test]
+    fn a_figure_in_another_currency_is_kept_as_billed_but_is_no_dollar_limit() {
+        let eur = r#"{"enabled":true,"limit":{"amount_minor":50000,"currency":"EUR","exponent":2},"used":{"amount_minor":1234,"currency":"EUR","exponent":2}}"#;
+        let home = Home::new("billed-eur", &cache_body(NOW * 1000, eur));
+
+        let c = read(&home.json()).cache.unwrap();
+
+        assert!(c.spend.is_none());
+        let used = c.billed.unwrap().used.unwrap();
+        assert_eq!(used.currency.as_deref(), Some("EUR"));
+        assert_eq!(used.minor, 1234);
+    }
+
+    #[test]
+    fn a_dollar_figure_is_kept_as_billed_too() {
+        let usd = r#"{"enabled":true,"limit":{"amount_minor":50000,"currency":"USD","exponent":2},"used":{"amount_minor":1234,"currency":"USD","exponent":2}}"#;
+        let home = Home::new("billed-usd", &cache_body(NOW * 1000, usd));
+
+        let c = read(&home.json()).cache.unwrap();
+
+        assert_eq!(
+            c.billed,
+            crate::spend::SpendFigure::from_usd(Some(500.0), Some(12.34), NOW)
+        );
+    }
+
+    #[test]
     fn a_spend_limit_that_is_off_or_not_in_dollars_is_ignored() {
         let off =
             r#"{"enabled":false,"limit":{"amount_minor":50000,"currency":"USD","exponent":2}}"#;
@@ -675,7 +689,10 @@ mod tests {
             );
         }
         for a in amounts {
-            assert!(usd(serde_json::from_str(a).ok().as_ref()).is_none(), "{a}");
+            assert!(
+                crate::spend::Money::from_json(serde_json::from_str(a).ok().as_ref()).is_none(),
+                "{a}"
+            );
         }
     }
 

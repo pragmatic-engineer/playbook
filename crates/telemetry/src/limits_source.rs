@@ -15,8 +15,8 @@
 use super::limits::{Burn, Limit, LimitPeriod, Origin, State, Unit};
 use super::period::Period;
 use super::plan::Account;
-use super::query::{month_first_day, WeekStart};
-use super::spend::{Comparison, NotCompared, SpendFigure};
+use super::query::{utc_month_bounds, WeekStart};
+use super::spend::{BilledComparison, NotCompared, SpendFigure};
 use super::UsageEvent;
 use crate::util::atomic::write_atomic_private;
 use serde_json::{json, Value};
@@ -381,19 +381,17 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
         // A fresh cache knows the spend of every machine on the account, so
         // it replaces this machine's estimate, unless it was fetched before
         // this month began.
-        if let Some(used) = used_usd.filter(|_| fresh && fetched_at >= utc_month_start(now)) {
+        let (month_start, month_end) = utc_month_bounds(now);
+        if let Some(used) = used_usd.filter(|_| fresh && fetched_at >= month_start) {
+            // The figure counts the UTC month, so the limit's window is that
+            // month too, not the local one.
+            l.start = month_start;
+            l.end = month_end;
             l.used = used;
         }
         out.push(l);
     }
     out
-}
-
-/// The first second of the UTC month that holds `now`. Claude bills by the UTC
-/// month, whatever zone this machine is in.
-fn utc_month_start(now: i64) -> i64 {
-    let utc = crate::tz::Zone::Utc;
-    utc.day_start(month_first_day(utc.day_of(now)))
 }
 
 /// The amount Claude Code reports as used next to this machine's estimate for
@@ -406,25 +404,30 @@ pub fn compare_billed(
     s: &Sources,
     events: &[UsageEvent],
     now: i64,
-) -> Option<Result<Comparison, NotCompared>> {
-    let month_start = utc_month_start(now);
+) -> Option<Result<BilledComparison, NotCompared>> {
+    let month_start = utc_month_bounds(now).0;
+    let usable = |f: &SpendFigure| f.used.is_some() && f.fetched_at >= month_start;
+    // A gateway figure counts its own period, so only a monthly one is
+    // comparable with the local spend of the month.
     let statusline = s
         .snapshot
         .as_ref()
         .and_then(|sn| {
-            let sp = sn.spend_limit.as_ref().filter(|sp| sp.resets_at > now)?;
+            let sp = sn
+                .spend_limit
+                .as_ref()
+                .filter(|sp| sp.resets_at > now && sp.period == Some(LimitPeriod::Monthly))?;
             SpendFigure::from_usd(sp.limit_usd, sp.used_usd, sn.captured_at)
         })
-        .filter(|f| f.used.is_some());
-    let figure = statusline
-        .or_else(|| {
-            s.account
-                .cache
-                .as_ref()
-                .filter(|c| !c.is_from_the_future(now))
-                .and_then(|c| c.billed.clone())
-        })
-        .filter(|f| f.used.is_some() && f.fetched_at >= month_start)?;
+        .filter(usable);
+    let figure = statusline.or_else(|| {
+        s.account
+            .cache
+            .as_ref()
+            .filter(|c| !c.is_from_the_future(now))
+            .and_then(|c| c.billed.clone())
+            .filter(usable)
+    })?;
     // Claude reported the amount at `fetched_at`, so only the local spend up
     // to then is comparable.
     let until = now.min(figure.fetched_at);
@@ -434,7 +437,7 @@ pub fn compare_billed(
         .map(|e| e.cost_usd)
         .sum::<f64>()
         + 0.0;
-    Some(Comparison::new(figure, local))
+    Some(BilledComparison::new(figure, local))
 }
 
 /// The line for the 5 hour and weekly windows when none is known. A plan
@@ -1150,7 +1153,7 @@ mod tests {
             account,
             ..Sources::default()
         };
-        let month_start = utc_month_start(NOW);
+        let month_start = utc_month_bounds(NOW).0;
         let events = [
             cost(month_start - 1, 50.0),
             cost(month_start, 3.0),
@@ -1175,7 +1178,7 @@ mod tests {
         };
         for (currency, text) in [
             (Some("EUR"), "currency EUR, not compared"),
-            (None, "currency not reported, not compared"),
+            (None, "currency not reported or not readable, not compared"),
         ] {
             let mut account = cache(60, None, None);
             account.cache.as_mut().unwrap().billed = Some(SpendFigure {
@@ -1208,7 +1211,7 @@ mod tests {
 
         assert!(compare_billed(&Sources::default(), &[], NOW).is_none());
         assert!(compare_billed(&fig(NOW - 60, None), &[], NOW).is_none());
-        assert!(compare_billed(&fig(utc_month_start(NOW) - 1, Some(5.0)), &[], NOW).is_none());
+        assert!(compare_billed(&fig(utc_month_bounds(NOW).0 - 1, Some(5.0)), &[], NOW).is_none());
         assert!(compare_billed(&fig(NOW + 3600, Some(5.0)), &[], NOW).is_none());
     }
 
@@ -1229,7 +1232,7 @@ mod tests {
 
     #[test]
     fn the_cached_used_amount_counts_from_the_utc_month_not_the_local_one() {
-        let month_start = utc_month_start(NOW);
+        let month_start = utc_month_bounds(NOW).0;
         let s = Sources {
             account: cache_at(month_start, spend(500.0, Some(120.0)), None, None),
             ..Sources::default()
@@ -1243,5 +1246,90 @@ mod tests {
             .collect();
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].used, 120.0);
+        assert_eq!((m[0].start, m[0].end), utc_month_bounds(NOW));
+    }
+
+    #[test]
+    fn a_figure_fetched_at_the_utc_month_start_is_compared_and_the_clock_clamps() {
+        let at = |fetched_at: i64| {
+            let mut account = cache_at(fetched_at, None, None, None);
+            account.cache.as_mut().unwrap().billed =
+                SpendFigure::from_usd(Some(100.0), Some(5.0), fetched_at);
+            Sources {
+                account,
+                ..Sources::default()
+            }
+        };
+        let start = utc_month_bounds(NOW).0;
+
+        assert!(compare_billed(&at(start), &[], NOW).is_some());
+
+        // Fetched 120 s ahead of this clock, inside the skew allowance: spend
+        // after `now` is not counted.
+        let c = compare_billed(
+            &at(NOW + 120),
+            &[cost(NOW - 1, 1.0), cost(NOW, 2.0), cost(NOW + 60, 4.0)],
+            NOW,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(c.local_estimate_usd, 3.0);
+    }
+
+    #[test]
+    fn the_statusline_amount_wins_over_the_cache_only_when_monthly_and_usable() {
+        let cached = |s: &mut Sources| {
+            s.account = cache(60, None, None);
+            s.account.cache.as_mut().unwrap().billed =
+                SpendFigure::from_usd(Some(500.0), Some(77.0), NOW - 60);
+        };
+        let mut both = Sources {
+            snapshot: Some(gateway_snapshot()),
+            ..Sources::default()
+        };
+        cached(&mut both);
+        let billed = |s: &Sources| compare_billed(s, &[], NOW).unwrap().unwrap().billed_usd;
+
+        assert_eq!(billed(&both), 10.0);
+
+        let weekly = both
+            .snapshot
+            .as_mut()
+            .unwrap()
+            .spend_limit
+            .as_mut()
+            .unwrap();
+        weekly.period = Some(LimitPeriod::Weekly);
+        assert_eq!(billed(&both), 77.0);
+
+        let mut no_used = both.clone();
+        let sp = no_used
+            .snapshot
+            .as_mut()
+            .unwrap()
+            .spend_limit
+            .as_mut()
+            .unwrap();
+        sp.period = Some(LimitPeriod::Monthly);
+        sp.used_usd = None;
+        assert_eq!(billed(&no_used), 77.0);
+
+        let mut ended = both.clone();
+        let sp = ended
+            .snapshot
+            .as_mut()
+            .unwrap()
+            .spend_limit
+            .as_mut()
+            .unwrap();
+        sp.period = Some(LimitPeriod::Monthly);
+        sp.resets_at = NOW;
+        assert_eq!(billed(&ended), 77.0);
+
+        let mut old = both.clone();
+        let snap = old.snapshot.as_mut().unwrap();
+        snap.captured_at = utc_month_bounds(NOW).0 - 1;
+        snap.spend_limit.as_mut().unwrap().period = Some(LimitPeriod::Monthly);
+        assert_eq!(billed(&old), 77.0);
     }
 }

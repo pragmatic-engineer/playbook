@@ -88,7 +88,7 @@ impl Money {
     }
 
     pub fn to_f64(&self) -> f64 {
-        self.minor as f64 / 10f64.powi(i32::from(self.decimals))
+        self.minor as f64 / 10f64.powi(i32::from(self.decimals.min(MAX_DECIMALS)))
     }
 
     /// Whether the document said this is dollars.
@@ -188,7 +188,9 @@ impl fmt::Display for NotCompared {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NotCompared::Currency(c) => write!(f, "currency {c}, not compared"),
-            NotCompared::CurrencyNotReported => write!(f, "currency not reported, not compared"),
+            NotCompared::CurrencyNotReported => {
+                write!(f, "currency not reported or not readable, not compared")
+            }
             NotCompared::UsedUnknown => write!(f, "amount used not reported, not compared"),
         }
     }
@@ -196,7 +198,7 @@ impl fmt::Display for NotCompared {
 
 /// The amount Claude Code reports as used next to the local estimate for the same period.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Comparison {
+pub struct BilledComparison {
     pub billed: SpendFigure,
     pub billed_usd: f64,
     pub local_estimate_usd: f64,
@@ -208,11 +210,11 @@ pub struct Comparison {
     pub disagrees: bool,
 }
 
-impl Comparison {
+impl BilledComparison {
     /// Compares the billed amount with `local_usd`. The two disagree when they
     /// differ by at least the larger of [`DISAGREE_MIN_USD`] and
     /// [`DISAGREE_PCT`] of the billed amount.
-    pub fn new(billed: SpendFigure, local_usd: f64) -> Result<Comparison, NotCompared> {
+    pub fn new(billed: SpendFigure, local_usd: f64) -> Result<BilledComparison, NotCompared> {
         let used = billed.used.as_ref().ok_or(NotCompared::UsedUnknown)?;
         let billed_usd = match (used.usd(), used.currency.as_deref()) {
             (Some(usd), _) => usd,
@@ -221,7 +223,7 @@ impl Comparison {
         };
         let delta_usd = local_usd - billed_usd;
         let floor = DISAGREE_MIN_USD.max(billed_usd * DISAGREE_PCT / PERCENT);
-        Ok(Comparison {
+        Ok(BilledComparison {
             delta_pct: (billed_usd > 0.0).then(|| delta_usd / billed_usd * PERCENT),
             disagrees: delta_usd.abs() >= floor,
             billed,
@@ -408,7 +410,7 @@ mod tests {
         for (billed_usd, local, disagrees) in table {
             let minor = (billed_usd * 100.0).round() as i64;
 
-            let c = Comparison::new(billed(Some(usd(minor))), local).unwrap();
+            let c = BilledComparison::new(billed(Some(usd(minor))), local).unwrap();
 
             assert_eq!(c.disagrees, disagrees, "billed {billed_usd} local {local}");
         }
@@ -416,11 +418,11 @@ mod tests {
 
     #[test]
     fn the_comparison_keeps_the_delta_and_its_percent() {
-        let c = Comparison::new(billed(Some(usd(105_950))), 900.0).unwrap();
+        let c = BilledComparison::new(billed(Some(usd(105_950))), 900.0).unwrap();
 
         assert_eq!(c.delta_usd, 900.0 - 1059.5);
         assert!((c.delta_pct.unwrap() - (-15.054)).abs() < 0.001);
-        assert!(Comparison::new(billed(Some(usd(0))), 0.5)
+        assert!(BilledComparison::new(billed(Some(usd(0))), 0.5)
             .unwrap()
             .delta_pct
             .is_none());
@@ -437,19 +439,22 @@ mod tests {
             ..usd(105_950)
         };
 
-        let a = Comparison::new(billed(Some(eur)), 1.0).unwrap_err();
-        let b = Comparison::new(billed(Some(none)), 1.0).unwrap_err();
-        let c = Comparison::new(billed(None), 1.0).unwrap_err();
+        let a = BilledComparison::new(billed(Some(eur)), 1.0).unwrap_err();
+        let b = BilledComparison::new(billed(Some(none)), 1.0).unwrap_err();
+        let c = BilledComparison::new(billed(None), 1.0).unwrap_err();
 
         assert_eq!(a.to_string(), "currency EUR, not compared");
-        assert_eq!(b.to_string(), "currency not reported, not compared");
+        assert_eq!(
+            b.to_string(),
+            "currency not reported or not readable, not compared"
+        );
         assert_eq!(c, NotCompared::UsedUnknown);
     }
 
     #[test]
     fn the_line_says_differs_with_both_numbers_and_never_wrong() {
-        let far = Comparison::new(billed(Some(usd(105_950))), 900.0).unwrap();
-        let near = Comparison::new(billed(Some(usd(105_950))), 1055.0).unwrap();
+        let far = BilledComparison::new(billed(Some(usd(105_950))), 900.0).unwrap();
+        let near = BilledComparison::new(billed(Some(usd(105_950))), 1055.0).unwrap();
 
         assert!(far.line().contains("differs"));
         assert!(far.line().contains("$900.00") && far.line().contains("$1059.50"));

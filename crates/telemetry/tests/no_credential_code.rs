@@ -29,6 +29,23 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Names a manifest declares: `name = ...`, `name.workspace = ...` and
+/// `[dependencies.name]` headers.
+fn dependency_names(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|l| {
+            let l = l.trim();
+            if let Some(table) = l.strip_prefix('[').and_then(|t| t.strip_suffix(']')) {
+                return table
+                    .rsplit_once("dependencies.")
+                    .map(|(_, name)| name.to_string());
+            }
+            let (key, _) = l.split_once('=')?;
+            Some(key.split('.').next()?.trim().to_string())
+        })
+        .collect()
+}
+
 #[test]
 fn no_product_source_names_the_anthropic_api_host() {
     // Built in two parts so this file does not name the host itself.
@@ -62,14 +79,8 @@ fn the_telemetry_crate_has_no_http_client_and_the_cli_adds_none_beyond_ureq() {
     let manifest = |krate: &str| {
         fs::read_to_string(crates_dir().join(krate).join("Cargo.toml")).expect("manifest")
     };
-    let names = |text: &str| -> Vec<String> {
-        text.lines()
-            .filter_map(|l| l.split_once('=').map(|(k, _)| k.trim().to_string()))
-            .collect()
-    };
-
-    let telemetry = names(&manifest("telemetry"));
-    let cli = names(&manifest("cli"));
+    let telemetry = dependency_names(&manifest("telemetry"));
+    let cli = dependency_names(&manifest("cli"));
 
     for client in clients {
         assert!(
@@ -80,4 +91,15 @@ fn the_telemetry_crate_has_no_http_client_and_the_cli_adds_none_beyond_ureq() {
             assert!(!cli.iter().any(|n| n == client), "cli: {client}");
         }
     }
+}
+
+#[test]
+fn the_name_reader_sees_dotted_keys_and_dependency_tables() {
+    let text =
+        "[dependencies]\nreqwest.workspace = true\n[dev-dependencies.curl]\nversion = \"1\"\n";
+
+    let found = dependency_names(text);
+
+    assert!(found.contains(&"reqwest".to_string()));
+    assert!(found.contains(&"curl".to_string()));
 }
