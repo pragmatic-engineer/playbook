@@ -57,18 +57,9 @@ pub struct Refreshed {
 
 /// The plugin folder and its version, or `None` when no plugin is found.
 fn resolve_plugin(home: &Path) -> Option<(PathBuf, String)> {
-    let claude_home = home.join(".claude");
-    let override_env = std::env::var(crate::plugin_root::OVERRIDE_ENV).ok();
-    let env = std::env::var("CLAUDE_PLUGIN_ROOT").ok();
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let resolved = crate::plugin_root::resolve(&crate::plugin_root::Inputs {
-        claude_home: &claude_home,
-        override_env: override_env.as_deref(),
-        env: env.as_deref(),
-        cwd: &cwd,
-    })
-    .ok()?;
-    let version = crate::plugin_root::plugin_version(&resolved.root).unwrap_or_default();
+    let resolved = crate::plugin_root::resolve_from(home).ok()?;
+    // Without a version there is nothing to compare a record against.
+    let version = crate::plugin_root::plugin_version(&resolved.root).filter(|v| !v.is_empty())?;
     Some((resolved.root, version))
 }
 
@@ -208,14 +199,13 @@ fn refresh_inner(home: &Path, dry_run: bool) -> Refreshed {
         }
         let (lines, clean) = match &rendered {
             Ok(folders) => {
-                let report = apply::apply(
+                let report = apply::apply_refresh(
                     &root,
                     agent,
                     &home.join(TARGET_DIR),
                     &version,
                     folders,
                     dry_run,
-                    &apply::Faults::default(),
                 );
                 (report.lines.clone(), report.is_clean())
             }
@@ -238,6 +228,10 @@ fn refresh_inner(home: &Path, dry_run: bool) -> Refreshed {
 /// The line the next session shows for a finished background refresh.
 pub fn notice_line(refreshed: &Refreshed) -> Option<String> {
     let summary = refreshed.lines.last()?;
+    // A release that left the skills as they were is not worth a line.
+    if refreshed.clean && summary == apply::NOTHING_TO_CHANGE {
+        return None;
+    }
     Some(if refreshed.clean {
         format!("playbook: refreshed the Codex skills ({summary}).")
     } else {

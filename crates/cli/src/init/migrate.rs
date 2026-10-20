@@ -43,8 +43,18 @@ pub const PROMPT_DEFAULT_MIGRATION: &str = "system-prompt-default-on";
 pub const COLLECTOR_LABEL_MIGRATION: &str = "collector-service-label";
 /// The `Consent` item that adds the disk guard hook (ADR 0047 decision 8).
 pub const DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
+/// The `Consent` removal of the retired `no-slop-guard` and `no-dash-guard`
+/// hook entries setup used to write.
+pub const NO_SLOP_GUARD_MIGRATION: &str = "no-slop-guard-entry";
 /// The `Owned` move of a stored `update.plugin` boolean to `auto` or `off`.
 pub const PLUGIN_UPDATE_MODE_MIGRATION: &str = "plugin-update-mode";
+/// The `Owned` notice that the rm guard is now a short fixed rule (ADR 0045,
+/// 2026-10-19 amendment). It changes nothing and is recorded once it has run.
+pub const RM_GUARD_NOTICE_MIGRATION: &str = "rm-guard-simplified";
+/// The step name of that notice, which the heal line shows in full.
+pub const RM_GUARD_NOTICE_STEP: &str = "rm guard";
+/// What the notice says (docs/guides/07-rm-guard.md).
+const RM_GUARD_NOTICE: &str = "the rm guard now denies only rm of / or your home folder, and hooks.rmGuard.allowedRoots is no longer used; see docs/guides/07-rm-guard.md";
 /// How long `collector-service-label` waits for the moved collector to run.
 const COLLECTOR_LABEL_WAIT: Duration = Duration::from_secs(3);
 
@@ -380,13 +390,51 @@ pub fn registry() -> Vec<Migration> {
             run: disk_guard_hook_by_setup,
         },
         Migration {
+            id: NO_SLOP_GUARD_MIGRATION,
+            since: "next",
+            kind: Kind::Idempotent,
+            scope: Scope::Consent {
+                check: retired_hooks_pending,
+                command: "playbook setup --hooks",
+            },
+            run: no_slop_guard_entry,
+        },
+        Migration {
             id: PLUGIN_UPDATE_MODE_MIGRATION,
             since: "next",
             kind: Kind::Auto,
             scope: Scope::Owned,
             run: plugin_update_mode,
         },
+        Migration {
+            id: RM_GUARD_NOTICE_MIGRATION,
+            since: "next",
+            kind: Kind::Auto,
+            scope: Scope::Owned,
+            run: rm_guard_simplified_notice,
+        },
     ]
+}
+
+/// One notice for an install that had the rm guard wired: it now denies only
+/// `rm` of `/` or the home folder, and `hooks.rmGuard.allowedRoots` is no
+/// longer read. It changes nothing. A fresh install gets nothing.
+fn rm_guard_simplified_notice(ctx: &Ctx) -> Outcome {
+    let settings = ctx.claude_home.join("settings.json");
+    let wired = crate::doctor::field::hook_commands_for_event(
+        &settings,
+        "PreToolUse",
+        &["rm-workspace-guard"],
+    )
+    .iter()
+    .any(|(_, n)| *n > 0);
+    if !wired {
+        return Outcome::Done(StepReport::skipped(
+            RM_GUARD_NOTICE_STEP,
+            "the rm guard was not in use",
+        ));
+    }
+    Outcome::Done(StepReport::wired(RM_GUARD_NOTICE_STEP, RM_GUARD_NOTICE))
 }
 
 /// An install with the policy guard wired and no disk guard on Bash (ADR
@@ -406,6 +454,27 @@ fn disk_guard_hook_pending(ctx: &Ctx) -> Option<String> {
 /// Setup's hooks part wires the disk guard with the other guards.
 fn disk_guard_hook_by_setup(_: &Ctx) -> Outcome {
     Outcome::Quiet
+}
+
+/// Removes the retired `no-slop-guard` and `no-dash-guard` entries older
+/// setups wrote. The hook is gone; the subcommand stays a no-op for one
+/// release. It writes settings.json, so only `init` does it.
+fn no_slop_guard_entry(ctx: &Ctx) -> Outcome {
+    let settings = ctx.claude_home.join("settings.json");
+    match crate::init::retired_hooks::remove(&settings, ctx.epoch) {
+        Ok(0) => Outcome::Quiet,
+        Ok(n) => Outcome::Repeat(StepReport::wired(
+            "retired-hooks",
+            format!(
+                "removed {n} retired hook entries (no-slop-guard, no-dash-guard); their rules live in the prompt and skills"
+            ),
+        )),
+        Err(err) => Outcome::Failed(StepReport::failed("retired-hooks", err.to_string())),
+    }
+}
+
+fn retired_hooks_pending(ctx: &Ctx) -> Option<String> {
+    crate::init::retired_hooks::pending(&ctx.claude_home.join("settings.json"))
 }
 
 /// Moves the collector agent playbook 0.37.0 installed under the old label
@@ -1410,14 +1479,15 @@ pub fn run_pending(ctx: &Ctx) -> Report {
 
 /// Runs the shipped registry. With `statusline` false the migration that
 /// rewrites `statusLine.command` stays pending, so init leaves that key alone.
-/// With `hooks` false the dead hook migration stays pending, so init leaves
+/// With `hooks` false the dead and retired hook migrations stay pending, so init leaves
 /// the hook entries alone.
 pub fn run_pending_for(ctx: &Ctx, statusline: bool, hooks: bool) -> Report {
     let root = playbook_root_from(&ctx.home);
     let pending = crate::state::pending_legacy(&root);
     let mut migrations = active();
     migrations.retain(|m| {
-        (statusline || m.id != STATUSLINE_MIGRATION) && (hooks || m.id != DEAD_HOOKS_MIGRATION)
+        (statusline || m.id != STATUSLINE_MIGRATION)
+            && (hooks || (m.id != DEAD_HOOKS_MIGRATION && m.id != NO_SLOP_GUARD_MIGRATION))
     });
     let mut report = run_with(&migrations, ctx);
     if pending > 0 && crate::state::pending_legacy(&root) == 0 {
@@ -2281,6 +2351,63 @@ mod tests {
             disk_guard_hook_pending(&ctx).is_some(),
             "wired for agents only leaves builds unguarded"
         );
+    }
+
+    #[test]
+    fn the_no_slop_guard_entry_is_removed_once_and_other_entries_stay() {
+        // Arrange
+        let h = home("no-slop-entry");
+        let ctx = ctx(&h);
+        let settings = ctx.claude_home.join("settings.json");
+        std::fs::create_dir_all(&ctx.claude_home).unwrap();
+        let doc = serde_json::json!({"hooks": {"PreToolUse": [
+            {"matcher": "Edit|Write", "hooks": [
+                {"type": "command", "command": "playbook hook no-slop-guard"},
+                {"type": "command", "command": "playbook hook policy-guard"}]}]}});
+        std::fs::write(&settings, doc.to_string()).unwrap();
+
+        // Act
+        let first = no_slop_guard_entry(&ctx);
+        let second = no_slop_guard_entry(&ctx);
+
+        // Assert
+        assert!(matches!(first, Outcome::Repeat(_)));
+        assert!(matches!(second, Outcome::Quiet));
+        let text = std::fs::read_to_string(&settings).unwrap();
+        assert!(!text.contains("no-slop-guard") && text.contains("policy-guard"));
+    }
+
+    #[test]
+    fn the_rm_guard_notice_shows_once_and_only_where_the_guard_was_wired() {
+        let h = home("rm-guard-notice");
+        let ctx = ctx(&h);
+        let step = |o: Outcome| match o {
+            Outcome::Done(step) => step,
+            _ => panic!("the notice is an Auto migration that finishes"),
+        };
+        let fresh = step(rm_guard_simplified_notice(&ctx));
+        assert!(
+            fresh.status != crate::init::run::StepStatus::Wired,
+            "fresh install"
+        );
+        let settings = ctx.claude_home.join("settings.json");
+        let doc = serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "playbook hook rm-workspace-guard"}]}]}});
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(&settings, doc.to_string()).unwrap();
+        let ms = [Migration {
+            id: RM_GUARD_NOTICE_MIGRATION,
+            since: "0.1.0",
+            kind: Kind::Auto,
+            scope: Scope::Owned,
+            run: rm_guard_simplified_notice,
+        }];
+        let (mut first, mut second) = (Report::default(), Report::default());
+        run_auto(&ms, &ctx, &mut first, None);
+        run_auto(&ms, &ctx, &mut second, None);
+        assert_eq!(first.steps.len(), 1, "shown on the first run");
+        assert!(first.steps[0].detail.contains("hooks.rmGuard.allowedRoots"));
+        assert!(second.steps.is_empty(), "recorded, so not shown again");
     }
 
     #[test]

@@ -44,6 +44,7 @@ fn run_hook(name: playbook::HookName) {
     if !is_worktree && common::plugin_state::paused() {
         return;
     }
+    playbook::cc::telemetry::on_hook(name);
     let payload = Payload::parse(&raw);
     if matches!(name, playbook::HookName::WorktreeCreate) {
         std::process::exit(hooks::worktree_create::execute(&payload));
@@ -101,6 +102,8 @@ fn main() {
     // before most commands. Hot paths returned above or skip it.
     playbook::heal::on_start(&cli.command);
     playbook::plugin_update::on_start(&cli.command, &args);
+    // Starts the collector daemon for most commands, `cc` included.
+    playbook::cc::telemetry::on_start(&cli.command);
 
     update::check::on_start(&cli.command, &args);
 
@@ -704,14 +707,9 @@ fn main() {
         }
         Command::Hooks { sub } => match sub {
             playbook::HooksCommand::List => print!("{}", init::catalog::hooks_list()),
-            playbook::HooksCommand::ExplainRm { command, cwd, json } => {
-                match playbook::hooks::explain_rm(&command, cwd.as_deref(), json) {
-                    Ok(text) => print!("{text}"),
-                    Err(e) => {
-                        eprintln!("playbook hooks explain-rm: {e}");
-                        std::process::exit(2);
-                    }
-                }
+            playbook::HooksCommand::ExplainRm { .. } => {
+                eprintln!("playbook hooks explain-rm was removed: the rm guard now denies only rm of / or your home folder (docs/guides/07-rm-guard.md)");
+                std::process::exit(2);
             }
         },
         Command::Settings { sub } => match sub {
@@ -1423,7 +1421,7 @@ fn main() {
                             std::process::exit(1);
                         }
                     };
-                    let shown = config::write::normalize(&key, value_json.clone()).to_string();
+                    let shown = value_json.to_string();
                     match config::write::set(tier, &key, value_json, &home, repo_slug) {
                         Ok(()) => println!("config set: {key} updated to {shown}"),
                         Err(err) => {
@@ -2648,10 +2646,14 @@ fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
             return 1;
         }
     };
+    if folders.is_empty() {
+        // An empty plan would read as every folder dropped and remove them.
+        eprintln!("skills sync: the plugin holds no skills or commands, nothing was changed");
+        return 1;
+    }
     let root = common::paths::playbook_root_from(&home);
     let target_root = home.join(skills_sync::TARGET_DIR);
     let mut lines = Vec::new();
-    let mut failed = 0;
     let mut clean = true;
     for agent in agents {
         let report = apply::apply(
@@ -2664,7 +2666,6 @@ fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
             &apply::Faults::default(),
         );
         clean &= report.is_clean();
-        failed += report.failed;
         lines.extend(report.lines);
     }
     if json {
@@ -2677,10 +2678,10 @@ fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
             println!("{line}");
         }
     }
-    if !clean && !json {
+    if !clean {
         eprintln!("skills sync: not every folder was synced");
     }
-    i32::from(failed > 0)
+    i32::from(!clean)
 }
 
 /// Parse `config set`'s raw `value` string into the JSON type `key` expects,

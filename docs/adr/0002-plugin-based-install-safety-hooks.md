@@ -1,8 +1,8 @@
 # ADR 0002: Plugin based install with always-on safety hooks
 
-- **Status:** Accepted, amended by ADR 0006 and ADR 0007 (hook delivery now goes through `playbook init`; hooks.json carries only the worktree hooks and the migration check), by ADR 0031 (hooks.json is gone; every hook is in settings.json), and by [ADR 0045](0045-rm-guard-roots-and-parser.md) (the rm guard reads real command words, builds in the safe roots per OS and protects playbook's data)
+- **Status:** Accepted, amended by ADR 0006 and ADR 0007 (hook delivery now goes through `playbook init`; hooks.json carries only the worktree hooks and the migration check), by ADR 0031 (hooks.json is gone; every hook is in settings.json), and by [ADR 0045](0045-rm-guard-roots-and-parser.md) (the rm guard denies only rm of / or the home folder)
 - **Date created:** 2026-07-30
-- **Date modified:** 2026-10-18
+- **Date modified:** 2026-10-20
 - **Amends:** ADR 0001 (package the toolkit as an opt-in plugin)
 
 ## Context

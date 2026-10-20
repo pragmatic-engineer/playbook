@@ -115,6 +115,11 @@ pub fn store_notice(root: &Path, key: &str, line: &str) {
 /// Reads and deletes the line stored under `key` in one transaction, so two
 /// sessions show it once between them.
 pub fn take_notice(root: &Path, key: &str) -> Option<String> {
+    // Most sessions have none, so look first without taking the write lock.
+    let stored = crate::state::list_read_only(root, key).ok()?;
+    if !stored.iter().any(|(k, v)| k == key && !v.is_empty()) {
+        return None;
+    }
     crate::state::transaction(root, |tx| {
         let line = tx.get(key)?.filter(|v| !v.is_empty());
         if line.is_some() {

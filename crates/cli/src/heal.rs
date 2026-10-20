@@ -16,8 +16,6 @@ use std::time::{Duration, Instant};
 const BINARY_KEY: &str = "versions/binary";
 const SCHEMA_KEY: &str = "versions/schema";
 const PLUGIN_KEY: &str = "versions/plugin";
-/// The start of the fix an item carries when the plugin needs updating.
-const PLUGIN_UPDATE_FIX_PREFIX: &str = "claude plugin update ";
 const PENDING_KEY: &str = "versions/pending";
 const FAILED_AT_KEY: &str = "versions/failed-at";
 
@@ -216,12 +214,18 @@ impl Outcome {
     /// report. The items that need the user go through `crate::pending`.
     pub fn line(&self) -> Option<String> {
         let mut parts = Vec::new();
-        if !self.changed.is_empty() {
+        // The rm guard notice changes no file, so it is not counted.
+        let (notices, files): (Vec<_>, Vec<_>) = self
+            .changed
+            .iter()
+            .partition(|s| s.name == migrate::RM_GUARD_NOTICE_STEP);
+        if !files.is_empty() {
             parts.push(format!(
                 "updated {} of its own files after the upgrade",
-                self.changed.len()
+                files.len()
             ));
         }
+        parts.extend(notices.iter().map(|s| s.detail.clone()));
         if !self.failed.is_empty() {
             parts.push(format!(
                 "{} migration(s) failed: run `playbook migrate`",
@@ -504,7 +508,7 @@ fn notice(home: &Path, out: &Outcome, now: u64, shown: bool) -> Option<String> {
         // An update already started says it is updating, so the manual fix
         // would contradict it.
         if crate::plugin_update::in_flight(&root, env!("CARGO_PKG_VERSION"), now) {
-            open.retain(|i| !i.fix.starts_with(PLUGIN_UPDATE_FIX_PREFIX));
+            open.retain(|i| !i.fix.starts_with(crate::plugin_update::COMMAND_PREFIX));
         }
         crate::pending::session_notice(&root, &open, now, shown, prune)
     };
@@ -757,6 +761,20 @@ mod tests {
         // Assert
         assert!(out.line().is_none());
         assert_eq!(Record::read(&root(&home)).unwrap(), before);
+    }
+
+    #[test]
+    fn the_rm_guard_notice_is_shown_but_not_counted_as_a_file() {
+        let out = Outcome {
+            changed: vec![crate::init::run::StepReport::wired(
+                migrate::RM_GUARD_NOTICE_STEP,
+                "the rm guard changed",
+            )],
+            ..Outcome::default()
+        };
+        let line = out.line().unwrap();
+        assert!(line.contains("the rm guard changed"), "{line}");
+        assert!(!line.contains("updated"), "{line}");
     }
 
     #[test]

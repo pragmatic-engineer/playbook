@@ -169,10 +169,17 @@ impl Fixture {
         for var in CI_VARS {
             cmd.env_remove(var);
         }
+        if (tty
+            || env
+                .iter()
+                .any(|(k, _)| *k == ASSUME_TTY_ENV || *k == NO_SPAWN_ENV))
+            && !cfg!(debug_assertions)
+        {
+            panic!(
+                "the terminal seam exists only in debug builds; run these tests without --release"
+            );
+        }
         if tty {
-            if !cfg!(debug_assertions) {
-                panic!("the terminal seam exists only in debug builds; run these tests without --release");
-            }
             cmd.env(ASSUME_TTY_ENV, "1");
         }
         for (k, v) in env {
@@ -300,10 +307,12 @@ fn a_piped_run_without_a_terminal_does_not_call_claude() {
 fn a_ci_run_does_not_call_claude() {
     let f = Fixture::new(true, 0);
 
-    let out = f.config_list(true, &[("CI", "1")]);
+    // A vendor variable alone, so the headless rule does not hide the CI rule.
+    let out = f.config_list(true, &[("GITHUB_ACTIONS", "true")]);
 
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(f.calls(), "");
+    assert_eq!(f.marker(), None);
 }
 
 #[test]
@@ -451,6 +460,32 @@ fn ask_no_claims_the_version_and_prints_the_manual_command() {
 }
 
 #[test]
+fn ask_with_an_unclear_reply_claims_nothing_so_the_question_comes_back() {
+    let f = Fixture::new(true, 0);
+    f.set_config("update.plugin", "ask");
+
+    let unclear = f.run(&["config", "list"], true, "maybe\n", &[]);
+    let eof = f.run(&["config", "list"], true, "", &[]);
+
+    assert_eq!(f.calls(), "");
+    assert_eq!(f.marker(), None);
+    assert!(stderr(&unclear).contains("Update the playbook plugin now?"));
+    assert!(stderr(&eof).contains("Update the playbook plugin now?"));
+}
+
+#[test]
+fn ask_yes_after_another_process_took_the_claim_does_not_update() {
+    let f = Fixture::new(true, 0);
+    f.set_config("update.plugin", "ask");
+    f.set_marker(&format!("{VERSION} running {}", now()));
+
+    let out = f.run(&["config", "list"], true, "y\n", &[]);
+
+    assert_eq!(f.calls(), "");
+    assert!(!stderr(&out).contains("Update the playbook plugin now?"));
+}
+
+#[test]
 fn ask_without_a_terminal_on_stdin_asks_nothing_and_claims_nothing() {
     let f = Fixture::new(true, 0);
     f.set_config("update.plugin", "ask");
@@ -494,6 +529,8 @@ fn the_detached_refresh_stores_the_updated_line_and_prints_nothing() {
     // Arrange
     let f = Fixture::new(true, 0);
 
+    f.set_marker(&format!("{VERSION} running {}", now()));
+
     // Act
     let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
 
@@ -518,9 +555,22 @@ fn the_detached_refresh_stores_the_updated_line_and_prints_nothing() {
 }
 
 #[test]
+fn a_refresh_started_by_hand_without_a_claim_runs_nothing() {
+    let f = Fixture::new(true, 0);
+
+    let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(f.calls(), "");
+    assert_eq!(f.marker(), None);
+}
+
+#[test]
 fn a_failed_detached_refresh_stores_the_failure_line_and_marks_failed() {
     // Arrange
     let f = Fixture::new(false, 1);
+
+    f.set_marker(&format!("{VERSION} running {}", now()));
 
     // Act
     let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
@@ -560,6 +610,8 @@ fn a_failed_detached_refresh_stores_the_failure_line_and_marks_failed() {
 fn a_refresh_that_leaves_the_plugin_older_stores_the_still_older_notice() {
     // Arrange: claude exits 0 and leaves the old plugin in place
     let f = Fixture::new(false, 0);
+
+    f.set_marker(&format!("{VERSION} running {}", now()));
 
     // Act
     f.run(&["update", "--refresh-plugin"], false, "", &[]);

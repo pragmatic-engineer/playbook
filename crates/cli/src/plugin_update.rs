@@ -85,9 +85,12 @@ impl Outcome {
     }
 }
 
+/// The start of every [`command`], for code that tells a plugin fix apart.
+pub const COMMAND_PREFIX: &str = "claude plugin update ";
+
 /// The command that updates plugin `id`.
 pub fn command(id: &str) -> String {
-    format!("claude plugin update {id}")
+    format!("{COMMAND_PREFIX}{id}")
 }
 
 /// What `update.plugin` asks for.
@@ -149,7 +152,9 @@ pub fn plugin_id(claude_home: &Path) -> Option<String> {
     let text = std::fs::read_to_string(claude_home.join("plugins/installed_plugins.json")).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     let map = value.get("plugins").unwrap_or(&value).as_object()?;
-    let mut ids = map.keys().filter(|k| k.starts_with(ID_PREFIX));
+    let mut ids = map
+        .keys()
+        .filter(|k| k.starts_with(ID_PREFIX) && !k.chars().any(char::is_control));
     let id = ids.next()?.clone();
     ids.next().is_none().then_some(id)
 }
@@ -265,7 +270,16 @@ pub fn run(probe: &Probe) -> Outcome {
 /// [`SKIP_ENV`]. `None` when it was not asked to run.
 pub fn run_for_command(home: &Path, no_plugin: bool) -> Option<Outcome> {
     let skip = no_plugin || std::env::var_os(SKIP_ENV).is_some_and(|v| v == SKIP_VALUE);
-    (!skip).then(|| run(&Probe::for_home(home)))
+    if skip {
+        return None;
+    }
+    let root = crate::common::paths::playbook_root_from(home);
+    if in_flight(&root, env!("CARGO_PKG_VERSION"), now()) {
+        return Some(Outcome::Skipped(
+            "another playbook process is already updating it".to_string(),
+        ));
+    }
+    Some(run(&Probe::for_home(home)))
 }
 
 /// The state key of the once-per-binary-version marker.
@@ -410,9 +424,9 @@ pub(crate) fn now() -> u64 {
 }
 
 /// [`due_from`] with the inputs read from `home` and the process
-/// environment. Reads only.
-pub fn due(home: &Path) -> Due {
-    let root = crate::common::paths::playbook_root_from(home);
+/// environment. `seen_marker` is the marker text the caller already read, so
+/// the store is opened once. Reads only.
+pub fn due(home: &Path, seen_marker: Option<&str>) -> Due {
     let claude_home = home.join(".claude");
     let id = plugin_id(&claude_home);
     let installed = id
@@ -421,7 +435,7 @@ pub fn due(home: &Path) -> Due {
     let skip_env = std::env::var(SKIP_ENV).ok();
     due_from(
         DueInputs {
-            marker: seen(&root).and_then(|t| Marker::parse(&t)),
+            marker: seen_marker.and_then(Marker::parse),
             running: env!("CARGO_PKG_VERSION"),
             installed: installed.as_deref(),
             mode: mode(home),
@@ -494,6 +508,16 @@ fn notice_line(outcome: &Outcome, state: State) -> Option<String> {
                 command(id)
             ))
         }
+        // The next session may already run the new plugin, so no restart advice.
+        Outcome::Updated { id, from, to } => Some(format!(
+            "plugin: updated {id}{}{}",
+            from.as_deref()
+                .map(|v| format!(" from {v}"))
+                .unwrap_or_default(),
+            to.as_deref()
+                .map(|v| format!(" to {v}"))
+                .unwrap_or_default(),
+        )),
         _ => outcome.line(),
     }
 }
@@ -529,16 +553,12 @@ fn write(root: &Path, running: &str, state: State, now: u64) {
 /// hook started cannot be stopped by its own variable.
 pub fn refresh_plugin(home: &Path) {
     let root = crate::common::paths::playbook_root_from(home);
-    let claude_home = home.join(".claude");
-    let outcome = run(&Probe::for_home(home));
-    let after = plugin_id(&claude_home).and_then(|id| installed_version(&claude_home, id.as_str()));
-    let state = finish(
-        &root,
-        &outcome,
-        env!("CARGO_PKG_VERSION"),
-        after.as_deref(),
-        now(),
-    );
+    // Only a run the hook claimed proceeds, so a hand-started flag cannot
+    // run a second update beside it.
+    if !in_flight(&root, env!("CARGO_PKG_VERSION"), now()) {
+        return;
+    }
+    let (outcome, state) = attempt(home, &root);
     if let Some(line) = notice_line(&outcome, state) {
         crate::notices::store_notice(&root, crate::notices::PLUGIN_UPDATE_KEY, &line);
     }
@@ -628,13 +648,6 @@ fn is_terminal(stream: &impl std::io::IsTerminal, for_stdin: bool) -> bool {
     assumed_tty(for_stdin) || stream.is_terminal()
 }
 
-fn has_json_arg(args: &[std::ffi::OsString]) -> bool {
-    args.iter().any(|a| {
-        a.to_str()
-            .is_some_and(|s| s == "--json" || s.starts_with("--json="))
-    })
-}
-
 /// Printed when a yes loses the claim to another running process.
 const ALREADY_UPDATING: &str = "playbook: another playbook process is already updating the plugin";
 
@@ -648,7 +661,7 @@ const QUESTION: &str = "Update the playbook plugin now? [Y/n] ";
 /// here changes the exit code.
 pub fn on_start(command: &crate::Command, args: &[std::ffi::OsString]) {
     if !crate::heal::runs_on_start(command)
-        || has_json_arg(args)
+        || crate::update::check::has_json_arg(args)
         || !is_terminal(&std::io::stderr(), false)
     {
         return;
@@ -666,7 +679,7 @@ fn start(home: &Path, stdin_is_terminal: bool) {
     let root = crate::common::paths::playbook_root_from(home);
     let running = env!("CARGO_PKG_VERSION");
     let seen_before = seen(&root);
-    let mode = match due(home) {
+    let mode = match due(home, seen_before.as_deref()) {
         Due::Run(mode) => mode,
         Due::Current => {
             record_done(&root, running, now());
@@ -683,7 +696,7 @@ fn start(home: &Path, stdin_is_terminal: bool) {
         }
         Mode::Ask if stdin_is_terminal => match ask() {
             Some(true) if claim_now() => update_and_report(home, &root),
-            Some(true) => eprintln!("{ALREADY_UPDATING}"),
+            Some(true) => lost_claim(&root, home, running),
             Some(false) if claim_now() => {
                 record_done(&root, running, now());
                 if let Some(id) = plugin_id(&home.join(".claude")) {
@@ -696,6 +709,20 @@ fn start(home: &Path, stdin_is_terminal: bool) {
             _ => {}
         },
         Mode::Ask | Mode::Off => {}
+    }
+}
+
+/// A yes lost the claim: say another process is updating only when the marker
+/// still says so, else the marker moved while the question was open (a
+/// no or a finished update), so name the manual command.
+fn lost_claim(root: &Path, home: &Path, running: &str) {
+    let busy = seen(root)
+        .and_then(|t| Marker::parse(&t))
+        .is_some_and(|m| m.version == running && m.state == State::Running);
+    match plugin_id(&home.join(".claude")) {
+        _ if busy => eprintln!("{ALREADY_UPDATING}"),
+        Some(id) => eprintln!("playbook: to update the plugin, run: {}", command(&id)),
+        None => {}
     }
 }
 
@@ -718,22 +745,32 @@ fn ask() -> Option<bool> {
 }
 
 fn update_and_report(home: &Path, root: &Path) {
-    let claude_home = home.join(".claude");
-    if let Some(id) = plugin_id(&claude_home) {
+    if let Some(id) = plugin_id(&home.join(".claude")) {
         eprintln!("playbook: updating the playbook plugin ({})", command(&id));
     }
+    let (outcome, state) = attempt(home, root);
+    let line = match outcome {
+        Outcome::Updated { .. } => outcome.line(),
+        _ => notice_line(&outcome, state),
+    };
+    if let Some(line) = line {
+        eprintln!("{line}");
+    }
+}
+
+/// Runs the update, records how it ended and returns both.
+fn attempt(home: &Path, root: &Path) -> (Outcome, State) {
+    let claude_home = home.join(".claude");
     let outcome = run(&Probe::for_home(home));
     let after = plugin_id(&claude_home).and_then(|id| installed_version(&claude_home, &id));
-    finish(
+    let state = finish(
         root,
         &outcome,
         env!("CARGO_PKG_VERSION"),
         after.as_deref(),
         now(),
     );
-    if let Some(line) = outcome.line() {
-        eprintln!("{line}");
-    }
+    (outcome, state)
 }
 
 #[cfg(test)]
@@ -966,6 +1003,19 @@ mod tests {
         assert!(off.contains("turned off in Claude Code"), "{off}");
         assert!(config_off.contains("update.plugin is off"), "{config_off}");
         assert_eq!(calls(&home), "");
+    }
+
+    #[test]
+    fn an_id_with_a_control_character_is_not_used() {
+        let home = scratch_dir("plugin-update-ctl");
+        fs::create_dir_all(home.join(".claude/plugins")).unwrap();
+        fs::write(
+            home.join(".claude/plugins/installed_plugins.json"),
+            r#"{"version":2,"plugins":{"playbook@evil\u001b[2J":[{"scope":"user","installPath":"/x"}]}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(plugin_id(&home.join(".claude")), None);
     }
 
     #[test]
