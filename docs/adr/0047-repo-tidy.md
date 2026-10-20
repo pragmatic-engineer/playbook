@@ -1,4 +1,4 @@
-# ADR-0048: Tidy the Repo Root, the Settings Seed and the Leftovers
+# ADR-0047: Tidy the Repo Root, the Settings Seed and the Leftovers
 
 - **Status:** Accepted
 - **Date created:** 2026-10-19

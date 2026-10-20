@@ -1,7 +1,7 @@
 # ADR 0007 Execution Blueprint
 
 - **Parent ADR:** `docs/adr/0007-rust-binary-for-hooks-and-launcher.md`
-- **Amended by:** [ADR 0048](0048-repo-tidy.md). `permissions.shared.json` is gone, so WU-20's PERMS argument and WU-21's permissions sync check are removed. The verification commands below that pass `permissions.shared.json` now read `playbook settings check settings.shared.json .`.
+- **Amended by:** [ADR 0047](0047-repo-tidy.md). `permissions.shared.json` is gone, so WU-20's PERMS argument and WU-21's permissions sync check are removed. The verification commands below that pass `permissions.shared.json` now read `playbook settings check settings.shared.json .`.
 
 ## System Snapshot
 

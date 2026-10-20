@@ -1,4 +1,4 @@
-# ADR-0050: Start the Usage Collector From Playbook Commands and Keep It Running
+# ADR-0048: Start the Usage Collector From Playbook Commands and Keep It Running
 
 - **Status:** Accepted
 - **Date created:** 2026-10-19

@@ -5,7 +5,7 @@
 //! reads a live `settings.json` (SRC) and the current seed (SEED), and prints
 //! a new seed: the shippable keys of SRC with `.hooks` filtered down to
 //! `playbook hook <name>` entries, and the `permissions` block of SEED. The
-//! seed is the only source of the shipped permissions (ADR 0048), so the
+//! seed is the only source of the shipped permissions (ADR 0047), so the
 //! maintainer's own permissions in SRC never ship.
 //!
 //! Top-level keys go through `settings::keys::SHIPPABLE_KEYS`, an allowlist:
