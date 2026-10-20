@@ -223,10 +223,10 @@ fn denials_tell_an_unattended_run_what_to_do_when_the_sanctioned_path_fails() {
 }
 
 #[test]
-fn the_rm_guard_allowance_cannot_be_changed_by_the_model() {
+fn protected_settings_cannot_be_changed_by_the_model() {
     let reason_of = |input: String| denial(&run(&input, &[]).0);
     for command in [
-        "playbook config set --global hooks.rmGuard.allowedRoots '[\"/a/b\"]'",
+        "playbook config set --global pr.rules.prose off",
         "nohup playbook config import f.json",
         "WORKTREE_BASE_DIR=/ rm -rf /tmp/x",
         "printf x > /Users/tester/.config/playbook/config.json",
@@ -249,7 +249,7 @@ fn the_rm_guard_allowance_cannot_be_changed_by_the_model() {
     }})
     .to_string();
     assert!(reason_of(settings).is_some());
-    assert!(reason_of(bash("playbook config get hooks.rmGuard.allowedRoots")).is_none());
+    assert!(reason_of(bash("playbook config get pr.rules.prose")).is_none());
     assert!(reason_of(bash("git commit -m 'mention playbook.db'")).is_none());
 }
 
@@ -265,7 +265,7 @@ fn reading_playbook_state_is_never_denied() {
         "cat ~/.config/playbook/config.json 2>/dev/null",
         "jq . ~/.config/playbook/config.json",
         "ls -la ~/.config/playbook/memory ~/.config/playbook/data > /private/tmp/pb-ls",
-        "grep -n rmGuard ~/.claude/settings.json 2>/dev/null",
+        "grep -n hooks ~/.claude/settings.json 2>/dev/null",
         "playbook migrate --status 2>/dev/null",
     ] {
         assert_eq!(reason_of(command), None, "{command}");

@@ -875,10 +875,11 @@ const LEFTOVER_SERVICE: &str = "a collector service file is still installed";
 /// label, or the systemd unit. Shown whatever telemetry says, since the
 /// service manager loads it at the next login; `playbook migrate` removes
 /// playbook's and names the commands for a file playbook did not write.
+/// Such a file is named the same way, with that said.
 fn leftover_service_row(home: &Path) -> Option<Row> {
-    let foreign = crate::usage::service::find_old(home)
-        .filter(|old| !old.ours)
-        .map(|old| old.file.display().to_string());
+    let foreign = crate::init::collector_service::foreign_files(home)
+        .into_iter()
+        .map(|f| f.sentence());
     let names: Vec<String> = crate::init::collector_service::installed_names(home)
         .into_iter()
         .chain(foreign)
@@ -887,7 +888,7 @@ fn leftover_service_row(home: &Path) -> Option<Row> {
         Row::new(
             "-",
             Level::Warn,
-            format!("{LEFTOVER_SERVICE}: {}", names.join(", ")),
+            format!("{LEFTOVER_SERVICE}: {}", names.join("; ")),
         )
         .hint("run: playbook migrate")
     })

@@ -492,9 +492,9 @@ fn retired_hooks_pending(ctx: &Ctx) -> Option<String> {
 /// systemd unit. Then it deletes the answers the retired setup part stored
 /// and starts a collector, because `bootout` stopped the one the service ran
 /// and open sessions still send to it, also when a removal fails part way.
-/// `Owned`: the agent under the current label and the unit are matched by
-/// path only, so whatever file sits there goes; the old-label agent goes
-/// only when playbook wrote it. The service manager runs only where
+/// `Owned`: a file goes only when playbook wrote it (its comment and the
+/// label or description it wrote); any other file at those paths stays and
+/// is reported with the commands that remove it. The service manager runs only where
 /// `service_manager::refusal` allows it. Idempotent: with no file left it
 /// reads a few paths and runs nothing, so a run the heal's start budget cut
 /// short finishes on the next one.
@@ -524,7 +524,7 @@ fn remove_collector_service(
     manager: &dyn crate::service_manager::Manager,
     start: &dyn Fn(),
 ) -> Outcome {
-    use crate::init::collector_service::{foreign_old_agent_fix, forget_answers, remove_with};
+    use crate::init::collector_service::{foreign_files, forget_answers, remove_with};
     const STEP: &str = "collector service";
     let home = &ctx.home;
     let removed = match remove_with(home, manager) {
@@ -539,15 +539,11 @@ fn remove_collector_service(
         }
     };
     forget_answers(home);
-    let foreign = crate::usage::service::find_old(home)
-        .filter(|old| !old.ours)
-        .map(|old| {
-            format!(
-                "{} uses the old collector label but playbook did not write it, so it stays; to remove it, run: {}",
-                old.file.display(),
-                foreign_old_agent_fix(&old.file)
-            )
-        });
+    let notes: Vec<String> = foreign_files(home)
+        .iter()
+        .map(|f| format!("{}; to remove it, run: {}", f.sentence(), f.fix))
+        .collect();
+    let foreign = (!notes.is_empty()).then(|| notes.join("; "));
     match (removed, foreign) {
         (Some(done), foreign) => {
             start();
@@ -2835,14 +2831,15 @@ mod tests {
 
     #[test]
     fn removal_that_fails_part_way_still_starts_a_collector() {
-        // Arrange: a directory where the unit file is, so its delete fails
-        // after the launchd agent was booted out.
+        // Arrange: a unit file in a folder that cannot be changed, so its
+        // delete fails after the launchd agent was booted out.
         use crate::service_manager::fake::Launchd;
         use crate::usage::service::{Kind, LABEL};
+        use std::os::unix::fs::PermissionsExt;
         let h = service_home("remove-fails");
         let unit = Kind::Systemd.file(&h);
-        fs::remove_file(&unit).unwrap();
-        fs::create_dir(&unit).unwrap();
+        let folder = unit.parent().unwrap().to_path_buf();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o555)).unwrap();
         let fake = Launchd::with(&[LABEL]);
         let starts = std::cell::Cell::new(0);
 
@@ -2850,6 +2847,7 @@ mod tests {
         let out = remove_collector_service(&ctx(&h), &fake, &|| starts.set(starts.get() + 1));
 
         // Assert
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
         let Outcome::Failed(step) = out else {
             panic!("a failed delete is reported as a failure");
         };

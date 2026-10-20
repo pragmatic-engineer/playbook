@@ -125,7 +125,7 @@ pub(crate) const META: &[Meta] = &[
     user("config import"),
     ro("config list"),
     free("config set")
-        .purpose("Change a setting; protected keys such as `hooks.rmGuard.*` are the user's"),
+        .purpose("Change a setting; protected keys such as `pr.rules.*` are the user's"),
     free("deliver"),
     user("deps"),
     user("deps ensure").purpose("Install the missing tools of a Brewfile with Homebrew"),

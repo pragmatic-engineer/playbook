@@ -200,6 +200,9 @@ fn render_labeled(kind: Kind, label: &str, program: &Path, log: &Path) -> String
 pub struct Found {
     pub kind: Kind,
     pub file: PathBuf,
+    /// Whether playbook wrote the file: it carries playbook's comment and
+    /// the label or description it wrote. Only such a file is ever removed.
+    pub ours: bool,
 }
 
 impl Found {
@@ -214,11 +217,25 @@ impl Found {
     }
 }
 
-/// The service file for `kind` under `home`, if one exists. Any file counts,
-/// readable or not, so removal also takes one it cannot parse.
+/// The file at the service path for `kind` under `home`, if one exists. A
+/// file that is not UTF-8, or lacks playbook's comment and the line it
+/// wrote, is reported with `ours` false and never removed.
 pub fn find_kind(kind: Kind, home: &Path) -> Option<Found> {
     let file = kind.file(home);
-    file.is_file().then_some(Found { kind, file })
+    if !file.is_file() {
+        return None;
+    }
+    let ours = fs::read_to_string(&file).is_ok_and(|text| match kind {
+        Kind::Launchd => {
+            text.contains(&format!("<!-- {MARKER} -->"))
+                && text.contains(&format!("<key>Label</key>\n\t<string>{LABEL}</string>"))
+        }
+        Kind::Systemd => {
+            text.contains(&format!("# {MARKER}"))
+                && text.contains("Description=playbook usage collector")
+        }
+    });
+    Some(Found { kind, file, ours })
 }
 
 /// A launchd agent file under [`OLD_LABEL`], found by [`find_old`].
@@ -280,6 +297,7 @@ mod tests {
         let found = find_kind(Kind::Launchd, &home).unwrap();
 
         assert_eq!(found.file, file);
+        assert!(found.ours);
         assert!(
             found
                 .describe()
@@ -287,6 +305,23 @@ mod tests {
             "{}",
             found.describe()
         );
+    }
+
+    #[test]
+    fn a_foreign_or_non_utf8_file_is_found_but_not_ours() {
+        for kind in [Kind::Launchd, Kind::Systemd] {
+            let home = scratch_dir("service-foreign");
+            let file = kind.file(&home);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            for bytes in [&b"<plist/>"[..], &[0xff, 0xfe, 0x00, 0x9f][..]] {
+                fs::write(&file, bytes).unwrap();
+
+                let found = find_kind(kind, &home).unwrap();
+
+                assert!(!found.ours, "{kind:?}");
+                assert_eq!(found.file, file);
+            }
+        }
     }
 
     /// The agent file 0.37.0 wrote, byte for byte, so the match does not
