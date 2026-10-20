@@ -429,9 +429,9 @@ fn collector_service_removed(ctx: &Ctx) -> Outcome {
 }
 
 /// Asks for a collector the way a command does, with no wait, so the heal
-/// that runs this migration is not held up.
+/// that runs this migration is not held up. A headless heal asks too.
 fn start_collector() {
-    let _ = crate::cc::telemetry::ensure_for(crate::cc::telemetry::Trigger::Command);
+    let _ = crate::cc::telemetry::ensure_after_removal();
 }
 
 /// [`collector_service_removed`] with the service manager and the collector
