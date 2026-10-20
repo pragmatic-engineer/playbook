@@ -17,13 +17,15 @@
 use std::path::{Path, PathBuf};
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 14] = [
+const ALLOW_FILES: [&str; 16] = [
     ".gitignore",
     "CHANGELOG.md",
     "README.md",
     "LICENSE",
     "NOTICE",
     "justfile",
+    "flake.nix",
+    "flake.lock",
     "install.sh",
     "install-pbtop.sh",
     "CODE_OF_CONDUCT.md",
@@ -146,6 +148,13 @@ mod tests {
     #[test]
     fn rust_toolchain_toml_is_allowlisted() {
         let tracked = vec!["rust-toolchain.toml".to_string()];
+        assert!(violations(&tracked).is_empty());
+    }
+
+    /// The Nix flake and its lock sit at the root, where `nix run` reads them.
+    #[test]
+    fn the_nix_flake_files_are_allowlisted() {
+        let tracked = vec!["flake.nix".to_string(), "flake.lock".to_string()];
         assert!(violations(&tracked).is_empty());
     }
 
