@@ -15,7 +15,7 @@ The maintainer changed the requirement on 2026-10-20. Every account has a limit:
 Token free sources that exist today:
 
 - The statusline input carries `rate_limits` (`five_hour`, `seven_day`, and behind a gateway `spend_limit`). `crates/cli/src/statusline/mod.rs` stores it through `limits_source::remember` in `<data>/rate_limits.json`. On the maintainer's Max 20x machine the file held both windows on 2026-10-20.
-- Claude Code caches `cachedUsageUtilization` in `~/.claude.json`, which `crates/telemetry/src/plan.rs` reads. It was absent on that machine. The shape of its `spend` block was never seen on an enterprise machine.
+- Claude Code caches `cachedUsageUtilization` in `~/.claude.json`, which `crates/telemetry/src/plan.rs` reads. It was absent on that machine. The shape of its `spend` block has not been seen on an enterprise machine.
 - OTel `api_error` events with `status_code`, kept in `telemetry_errors`. A 429 is the only token free proof that a cap was hit.
 - `usage.db` holds the local cost per request.
 
@@ -23,7 +23,7 @@ The one number found in no token free source is the enterprise dollar cap and th
 
 ## Decision Drivers
 
-- The limit must never be set by the user, so no plan or limit key.
+- The user does not set the limit, so there is no plan or limit key.
 - Reading another application's credential is hard to take back in terms of trust, and it ships in a distributed binary.
 - The reply of the usage endpoint is undocumented, and the probe saw one account type only.
 - The burn rate, projection and crossings are plain arithmetic on a percent and a reset time, so they need no extra number.
@@ -44,18 +44,22 @@ The one number found in no token free source is the enterprise dollar cap and th
 
 ### A user set plan and limit (effort: S)
 - Keys such as `usage.plan` and a dollar limit that the user fills in.
-- Trade-offs: simple, but it breaks the requirement that the limit is never set by the user, and a wrong value gives a wrong chart.
+- Trade-offs: simple, but it breaks the requirement that the user does not set the limit, and a wrong value gives a wrong chart.
 
 ## Decision
 
 1. Playbook does not read the Claude Code login token and does not call the Anthropic usage endpoint, in code, tests or manual runs. A test fails if a product source names the API host, and a second test fails if the telemetry crate gains an HTTP client or the cli crate gains one besides `ureq`.
-2. Limits come from the statusline `rate_limits`, the `cachedUsageUtilization` cache, OTel 429 events and the local history. The display follows the fields present, never a plan name.
+2. Limits come from the statusline `rate_limits`, the `cachedUsageUtilization` cache, OTel 429 events and the local history. The display follows the fields present, not a plan name.
 3. There is no `usage spend` subcommand, no `usage.plan` key and no `usage.spend.*` key. `usage.budget.monthlyUsd` and `usage.budget.weeklyUsd` stay, and are the only way to get a limit line for a login that has no Claude limit data (API key, Bedrock, Vertex, Foundry).
 4. Burn rate, projection, the 50, 80 and 100 percent crossings and the burn-up chart with a projection line and cutoff lines are computed in the usage dashboard.
 5. A statusline reading that carries one window keeps the other as stored, with its own read time. A bounded history file `rate_limits.jsonl` (256 KiB, 8 days) gives the window chart a time series. Without it the window chart is a straight line from the window start to the latest reading.
 6. The fetch is reopened only as a new plan with its own decision, and only if the enterprise dollar cap is in neither the statusline `spend_limit` nor the cache `spend` block. The check costs nothing: `playbook usage doctor --raw` on that machine.
 
-Why the others were rejected: the fetch of ADR 0052 and the enterprise only fetch carry credential and terms of service risk that the free sources make unnecessary for the plans seen so far, and the user set limit breaks the requirement.
+Why each alternative was rejected:
+
+- The fetch of ADR 0052: it carries a credential path, a terms of service risk and a consent flow that the free sources make unnecessary for the window plans, and its endpoint reply is undocumented.
+- The enterprise only fetch: it keeps the same credential risk to cover one gap that nobody has measured yet. The check in decision 6 comes first.
+- The user set plan and limit: it breaks the requirement that the user does not set the limit, and a wrong value draws a wrong chart.
 
 ## Consequences
 
