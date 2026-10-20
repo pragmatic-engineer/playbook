@@ -116,7 +116,7 @@ jobs:
             // Parse table rows between CLA-BOT markers
             const match = content.match(/CLA-BOT:START[\s\S]*?CLA-BOT:END/);
             const hasSigned = match
-              ? match[0].toLowerCase().split('\n').some(l => l.trim().startsWith('| @' + author + ' |'))
+              ? match[0].toLowerCase().split('\n').some(l => /^\|\s*@([^\s|]+)\s*\|/.exec(l.trim())?.[1] === author)
               : false;
 
             if (!hasSigned) {
@@ -182,7 +182,7 @@ jobs:
 
                 const content = Buffer.from(file.content, 'base64').toString('utf-8');
 
-                if (content.toLowerCase().split('\n').some(l => l.trim().startsWith('| @' + author.toLowerCase() + ' |'))) {
+                if (content.toLowerCase().split('\n').some(l => /^\|\s*@([^\s|]+)\s*\|/.exec(l.trim())?.[1] === author.toLowerCase())) {
                   core.info('@' + author + ' already signed (detected on attempt ' + attempt + ').');
                   break;
                 }
