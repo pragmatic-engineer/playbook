@@ -1,0 +1,1 @@
+{"cachedUsageUtilization":{"fetchedAtMs":1788400000000,"utilization":{"five_hour":null,"seven_day":null,"spend":{"enabled":true,"limit":{"amount_minor":50000,"currency":"USD","exponent":2},"used":{"amount_minor":1234,"currency":"USD","exponent":2}}}}}

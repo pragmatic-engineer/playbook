@@ -5,15 +5,16 @@ use clap::{CommandFactory, Parser};
 use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::{
-    adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, disk, doc,
-    doctor, effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
-    plan_cleanup, planning, pr, prose, review, sanitize, settings, statusline, storage, tools_map,
-    trust, update, usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli,
-    Command, CommitCommand, ConfigCommand, DepsCommand, DiskCommand, DocCommand, DoctorCommand,
-    EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand,
-    ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ProseCommand,
-    ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology,
-    SessionsCommand, SettingsCommand, ToolsCommand, WorktreeCommand,
+    adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor,
+    effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
+    plan_cleanup, planning, pr, prose, review, sanitize, settings, skills_sync, statusline,
+    storage, tools_map, trust, update, usage, worktree, AdrCommand, AgentsCommand,
+    AtlassianCommand, CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand,
+    DocCommand, DoctorCommand, EvalCommand, GateCommand, GlossaryCommand, HandoffCommand,
+    JsonCommand, LearnCommand, ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand,
+    PrCommand, ProseCommand, ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SegmentCommand,
+    SegmentTopology, SessionsCommand, SettingsCommand, SkillsCommand, ToolsCommand,
+    WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -100,6 +101,7 @@ fn main() {
     // The first-run step (ADR 0034 decision 13): heal once after an upgrade,
     // before most commands. Hot paths returned above or skip it.
     playbook::heal::on_start(&cli.command);
+    playbook::plugin_update::on_start(&cli.command, &args);
     // Starts the collector daemon for most commands, `cc` included.
     playbook::cc::telemetry::on_start(&cli.command);
 
@@ -627,7 +629,7 @@ fn main() {
                     init::pb_link::declined(&common::home_dir()),
                 ),
                 attribution: choices.attribution.resolve(&common::home_dir()),
-                disk_ballast: choices.disk_ballast,
+                policy_guard: choices.policy_guard,
             };
             if flags.dry_run {
                 print!("{}", init::preview::dry_run(&paths, &choices));
@@ -677,14 +679,9 @@ fn main() {
         }
         Command::Hooks { sub } => match sub {
             playbook::HooksCommand::List => print!("{}", init::catalog::hooks_list()),
-            playbook::HooksCommand::ExplainRm { command, cwd, json } => {
-                match playbook::hooks::explain_rm(&command, cwd.as_deref(), json) {
-                    Ok(text) => print!("{text}"),
-                    Err(e) => {
-                        eprintln!("playbook hooks explain-rm: {e}");
-                        std::process::exit(2);
-                    }
-                }
+            playbook::HooksCommand::ExplainRm { .. } => {
+                eprintln!("playbook hooks explain-rm was removed: the rm guard now denies only rm of / or your home folder (docs/guides/07-rm-guard.md)");
+                std::process::exit(2);
             }
         },
         Command::Settings { sub } => match sub {
@@ -1339,6 +1336,18 @@ fn main() {
                 }
             }
         }
+        Command::Skills { sub } => match sub {
+            SkillsCommand::Sync {
+                agent,
+                dry_run,
+                json,
+                refresh,
+            } => std::process::exit(if refresh {
+                run_skills_refresh()
+            } else {
+                run_skills_sync(agent.as_deref(), dry_run, json)
+            }),
+        },
         Command::Config { sub } => {
             let home = common::home_dir();
             for warning in config::adopt_late_config(&home) {
@@ -1384,7 +1393,7 @@ fn main() {
                             std::process::exit(1);
                         }
                     };
-                    let shown = config::write::normalize(&key, value_json.clone()).to_string();
+                    let shown = value_json.to_string();
                     match config::write::set(tier, &key, value_json, &home, repo_slug) {
                         Ok(()) => println!("config set: {key} updated to {shown}"),
                         Err(err) => {
@@ -2045,7 +2054,6 @@ fn main() {
             }
             ReviewWorktreeCommand::Teardown { path } => worktree::review::teardown(&path),
         },
-        Command::Disk { sub } => run_disk(sub),
         Command::Worktree { sub } => {
             let home = common::home_dir();
             let slug = common::repo_slug();
@@ -2379,12 +2387,17 @@ fn main() {
             pre,
             yes,
             refresh_check,
+            refresh_plugin,
             print_notes,
             from,
             no_plugin,
         } => {
             if refresh_check {
                 update::check::run_refresh();
+                return;
+            }
+            if refresh_plugin {
+                playbook::plugin_update::refresh_plugin(&common::home_dir());
                 return;
             }
             // On stdout, so the install script can tell an answer from the
@@ -2559,6 +2572,89 @@ fn print_resolved(
     );
 }
 
+/// The detached body behind `skills sync --refresh`: prints nothing and
+/// leaves its summary for the next session.
+fn run_skills_refresh() -> i32 {
+    let home = common::home_dir();
+    let refreshed = skills_sync::refresh_report(&home, false);
+    if let Some(line) = skills_sync::notice_line(&refreshed) {
+        let root = common::paths::playbook_root_from(&home);
+        playbook::notices::store_notice(&root, playbook::notices::SKILLS_SYNC_KEY, &line);
+    }
+    0
+}
+
+/// `playbook skills sync`: returns the exit code.
+fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
+    use skills_sync::{apply, Agent};
+    const NO_AGENTS: &str = "no other agents found (looked for Codex at ~/.codex)";
+    let home = common::home_dir();
+    let path = std::env::var("PATH").unwrap_or_default();
+    let agents: Vec<Agent> = skills_sync::detect(&home, &path)
+        .into_iter()
+        .filter(|a| agent.is_none_or(|name| name == a.key()))
+        .collect();
+    if agents.is_empty() {
+        println!("{NO_AGENTS}");
+        return 0;
+    }
+    // Resolved after the agent check, so a machine with no other agent never
+    // needs the plugin folder.
+    let plugin = match playbook::plugin_root::resolve_here() {
+        Ok(resolved) => resolved.root,
+        Err(err) => {
+            eprintln!("{err}");
+            return 1;
+        }
+    };
+    let version = playbook::plugin_root::plugin_version(&plugin).unwrap_or_default();
+    let rendered = skills_sync::plan::plan(&plugin)
+        .and_then(|targets| skills_sync::render_targets(&plugin, &targets));
+    let folders = match rendered {
+        Ok(folders) => folders,
+        Err(err) => {
+            eprintln!("skills sync: {err}");
+            return 1;
+        }
+    };
+    if folders.is_empty() {
+        // An empty plan would read as every folder dropped and remove them.
+        eprintln!("skills sync: the plugin holds no skills or commands, nothing was changed");
+        return 1;
+    }
+    let root = common::paths::playbook_root_from(&home);
+    let target_root = home.join(skills_sync::TARGET_DIR);
+    let mut lines = Vec::new();
+    let mut clean = true;
+    for agent in agents {
+        let report = apply::apply(
+            &root,
+            agent,
+            &target_root,
+            &version,
+            &folders,
+            dry_run,
+            &apply::Faults::default(),
+        );
+        clean &= report.is_clean();
+        lines.extend(report.lines);
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&lines).unwrap_or_default()
+        );
+    } else {
+        for line in &lines {
+            println!("{line}");
+        }
+    }
+    if !clean {
+        eprintln!("skills sync: not every folder was synced");
+    }
+    i32::from(!clean)
+}
+
 /// Parse `config set`'s raw `value` string into the JSON type `key` expects,
 /// using `config::keys::default_value` to learn that type generically so an
 /// unknown key or a wrong-type value is rejected before `write::set` ever
@@ -2729,85 +2825,4 @@ fn effort_diff_shape(base: &str) -> Result<effort::auto::Shape, String> {
     }
     let text = String::from_utf8_lossy(&out.stdout);
     effort::auto::Shape::from_numstat(&text)
-}
-
-fn run_disk(sub: DiskCommand) {
-    let home = common::home_dir();
-    match sub {
-        DiskCommand::Status { json } => {
-            let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
-            let report = disk::status::report(&home, &disk::status::claude_home(&home), &cwd);
-            if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&disk::status::to_json(&report))
-                        .unwrap_or_default()
-                );
-            } else {
-                print!("{}", disk::status::render(&report));
-            }
-        }
-        DiskCommand::Reserve => {
-            let at = disk::ballast::file(&home);
-            match disk::ballast::reserve_for(&home, &disk::policy::load(&home)) {
-                Ok(disk::ballast::Reserved::Wrote(bytes)) => println!(
-                    "disk reserve: wrote {} of ballast at {}. `playbook disk release` deletes it",
-                    disk::size::gb(bytes),
-                    at.display()
-                ),
-                Ok(disk::ballast::Reserved::Existing(bytes)) => println!(
-                    "disk reserve: the ballast already exists ({}) at {}",
-                    disk::size::gb(bytes),
-                    at.display()
-                ),
-                Err(err) => {
-                    eprintln!("{err}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        DiskCommand::TargetDir => {
-            let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
-            let Some(worktree) = playbook_common::gitfacts::toplevel(&cwd) else {
-                eprintln!("disk target-dir: not inside a git worktree");
-                std::process::exit(1);
-            };
-            let Some(root) = disk::targets::worktrees_root(&worktree) else {
-                eprintln!("disk target-dir: cannot find the worktrees root of {}", worktree.display());
-                std::process::exit(1);
-            };
-            let Some(target) = disk::targets::target_for(&root, &worktree) else {
-                eprintln!("disk target-dir: {} has no folder name", worktree.display());
-                std::process::exit(1);
-            };
-            let max = disk::policy::load(&home).max_target_dirs;
-            let count = disk::targets::target_dirs(&root).len();
-            if let Some(warning) = disk::targets::too_many_warning(count, max) {
-                eprintln!("disk target-dir: {warning}");
-            }
-            println!("{}", target.display());
-        }
-        DiskCommand::Release => match disk::ballast::release(&home) {
-            Ok(Some(bytes)) => println!(
-                "disk release: deleted the ballast, {} given back. Run `playbook disk reserve` after a cleanup to put it back",
-                disk::size::gb(bytes)
-            ),
-            Ok(None) => println!("disk release: there is no ballast to delete"),
-            Err(err) => {
-                eprintln!("disk release: {err}");
-                std::process::exit(1);
-            }
-        },
-        DiskCommand::Clean { dry_run, auto } => {
-            let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
-            if auto && !disk::clean::auto_due(&home, &cwd) {
-                println!("disk clean: nothing to do, space is fine or disk.autoCleanup is off");
-                return;
-            }
-            let repo_root = playbook_common::gitfacts::toplevel(&cwd);
-            for line in disk::clean::run(&home, repo_root.as_deref(), dry_run, auto) {
-                println!("{line}");
-            }
-        }
-    }
 }

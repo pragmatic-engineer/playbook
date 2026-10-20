@@ -1,6 +1,6 @@
 # ADR-0041: Retire the `playbook-telemetry` binary and formula, and keep `pbtop`
 
-- **Status:** Accepted. The context is amended by [ADR 0043](0043-collector-service-in-setup.md): setup could install a launchd agent or systemd user unit that runs `playbook usage collect`, until [ADR 0049](0049-collector-daemon-started-by-commands.md) replaced it with a collector that playbook commands start. Decision 5 is amended by [ADR 0048](0048-repo-tidy.md): `install.sh --pbtop` goes after 0.37.0, in a change of its own.
+- **Status:** Accepted. The context is amended by [ADR 0043](0043-collector-service-in-setup.md): setup could install a launchd agent or systemd user unit that runs `playbook usage collect`, until [ADR 0050](0050-collector-daemon-started-by-commands.md) replaced it with a collector that playbook commands start. Decision 5 is amended by [ADR 0048](0048-repo-tidy.md): `install.sh --pbtop` goes after 0.37.0, in a change of its own.
 - **Date created:** 2026-10-16
 - **Date modified:** 2026-10-20
 - **Amends:** [ADR 0038](0038-one-release-line.md) decision 9 and [ADR 0039](0039-release-workflow.md) decisions 6 and 9, which ship and bump the `playbook-telemetry` archive and formula.

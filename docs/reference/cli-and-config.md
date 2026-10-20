@@ -79,16 +79,11 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `launcher.shortName` | `false` | `true`, `false` |
 | `systemPrompt.enabled` | `true` | `true`, `false` |
 | `attribution.enabled` | `false` | `true`, `false` |
-| `hooks.rmGuard.allowedRoots` | `[]` | see the config keys page |
 | `hooks.proseLint.mode` | `warn` | `warn`, `block`, `off` |
+| `hooks.policyGuard.enabled` | `false` | `true`, `false` |
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
 | `update.checkIntervalHours` | `24` | a number, see the config keys page for the range |
 | `update.plugin` | `auto` | `auto`, `ask`, `off` |
-| `disk.warnFreeGb` | `15` | a number, see the config keys page for the range |
-| `disk.blockFreeGb` | `6` | a number, see the config keys page for the range |
-| `disk.autoCleanup` | `true` | `true`, `false` |
-| `disk.paths` | `[]` | see the config keys page |
-| `disk.maxTargetDirs` | `4` | a number, see the config keys page for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
@@ -99,7 +94,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `disk`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -473,49 +468,6 @@ Keep each tool on PATH and install only the missing ones with Homebrew, from the
 - `<BREWFILE>`: Brewfile to read; defaults to `Brewfile` in the current directory
 - `--builtin`: Read the Brewfile built into this binary instead of a file
 
-### `playbook disk`
-
-Check free disk space and keep builds from filling the disk
-
-Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb` and the folders that use the most of it. `disk reserve` can keep a ballast file that gives space back when the disk is full.
-
-Example: `playbook disk status`
-
-Subcommands: `clean`, `release`, `reserve`, `status`, `target-dir`
-
-### `playbook disk clean`
-
-Remove what playbook can prove is disposable and print what it freed
-
-Removes idle `cargo-*` target folders under this repo's worktrees root that no build holds, `/tmp/pb-*` scratch older than an hour, playbook's own cache and tmp entries, plugin cache versions Claude Code marked orphaned a day ago or more, and landed worktrees through `playbook worktree sweep`. Never removes uncommitted work, a branch, the memory store or the config database.
-
-Example: `playbook disk clean --dry-run`
-
-- `--dry-run`: Show what would be removed without removing anything
-- `--auto`: Run only when `disk.autoCleanup` is on and free space is below `disk.warnFreeGb`, as the disk guard hooks do
-
-### `playbook disk release`
-
-Delete the ballast file and print the space it gave back
-
-### `playbook disk reserve`
-
-Write a 1 GB ballast file under ~/.cache/playbook/ballast that `disk release` deletes to give space back on a full disk. The folder carries a CACHEDIR.TAG and, on macOS, a Time Machine exclusion. Refuses, with exit code 1, when less than `disk.warnFreeGb` would stay free
-
-### `playbook disk status`
-
-Show free space per volume, the thresholds, and the biggest folders playbook and its agents made: cargo target folders, worktrees, caches and the ballast. Also lists cargo target folders of any project under the home folder and `disk.paths`
-
-- `--json`: Print JSON for tools
-
-### `playbook disk target-dir`
-
-Print the private cargo target folder for this worktree
-
-Prints `<worktrees root>/cargo-<worktree name>-<hash>`, the folder an agent sets as `CARGO_TARGET_DIR` so each worktree builds into its own target folder. `playbook worktree remove`, the sweep and the worktree-remove hook delete it with the worktree. Warns on stderr when more than `disk.maxTargetDirs` target folders exist.
-
-Example: `CARGO_TARGET_DIR="$(playbook disk target-dir)" cargo test`
-
 ### `playbook doc`
 
 Read a PDF or Office file as text with the optional anydoc converter
@@ -859,19 +811,9 @@ Print the rules and template for writing a handoff
 
 ### `playbook hooks`
 
-List the hooks that `playbook setup` wires into Claude Code, or explain a guard verdict
+List the hooks that `playbook setup` wires into Claude Code
 
-Subcommands: `explain-rm`, `list`
-
-### `playbook hooks explain-rm`
-
-Show what the rm guard does with a Bash command
-
-Reads the command the way the guard does and prints each path it deletes or overwrites, with the verdict and the rule that matched, then the denial text Claude would see. Runs nothing and changes nothing.
-
-- `<COMMAND>`: The Bash command, quoted as one argument
-- `--cwd <CWD>`: The folder the command runs in (default: the current folder)
-- `--json`: Print JSON instead of text
+Subcommands: `list`
 
 ### `playbook hooks list`
 
@@ -1429,14 +1371,34 @@ Example: `playbook setup --no-hooks --system-prompt`
 - `--no-telemetry`: Do not write telemetry variables into settings.json
 - `--short-name`: Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
 - `--no-short-name`: Do not add the `pb` short name
-- `--disk-ballast`: Write a 1 GB ballast file under ~/.cache/playbook/ballast that `playbook disk release` deletes to give space back on a full disk
-- `--no-disk-ballast`: Do not write the disk ballast file, the default
+- `--policy-guard`: Turn the policy guard on (`hooks.policyGuard.enabled`): it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
+- `--no-policy-guard`: Do not turn the policy guard on; it is off by default and a stored choice is not changed
 - `--attribution`: Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true
 - `--no-attribution`: Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values
-- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, disk-ballast, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
+- `--only <PART>`: Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing
+
+### `playbook skills`
+
+Share the playbook skills with other agents
+
+`sync` copies the plugin's skills and commands into the folder that Codex reads, `~/.agents/skills`, as `playbook-*` folders. It never touches folders you made yourself or edited.
+
+Example: `playbook skills sync --dry-run`
+
+Subcommands: `sync`
+
+### `playbook skills sync`
+
+Copy the playbook skills into another agent's skill folder
+
+Without `--agent`, every agent found on this machine is synced. A second run with nothing new changes nothing.
+
+- `--agent <AGENT>`: Sync only this agent (one of `codex`)
+- `--dry-run`: Show what would change and write nothing
+- `--json`: Print the report lines as a JSON array
 
 ### `playbook state`
 
@@ -1528,7 +1490,7 @@ Subcommands: `collect`, `doctor`, `prune`, `status`, `stop`
 
 Run the local OpenTelemetry receiver in the foreground
 
-Listens on 127.0.0.1 only (default port 47318, chosen once and then kept; a free port is chosen on the first run when that one is taken; an existing install keeps the port it recorded) and stores API request cost and token rows, tool call timings and API errors from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector (`playbook usage status` shows it too). It stops by itself after the idle time, counted from the last real telemetry request, so a status check does not keep it alive. Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no telemetry are read from transcripts as before. While it runs, `cc` points its sessions at it unless `usage.telemetry` is `off` or you set telemetry yourself. When none runs, `cc` starts one itself in the background (once the usage database exists) under the same conditions.
+Listens on 127.0.0.1 only (default port 47318, chosen once and then kept; a free port is chosen on the first run when that one is taken; an existing install keeps the port it recorded) and stores API request cost and token rows, tool call timings and API errors from Claude Code's JSON telemetry. Prompts, tool content, paths, emails and user ids are never stored. A second start reports the running collector (`playbook usage status` shows it too). It stops by itself after the idle time, counted from the last real telemetry request, so a status check does not keep it alive. Use `--idle-seconds 0` to keep it running in a tmux window. Sessions that sent no telemetry are read from transcripts as before. While it runs, `cc` points its sessions at it unless `usage.telemetry` is `off` or you set telemetry yourself. When the settings that `setup` wrote point at it and none runs, playbook commands and hooks start one with `--idle-seconds 0` (see `docs/internals/04-usage-dashboard.md`).
 
 Example: `playbook usage collect --idle-seconds 1800`
 

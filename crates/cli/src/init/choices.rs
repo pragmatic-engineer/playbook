@@ -65,18 +65,24 @@ pub struct Flags {
     /// Retired with `--claude-override`
     #[arg(long, hide = true, overrides_with = "claude_override")]
     pub no_claude_override: bool,
+    /// Retired: the disk feature is gone. Accepted and ignored until 1.0
+    #[arg(long, hide = true, overrides_with = "no_disk_ballast")]
+    pub disk_ballast: bool,
+    /// Retired with `--disk-ballast`
+    #[arg(long, hide = true, overrides_with = "disk_ballast")]
+    pub no_disk_ballast: bool,
     /// Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
     #[arg(long, overrides_with = "no_short_name")]
     pub short_name: bool,
     /// Do not add the `pb` short name
     #[arg(long, overrides_with = "short_name")]
     pub no_short_name: bool,
-    /// Write a 1 GB ballast file under ~/.cache/playbook/ballast that `playbook disk release` deletes to give space back on a full disk
-    #[arg(long, overrides_with = "no_disk_ballast")]
-    pub disk_ballast: bool,
-    /// Do not write the disk ballast file, the default
-    #[arg(long, overrides_with = "disk_ballast")]
-    pub no_disk_ballast: bool,
+    /// Turn the policy guard on (`hooks.policyGuard.enabled`): it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
+    #[arg(long, overrides_with = "no_policy_guard")]
+    pub policy_guard: bool,
+    /// Do not turn the policy guard on; it is off by default and a stored choice is not changed
+    #[arg(long, overrides_with = "policy_guard")]
+    pub no_policy_guard: bool,
     #[arg(
         long,
         overrides_with_all = ["no_attribution", "attribution_off", "no_attribution_off"],
@@ -100,7 +106,7 @@ pub struct Flags {
         value_name = "PART",
         value_delimiter = ',',
         num_args = 1..,
-        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, disk-ballast, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
+        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
     )]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
@@ -124,8 +130,8 @@ pub struct Choices {
     pub system_prompt: bool,
     pub telemetry: bool,
     pub short_name: bool,
-    /// Whether to write the 1 GB disk ballast. Off unless chosen.
-    pub disk_ballast: bool,
+    /// Whether to turn the policy guard on. Off unless chosen.
+    pub policy_guard: bool,
     /// Attribution OFF (the default), ON, or left as it is.
     pub attribution: attribution::Choice,
 }
@@ -149,7 +155,7 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
         "system-prompt" => (flags.system_prompt, flags.no_system_prompt),
         "telemetry" => (flags.telemetry, flags.no_telemetry),
         "short-name" => (flags.short_name, flags.no_short_name),
-        "disk-ballast" => (flags.disk_ballast, flags.no_disk_ballast),
+        "policy-guard" => (flags.policy_guard, flags.no_policy_guard),
         "attribution" => (flags.attribution, flags.no_attribution),
         _ => return None,
     })
@@ -164,14 +170,20 @@ pub const COLLECTOR_SERVICE_RETIRED: &str =
     "the collector service is no longer needed; playbook starts the collector itself";
 
 /// The part names setup took once and now ignores: the launchers ADR 0044
-/// dropped and the collector service.
-pub const RETIRED_PARTS: [&str; 3] = ["aliases", "claude-override", COLLECTOR_SERVICE_PART];
+/// dropped, the disk ballast and the collector service.
+pub const RETIRED_PARTS: [&str; 4] = [
+    "aliases",
+    "claude-override",
+    "disk-ballast",
+    COLLECTOR_SERVICE_PART,
+];
 
 /// One stderr line per retired flag or `--only` name in use, for a terminal.
 pub fn retired_notes(flags: &Flags) -> Vec<String> {
     let set_by_flag = [
         flags.aliases || flags.no_aliases,
         flags.claude_override || flags.no_claude_override,
+        flags.disk_ballast || flags.no_disk_ballast,
         flags.collector_service || flags.no_collector_service,
     ];
     RETIRED_PARTS
@@ -180,6 +192,9 @@ pub fn retired_notes(flags: &Flags) -> Vec<String> {
         .filter(|(id, flag)| *flag || flags.only.iter().any(|n| n == *id))
         .map(|(id, _)| match *id {
             COLLECTOR_SERVICE_PART => format!("playbook setup: {COLLECTOR_SERVICE_RETIRED}"),
+            "disk-ballast" => format!(
+                "playbook setup: `{id}` is retired and does nothing; the disk feature was removed"
+            ),
             _ => format!(
                 "playbook setup: `{id}` is retired and does nothing; `playbook cc` and `pb cc` need no shell line (ADR 0044)"
             ),
@@ -311,7 +326,7 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         system_prompt: has("system-prompt"),
         telemetry: has("telemetry"),
         short_name: has("short-name"),
-        disk_ballast: has("disk-ballast"),
+        policy_guard: has("policy-guard"),
         attribution: match has(attribution::PART) {
             true => attribution_from_flags(flags).unwrap_or(attribution::Choice::Default),
             false => attribution::Choice::Skip,
@@ -511,12 +526,12 @@ pub fn resolve_with(
             catalog::question("short-name"),
             settings_default,
         ),
-        // It costs 1 GB, so it stays off unless a flag or an answer says yes,
-        // `--yes` included.
-        disk_ballast: decide(
-            flags.disk_ballast,
-            flags.no_disk_ballast,
-            catalog::question("disk-ballast"),
+        // It denies tool calls, so it stays off unless a flag or an answer
+        // says yes, `--yes` included.
+        policy_guard: decide(
+            flags.policy_guard,
+            flags.no_policy_guard,
+            catalog::question("policy-guard"),
             false,
         ),
         attribution: attribution::Choice::Skip,
@@ -557,14 +572,14 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
         (flags.system_prompt, flags.no_system_prompt),
         (flags.telemetry, flags.no_telemetry),
         (flags.short_name, flags.no_short_name),
-        (flags.disk_ballast, flags.no_disk_ballast),
+        (flags.policy_guard, flags.no_policy_guard),
         (flags.attribution, flags.no_attribution),
     ]
     .iter()
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
         "setup: output is not a terminal, so no questions were asked; the hooks, status line, \
-         system-prompt, telemetry, short-name and disk-ballast parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
+         system-prompt, telemetry, short-name and policy-guard parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
 }
@@ -590,7 +605,7 @@ mod tests {
             system_prompt: true,
             no_telemetry: true,
             no_short_name: true,
-            no_disk_ballast: true,
+            no_policy_guard: true,
             no_attribution: true,
             ..Flags::default()
         };
@@ -641,7 +656,7 @@ mod tests {
                 system_prompt: false,
                 telemetry: false,
                 short_name: false,
-                disk_ballast: false,
+                policy_guard: false,
                 attribution: attribution::Choice::Skip
             }
         );
@@ -669,29 +684,29 @@ mod tests {
     }
 
     #[test]
-    fn the_disk_ballast_stays_off_unless_a_flag_or_an_answer_says_yes() {
+    fn the_policy_guard_stays_off_unless_a_flag_or_an_answer_says_yes() {
         let yes = Flags {
             yes: true,
             ..Flags::default()
         };
-        assert!(!resolve(&yes, false, true, &mut never).disk_ballast);
-        assert!(!resolve(&yes, true, true, &mut never).disk_ballast);
+        assert!(!resolve(&yes, false, true, &mut never).policy_guard);
+        assert!(!resolve(&yes, true, true, &mut never).policy_guard);
         let flag = Flags {
             yes: true,
-            disk_ballast: true,
+            policy_guard: true,
             ..Flags::default()
         };
-        assert!(resolve(&flag, false, true, &mut never).disk_ballast);
+        assert!(resolve(&flag, false, true, &mut never).policy_guard);
         let answered = resolve(&Flags::default(), true, true, &mut |q, d| {
-            q == catalog::question("disk-ballast") || d
+            q == catalog::question("policy-guard") || d
         });
-        assert!(answered.disk_ballast);
+        assert!(answered.policy_guard);
         let only = Flags {
-            only: vec!["disk-ballast".into()],
+            only: vec!["policy-guard".into()],
             ..Flags::default()
         };
         let c = only_choices(&only).unwrap().unwrap();
-        assert!(c.disk_ballast && !c.hooks && !c.short_name);
+        assert!(c.policy_guard && !c.hooks);
     }
 
     #[test]
@@ -887,7 +902,7 @@ mod tests {
                 system_prompt: true,
                 telemetry: true,
                 short_name: true,
-                disk_ballast: false,
+                policy_guard: false,
                 attribution: attribution::Choice::Default
             }
         );
@@ -981,7 +996,7 @@ mod tests {
                 system_prompt: false,
                 telemetry: true,
                 short_name: false,
-                disk_ballast: false,
+                policy_guard: false,
                 attribution: attribution::Choice::Skip
             }
         );
@@ -1014,6 +1029,25 @@ mod tests {
             only: vec!["aliases".into(), "hooks".into()],
             ..Flags::default()
         }));
+    }
+
+    #[test]
+    fn the_retired_disk_ballast_flags_and_part_are_accepted_and_noted() {
+        for flags in [
+            Flags {
+                no_disk_ballast: true,
+                ..Flags::default()
+            },
+            Flags {
+                only: vec!["disk-ballast".into()],
+                ..Flags::default()
+            },
+        ] {
+            assert!(only_choices(&flags).is_ok(), "{flags:?}");
+            let notes = retired_notes(&flags);
+            assert_eq!(notes.len(), 1, "{notes:?}");
+            assert!(notes[0].contains("`disk-ballast` is retired"));
+        }
     }
 
     #[test]
@@ -1156,7 +1190,7 @@ mod tests {
             system_prompt: false,
             telemetry: false,
             short_name: false,
-            disk_ballast: false,
+            policy_guard: false,
             attribution: attribution::Choice::Skip,
         }
     }

@@ -1001,6 +1001,8 @@ fn enterprise_sources(cache_age: i64) -> Sources {
                     limit_usd: 500.0,
                     used_usd: Some(120.0),
                 }),
+                billed: None,
+                extra_windows: Vec::new(),
             }),
         },
         ..Sources::default()
