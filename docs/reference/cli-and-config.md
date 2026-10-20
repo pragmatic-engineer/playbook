@@ -858,7 +858,7 @@ Print the rules and template for writing a handoff
 
 ### `playbook hooks`
 
-List the hooks that `playbook setup` wires into Claude Code, or explain a guard verdict
+List the hooks that `playbook setup` wires into Claude Code
 
 Subcommands: `list`
 

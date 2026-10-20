@@ -14,4 +14,4 @@ gh api "repos/{owner}/{repo}/pulls/$PR/comments/$ID/replies" -F body=@"$REPLY_FI
 
 For a comment on the pull request itself, use `gh pr comment "$PR" --body-file "$REPLY_FILE"`.
 
-Leave the file in place. The rm guard denies any `rm` whose path holds a variable other than `$HOME`.
+Leave the file in place.
