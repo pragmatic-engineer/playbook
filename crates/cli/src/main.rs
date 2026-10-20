@@ -2114,7 +2114,22 @@ fn main() {
         Command::Doc { sub } => {
             let home = common::home_dir();
             let code = match sub {
-                DocCommand::Read { file, json } => doc::read(&home, &file, json),
+                DocCommand::Read {
+                    file,
+                    json,
+                    offset,
+                    limit,
+                    section,
+                } => doc::read(
+                    &home,
+                    &file,
+                    json,
+                    &doc::SliceRequest {
+                        offset,
+                        limit,
+                        section,
+                    },
+                ),
                 DocCommand::Status => doc::status(&home),
             };
             std::process::exit(code);

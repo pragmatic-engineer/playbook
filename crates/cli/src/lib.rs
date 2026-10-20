@@ -40,7 +40,14 @@ pub mod doc {
         }
     }
 
-    pub fn read(_home: &Path, _file: &Path, _json: bool) -> i32 {
+    #[derive(Debug, Default)]
+    pub struct SliceRequest {
+        pub offset: Option<usize>,
+        pub limit: Option<usize>,
+        pub section: Option<usize>,
+    }
+
+    pub fn read(_home: &Path, _file: &Path, _json: bool, _req: &SliceRequest) -> i32 {
         eprintln!("doc read: not supported on this platform");
         1
     }
@@ -2032,6 +2039,15 @@ pub enum DocCommand {
         /// Print one JSON object instead of the framed text
         #[arg(long)]
         json: bool,
+        /// Character offset to start the slice at (default 0)
+        #[arg(long)]
+        offset: Option<usize>,
+        /// Most characters to print, capped at docs.displayChars
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Print one section by its number from the section index
+        #[arg(long)]
+        section: Option<usize>,
     },
     /// Say whether the anydoc converter is installed and how to get it
     Status,

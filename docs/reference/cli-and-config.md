@@ -74,6 +74,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `docs.timeoutSeconds` | `30` | a number, see the config keys page for the range |
 | `docs.maxOutputChars` | `200000` | a number, see the config keys page for the range |
 | `docs.maxMemoryMb` | `1024` | a number, see the config keys page for the range |
+| `docs.displayChars` | `24000` | a number, see the config keys page for the range |
 | `docs.anydocPath` | empty | see the config keys page |
 | `launcher.claudeOverride` | `false` | `true`, `false` |
 | `launcher.shortName` | `false` | `true`, `false` |
@@ -486,6 +487,9 @@ Supports pdf, docx, doc, odt, rtf, epub, pptx, ppt, odp, xlsx, ods and csv. A sc
 
 - `<FILE>`: The document to read
 - `--json`: Print one JSON object instead of the framed text
+- `--offset <OFFSET>`: Character offset to start the slice at (default 0)
+- `--limit <LIMIT>`: Most characters to print, capped at docs.displayChars
+- `--section <SECTION>`: Print one section by its number from the section index
 
 ### `playbook doc status`
 
