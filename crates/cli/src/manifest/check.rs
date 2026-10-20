@@ -23,6 +23,7 @@ const ALLOW_FILES: [&str; 17] = [
     "README.md",
     "LICENSE",
     "NOTICE",
+    "NOTICE-pbdoc",
     "justfile",
     "flake.nix",
     "flake.lock",
