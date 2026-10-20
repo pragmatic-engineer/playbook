@@ -45,7 +45,7 @@ Combined flags are fine: `-Au`, `-a -u`, etc. No flags means commit only what is
 
 ## Worktree guard (first)
 
-Before anything else, run the worktree guard in the `playbook:writing-style` skill's `references/worktree-guard.md` (invoke the skill and read the file from the skill base directory it shows). The caller gives "Worktree root: <path>, branch: <name>" in this command's prompt. On a mismatch stop with its `WRONG_DIRECTORY` line and commit nothing.
+Before anything else, run the worktree guard in the `playbook:delegating-subagents` skill's `references/worktree-guard.md` (invoke the skill and read the file from the skill base directory it shows). The caller gives "Worktree root: <path>, branch: <name>" in this command's prompt. On a mismatch stop with its `WRONG_DIRECTORY` line and commit nothing.
 
 ## Step 0: Read the run mode
 
