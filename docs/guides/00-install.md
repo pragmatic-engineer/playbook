@@ -74,6 +74,21 @@ playbook setup
 
 `playbook setup` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `setup` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew on Linux works the same way: install [Homebrew](https://brew.sh) for Linux, then run the same two commands. The formula picks the static musl build for x86_64 or arm64, so it needs no system libraries. Brew installs under its own prefix (`/home/linuxbrew/.linuxbrew` by default) and playbook never asks for `sudo`. Each release installs `playbook` and `pbtop` this way on an x86_64 Ubuntu runner after the tap is updated, and fails the release run when that breaks. Homebrew installs update with `brew upgrade playbook`, and `playbook update` refuses a Homebrew install and tells you to use brew.
 
+### cargo binstall and mise
+
+Both fetch the release binary for your platform. binstall builds from source only when no release binary matches.
+
+```bash
+cargo binstall --git https://github.com/pragmatic-engineer/playbook playbook
+mise use github:pragmatic-engineer/playbook
+```
+
+`cargo binstall` reads `[package.metadata.binstall]` in `crates/cli/Cargo.toml`, which names the `playbook-<version>-<target>` asset of the release. Pass `--git`: the crate name `playbook` on crates.io belongs to another project, so `cargo binstall playbook` without it installs that one, and playbook is not published there. The metadata turns off binstall's quick-install service for the same reason. mise's `github` backend finds the same asset by the operating system and architecture in its name, and needs no registry entry.
+
+Neither route checks `SHA256SUMS` or the attestation for you, so use [Without `curl | bash`](#without-curl--bash) below when you want those checks. Each release installs playbook both ways in an empty `HOME` and compares the file with its `SHA256SUMS` line and its attestation. A test (`scripts/asset-names.test.sh`) fails when the asset names change, because both tools depend on them. Neither tool links `pb`, so run `playbook setup` for the link.
+
+||||||| 43b3fb3c
+
 ### Debian, Ubuntu and Fedora packages
 
 Each release has a `.deb` and an `.rpm` for x86_64 and arm64. They hold the static `playbook` and `pbtop` binaries and the `pb` link in `/usr/bin`, with no dependencies. Download the file for your machine and `SHA256SUMS` from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest), check them as in [Without `curl | bash`](#without-curl--bash) below, then install with your package manager, which asks for its own privileges (`playbook` never runs `sudo`):

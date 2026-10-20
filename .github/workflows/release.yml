@@ -881,6 +881,70 @@ jobs:
             echo "pbtop=$(base64 -w0 < downstream/tap/Formula/pbtop.rb)"
           } >> "$GITHUB_OUTPUT"
 
+  # Installs the release with cargo binstall and with mise in an empty HOME,
+  # the way users do, and checks the file against SHA256SUMS and its
+  # attestation (scripts/verify-installers.sh). A leaf job: it blocks no other
+  # channel, a red result fails the run, and a run with the same version
+  # starts it again. A dry run has no new release, so it installs the last
+  # released version, which proves the job and its egress list without
+  # publishing anything.
+  verify-installers:
+    needs: [plan, verify]
+    if: >-
+      ${{ !cancelled()
+      && needs.plan.result == 'success'
+      && (needs.verify.result == 'success'
+          || (needs.plan.outputs.dry_run == 'true' && needs.plan.outputs.previous != '0.0.0')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            tmaproduction.blob.core.windows.net:443
+            tuf-repo.github.com:443
+            tuf-repo-cdn.sigstore.dev:443
+
+      # The tag, or the dispatch commit on a dry run.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.dry_run == 'true' && github.sha || needs.plan.outputs.tag }}
+          persist-credentials: false
+
+      - name: Install with cargo binstall and mise
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          ver="$VERSION"
+          # The files of a dry run carry the last release, or a pending one.
+          if [ "$DRY_RUN" = true ]; then
+            ver="$(scripts/check-plugin.sh cargo-version)"
+            if ! gh release view "v$ver" >/dev/null 2>&1; then
+              echo "::notice::v$ver is not released, so a dry run has nothing to install."
+              exit 0
+            fi
+          fi
+          # The documented --git command reads the default branch, which a
+          # dry run on another branch does not carry yet.
+          export CHECK_GIT=true
+          if [ "$DRY_RUN" = true ]; then CHECK_GIT=false; fi
+          scripts/verify-installers.sh "$ver" | tee -a "$GITHUB_STEP_SUMMARY"
+
   # Moves the Homebrew tap and the marketplace to the release (ADR 0039
   # decision 9). Each gets a release/vX.Y.Z pull request from the app with
   # auto-merge, and each tags and publishes its own vX.Y.Z when it merges. The
