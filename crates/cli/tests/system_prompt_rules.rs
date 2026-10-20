@@ -56,6 +56,11 @@ fn the_prompt_does_not_restate_models_or_effort_variants() {
 }
 
 #[test]
+fn the_prompt_no_longer_names_the_retired_guard() {
+    assert!(!prompt().contains("no-slop-guard"));
+}
+
+#[test]
 fn the_prompt_points_at_the_files_that_own_routing_and_the_hooks_that_enforce_rules() {
     let text = prompt();
 
@@ -64,7 +69,6 @@ fn the_prompt_points_at_the_files_that_own_routing_and_the_hooks_that_enforce_ru
         "playbook:delegating-subagents",
         "policy-guard",
         "commit-message-sanitizer",
-        "no-slop-guard",
     ] {
         assert!(text.contains(needle), "missing `{needle}`");
     }

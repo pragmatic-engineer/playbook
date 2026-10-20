@@ -395,6 +395,10 @@ pub enum Command {
         /// Refresh the cached release check and exit (started in the background)
         #[arg(long, hide = true)]
         refresh_check: bool,
+        /// Update the plugin and store the outcome line for the next session
+        /// (started in the background)
+        #[arg(long, hide = true)]
+        refresh_plugin: bool,
         /// Print the release notes of this binary from a release-notes.json
         /// the install script checked, record them as shown, and exit
         #[arg(long, hide = true, value_name = "FILE")]
@@ -2290,6 +2294,8 @@ pub enum HookName {
     MemoryCapture,
     RmWorkspaceGuard,
     BgAwaitGuard,
+    /// Retired: kept as a no-op for one release so old settings entries still run.
+    #[value(hide = true)]
     NoSlopGuard,
     CommitMessageSanitizer,
     PolicyGuard,
@@ -2432,7 +2438,6 @@ mod tests {
             "usage-warm",
             "rm-workspace-guard",
             "bg-await-guard",
-            "no-slop-guard",
             "precommit-check",
             "commit-message-sanitizer",
             "policy-guard",
@@ -2447,6 +2452,10 @@ mod tests {
         for name in names {
             assert!(help.contains(name), "hook --help is missing '{name}'");
         }
+        assert!(
+            !help.contains("no-slop-guard"),
+            "retired hook shows in help"
+        );
     }
 
     #[test]
