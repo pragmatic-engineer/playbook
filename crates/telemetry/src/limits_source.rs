@@ -5,7 +5,8 @@
 //! Claude Code passes to the statusline command on stdin (documented at
 //! code.claude.com/docs/en/statusline). The statusline keeps the latest copy
 //! in a small private file next to the usage database, and the usage views read
-//! it back. Only percentages, reset times and, behind a Claude apps gateway,
+//! it back. A short history of the two window percentages sits beside it (see
+//! `limits_history`). Only percentages, reset times and, behind a Claude apps gateway,
 //! the dollar spend limit are kept: no account, no token, no session id. The
 //! rate limit fields exist only for Pro and Max subscribers (or a gateway), so
 //! on an API key there is nothing to read and the file is never written.
@@ -304,7 +305,12 @@ pub fn save(usage_dir: &Path, snap: &Snapshot) {
 /// JSON or has no usable part. Best effort, like [`save`].
 pub fn remember(usage_dir: &Path, input: &str, now: i64) {
     if let Some(new) = Snapshot::from_statusline(input, now) {
+        // The history gets what this reading carried, not the windows kept
+        // from an earlier one: those keep their own read time.
+        let five = new.five_hour.as_ref().map(|w| w.used_percentage);
+        let seven = new.seven_day.as_ref().map(|w| w.used_percentage);
         save(usage_dir, &new.merged_over(load(usage_dir), now));
+        super::limits_history::record(usage_dir, five, seven, now);
     }
 }
 
@@ -342,6 +348,10 @@ pub struct Sources {
     /// store. Set by the caller that holds the connection (`run::limit_sources`);
     /// empty until then.
     pub rate_limited: Vec<i64>,
+    /// The window readings of `rate_limits.jsonl` as `(window, time, percent)`,
+    /// oldest first. Set by the caller that draws burn-ups
+    /// (`run::limit_sources`); empty until then.
+    pub history: Vec<(LimitPeriod, i64, f64)>,
 }
 
 impl Sources {
@@ -368,6 +378,7 @@ impl Sources {
                 super::plan::read(claude_json)
             },
             rate_limited: Vec::new(),
+            history: Vec::new(),
         }
     }
 
@@ -635,7 +646,7 @@ pub fn burn_pair(events: &[UsageEvent], period: Period, now: i64) -> (Burn, Burn
 pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart) -> Value {
     let snapshot = s.snapshot.as_ref();
     let limits = all_limits(s, events, now, week);
-    let burnups = burnups_for(s, &limits, events, &[], now);
+    let burnups = burnups_for(s, &limits, events, now);
     let burn: serde_json::Map<String, Value> = [Period::Today, Period::Week(week), Period::Month]
         .into_iter()
         .map(|p| {
@@ -924,7 +935,7 @@ pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekS
     for line in limit_lines(s, &limits, events, now) {
         out.push_str(&format!("  {line}\n"));
     }
-    let burnups = burnups_for(s, &limits, events, &[], now);
+    let burnups = burnups_for(s, &limits, events, now);
     if let Some(b) = limits
         .iter()
         .zip(burnups)
@@ -1333,6 +1344,7 @@ mod tests {
             budgets: vec![(LimitPeriod::Monthly, 100.0)],
             account: cache(600, spend(500.0, Some(120.0)), None),
             rate_limited: Vec::new(),
+            history: Vec::new(),
         };
 
         let l = all_limits(&s, &[], NOW, WeekStart::Monday);

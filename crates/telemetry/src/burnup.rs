@@ -392,12 +392,12 @@ fn period_zone(limit: &Limit) -> Zone {
 }
 
 /// The burn-ups for the limits shown: every limit above zero, in the order
-/// given. The local cost feeds dollar limits and the readings feed windows.
+/// given. The local cost feeds dollar limits and the saved readings of
+/// `Sources::history` feed windows.
 pub fn burnups_for(
     s: &Sources,
     limits: &[Limit],
     events: &[UsageEvent],
-    readings: &[(LimitPeriod, i64, f64)],
     now: i64,
 ) -> Vec<Option<Burnup>> {
     let billed = limits_source::billed_anchor(s, now);
@@ -405,7 +405,8 @@ pub fn burnups_for(
         .iter()
         .map(|l| {
             let zone = period_zone(l);
-            let own: Vec<(i64, f64)> = readings
+            let own: Vec<(i64, f64)> = s
+                .history
                 .iter()
                 .filter(|(period, _, _)| *period == l.period)
                 .map(|(_, at, p)| (*at, *p))
@@ -490,6 +491,60 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    fn history_burnup(name: &str, file: &[u8]) -> Burnup {
+        let dir =
+            std::env::temp_dir().join(format!("pb-burnup-hist-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(crate::limits_history::history_path(&dir), file).unwrap();
+        let mut s = Sources::new(Some(&dir), &dir.join("none.json"), Vec::new(), false);
+        s.history = crate::limits_history::load(&dir);
+        let l = window(JAN, 40.0);
+        burnups_for(&s, &[l], &[], JAN + 4_000).remove(0).unwrap()
+    }
+
+    const HISTORY: &str = concat!(
+        "{\"t\":1798761500,\"five_hour\":90,\"seven_day\":5}\n",
+        "{\"t\":1798762200,\"five_hour\":10,\"seven_day\":6}\n",
+        "not a line\n",
+        "{\"t\":1798763100,\"five_hour\":25,\"seven_day\":null}\n",
+        "{\"t\":1798763700,\"five_hour\":15}\n",
+        "{\"t\":1798764600,\"five_hour\":40}\n",
+    );
+
+    #[test]
+    fn a_history_file_gives_the_window_its_measured_points() {
+        let b = history_burnup("good", HISTORY.as_bytes());
+
+        assert_eq!(b.basis, Basis::Readings);
+        assert_eq!(
+            b.points,
+            vec![
+                (JAN, 0.0),
+                (JAN + 600, 10.0),
+                (JAN + 1_500, 25.0),
+                (JAN + 2_100, 25.0),
+                (JAN + 3_000, 40.0),
+                (JAN + 4_000, 40.0)
+            ]
+        );
+        assert!(b.points.windows(2).all(|w| w[0].1 <= w[1].1));
+    }
+
+    #[test]
+    fn a_corrupt_or_oversized_history_falls_back_to_the_two_point_line() {
+        let big = HISTORY.repeat(crate::limits_history::MAX_BYTES as usize / HISTORY.len() + 2);
+        for (name, file) in [
+            ("garbage", b"\x00\xff not json\n{".to_vec()),
+            ("big", big.into_bytes()),
+        ] {
+            let b = history_burnup(name, &file);
+
+            assert_eq!(b.basis, Basis::Line, "{name}");
+            assert_eq!(b.points, vec![(JAN, 0.0), (JAN + 4_000, 40.0)], "{name}");
+        }
     }
 
     #[test]
