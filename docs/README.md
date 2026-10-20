@@ -107,3 +107,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0046](adr/0046-migrations-by-release-version.md) | Attach each migration to the release that introduced it | Accepted, amended on 2026-10-19 | 2026-10-18 |
 | [0047](adr/0047-disk-guard.md) | Guard free disk space while agents build | Accepted | 2026-10-19 |
 | [0048](adr/0048-repo-tidy.md) | Tidy the repo root, the settings seed and the leftovers | Accepted | 2026-10-19 |
+| [0052](adr/0052-spend-limit-credential-access.md) | Read the Claude Code login token to fetch the server spend limit | Accepted | 2026-10-20 |
