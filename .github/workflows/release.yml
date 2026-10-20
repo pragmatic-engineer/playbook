@@ -788,6 +788,9 @@ jobs:
           t=x86_64-unknown-linux-musl
           mkdir -p check && cd check
           gh release download "$TAG" --pattern SHA256SUMS
+          # The file decides what is checked, so it is checked first.
+          gh attestation verify SHA256SUMS --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
+            --signer-workflow "$GH_REPO/.github/workflows/release.yml" >/dev/null
           mapfile -t names < <(../scripts/package-linux.sh names "$VERSION" "$t")
           listed=0
           for f in "${names[@]}"; do

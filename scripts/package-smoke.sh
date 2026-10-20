@@ -13,8 +13,8 @@
 #      root and no host file changes),
 #   2. runs `playbook --version`, `pb --version` and `pbtop --version`, which
 #      must all report <version>,
-#   3. writes a file under ~/.config/playbook, upgrades the package in place
-#      and removes it, and checks that the file is still there.
+#   3. writes a file under ~/.config/playbook, reinstalls the same package over
+#      itself and removes it, and checks that the file is still there.
 #
 # The images are pinned by digest. The packages have no dependencies, so the
 # containers need no distro mirror, only the registry that holds the image.
@@ -37,7 +37,7 @@ dir="$(cd "$dir" && pwd)"
 [ -s "$dir/$rpm" ] || fail "$dir/$rpm is missing"
 
 # The script each container runs. $1 is the package, $2 the version, and the
-# install, upgrade and remove commands come from the environment.
+# install, reinstall and remove commands come from the environment.
 inner='
 set -eu
 pkg="/pkg/$1"; want="$2"

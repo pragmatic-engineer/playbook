@@ -84,7 +84,7 @@ sudo dnf install ./playbook-<version>.x86_64.rpm    # Fedora, RHEL (arm64: aarch
 playbook setup
 ```
 
-An upgrade installs the newer file the same way. The package owns no file under `/etc` or your home folder, so an upgrade or a removal leaves your config alone, and `playbook migrate` runs on first use. The package manager owns `/usr/bin/playbook`, so update with it and not with `playbook update`, which cannot write there without root. Each release installs, upgrades and removes the packages in Debian, Ubuntu and Fedora containers before and after it is published.
+An upgrade installs the newer file the same way. The package owns no file under `/etc` or your home folder, so an upgrade or a removal leaves your config alone, and `playbook migrate` runs on first use. The package manager owns `/usr/bin/playbook`, so update with it. Do not run `playbook update` on a package install, because it would replace a file the package manager owns. Each release installs, reinstalls and removes the packages in Debian, Ubuntu and Fedora containers before and after it is published.
 
 ### Optional: pbtop alone
 

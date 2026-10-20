@@ -35,7 +35,9 @@ done
 # The publish job downloads, counts and sums the assets by these patterns. A
 # renamed package must fail here and not as a partial release.
 wf=.github/workflows/release.yml
-grep -qF '"playbook-$VERSION.*.rpm" "playbook_${VERSION}_*.deb"' "$wf" || fail "$wf does not download the packages by their names"
+grep -qF 'for p in "playbook-$VERSION-*" "pbtop-$VERSION-*" "playbook-$VERSION.*.rpm" "playbook_${VERSION}_*.deb"; do' "$wf" \
+  || fail "$wf does not download the assets by these patterns"
+grep -qF '[ "$count" -ne 14 ]' "$wf" || fail "$wf does not expect 14 assets"
 grep -qF 'shasum -a 256 playbook-* playbook_* pbtop-*' "$wf" || fail "$wf does not put the .deb in SHA256SUMS"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

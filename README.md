@@ -61,7 +61,7 @@ A Homebrew install updates with `brew upgrade playbook`. On a brew-managed insta
 
 ### Debian, Ubuntu and Fedora
 
-Each release also has `.deb` and `.rpm` packages for x86_64 and arm64. Download one with `SHA256SUMS` from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest) and install it with `apt install ./playbook_<version>_amd64.deb` or `dnf install ./playbook-<version>.x86_64.rpm`. The [install guide](docs/guides/00-install.md#debian-ubuntu-and-fedora-packages) has the checks and the upgrade notes.
+Each release also has `.deb` and `.rpm` packages for x86_64 and arm64. Download one with `SHA256SUMS` from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest) and install it with `sudo apt install ./playbook_<version>_amd64.deb` or `sudo dnf install ./playbook-<version>.x86_64.rpm`. The [install guide](docs/guides/00-install.md#debian-ubuntu-and-fedora-packages) has the checks and the upgrade notes.
 
 ### Telemetry
 
