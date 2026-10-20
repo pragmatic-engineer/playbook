@@ -20,9 +20,7 @@ const SPAWNS: [&str; 2] = [
 
 /// Files the check skips, each with its reason. The binary refuses to heal
 /// the real home from a cargo test anyway.
-const EXEMPT: [&str; 2] = [
-    // The rm guard resolves `$HOME/...` paths against the real home.
-    "cli/tests/hooks_guards.rs",
+const EXEMPT: [&str; 1] = [
     // Copies the binary for shell scripts; each caller sets HOME.
     "cli/tests/support/shell_fixture.rs",
 ];
@@ -167,4 +165,74 @@ fn a_child_of_a_cargo_test_inherits_the_signal_the_net_reads() {
             .any(|l| l.starts_with("CARGO_MANIFEST_DIR=") || l.starts_with("NEXTEST_RUN_ID=")),
         "{env}"
     );
+}
+
+/// What reads the real home of the account from a test process.
+const HOME_READS: [&str; 3] = ["env::var(\"HOME\")", "env::home_dir()", "home_dir()"];
+
+/// The lines of `text` that read the process home, comments left out. For a
+/// unit test file only the part after `#[cfg(test)]` counts, and a file that
+/// runs its tests through `in_scratch_home` is allowed to read it.
+fn home_reads(text: &str, unit: bool) -> Vec<usize> {
+    let start = if unit {
+        text.find("#[cfg(test)]").unwrap_or(text.len())
+    } else {
+        0
+    };
+    if text[start..].contains("in_scratch_home(") {
+        return Vec::new();
+    }
+    let before = text[..start].lines().count();
+    text[start..]
+        .lines()
+        .enumerate()
+        .filter(|(_, l)| !l.trim_start().starts_with("//"))
+        .filter(|(_, l)| HOME_READS.iter().any(|r| l.contains(r)))
+        .map(|(i, _)| before + i)
+        .collect()
+}
+
+/// The hook test files that read the process home, with the lines.
+fn hook_tests_on_real_home(cli: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    rust_files(&cli.join("src/hooks"), &mut files);
+    let mut integration = Vec::new();
+    rust_files(&cli.join("tests"), &mut integration);
+    let hook_integration = integration.into_iter().filter(|f| {
+        let name = f.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        name.starts_with("hooks_") || name == "headless_hooks.rs"
+    });
+    let units = files.into_iter().map(|f| (f, true));
+    let all = units.chain(hook_integration.map(|f| (f, false)));
+    all.filter_map(|(f, unit)| {
+        let reads = home_reads(&fs::read_to_string(&f).ok()?, unit);
+        (!reads.is_empty()).then(|| format!("{}:{reads:?}", f.display()))
+    })
+    .collect()
+}
+
+#[test]
+fn no_hook_test_reads_the_real_home() {
+    let cli = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    let bad = hook_tests_on_real_home(cli);
+
+    assert!(
+        bad.is_empty(),
+        "run a hook test in a scratch home (testing::in_scratch_home) or start the binary with \
+         isolated::playbook(), and do not read the process HOME: {bad:?}"
+    );
+}
+
+#[test]
+fn the_real_home_check_catches_a_read_and_allows_the_helper() {
+    let unit = "fn f() { home_dir(); }\n#[cfg(test)]\nmod tests {\n    fn t() { let h = home_dir(); }\n}\n";
+    let scratch =
+        "#[cfg(test)]\nmod tests {\n    fn t() { if !in_scratch_home(\"a::t\") { return; } home_dir(); }\n}\n";
+    let integration =
+        "// std::env::var(\"HOME\") in a comment\nfn t() { std::env::var(\"HOME\"); }\n";
+
+    assert_eq!(home_reads(unit, true), vec![3], "only the test part counts");
+    assert_eq!(home_reads(scratch, true), Vec::<usize>::new());
+    assert_eq!(home_reads(integration, false), vec![1]);
 }
