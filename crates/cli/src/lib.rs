@@ -135,6 +135,10 @@ pub enum SkillsCommand {
         /// Print the report lines as a JSON array
         #[arg(long)]
         json: bool,
+        /// Refresh the agents already synced and store a summary for the
+        /// next session (started in the background)
+        #[arg(long, hide = true)]
+        refresh: bool,
     },
 }
 
