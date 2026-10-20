@@ -136,7 +136,7 @@ is left out. The release commit itself is left out. The same notes go into
 
 No check fails a release for a breaking change: the notes list the commits
 marked breaking first. Releases no longer carry `breaking-changes.json`
-(ADR 0048). A 0.34 binary, the last that read it, treats the missing asset
+(ADR 0047). A 0.34 binary, the last that read it, treats the missing asset
 as a release with no breaking changes.
 
 ## Credentials
