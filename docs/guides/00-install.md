@@ -214,6 +214,19 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 With the skills plugin alone, some commands call the `playbook` binary. They fall back to plain git, gh and file steps where they can. No hook runs, so the guards and status line are not active, and `/playbook:doctor` reports the binary and the hook entries as missing. Install the binary and run `playbook setup` to add them.
 
+## Use playbook's skills in Codex
+
+```bash
+playbook skills sync --dry-run   # list what would be written, change nothing
+playbook skills sync             # write it
+```
+
+The command copies the playbook skills and commands into `~/.agents/skills/playbook-<name>/`, the user skill folder Codex reads. Each command becomes a skill, so `/playbook:plan` is `$playbook-plan` in Codex. It needs Codex on the machine: a `~/.codex` folder or `codex` on your `PATH`.
+
+It never touches a folder it did not write, or one you edited. Those are left as they are and listed in the output. When the plugin updates, playbook adds, updates and removes its own folders to match, and only for an agent you already synced. A folder you deleted is not written again. To opt out, do not run the command. `playbook uninstall` removes the folders that `skills sync` wrote and you did not edit.
+
+Codex has no subagents and no `AskUserQuestion` tool, so a command step that needs one is done by the agent itself or asked in chat. A rendered skill over 8,000 bytes is written as a short stub that tells the agent to read `references/playbook-body.md`. Whether a running Codex follows that line has not been verified. See [Codex skills](../internals/15-codex-skills.md).
+
 ## Settings merge
 
 `playbook setup` merges the shipped template into your `settings.json` and never overwrites it. The template carries three things, each behind its own part: the `hooks` block, the `statusLine` and, only when you opt in, the `permissions` block. It ships no display options, notification toggles or `env` entries, because no hook or launcher reads them. Keys you customised stay as you set them. Keys an older template shipped (`cleanupPeriodDays`, `outputStyle`, `env` and the like) stay in your file too, and setup never removes them.
