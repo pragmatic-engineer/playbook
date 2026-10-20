@@ -2290,6 +2290,8 @@ pub enum HookName {
     MemoryCapture,
     RmWorkspaceGuard,
     BgAwaitGuard,
+    /// Retired: kept as a no-op for one release so old settings entries still run.
+    #[value(hide = true)]
     NoSlopGuard,
     CommitMessageSanitizer,
     PolicyGuard,
@@ -2432,7 +2434,6 @@ mod tests {
             "usage-warm",
             "rm-workspace-guard",
             "bg-await-guard",
-            "no-slop-guard",
             "precommit-check",
             "commit-message-sanitizer",
             "policy-guard",
@@ -2447,6 +2448,10 @@ mod tests {
         for name in names {
             assert!(help.contains(name), "hook --help is missing '{name}'");
         }
+        assert!(
+            !help.contains("no-slop-guard"),
+            "retired hook shows in help"
+        );
     }
 
     #[test]
