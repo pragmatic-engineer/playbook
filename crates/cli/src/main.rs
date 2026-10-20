@@ -5,15 +5,15 @@ use clap::{CommandFactory, Parser};
 use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::{
-    adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, disk, doc,
-    doctor, effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
+    adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, doc, doctor,
+    effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
     plan_cleanup, planning, pr, prose, review, sanitize, settings, statusline, storage, tools_map,
     trust, update, usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli,
-    Command, CommitCommand, ConfigCommand, DepsCommand, DiskCommand, DocCommand, DoctorCommand,
-    EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand,
-    ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ProseCommand,
-    ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology,
-    SessionsCommand, SettingsCommand, ToolsCommand, WorktreeCommand,
+    Command, CommitCommand, ConfigCommand, DepsCommand, DocCommand, DoctorCommand, EvalCommand,
+    GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand, ManifestCommand,
+    MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ProseCommand, ReviewCommand,
+    ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand,
+    SettingsCommand, ToolsCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -2069,7 +2069,6 @@ fn main() {
             }
             ReviewWorktreeCommand::Teardown { path } => worktree::review::teardown(&path),
         },
-        Command::Disk { sub } => run_disk(sub),
         Command::Worktree { sub } => {
             let home = common::home_dir();
             let slug = common::repo_slug();
@@ -2753,85 +2752,4 @@ fn effort_diff_shape(base: &str) -> Result<effort::auto::Shape, String> {
     }
     let text = String::from_utf8_lossy(&out.stdout);
     effort::auto::Shape::from_numstat(&text)
-}
-
-fn run_disk(sub: DiskCommand) {
-    let home = common::home_dir();
-    match sub {
-        DiskCommand::Status { json } => {
-            let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
-            let report = disk::status::report(&home, &disk::status::claude_home(&home), &cwd);
-            if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&disk::status::to_json(&report))
-                        .unwrap_or_default()
-                );
-            } else {
-                print!("{}", disk::status::render(&report));
-            }
-        }
-        DiskCommand::Reserve => {
-            let at = disk::ballast::file(&home);
-            match disk::ballast::reserve_for(&home, &disk::policy::load(&home)) {
-                Ok(disk::ballast::Reserved::Wrote(bytes)) => println!(
-                    "disk reserve: wrote {} of ballast at {}. `playbook disk release` deletes it",
-                    disk::size::gb(bytes),
-                    at.display()
-                ),
-                Ok(disk::ballast::Reserved::Existing(bytes)) => println!(
-                    "disk reserve: the ballast already exists ({}) at {}",
-                    disk::size::gb(bytes),
-                    at.display()
-                ),
-                Err(err) => {
-                    eprintln!("{err}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        DiskCommand::TargetDir => {
-            let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
-            let Some(worktree) = playbook_common::gitfacts::toplevel(&cwd) else {
-                eprintln!("disk target-dir: not inside a git worktree");
-                std::process::exit(1);
-            };
-            let Some(root) = disk::targets::worktrees_root(&worktree) else {
-                eprintln!("disk target-dir: cannot find the worktrees root of {}", worktree.display());
-                std::process::exit(1);
-            };
-            let Some(target) = disk::targets::target_for(&root, &worktree) else {
-                eprintln!("disk target-dir: {} has no folder name", worktree.display());
-                std::process::exit(1);
-            };
-            let max = disk::policy::load(&home).max_target_dirs;
-            let count = disk::targets::target_dirs(&root).len();
-            if let Some(warning) = disk::targets::too_many_warning(count, max) {
-                eprintln!("disk target-dir: {warning}");
-            }
-            println!("{}", target.display());
-        }
-        DiskCommand::Release => match disk::ballast::release(&home) {
-            Ok(Some(bytes)) => println!(
-                "disk release: deleted the ballast, {} given back. Run `playbook disk reserve` after a cleanup to put it back",
-                disk::size::gb(bytes)
-            ),
-            Ok(None) => println!("disk release: there is no ballast to delete"),
-            Err(err) => {
-                eprintln!("disk release: {err}");
-                std::process::exit(1);
-            }
-        },
-        DiskCommand::Clean { dry_run, auto } => {
-            let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
-            if auto && !disk::clean::auto_due(&home, &cwd) {
-                println!("disk clean: nothing to do, space is fine or disk.autoCleanup is off");
-                return;
-            }
-            let repo_root = playbook_common::gitfacts::toplevel(&cwd);
-            for line in disk::clean::run(&home, repo_root.as_deref(), dry_run, auto) {
-                println!("{line}");
-            }
-        }
-    }
 }
