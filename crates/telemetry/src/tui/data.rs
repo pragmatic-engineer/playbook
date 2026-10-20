@@ -198,7 +198,8 @@ impl LimitsView {
             LimitPeriod::Monthly.containing(now, week),
             crate::tz::current(),
             now,
-        );
+        )
+        .map(|b| b.with_rate_limits(&sources.rate_limited));
         LimitsView {
             limits,
             burnups,
@@ -436,7 +437,7 @@ pub fn load_limits(
 ) -> Result<LimitsView, String> {
     let week = crate::entry::configured_week_start();
     let events = db::load_usage_events_since(conn, limits_source::events_since(now, week))?;
-    let sources = crate::run::limit_sources(paths);
+    let sources = crate::run::limit_sources(paths, conn, now);
     Ok(LimitsView::build(&sources, &events, now, week, range))
 }
 

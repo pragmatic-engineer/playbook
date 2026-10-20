@@ -334,6 +334,9 @@ pub struct Sources {
     pub snapshot: Option<Snapshot>,
     pub budgets: Vec<(LimitPeriod, f64)>,
     pub account: Account,
+    /// When Claude Code logged an HTTP 429, in UTC seconds, from the usage
+    /// store. Read by the caller that holds the connection; empty until then.
+    pub rate_limited: Vec<i64>,
 }
 
 impl Sources {
@@ -359,7 +362,22 @@ impl Sources {
             } else {
                 super::plan::read(claude_json)
             },
+            rate_limited: Vec::new(),
         }
+    }
+
+    /// The sources with the times of the HTTP 429 replies in `[since, now]`.
+    /// A read failure leaves them empty: the marker is a hint, never an error.
+    pub fn with_rate_limited(
+        mut self,
+        conn: &rusqlite::Connection,
+        since: i64,
+        now: i64,
+    ) -> Sources {
+        self.rate_limited =
+            super::telemetry_db::rate_limited_at(conn, since, now.saturating_add(1))
+                .unwrap_or_default();
+        self
     }
 
     /// The plan limits were read over six hours ago.
@@ -676,6 +694,8 @@ pub enum Reason {
     CapUnknown,
     /// The last reading held windows, and they have all reset.
     WindowsReset,
+    /// Claude Code was rate limited (HTTP 429) and no limit is reported.
+    RateLimitedSeen,
 }
 
 impl Reason {
@@ -685,6 +705,7 @@ impl Reason {
             Reason::Stale => "stale",
             Reason::CapUnknown => "cap-unknown",
             Reason::WindowsReset => "windows-reset",
+            Reason::RateLimitedSeen => "rate-limited-seen",
         }
     }
 
@@ -700,6 +721,9 @@ impl Reason {
             Reason::CapUnknown => "cap not reported by Claude Code on this login",
             Reason::WindowsReset => {
                 "the windows of the last reading have reset: run a session with the playbook statusline for a new one"
+            }
+            Reason::RateLimitedSeen => {
+                "Claude Code was rate limited, yet it reports no limit: run a session with the playbook statusline"
             }
         }
     }
@@ -717,7 +741,9 @@ pub fn reason(s: &Sources, now: i64) -> Option<Reason> {
     let held = s.snapshot.as_ref().is_some_and(|sn| {
         sn.five_hour.is_some() || sn.seven_day.is_some() || sn.spend_limit.is_some()
     });
-    Some(if held {
+    Some(if !s.rate_limited.is_empty() {
+        Reason::RateLimitedSeen
+    } else if held {
         Reason::WindowsReset
     } else if s.account.cache.as_ref().is_some_and(|c| !c.is_fresh(now)) {
         Reason::Stale
@@ -799,6 +825,12 @@ pub fn limit_lines(s: &Sources, limits: &[Limit], events: &[UsageEvent], now: i6
                 c.iter().map(crossing_text).collect::<Vec<_>>().join(", ")
             ));
         }
+    }
+    if let Some(at) = s.rate_limited.iter().max() {
+        out.push(format!(
+            "Claude Code was rate limited at {} (HTTP 429)",
+            &stamp(*at)[..16]
+        ));
     }
     out.extend(reason(s, now).map(|r| r.line().to_string()));
     out
@@ -1295,6 +1327,7 @@ mod tests {
             snapshot: Some(gateway_snapshot()),
             budgets: vec![(LimitPeriod::Monthly, 100.0)],
             account: cache(600, spend(500.0, Some(120.0)), None),
+            rate_limited: Vec::new(),
         };
 
         let l = all_limits(&s, &[], NOW, WeekStart::Monday);
@@ -1823,7 +1856,7 @@ mod tests {
             fetched_at: NOW - 7 * HOUR,
             ..crate::plan::UsageCache::default()
         };
-        let cases: [(Sources, Option<Reason>, &str); 6] = [
+        let cases: [(Sources, Option<Reason>, &str); 7] = [
             (
                 Sources { account: max_plan(None), ..Sources::default() },
                 Some(Reason::NoReading),
@@ -1843,6 +1876,11 @@ mod tests {
                 Sources { snapshot: Some(window_snapshot(0)), ..Sources::default() },
                 Some(Reason::WindowsReset),
                 "the windows of the last reading have reset: run a session with the playbook statusline for a new one",
+            ),
+            (
+                Sources { rate_limited: vec![NOW - 60], ..Sources::default() },
+                Some(Reason::RateLimitedSeen),
+                "Claude Code was rate limited, yet it reports no limit: run a session with the playbook statusline",
             ),
             (
                 Sources { snapshot: Some(window_snapshot(3600)), ..Sources::default() },
@@ -1878,12 +1916,40 @@ mod tests {
             Reason::Stale,
             Reason::CapUnknown,
             Reason::WindowsReset,
+            Reason::RateLimitedSeen,
         ]
         .map(Reason::key);
         assert_eq!(
             keys,
-            ["no-reading", "stale", "cap-unknown", "windows-reset"]
+            [
+                "no-reading",
+                "stale",
+                "cap-unknown",
+                "windows-reset",
+                "rate-limited-seen"
+            ]
         );
+    }
+
+    #[test]
+    fn a_rate_limit_time_gets_its_own_line_even_when_a_limit_is_known() {
+        let s = Sources {
+            snapshot: Some(window_snapshot(3600)),
+            rate_limited: vec![NOW - 600, NOW - 60],
+            ..Sources::default()
+        };
+
+        let lines = limit_lines(&s, &all_limits(&s, &[], NOW, WeekStart::Monday), &[], NOW);
+
+        let want = format!(
+            "Claude Code was rate limited at {} (HTTP 429)",
+            &stamp(NOW - 60)[..16]
+        );
+        assert!(lines.contains(&want), "{lines:?}");
+        assert_eq!(reason(&s, NOW), None);
+        assert!(limit_lines(&Sources::default(), &[], &[], NOW)
+            .iter()
+            .all(|l| !l.contains("rate limited at")));
     }
 
     #[test]
