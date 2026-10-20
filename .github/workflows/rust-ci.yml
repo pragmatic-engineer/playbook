@@ -240,13 +240,17 @@ jobs:
 
       - name: cargo clippy
         if: env.LANE == 'true'
-        run: cargo clippy ${{ needs.changes.outputs.pkgs || '--workspace' }} --all-targets -- -D warnings
+        env:
+          PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
+        run: cargo clippy $PKGS --all-targets -- -D warnings
 
       # Non-test code must not panic on bad input: unwrap and expect are errors
       # there. Tests may use them, so this covers the library and the binary only.
       - name: cargo clippy (no unwrap or expect outside tests)
         if: env.LANE == 'true'
-        run: cargo clippy ${{ needs.changes.outputs.pkgs || '--workspace' }} --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
+        env:
+          PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
+        run: cargo clippy $PKGS --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
 
       # nextest schedules every test across all test binaries, where
       # `cargo test` runs the binaries one after another. Pinned like the
@@ -260,7 +264,9 @@ jobs:
 
       - name: cargo nextest run
         if: env.LANE == 'true'
-        run: cargo nextest run ${{ needs.changes.outputs.pkgs || '--workspace' }} --no-tests=pass --config-file .github/nextest.toml --profile ci
+        env:
+          PKGS: ${{ needs.changes.outputs.pkgs || '--workspace' }}
+        run: cargo nextest run $PKGS --no-tests=pass --config-file .github/nextest.toml --profile ci
 
       # nextest does not run doctests, and `cargo test --doc` builds every
       # selected crate again to look for them. This runs it only for crates
@@ -410,6 +416,8 @@ jobs:
             static.rust-lang.org:443
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Saved only by a push to main, so a pull request does not store a
       # copy only its own runs can read. v2: built without debug info.
@@ -464,6 +472,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Saved only by a push to main, so a pull request does not store a
       # copy (about 350 MB) only its own runs can read. v2: built without
@@ -557,6 +567,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The built binary, keyed on what builds it: the crates, the Cargo
       # files, the toolchain, the files the binary embeds with include_str!
