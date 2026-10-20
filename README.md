@@ -59,6 +59,10 @@ The same formulas work on Linux (x86_64 and arm64, Homebrew on Linux), where the
 
 A Homebrew install updates with `brew upgrade playbook`. On a brew-managed install, `playbook update` stops and tells you to run `brew upgrade playbook`.
 
+### Debian, Ubuntu and Fedora
+
+Each release also has `.deb` and `.rpm` packages for x86_64 and arm64. Download one with `SHA256SUMS` from the [latest release](https://github.com/pragmatic-engineer/playbook/releases/latest) and install it with `sudo apt install ./playbook_<version>_amd64.deb` or `sudo dnf install ./playbook-<version>.x86_64.rpm`. The [install guide](docs/guides/00-install.md#debian-ubuntu-and-fedora-packages) has the checks and the upgrade notes.
+
 ### Telemetry
 
 `playbook setup` asks whether to send Claude Code telemetry to a collector on your own machine, and the answer defaults to yes. It writes eight OpenTelemetry variables into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage`. Prompt text and tool content are never sent. Nothing leaves your machine: the collector listens on 127.0.0.1 only, and playbook's `session-init` hook (part of the hooks you install with setup) starts it when a session begins. Without those hooks, start it with `playbook usage collect`, or let `playbook cc` do it.

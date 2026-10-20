@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+#
+# nfpm config for the .deb and .rpm packages of a release. It is read by
+# scripts/package-linux.sh, which sets NFPM_ARCH (amd64 or arm64), NFPM_VERSION
+# and BIN_DIR (the folder with the static musl `playbook` and `pbtop`).
+#
+# One package holds both binaries and the `pb` link, because every binary is
+# static and the package has no dependencies. It owns no file under /etc or the
+# home folder and has no install or remove script, so an upgrade or a removal
+# never touches user config. `playbook migrate` runs on first use.
+name: playbook
+arch: ${NFPM_ARCH}
+platform: linux
+version: ${NFPM_VERSION}
+section: devel
+priority: optional
+maintainer: pragmatic-engineer <https://github.com/pragmatic-engineer/playbook>
+vendor: pragmatic-engineer
+homepage: https://github.com/pragmatic-engineer/playbook
+license: Apache-2.0
+description: |
+  Claude Code toolkit: hooks, guards, launcher, status line, memory and usage.
+  Static binaries for playbook, its pb alias and pbtop. Run playbook setup
+  after the install.
+contents:
+  - src: ${BIN_DIR}/playbook
+    dst: /usr/bin/playbook
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${BIN_DIR}/pbtop
+    dst: /usr/bin/pbtop
+    expand: true
+    file_info:
+      mode: 0755
+  - src: playbook
+    dst: /usr/bin/pb
+    type: symlink
+  - src: LICENSE
+    dst: /usr/share/doc/playbook/copyright
+    file_info:
+      mode: 0644

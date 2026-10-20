@@ -9,8 +9,8 @@ marketplace, as the section on the release workflow describes. The tap also
 checks every 30 minutes for a newer release and bumps a formula itself when the
 `downstream` job has not done it within an hour.
 
-A release attaches ten assets (two per target), `release-notes.json` and
-`SHA256SUMS`, which lists the other eleven. It
+A release attaches ten assets (two per target), four Linux packages,
+`release-notes.json` and `SHA256SUMS`, which lists the other fifteen. It
 builds no plugin archive. The plugin in `plugins/playbook` ships with the same `vX.Y.Z`, as
 described next.
 
@@ -203,5 +203,23 @@ no release of its own. `playbook-telemetry` uses the workspace version, and its
 | --- | --- |
 | playbook | `playbook-<version>-<target>`, the raw binary |
 | pbtop | `pbtop-<version>-<target>.tar.gz` holding `pbtop` alone |
+| Debian, Ubuntu | `playbook_<version>_amd64.deb` and `playbook_<version>_arm64.deb` |
+| Fedora, RHEL | `playbook-<version>.x86_64.rpm` and `playbook-<version>.aarch64.rpm` |
+
+Each package holds `playbook`, the `pb` link and `pbtop` in `/usr/bin`, and the
+license. It has no dependencies, no config file and no install or remove script,
+so an upgrade or a removal never touches user config. `scripts/nfpm.yaml`
+describes it and `scripts/package-linux.sh` builds it with a pinned nfpm
+(version and SHA-256 are in the script; bump both together). The two Linux
+build legs build the packages from their own static binaries, install them in
+Debian, Ubuntu and Fedora containers with `scripts/package-smoke.sh`, and attest
+them with the other assets, so a bad package stops the release before the
+draft is published. The `publish` job puts them in `SHA256SUMS` and expects 14
+assets. After `verify`, the `verify-packages` job downloads the x86_64 pair
+from the published release, checks the sums and the attestation, and runs the
+same container test. It blocks no other channel, a red result fails the run, and
+a run with the same version starts it again. A dry run builds and tests the
+packages and publishes nothing. The container images are pinned by digest in
+`scripts/package-smoke.sh`.
 
 Every release also carries `release-notes.json` and `SHA256SUMS`. The Homebrew tap maps each formula to its asset.
