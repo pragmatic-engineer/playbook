@@ -233,6 +233,10 @@ The Budget panel ignores the project filter: a limit belongs to the account, not
 
 The Projection panel says when each limit is reached if you keep going at your current pace, in the time zone shown in the panel title (UTC or local). Each limit gets one line in plain words. A limit in dollars has two paces on that line. The first is the last 24 hours: it follows what you are doing now. When the period started less than 24 hours ago, it uses the spend of the period over the age of the period, so spend from before the period never counts (under one hour of data it says "no pace yet"). The second is the period average since the period began, which is steadier and shows the long view. A limit that is a percentage of a window (the 5 hour and weekly windows of a plan) has the window average only, because the window has no per day cost. Each pace ends with "hit" and a time, "won't hit before it resets", "no hit" (nothing was used in that span) or "limit reached". With no limit known, the panel says how to set one.
 
+### The burn-up panel
+
+The Burn-up panel is on the Charts tab. It plots the spend of the period so far against a limit that Claude Code reported, with a dotted projection at the current pace, a cutoff line for the limit and lines for 50, 80 and 100 percent, each marked where it is crossed or when it will be. The chart uses the most used limit that has a burn-up. A monthly dollar limit is drawn from the daily cost of this machine, and a window in percent as a straight line from the start of the window to the figure Claude Code reported. With no limit known the panel says so and charts the spend alone. Nothing here is set by hand: the limit and the used figure come from what Claude Code reports. The math is in `crates/telemetry/src/burnup.rs` and the drawing in `crates/telemetry/src/tui/burnup.rs`.
+
 ### What is not automatic
 
 - Enterprise and API organization budgets, as above.

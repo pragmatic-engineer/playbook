@@ -894,6 +894,9 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+    outputs:
+      # true only when the tap and the marketplace releases are published.
+      moved: ${{ steps.move.outputs.moved }}
     env:
       TAP: pragmatic-engineer/homebrew-tap
       MARKETPLACE: pragmatic-engineer/marketplace
@@ -1026,6 +1029,7 @@ jobs:
           GH_TOKEN="$MARKETPLACE_TOKEN" scripts/release-gh.sh find "$MARKETPLACE" "release/$TAG"
 
       - name: Open the pull requests and wait for the releases
+        id: move
         if: steps.bot.outputs.configured == 'true' && needs.plan.outputs.dry_run != 'true'
         env:
           TAP_TOKEN: ${{ steps.tap-app.outputs.token }}
@@ -1143,3 +1147,67 @@ jobs:
             report "The playbook release $TAG is published. Only the downstream step failed."
             exit 1
           fi
+          echo "moved=true" >> "$GITHUB_OUTPUT"
+
+  # Installs the release from the tap on Linux, the way a user does, once the
+  # downstream job has published the tap release. It is a leaf job: it blocks
+  # no other channel, a red result fails the run, and a run with the same
+  # version starts it again. The formulas carry the Linux musl builds, so a
+  # wrong URL or checksum shows here and not in a user report. A dry run
+  # publishes nothing to install, so it is skipped.
+  verify-homebrew-linux:
+    needs: [plan, downstream]
+    if: >-
+      ${{ !cancelled()
+      && github.event_name == 'workflow_dispatch'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && needs.plan.outputs.dry_run != 'true'
+      && needs.downstream.result == 'success'
+      && needs.downstream.outputs.moved == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      # The list is written from reasoning and not from a run (the tap clone
+      # and the release asset downloads), like the other jobs. When the first
+      # release blocks a host, add that host here.
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            formulae.brew.sh:443
+            github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+
+      - name: Install playbook and pbtop with Homebrew
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          HOMEBREW_NO_ANALYTICS: "1"
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
+        run: |
+          set -euo pipefail
+          # No Homebrew on the runner image is a failure, not a skip.
+          brew=/home/linuxbrew/.linuxbrew/bin/brew
+          [ -x "$brew" ] || { echo "::error::Homebrew is not on this runner image." >&2; exit 1; }
+          eval "$("$brew" shellenv)"
+          # A fresh tap clone, so the formula is the one the tap has now.
+          brew tap pragmatic-engineer/tap
+          brew install pragmatic-engineer/tap/playbook
+          brew install pragmatic-engineer/tap/pbtop
+          # Both must come from the tap and say the release version.
+          scratch="$(mktemp -d)"
+          for b in playbook pbtop; do
+            out="$(HOME="$scratch" "$(brew --prefix)/bin/$b" --version)"
+            [ "${out##* }" = "$VERSION" ] \
+              || { echo "::error::$b --version says '$out', not $VERSION. The tap may not carry the release." >&2; exit 1; }
+            echo "$b: $out"
+          done
+          # In an empty HOME the check has nothing to find and still must run.
+          report="$(HOME="$scratch" "$(brew --prefix)/bin/playbook" doctor check)"
+          [ -n "$report" ] || { echo "::error::playbook doctor check printed nothing." >&2; exit 1; }
+          echo "$report"
+          echo "Homebrew on Linux installed playbook and pbtop $VERSION." >> "$GITHUB_STEP_SUMMARY"

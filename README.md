@@ -55,6 +55,8 @@ brew install pragmatic-engineer/tap/playbook
 playbook setup
 ```
 
+The same formulas work on Linux (x86_64 and arm64, Homebrew on Linux), where they install the static musl build. Each release checks the x86_64 install on an Ubuntu runner after the tap is updated.
+
 A Homebrew install updates with `brew upgrade playbook`. On a brew-managed install, `playbook update` stops and tells you to run `brew upgrade playbook`.
 
 ### Debian, Ubuntu and Fedora
