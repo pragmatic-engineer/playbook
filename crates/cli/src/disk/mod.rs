@@ -4,11 +4,8 @@
 //! The disk guard (ADR 0047): reads free space, compares it with the
 //! `disk.*` thresholds, and keeps the disk from filling while agents build.
 
-pub mod backups;
-pub mod classify;
 pub mod policy;
 pub mod probe;
 pub mod size;
-pub mod targets;
 
 pub use policy::{Level, Policy};
