@@ -71,6 +71,7 @@ type: project
 links:
   depends_on: session-model
   relates_to: rate-limiting
+aliases: [auth, token flow]
 anchors:
   - src/auth/
 ---
@@ -81,6 +82,8 @@ Tokens are issued by the `/auth/token` endpoint and validated via middleware.
 
 **How to apply:** Read `src/auth/` before modifying any route that requires authentication.
 ```
+
+The optional `aliases:` field lists other names for a fact, such as `aliases: [auth, token flow]`. A prompt that uses one of them as a whole word or phrase surfaces the fact, even when the prompt shares no word with the fact name.
 
 ### Typed edges
 

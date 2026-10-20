@@ -14,12 +14,10 @@ pub mod auto_model_detect;
 pub mod bg_await_guard;
 pub mod commit_message_sanitizer;
 pub mod context_hygiene;
-pub mod disk_guard;
 pub mod doc_read_hint;
 pub mod memory_anchors;
 pub mod memory_capture;
 pub mod memory_signals;
-pub mod no_slop_guard;
 pub mod policy_guard;
 pub mod post_edit_track;
 pub mod precommit_check;
@@ -56,7 +54,8 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::MemoryCapture => memory_capture::run(payload),
         HookName::RmWorkspaceGuard => rm_root_guard::run(payload),
         HookName::BgAwaitGuard => bg_await_guard::run(payload),
-        HookName::NoSlopGuard => no_slop_guard::run(payload),
+        // Retired: allow, so an old settings entry stays quiet.
+        HookName::NoSlopGuard => {}
         HookName::CommitMessageSanitizer => commit_message_sanitizer::run(payload),
         HookName::PolicyGuard => policy_guard::run(payload),
         HookName::PrecommitCheck => precommit_check::run(payload),
@@ -67,9 +66,9 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::ContextHygiene => context_hygiene::run(payload),
         HookName::DocReadHint => doc_read_hint::run(payload),
         HookName::UsageWarm => usage_warm::run(payload),
-        HookName::DiskGuard => disk_guard::run(payload),
-        // Retired. Old plugin caches still call it; succeed without output.
-        HookName::MigrationCheck => {}
+        // Retired. Old plugin caches and settings.json entries still call
+        // these; succeed without output.
+        HookName::MigrationCheck | HookName::DiskGuard => {}
     }
 }
 

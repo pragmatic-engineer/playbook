@@ -39,9 +39,29 @@ These settings are per shell or per command, so nothing changes for other contri
 - **Drop debug info.** `export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` makes builds faster and the target folder smaller. A panic message keeps its file and line, but backtraces and debuggers show only function names. Unset both when you need a debugger.
 - **Keep incremental builds on locally.** CI sets `CARGO_INCREMENTAL=0` because each run builds once. On your machine, incremental builds make the edit and test loop faster.
 - **Linker.** The rustup toolchain for x86_64 Linux already links with `rust-lld`. In CI, mold was slower: 44 s against 37 s to rebuild the test binaries. On macOS, `ld64.lld` from `brew install lld` saved 2 s per rebuild in one run: `RUSTFLAGS="-C link-arg=-fuse-ld=$(brew --prefix lld)/bin/ld64.lld"`. Cargo rebuilds everything whenever `RUSTFLAGS` changes, so set it the same way in every shell and editor, or in your own `~/.cargo/config.toml`.
-- **Disk.** One `CARGO_TARGET_DIR` per worktree keeps parallel builds from blocking each other, and each one grows to 1 GB or more. Run `cargo clean` in a worktree you are done with.
+- **Disk.** One `CARGO_TARGET_DIR` per worktree keeps parallel builds from blocking each other, and each one grows to 1 GB or more. See [Keeping target folders small](#keeping-target-folders-small).
 
 The repository has no shared `.cargo/config.toml` build settings for speed, because a debugger or a missing linker would break them for some contributors.
+
+### Keeping target folders small
+
+Many worktrees building at once fill the disk: on 2026-10-19 sixteen worktrees held 1.5 to 6 GB of `target/` each, about 45 GB, and a full disk corrupted `target/debug/incremental`. `scripts/dev-disk.sh` is a development helper for contributors and their agents. It is not part of the `playbook` binary or the plugin, and no release ships it.
+
+- **Lean build.** Run `eval "$(just dev-env)"` in the same shell call as your cargo command. It sets `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_DEBUG=0`, `CARGO_PROFILE_TEST_DEBUG=0` and a private `CARGO_TARGET_DIR` next to your worktree. It also warns when free space is below `DEV_DISK_WARN_FREE_GB` (default 15). Your normal builds are unchanged unless you run it. It turns incremental builds off on purpose, to save disk, so keep them on in the worktree you edit in all day.
+- **Clean up.** `just dev-clean --dry-run` lists, and `just dev-clean` removes, the `target/` folder and the private `cargo-*` folder of every other linked worktree of this repo (not the main one, not the one you run it in) that is a cargo target folder, unchanged for `DEV_DISK_IDLE_MINUTES` (default 30), with no build holding its lock and no running process naming it. The main worktree is never touched.
+- **Agents.** Tell an agent to run the `dev-env` line before each cargo command, and run `just dev-clean` yourself when disk is low. The plugin's own commands do not call the script.
+
+Measured with `cargo test --workspace --no-run` from a clean target folder, on a loaded machine, so times are rough:
+
+| Setting | Target folder | Time |
+| --- | --- | --- |
+| cargo defaults | 3.0 GB | 61 s |
+| `CARGO_INCREMENTAL=0` | 1.9 GB | 68 s |
+| and debug info `line-tables-only` | 1.6 GB | 54 s |
+| and debug info `0` (what `dev-env` sets) | 1.1 GB | not comparable (one run hit machine contention) |
+| debug info `0`, incremental on | 2.1 GB | 65 s |
+
+A shared `CARGO_TARGET_DIR` makes parallel builds wait on cargo's build lock. `sccache` shares compiled dependencies but does not shrink each target folder, skips incremental builds, and is an extra install; if you have it, `RUSTC_WRAPPER=sccache` works alongside the settings above.
 
 ### Releases
 
