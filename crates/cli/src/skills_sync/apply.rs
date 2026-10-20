@@ -6,7 +6,7 @@
 //! playbook wrote, as a hash per file, so a folder is replaced only while it
 //! still matches that record. See `docs/internals/15-codex-skills.md`.
 
-use super::Agent;
+use super::{record_prefix, Agent, REFRESH_KEY};
 use crate::common::atomic::{acquire_dir_lock_aged, LONG_LOCK_STALE_AGE};
 use crate::init::migrate::content_hash;
 use std::collections::BTreeMap;
@@ -24,12 +24,12 @@ const TMP_PREFIX: &str = ".playbook-tmp-";
 const OLD_PREFIX: &str = ".playbook-old-";
 /// A run takes seconds, so a leftover this old belongs to a dead run.
 const LEFTOVER_MAX_AGE: Duration = Duration::from_secs(600);
-/// The refresh claim lives beside the folder records and is not one.
-const REFRESH_KEY: &str = "refresh";
-const RECORD_PREFIX: &str = "skills-sync/";
 
 const SKIP_NOT_OURS: &str = "not written by playbook";
 const SKIP_EDITED: &str = "edited since the last sync";
+/// The summary of a run that changed nothing.
+pub const NOTHING_TO_CHANGE: &str = "nothing to change";
+const SKIP_REMOVED: &str = "removed since the last sync";
 const SKIP_BUSY: &str = "another sync is running";
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
@@ -133,7 +133,7 @@ impl Report {
         .map(|(n, label)| format!("{n} {label}"))
         .collect();
         let summary = if parts.is_empty() {
-            "nothing to change".to_string()
+            NOTHING_TO_CHANGE.to_string()
         } else {
             parts.join(", ")
         };
@@ -263,6 +263,10 @@ struct Run<'a> {
     version: &'a str,
     dry_run: bool,
     faults: &'a Faults,
+    /// False for a background refresh, which only brings synced folders up to
+    /// date: it adds nothing back that was removed, and nothing at all for an
+    /// agent with no folder records.
+    first_install: bool,
 }
 
 /// Syncs `folders` into `target_root`, keeping ownership records under
@@ -284,8 +288,42 @@ pub fn apply(
         version: plugin_version,
         dry_run,
         faults,
+        first_install: true,
     };
+    execute(&run, folders)
+}
+
+/// [`apply`] for a background refresh: it brings the folders playbook already
+/// wrote up to date, adds the skills the plugin gained, and never writes a
+/// folder the user removed or anything for an agent that has no records.
+pub fn apply_refresh(
+    root: &Path,
+    agent: Agent,
+    target_root: &Path,
+    plugin_version: &str,
+    folders: &[RenderedFolder],
+    dry_run: bool,
+) -> Report {
+    let run = Run {
+        root,
+        agent,
+        target_root,
+        version: plugin_version,
+        dry_run,
+        faults: &Faults::default(),
+        first_install: false,
+    };
+    execute(&run, folders)
+}
+
+fn execute(run: &Run<'_>, folders: &[RenderedFolder]) -> Report {
+    let (target_root, dry_run) = (run.target_root, run.dry_run);
     let mut report = Report::default();
+    // A refresh never creates the folder: without it the user removed the
+    // synced skills, and there is nothing to bring up to date.
+    if !run.first_install && !target_root.is_dir() {
+        return report.finish(dry_run);
+    }
     if dry_run {
         run.sync_all(folders, &mut report);
         return report.finish(true);
@@ -312,9 +350,96 @@ pub fn apply(
     report.finish(false)
 }
 
+/// What `playbook uninstall` did to the synced folders: report lines in the
+/// uninstall verbs, and the folders it could not handle.
+#[derive(Debug, Default)]
+pub struct Removed {
+    pub lines: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+/// Removes every synced folder whose files still match its record, then its
+/// record. An edited folder stays, and so does any record that still has a
+/// folder. A user's own folder has no record, so it is never visited. Holds
+/// the sync lock, so it never removes folders under a running sync.
+pub fn remove_synced(root: &Path, target_root: &Path, dry_run: bool) -> Removed {
+    // Without the folder there is nothing to race with, and no place for the lock.
+    if dry_run || !target_root.is_dir() {
+        return remove_all(root, target_root, dry_run);
+    }
+    let lock = target_root.join(LOCK_NAME);
+    let acquired = acquire_dir_lock_aged(&lock, 0, Duration::ZERO, LONG_LOCK_STALE_AGE);
+    if !acquired {
+        return Removed {
+            lines: vec![format!("skipped, {SKIP_BUSY}")],
+            errors: Vec::new(),
+        };
+    }
+    let out = remove_all(root, target_root, dry_run);
+    let _ = fs::remove_dir(&lock);
+    out
+}
+
+fn remove_all(root: &Path, target_root: &Path, dry_run: bool) -> Removed {
+    let mut out = Removed::default();
+    for agent in super::ALL_AGENTS {
+        let run = Run {
+            root,
+            agent,
+            target_root,
+            version: "",
+            dry_run,
+            faults: &Faults::default(),
+            first_install: true,
+        };
+        let rows = match crate::state::list_read_only(root, &run.prefix()) {
+            Ok(rows) => rows,
+            Err(e) => {
+                out.errors.push(format!(
+                    "synced skills left in place, cannot read the records: {e}"
+                ));
+                continue;
+            }
+        };
+        let mut kept = 0;
+        for (key, value) in rows {
+            let Some(name) = key.strip_prefix(&run.prefix()) else {
+                continue;
+            };
+            let Some(record) = Record::decode(&value)
+                .filter(|_| name != REFRESH_KEY && super::plan::is_folder_name(name))
+            else {
+                continue;
+            };
+            let path = target_root.join(name).display().to_string();
+            match run.remove_dropped(name, &record) {
+                Ok(Some(Change::Skipped(reason))) => {
+                    kept += 1;
+                    out.lines
+                        .push(format!("kept {path}, left in place, {reason}"));
+                }
+                Ok(Some(change)) => out.lines.push(format!("{} {path}", verb(&change, dry_run))),
+                Ok(None) => {}
+                Err(why) => {
+                    kept += 1;
+                    out.errors.push(format!("could not remove {path}: {why}"));
+                }
+            }
+        }
+        // The claim only means something while the agent has synced folders.
+        if !dry_run && kept == 0 {
+            if let Err(e) = crate::state::delete(root, &super::refresh_key(agent)) {
+                out.errors
+                    .push(format!("could not delete the refresh claim: {e}"));
+            }
+        }
+    }
+    out
+}
+
 impl Run<'_> {
     fn prefix(&self) -> String {
-        format!("{RECORD_PREFIX}{}/", self.agent.key())
+        record_prefix(self.agent)
     }
 
     fn key(&self, name: &str) -> String {
@@ -338,6 +463,11 @@ impl Run<'_> {
                 Some((name, Record::decode(&value)?))
             })
             .collect();
+        // Read under the lock: an uninstall that ran since the caller looked
+        // left no records, and a refresh must not install over it.
+        if !self.first_install && records.is_empty() {
+            return;
+        }
         for folder in folders {
             match self.sync_folder(folder, records.get(&folder.name)) {
                 Ok(Some(change)) => report.record(&folder.name, &change, self.dry_run),
@@ -371,6 +501,9 @@ impl Run<'_> {
             Ok(_) => return Ok(Some(Change::Skipped(SKIP_NOT_OURS))),
         };
         let Some(found) = found else {
+            if record.is_some() && !self.first_install {
+                return Ok(Some(Change::Skipped(SKIP_REMOVED)));
+            }
             self.replace(folder, &Hashes::new(), &new, false)?;
             return Ok(Some(Change::Added));
         };
@@ -797,6 +930,94 @@ mod tests {
         assert_eq!(skill_md(&s, NAME), "one");
     }
 
+    fn refresh(s: &Setup, v: &str, folders: &[RenderedFolder]) -> Report {
+        apply_refresh(&s.data, Agent::Codex, &s.target, v, folders, false)
+    }
+
+    #[test]
+    fn a_refresh_updates_synced_folders_and_adds_a_new_skill() {
+        // Arrange
+        let s = setup("refresh-update");
+        sync(&s, V1, &[folder(NAME, "one")]);
+
+        // Act
+        let report = refresh(&s, V2, &[folder(NAME, "two"), folder("playbook-new", "n")]);
+
+        // Assert
+        assert_eq!(
+            report.lines,
+            vec![
+                "updated playbook-fix",
+                "added playbook-new",
+                "1 added, 1 updated"
+            ]
+        );
+        assert_eq!(skill_md(&s, NAME), "two");
+    }
+
+    #[test]
+    fn a_refresh_does_not_bring_back_a_folder_the_user_removed() {
+        // Arrange
+        let s = setup("refresh-removed");
+        sync(
+            &s,
+            V1,
+            &[folder(NAME, "one"), folder("playbook-other", "x")],
+        );
+        fs::remove_dir_all(s.target.join(NAME)).unwrap();
+
+        // Act
+        let report = refresh(
+            &s,
+            V2,
+            &[folder(NAME, "two"), folder("playbook-other", "y")],
+        );
+
+        // Assert
+        assert!(report
+            .lines
+            .contains(&"skipped playbook-fix, removed since the last sync".to_string()));
+        assert!(!s.target.join(NAME).exists());
+        assert_eq!(skill_md(&s, "playbook-other"), "y");
+    }
+
+    #[test]
+    fn a_refresh_writes_nothing_for_an_agent_with_no_records_or_no_folder() {
+        // Arrange
+        let s = setup("refresh-none");
+        fs::create_dir_all(&s.target).unwrap();
+
+        // Act
+        let no_records = refresh(&s, V2, &[folder(NAME, "two")]);
+        fs::remove_dir_all(&s.target).unwrap();
+        let no_folder = refresh(&s, V2, &[folder(NAME, "two")]);
+
+        // Assert
+        assert!(!s.target.join(NAME).exists());
+        assert!(!s.target.exists());
+        assert!(no_records.is_clean() && no_folder.is_clean());
+        assert_eq!(no_records.lines, vec![NOTHING_TO_CHANGE]);
+        assert_eq!(no_folder.lines, vec![NOTHING_TO_CHANGE]);
+    }
+
+    #[test]
+    fn a_refresh_skips_an_edited_folder() {
+        // Arrange
+        let s = setup("refresh-edited");
+        sync(&s, V1, &[folder(NAME, "one")]);
+        fs::write(s.target.join(NAME).join("SKILL.md"), "mine").unwrap();
+
+        // Act
+        let report = refresh(&s, V2, &[folder(NAME, "two")]);
+
+        // Assert
+        assert_eq!(
+            report.lines[0],
+            "skipped playbook-fix, edited since the last sync"
+        );
+        assert_eq!(skill_md(&s, NAME), "mine");
+    }
+
     #[test]
     fn a_dry_run_writes_nothing_and_says_would() {
         // Arrange
@@ -997,6 +1218,38 @@ mod tests {
         assert_eq!(report.lines[0], "skipped, another sync is running");
         assert!(!s.target.join(NAME).exists());
         assert!(record(&s, NAME).is_none());
+        assert!(s.target.join(LOCK_NAME).is_dir());
+    }
+
+    #[test]
+    fn remove_synced_takes_the_lock_and_releases_it() {
+        // Arrange
+        let s = setup("remove-locked");
+        sync(&s, V1, &[folder(NAME, "one")]);
+
+        // Act
+        let out = remove_synced(&s.data, &s.target, false);
+
+        // Assert
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+        assert!(!s.target.join(NAME).exists());
+        assert!(!s.target.join(LOCK_NAME).exists());
+    }
+
+    #[test]
+    fn remove_synced_skips_while_another_sync_holds_the_lock() {
+        // Arrange
+        let s = setup("remove-busy");
+        sync(&s, V1, &[folder(NAME, "one")]);
+        fs::create_dir_all(s.target.join(LOCK_NAME)).unwrap();
+
+        // Act
+        let out = remove_synced(&s.data, &s.target, false);
+
+        // Assert
+        assert_eq!(out.lines, vec!["skipped, another sync is running"]);
+        assert_eq!(skill_md(&s, NAME), "one");
+        assert!(record(&s, NAME).is_some());
         assert!(s.target.join(LOCK_NAME).is_dir());
     }
 }
