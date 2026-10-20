@@ -26,6 +26,7 @@ Pages to look things up in.
 - [CLI and config reference](reference/cli-and-config.md): every command, flag and config key, generated from the code so it cannot drift. For a short list, run `playbook commands`.
 - [Hook reference](reference/hooks.md): every hook setup wires, with its event, matcher, what it reads and writes, and how to turn it off.
 - [Policy table](reference/policy-table.md): the model and effort each agent and command runs at.
+- [Codex support](reference/codex-support.md): what works in Codex, what does not and why.
 
 ## Authoring
 

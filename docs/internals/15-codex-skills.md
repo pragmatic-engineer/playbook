@@ -37,7 +37,7 @@ A replacement renames the old folder aside and then the new one into place. For 
 
 ## What does not work in Codex
 
-Codex has no subagents and no `AskUserQuestion` tool, so a command step that dispatches an agent or asks a question through a tool does not run as written. The preamble tells the agent to do that step itself or to ask in chat.
+Codex has subagents and no `AskUserQuestion` tool. Playbook does not render its agent files for Codex, so a command step that dispatches a playbook agent or asks a question through a tool does not run as written. The preamble tells the agent to do that step itself, to ask Codex to spawn a subagent, or to ask in chat. See the [Codex support matrix](../reference/codex-support.md).
 
 ## Open question
 
