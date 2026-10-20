@@ -1522,8 +1522,10 @@ jobs:
           copy="$(mktemp -d)"
           cp flake.nix flake.lock "$copy/"
           sys="$(nix eval --impure --raw --expr builtins.currentSystem)"
-          sed -E "s|^( *$sys = \").*(\";)\$|\1sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\2|" flake.nix > "$copy/flake.nix"
-          ! cmp -s flake.nix "$copy/flake.nix" || { echo "::error::the copy was not changed for $sys." >&2; exit 1; }
+          sed -E "s|^( *$sys = \")sha256-[^\"]*(\";)\$|\1sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\2|" flake.nix > "$copy/flake.nix"
+          # Exactly the hash line of this system changed, not the target line.
+          [ "$(diff flake.nix "$copy/flake.nix" | grep -c '^>')" -eq 1 ] \
+            || { echo "::error::the copy did not change on exactly one line for $sys." >&2; exit 1; }
           if log="$(nix build "path:$copy#playbook" --no-link 2>&1)"; then
             echo "::error::a flake with a wrong hash built." >&2; exit 1
           fi
