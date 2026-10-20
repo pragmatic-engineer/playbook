@@ -117,52 +117,65 @@ impl Capabilities {
         }
     }
 
-    /// From the usage numbers Claude Code cached. A null window is not there.
-    pub fn from_cache(c: &UsageCache) -> Capabilities {
-        let mut windows: Vec<(String, Window)> =
-            [("five_hour", &c.five_hour), ("seven_day", &c.seven_day)]
-                .into_iter()
-                .filter_map(|(name, w)| w.clone().map(|w| (name.to_string(), w)))
-                .collect();
-        windows.extend(c.extra_windows.iter().cloned());
-        let cap = c
-            .billed
-            .as_ref()
-            .and_then(|b| b.limit.clone())
-            .filter(|m| m.minor > 0);
-        Capabilities::build(windows, cap)
-    }
-
-    /// From the statusline reading.
-    pub fn from_snapshot(s: &limits_source::Snapshot) -> Capabilities {
-        let windows = [("five_hour", &s.five_hour), ("seven_day", &s.seven_day)]
-            .into_iter()
-            .filter_map(|(name, w)| w.clone().map(|w| (name.to_string(), w)))
-            .collect();
-        let cap = s
-            .spend_limit
-            .as_ref()
-            .and_then(|l| l.limit_usd)
-            .filter(|n| *n > 0.0)
-            .and_then(crate::spend::Money::from_usd);
-        Capabilities::build(windows, cap)
-    }
-
-    /// Both sources together: a window or cap the statusline has wins, the
-    /// cache fills in what it lacks.
-    pub fn from_sources(s: &limits_source::Sources) -> Capabilities {
-        let snap = s.snapshot.as_ref().map(Capabilities::from_snapshot);
-        let cache = s.account.cache.as_ref().map(Capabilities::from_cache);
-        let (mut windows, mut cap) =
-            snap.map_or((Vec::new(), None), |c| (c.rolling_windows, c.monthly_cap));
-        if let Some(c) = cache {
-            for (name, w) in c.rolling_windows {
-                if !windows.iter().any(|(n, _)| *n == name) {
-                    windows.push((name, w));
-                }
+    /// What the statusline reading and the usage cache carry at `now`, by the
+    /// same rules as [`limits_source::all_limits`]: a window already reset is
+    /// not there, only a fresh cache counts, and a cache newer than the
+    /// reading replaces its window. The cap follows the monthly limit that
+    /// [`limits_source::monthly`] picks, so a manual budget is no cap here.
+    pub fn from_sources(s: &limits_source::Sources, now: i64) -> Capabilities {
+        let live = |w: &Option<Window>| w.clone().filter(|w| w.resets_at > now);
+        let cache = s.account.cache.as_ref().filter(|c| c.is_fresh(now));
+        let mut windows = Vec::new();
+        for (name, from_snapshot, from_cache) in [
+            (
+                "five_hour",
+                s.snapshot.as_ref().map(|sn| &sn.five_hour),
+                cache.map(|c| &c.five_hour),
+            ),
+            (
+                "seven_day",
+                s.snapshot.as_ref().map(|sn| &sn.seven_day),
+                cache.map(|c| &c.seven_day),
+            ),
+        ] {
+            let measured = from_snapshot.and_then(live);
+            let cached = from_cache.and_then(live);
+            let newer = cache
+                .zip(s.snapshot.as_ref())
+                .is_none_or(|(c, sn)| c.fetched_at > sn.captured_at);
+            if let Some(w) = if newer {
+                cached.or(measured)
+            } else {
+                measured.or(cached)
+            } {
+                windows.push((name.to_string(), w));
             }
-            cap = cap.or(c.monthly_cap);
         }
+        if let Some(c) = cache {
+            windows.extend(
+                c.extra_windows
+                    .iter()
+                    .filter(|(_, w)| w.resets_at > now)
+                    .cloned(),
+            );
+        }
+        let cap = match limits_source::monthly(s, now) {
+            limits_source::Monthly::Measured => s
+                .snapshot
+                .as_ref()
+                .and_then(|sn| sn.spend_limit.as_ref())
+                .and_then(|l| l.limit_usd)
+                .filter(|n| *n > 0.0)
+                .and_then(crate::spend::Money::from_usd),
+            limits_source::Monthly::Cached { .. } => s
+                .account
+                .cache
+                .as_ref()
+                .and_then(|c| c.billed.as_ref())
+                .and_then(|b| b.limit.clone())
+                .filter(|m| m.minor > 0),
+            _ => None,
+        };
         Capabilities::build(windows, cap)
     }
 
@@ -301,8 +314,9 @@ fn cache(root: &Value) -> Option<UsageCache> {
         .get("spend")
         .and_then(|s| SpendFigure::from_cache(s, fetched_at));
     let mut extra_windows: Vec<(String, Window)> = u
-        .as_object()?
-        .iter()
+        .as_object()
+        .into_iter()
+        .flatten()
         .filter(|(name, _)| !KNOWN_KEYS.contains(&name.as_str()) && plain_name(name))
         .filter_map(|(name, v)| window(Some(v)).map(|w| (name.clone(), w)))
         .collect();
@@ -1163,9 +1177,16 @@ mod tests {
         std::fs::read_to_string(path).unwrap()
     }
 
-    fn lines_of(name: &str) -> Vec<DisplayLine> {
+    fn sources_of(name: &str) -> limits_source::Sources {
         let home = Home::new(&format!("caps-{name}"), &fixture(name));
-        Capabilities::from_cache(&read(&home.json()).cache.unwrap()).lines()
+        limits_source::Sources {
+            account: read(&home.json()),
+            ..limits_source::Sources::default()
+        }
+    }
+
+    fn lines_of(name: &str) -> Vec<DisplayLine> {
+        Capabilities::from_sources(&sources_of(name), NOW).lines()
     }
 
     fn win(name: &str) -> DisplayLine {
@@ -1204,10 +1225,7 @@ mod tests {
 
     #[test]
     fn a_cache_with_nothing_is_local_only_and_a_window_or_cap_is_not() {
-        let caps = |name: &str| {
-            let home = Home::new(&format!("local-{name}"), &fixture(name));
-            Capabilities::from_cache(&read(&home.json()).cache.unwrap())
-        };
+        let caps = |name: &str| Capabilities::from_sources(&sources_of(name), NOW);
 
         assert!(caps("empty").local_only);
         assert!(!caps("cap-only").local_only);
@@ -1215,6 +1233,22 @@ mod tests {
         assert_eq!(
             caps("windows-and-cap").monthly_cap.unwrap().format(),
             "500.00"
+        );
+    }
+
+    #[test]
+    fn a_zero_cap_is_no_cap() {
+        let mut s = sources_of("cap-only");
+        s.account.cache.as_mut().unwrap().billed =
+            crate::spend::SpendFigure::from_usd(Some(0.0), Some(1.0), NOW);
+        s.account.cache.as_mut().unwrap().spend = Some(SpendLimit {
+            limit_usd: 0.0,
+            used_usd: None,
+        });
+
+        assert_eq!(
+            Capabilities::from_sources(&s, NOW).lines(),
+            vec![DisplayLine::LocalEstimate]
         );
     }
 
@@ -1240,39 +1274,160 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_statusline_wins_and_the_cache_fills_in_what_it_lacks() {
-        let w = |used| Window {
+    fn w(used: f64, resets_in: i64) -> Window {
+        Window {
             used_percentage: used,
-            resets_at: NOW + 3600,
-        };
-        let sources = limits_source::Sources {
-            snapshot: Some(limits_source::Snapshot {
-                captured_at: NOW,
-                five_hour: Some(w(10.0)),
-                ..limits_source::Snapshot::default()
-            }),
+            resets_at: NOW + resets_in,
+        }
+    }
+
+    fn with(
+        snapshot: limits_source::Snapshot,
+        cache: Option<UsageCache>,
+    ) -> limits_source::Sources {
+        limits_source::Sources {
+            snapshot: Some(snapshot),
             account: Account {
                 plan: Plan::EnterpriseOrUnknown,
-                cache: Some(UsageCache {
-                    fetched_at: NOW,
-                    five_hour: Some(w(99.0)),
-                    seven_day: Some(w(50.0)),
-                    ..UsageCache::default()
-                }),
+                cache,
             },
             ..limits_source::Sources::default()
+        }
+    }
+
+    #[test]
+    fn the_windows_merge_like_the_limits_do_and_keep_one_order() {
+        // The reading is newer than the cache, so it wins where it has a window
+        // and the cache fills in the other one. Order stays five_hour first.
+        let snapshot = limits_source::Snapshot {
+            captured_at: NOW,
+            seven_day: Some(w(20.0, 3600)),
+            ..limits_source::Snapshot::default()
+        };
+        let cache = UsageCache {
+            fetched_at: NOW - 60,
+            five_hour: Some(w(99.0, 3600)),
+            seven_day: Some(w(50.0, 3600)),
+            ..UsageCache::default()
         };
 
-        let caps = Capabilities::from_sources(&sources);
+        let caps = Capabilities::from_sources(&with(snapshot, Some(cache)), NOW);
 
         assert_eq!(
             caps.rolling_windows,
             vec![
-                ("five_hour".to_string(), w(10.0)),
-                ("seven_day".to_string(), w(50.0))
+                ("five_hour".to_string(), w(99.0, 3600)),
+                ("seven_day".to_string(), w(20.0, 3600))
             ]
         );
-        assert!(Capabilities::from_sources(&limits_source::Sources::default()).local_only);
+    }
+
+    #[test]
+    fn a_newer_fresh_cache_replaces_the_reading_and_a_stale_or_reset_one_is_not_there() {
+        let reading = |captured_at| limits_source::Snapshot {
+            captured_at,
+            five_hour: Some(w(10.0, 3600)),
+            ..limits_source::Snapshot::default()
+        };
+        let cache = |fetched_at, resets_in| UsageCache {
+            fetched_at,
+            five_hour: Some(w(90.0, resets_in)),
+            ..UsageCache::default()
+        };
+        let five = |s: limits_source::Sources| {
+            Capabilities::from_sources(&s, NOW)
+                .rolling_windows
+                .first()
+                .map(|(_, w)| w.used_percentage)
+        };
+
+        assert_eq!(
+            five(with(reading(NOW - 100), Some(cache(NOW, 3600)))),
+            Some(90.0)
+        );
+        assert_eq!(
+            five(with(reading(NOW), Some(cache(NOW - 100, 3600)))),
+            Some(10.0)
+        );
+        // A cache over six hours old is ignored.
+        assert_eq!(
+            five(with(reading(NOW - 100), Some(cache(NOW - 7 * 3600, 3600)))),
+            Some(10.0)
+        );
+        // A window whose reset time has come is dropped, from either source.
+        assert_eq!(
+            five(with(reading(NOW - 100), Some(cache(NOW, 0)))),
+            Some(10.0)
+        );
+        let mut gone = reading(NOW);
+        gone.five_hour = Some(w(10.0, 0));
+        assert_eq!(five(with(gone, None)), None);
+    }
+
+    #[test]
+    fn extra_windows_come_sorted_and_a_cap_follows_the_monthly_limit_in_use() {
+        let body = format!(
+            r#"{{"cachedUsageUtilization":{{"fetchedAtMs":{},"utilization":{{
+              "zeta":{{"utilization":1,"resets_at":"{RESET}"}},
+              "alpha":{{"utilization":2,"resets_at":"{RESET}"}},
+              "spend":{{"enabled":true,"limit":{{"amount_minor":50000,"currency":"USD","exponent":2}}}}}}}}}}"#,
+            NOW * 1000
+        );
+        let home = Home::new("extras", &body);
+        let mut s = limits_source::Sources {
+            account: read(&home.json()),
+            ..limits_source::Sources::default()
+        };
+
+        let caps = Capabilities::from_sources(&s, NOW);
+
+        let names: Vec<_> = caps
+            .rolling_windows
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert_eq!(names, ["alpha", "zeta"]);
+        assert!(caps.monthly_cap.is_some());
+
+        // A fresh statusline monthly limit is the one in use, and a weekly one
+        // is no monthly cap.
+        s.snapshot = Some(limits_source::Snapshot {
+            captured_at: NOW,
+            spend_limit: Some(limits_source::Spend {
+                used_percentage: 10.0,
+                resets_at: NOW + 3600,
+                used_usd: Some(1.0),
+                limit_usd: Some(100.0),
+                period: Some(LimitPeriod::Monthly),
+            }),
+            ..limits_source::Snapshot::default()
+        });
+        assert_eq!(
+            Capabilities::from_sources(&s, NOW)
+                .monthly_cap
+                .unwrap()
+                .format(),
+            "100.00"
+        );
+        s.snapshot
+            .as_mut()
+            .unwrap()
+            .spend_limit
+            .as_mut()
+            .unwrap()
+            .period = Some(LimitPeriod::Weekly);
+        assert_eq!(
+            Capabilities::from_sources(&s, NOW)
+                .monthly_cap
+                .unwrap()
+                .format(),
+            "500.00"
+        );
+        // A manual budget alone is no cap.
+        let manual = limits_source::Sources {
+            budgets: vec![(LimitPeriod::Monthly, 200.0)],
+            ..limits_source::Sources::default()
+        };
+        assert!(Capabilities::from_sources(&manual, NOW).local_only);
     }
 }
