@@ -99,7 +99,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `disk`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -472,49 +472,6 @@ Keep each tool on PATH and install only the missing ones with Homebrew, from the
 
 - `<BREWFILE>`: Brewfile to read; defaults to `Brewfile` in the current directory
 - `--builtin`: Read the Brewfile built into this binary instead of a file
-
-### `playbook disk`
-
-Check free disk space and keep builds from filling the disk
-
-Shows free space against `disk.warnFreeGb` and `disk.blockFreeGb` and the folders that use the most of it. `disk reserve` can keep a ballast file that gives space back when the disk is full.
-
-Example: `playbook disk status`
-
-Subcommands: `clean`, `release`, `reserve`, `status`, `target-dir`
-
-### `playbook disk clean`
-
-Remove what playbook can prove is disposable and print what it freed
-
-Removes idle `cargo-*` target folders under this repo's worktrees root that no build holds, `/tmp/pb-*` scratch older than an hour, playbook's own cache and tmp entries, plugin cache versions Claude Code marked orphaned a day ago or more, and landed worktrees through `playbook worktree sweep`. Never removes uncommitted work, a branch, the memory store or the config database.
-
-Example: `playbook disk clean --dry-run`
-
-- `--dry-run`: Show what would be removed without removing anything
-- `--auto`: Run only when `disk.autoCleanup` is on and free space is below `disk.warnFreeGb`, as the disk guard hooks do
-
-### `playbook disk release`
-
-Delete the ballast file and print the space it gave back
-
-### `playbook disk reserve`
-
-Write a 1 GB ballast file under ~/.cache/playbook/ballast that `disk release` deletes to give space back on a full disk. The folder carries a CACHEDIR.TAG and, on macOS, a Time Machine exclusion. Refuses, with exit code 1, when less than `disk.warnFreeGb` would stay free
-
-### `playbook disk status`
-
-Show free space per volume, the thresholds, and the biggest folders playbook and its agents made: cargo target folders, worktrees, caches and the ballast. Also lists cargo target folders of any project under the home folder and `disk.paths`
-
-- `--json`: Print JSON for tools
-
-### `playbook disk target-dir`
-
-Print the private cargo target folder for this worktree
-
-Prints `<worktrees root>/cargo-<worktree name>-<hash>`, the folder an agent sets as `CARGO_TARGET_DIR` so each worktree builds into its own target folder. `playbook worktree remove`, the sweep and the worktree-remove hook delete it with the worktree. Warns on stderr when more than `disk.maxTargetDirs` target folders exist.
-
-Example: `CARGO_TARGET_DIR="$(playbook disk target-dir)" cargo test`
 
 ### `playbook doc`
 
