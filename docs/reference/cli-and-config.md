@@ -84,11 +84,6 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
 | `update.checkIntervalHours` | `24` | a number, see the config keys page for the range |
 | `update.plugin` | `auto` | `auto`, `ask`, `off` |
-| `disk.warnFreeGb` | `15` | a number, see the config keys page for the range |
-| `disk.blockFreeGb` | `6` | a number, see the config keys page for the range |
-| `disk.autoCleanup` | `true` | `true`, `false` |
-| `disk.paths` | `[]` | see the config keys page |
-| `disk.maxTargetDirs` | `4` | a number, see the config keys page for the range |
 | `effort.agents.<name>`, `effort.commands.<name>`, `effort.skills.<name>` | `auto` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` |
 
 ## Commands
