@@ -291,8 +291,8 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
                 &paths.home,
                 // The scratch copy has the telemetry this run writes; the
                 // real home has the collector state the copy lacks.
-                crate::init::collector_service::telemetry_points_here(&sh)
-                    || crate::init::collector_service::telemetry_points_here(&paths.home),
+                crate::cc::telemetry::telemetry_points_here(&sh)
+                    || crate::cc::telemetry::telemetry_points_here(&paths.home),
                 &crate::init::collector_service::program(),
             )],
             "short-name" => vec![format!("pb: {short_line}")],
