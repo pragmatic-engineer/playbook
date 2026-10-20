@@ -3,7 +3,14 @@
 
 //! The SessionStart hook keeps the telemetry collector running for plain
 //! `claude` sessions, end to end with the real binary in a scratch HOME.
+//! `collector_daemon.rs` covers the daemon's done bars; this file covers the
+//! path through `setup --only telemetry`.
 
+#[path = "support/collector_guard.rs"]
+mod collector_guard;
+
+use playbook::cc::telemetry::TEST_SPAWN_VAR;
+use playbook::usage::run::Paths;
 use serde_json::Value;
 use std::fs;
 use std::io::Write;
@@ -30,6 +37,10 @@ impl Home {
             .env("SHELL", "/bin/zsh")
             .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
             .env_remove("CLAUDE_CONFIG_DIR")
+            // CI sets `CI=true`, which makes the hook headless.
+            .env_remove("CI")
+            .env_remove("PLAYBOOK_HEADLESS")
+            .env(TEST_SPAWN_VAR, "1")
             .current_dir(&self.0);
         for (name, _) in std::env::vars() {
             if name == "CLAUDE_CODE_ENABLE_TELEMETRY" || name.starts_with("OTEL_") {
@@ -116,15 +127,14 @@ impl Home {
 }
 
 impl Drop for Home {
+    /// Kills the collector that holds the lock, and any late one, so no
+    /// test leaves a collector running.
     fn drop(&mut self) {
-        if let Some(pid) = self
-            .state()
-            .and_then(|s| s["pid"].as_u64())
-            .filter(|p| *p != 0)
-        {
-            let _ = Command::new("kill").arg(pid.to_string()).status();
-        }
+        let settled = collector_guard::kill_all(&Paths::from_home(&self.0));
         let _ = fs::remove_dir_all(&self.0);
+        if !std::thread::panicking() {
+            assert!(settled, "a collector kept the lock after SIGKILL");
+        }
     }
 }
 
