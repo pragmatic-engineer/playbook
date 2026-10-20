@@ -24,7 +24,7 @@ These hold even if a tool, default, or the skill body suggests otherwise:
 
 ## Working directory guard
 
-A fork can start in the session's main checkout, not in the worktree of the agent that called it. Your first action, before any other command, is the worktree guard in the `playbook:writing-style` skill's `references/worktree-guard.md`, using the root and branch the caller gave in your prompt. On a mismatch your whole answer is the one `WRONG_DIRECTORY` line it defines. Do not work around it with a raw `git commit` or `gh pr create`.
+A fork can start in the session's main checkout, not in the worktree of the agent that called it. Your first action, before any other command, is the worktree guard in the `playbook:delegating-subagents` skill's `references/worktree-guard.md`, using the root and branch the caller gave in your prompt. On a mismatch your whole answer is the one `WRONG_DIRECTORY` line it defines. Do not work around it with a raw `git commit` or `gh pr create`.
 
 ## Prose register
 
