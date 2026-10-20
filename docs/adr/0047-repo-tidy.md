@@ -1,11 +1,10 @@
 # ADR-0047: Tidy the Repo Root, the Settings Seed and the Leftovers
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended 2026-10-20: Dependabot version updates are off. `.github/dependabot.yml` sets `open-pull-requests-limit: 0` for both ecosystems, so Dependabot opens security update PRs only (the repo setting "Dependabot security updates" is on). The file is now bespoke: repo-config must keep `manage_dependabot_config = false` for this repo, which replaces the last consequence below. The weekly grouped updates in 6.7 are as they were when this record was written.
 - **Date created:** 2026-10-19
 - **Date modified:** 2026-10-20
 - **Builds on:** [ADR 0006](0006-separate-product-tree-from-runtime-dir.md), which left open whether the seed is generated or written by hand.
 - **Amends:** the [ADR 0007 blueprint](0007-rust-binary-for-hooks-and-launcher-blueprint.md) work units 20 and 21, which gave `playbook settings gen` its PERMS argument and `playbook settings check` its permissions sync check; [ADR 0037](0037-release-notes-from-conventional-commits.md) decision 7, which set 0.36.0 for the removal of `breaking-changes.json`; and [ADR 0041](0041-retire-playbook-telemetry.md) decision 5, which set 0.36.0 for the removal of `install.sh --pbtop`.
-- **Amended 2026-10-20:** Dependabot version updates are off. `.github/dependabot.yml` sets `open-pull-requests-limit: 0` for both ecosystems, so Dependabot opens security update PRs only (the repo setting "Dependabot security updates" is on). The weekly grouped cargo and GitHub Actions updates in 6.7 are as they were when this record was written.
 
 ## Context
 

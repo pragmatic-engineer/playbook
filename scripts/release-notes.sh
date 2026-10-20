@@ -69,7 +69,7 @@ prefix_of() {
 # A playbook release ships the plugin too (ADR 0038), and the binary builds
 # every crate but the plugin checks. Cargo.lock counts for none, since every
 # dependency bump rewrites it. A bump also changes a pin in a crate's
-# Cargo.toml, so the weekly Dependabot PR is listed under Other changes.
+# Cargo.toml, so a Dependabot security PR is listed under Other changes.
 paths_of() {
   case "$1" in
     playbook) printf '%s\n' crates ':(exclude)crates/plugin-checks' \

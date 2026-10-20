@@ -11,10 +11,9 @@
 # github-actions and 10 for cargo were the old values). The schedule, cooldown
 # and groups are kept so that is the only edit.
 #
-# Each crate's Cargo.toml pins its dependencies exactly, so a security PR
-# bumps the pin and Cargo.lock together. dependabot-auto-merge.yml still
-# merges Dependabot PRs once CI passes, except major bumps, which wait for
-# review.
+# Each crate's Cargo.toml pins its direct dependencies exactly, so a security
+# PR for one bumps the pin and Cargo.lock together; for a transitive crate it
+# changes Cargo.lock only. dependabot-auto-merge.yml says how PRs are merged.
 #
 # This file is bespoke: repo-config must keep `manage_dependabot_config =
 # false` for this repo, or its next `terraform apply` writes its monthly
