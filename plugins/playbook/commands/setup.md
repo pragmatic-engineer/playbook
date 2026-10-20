@@ -1,7 +1,8 @@
 ---
 description: Use on first install or to repair the local setup. Wires safety guards, settings.json, the pb short name and system prompt.
 allowed-tools: Bash, Read, AskUserQuestion
-argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--collector-service|--no-collector-service] [--short-name|--no-short-name] [--disk-ballast|--no-disk-ballast] [--attribution|--no-attribution] [--help] [--auto] [--ask]"
+argument-hint: "[--only <PART>...] [--yes] [--dry-run] [--explain [<PART>]] [--hooks|--no-hooks] [--statusline|--no-statusline] [--security|--no-security] [--path|--no-path] [--system-prompt|--no-system-prompt] [--telemetry|--no-telemetry] [--short-name|--no-short-name] [--policy-guard|--no-policy-guard] [--attribution|--no-attribution] [--help] [--auto] [--ask]"
+
 model: haiku
 effort: low
 ---
@@ -43,7 +44,10 @@ Take `$ARGUMENTS` word by word:
 - Drop `--auto` and `--ask`. Step 0 read them, and the binary does not take them.
 - Replace the old name `--use-system-prompt` with `--yes --system-prompt`. Say so in one line.
 - Replace the old names from 0.36 and 0.37: `--attribution-off` with `--no-attribution` (attribution OFF), `--no-attribution-off` with `--attribution` (attribution ON), and `attribution-off` inside an `--only` or `--explain` value with `attribution`. When an `--only` value names neither `attribution` nor `attribution-off`, drop `--no-attribution-off` instead, as the binary does. Say so in one line.
-- Drop the retired words `--install-aliases`, `--aliases`, `--no-aliases`, `--claude-override` and `--no-claude-override`, and the names `aliases` and `claude-override` inside an `--only` value. Say in one line that they are retired and that `playbook cc` and `pb cc` need no shell line (ADR 0044). When an `--only` value had only retired names, stop there and run nothing.
+- Drop the retired words `--install-aliases`, `--aliases`, `--no-aliases`, `--claude-override` and `--no-claude-override`, and the names `aliases` and `claude-override` inside an `--only` value. Say in one line that they are retired and that `playbook cc` and `pb cc` need no shell line (ADR 0044).
+- Drop the retired words `--disk-ballast` and `--no-disk-ballast`, and the name `disk-ballast` inside an `--only` value. Say in one line that the disk feature was removed.
+- Drop the retired words `--collector-service` and `--no-collector-service`, and the name `collector-service` inside an `--only` value. Say in one line that the collector service is no longer needed, as playbook starts the collector itself.
+- When an `--only` value had only retired names, stop there and run nothing.
 - Every other word must be a flag from the Flags table below, or the value after `--only` or `--explain`. A value is part names from the Questions table or `security`, joined by commas. When a word is neither, stop with one line that names it and points to `/playbook:setup --help`. Ask nothing and run nothing.
 
 The rest of this file calls the kept words the arguments. A part flag is any flag in the Flags table from `--hooks` to `--no-attribution`. When you build a command, put each argument in single quotes.
@@ -52,7 +56,7 @@ The rest of this file calls the kept words the arguments. A part flag is any fla
 
 These runs ask no question in a terminal either, so pass the arguments straight to the binary:
 
-- The arguments hold `--dry-run` or `--explain`: run `playbook setup` with the arguments, print the output verbatim, and stop. Neither changes any part. When the arguments hold `--dry-run` and none of `--yes`, `-y`, `--defaults` or `--only`, add one line after the output: "This session has no terminal, so this preview shows the hooks, the status line, the system prompt, telemetry, the collector service and the pb short name off unless a flag turns them on, and leaves attribution as it is unless a flag sets it. Answering the questions with the defaults turns them on and sets attribution OFF."
+- The arguments hold `--dry-run` or `--explain`: run `playbook setup` with the arguments, print the output verbatim, and stop. Neither changes any part. When the arguments hold `--dry-run` and none of `--yes`, `-y`, `--defaults` or `--only`, add one line after the output: "This session has no terminal, so this preview shows the hooks, the status line, the system prompt, telemetry and the pb short name off unless a flag turns them on, and leaves attribution as it is unless a flag sets it. Answering the questions with the defaults turns them on and sets attribution OFF."
 - The arguments hold `--yes`, `-y`, `--defaults` or `--only`, or `--telemetry` with no other part flag (a bare `--telemetry` means `--only telemetry`): the user already chose. Go to Step 6 with the arguments as they are.
 
 Otherwise go on to Step 4.
@@ -68,7 +72,7 @@ Otherwise go on to Step 4.
    playbook setup --dry-run; echo '--- explain ---'; playbook setup --explain; echo '--- security ---'; playbook config get security.defaults; echo '--- attribution ---'; playbook config get attribution.enabled
    ```
 
-3. Read the dry run output. A line that starts with `telemetry: already` or `telemetry: switched off` means setup would not ask about telemetry. Print that line and drop the telemetry question. A line that starts with `collector-service: already` means the background service is installed. Print that line and drop the collector-service question.
+3. Read the dry run output. A line that starts with `telemetry: already` or `telemetry: switched off` means setup would not ask about telemetry. Print that line and drop the telemetry question.
 4. Read the explain output. For each part it prints a `What it does:` line.
 5. Ask the remaining questions with the AskUserQuestion tool, in table order, at most four questions per call. For each question:
    - The header and the question are the Header and Question columns, verbatim.
@@ -79,9 +83,9 @@ Otherwise go on to Step 4.
 
 ## Step 5: Summary and confirm
 
-Print "Summary of your choices", then one line per part in table order: the part, on or off, and "will be applied" or "left as it is", plus "(set by a flag)" when the arguments decided it. For `attribution`, print "ON: Claude Code adds its attribution" for a yes and "OFF (default): Claude Code adds no attribution" for a no, in place of on or off and the words after it. For a telemetry or collector-service question dropped in Step 4, print the dry run line from sub-step 3 in place of on or off. Add the line `security: on, will be applied` when the arguments hold `--security`, or when `security.defaults` printed true and the arguments do not hold `--no-security`.
+Print "Summary of your choices", then one line per part in table order: the part, on or off, and "will be applied" or "left as it is", plus "(set by a flag)" when the arguments decided it. For `attribution`, print "ON: Claude Code adds its attribution" for a yes and "OFF (default): Claude Code adds no attribution" for a no, in place of on or off and the words after it. For a telemetry question dropped in Step 4, print the dry run line from sub-step 3 in place of on or off. Add the line `security: on, will be applied` when the arguments hold `--security`, or when `security.defaults` printed true and the arguments do not hold `--no-security`.
 
-Build the command: `playbook setup`, then the arguments, then for each answered part its `--x` or `--no-x` flag. When Step 4 dropped the telemetry question and the arguments hold no telemetry flag, also add `--telemetry`: a terminal run keeps telemetry on in that case, and setup still leaves a setting of yours alone. When Step 4 dropped the collector-service question and the arguments hold no collector-service flag, also add `--collector-service`, so setup keeps the installed service up to date as a terminal run does. Print the command in a bash block.
+Build the command: `playbook setup`, then the arguments, then for each answered part its `--x` or `--no-x` flag. When Step 4 dropped the telemetry question and the arguments hold no telemetry flag, also add `--telemetry`: a terminal run keeps telemetry on in that case, and setup still leaves a setting of yours alone. Print the command in a bash block.
 
 Ask "Apply these changes?" with the AskUserQuestion tool, header "Apply", options "Yes (Recommended)" and "No". On No, print "Cancelled. Nothing was changed." and stop.
 
@@ -133,15 +137,13 @@ The same flags as `playbook setup`, with the same text as `playbook setup --help
 | `--no-system-prompt` | Do not install the system prompt, and store `systemPrompt.enabled` false so `pb cc` starts with Claude Code's own |
 | `--telemetry` | Answer yes to the telemetry question: write the OpenTelemetry variables for the local usage collector into settings.json. Given alone it means `--only telemetry` |
 | `--no-telemetry` | Do not write telemetry variables into settings.json |
-| `--collector-service` | Keep the usage collector running in a per-user background service (launchd agent or systemd user unit), when telemetry points at it |
-| `--no-collector-service` | Do not install the background service for the usage collector |
 | `--short-name` | Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free |
 | `--no-short-name` | Do not add the `pb` short name |
-| `--disk-ballast` | Write a 1 GB ballast file under ~/.cache/playbook/ballast that `playbook disk release` deletes to give space back on a full disk |
-| `--no-disk-ballast` | Do not write the disk ballast file, the default |
+| `--policy-guard` | Turn the policy guard on (`hooks.policyGuard.enabled`): it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits |
+| `--no-policy-guard` | Do not turn the policy guard on; it is off by default and a stored choice is not changed |
 | `--attribution` | Attribution ON: Claude Code adds its Co-Authored-By trailer, generated-by line and session link. Removes each `attribution` key in settings.json that holds exactly the off value playbook writes, and stores `attribution.enabled` true |
 | `--no-attribution` | Attribution OFF, the default: Claude Code adds no trailer, generated-by line or session link. Sets `attribution` in settings.json, replacing your own values |
-| `--only <PART>...` | Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, collector-service, short-name, disk-ballast, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON |
+| `--only <PART>...` | Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON |
 | `-y`, `--yes`, `--defaults` | Never ask: use the default for every part you did not answer with a flag |
 | `--dry-run` | Print what would change for each part and change nothing |
 | `--explain [<PART>]` | Describe a part, or every part when none is named, and change nothing |
@@ -160,9 +162,8 @@ The questions `playbook setup` asks in a terminal, in its order, with its defaul
 | 3 | `path` | PATH | Add the playbook binary's directory to PATH in your shell startup files (~/.zshenv for zsh, ~/.bashrc and a login file for bash)? | Yes | Your shell files are not touched. Hooks may not find playbook unless it is already on PATH. |
 | 4 | `system-prompt` | Prompt | Copy the playbook system prompt to ~/.config/playbook/prompts/SYSTEM_PROMPT.md? | Yes | No file is copied, and `systemPrompt.enabled` is set to false, so `pb cc` starts with Claude Code's own prompt. |
 | 5 | `telemetry` | Telemetry | Turn on Claude Code telemetry by writing the OpenTelemetry variables for the local usage collector into the env block of ~/.claude/settings.json, so plain claude, the IDE and the desktop app feed `playbook usage`? (skipped with one line when telemetry is already on, set up by you, or switched off by a setting that `playbook setup` will not change) | Yes | No variables are written. `playbook usage` reads transcripts instead. |
-| 6 | `collector-service` | Collector | Keep the usage collector (`playbook usage collect`) running in the background, so telemetry has a receiver after every login? This installs a per-user service: a launchd agent in ~/Library/LaunchAgents on macOS, a systemd user unit on Linux. It acts only when telemetry points at the playbook collector. | Yes | No service is installed. The collector runs only while `cc` or the session hook starts it, or while you run `playbook usage collect`. |
-| 7 | `short-name` | Short name | Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists. | Yes | No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing. |
-| 8 | `disk-ballast` | Disk ballast | Keep 1 GB in reserve as a ballast file in ~/.cache/playbook/ballast, so a full disk can get room back with `playbook disk release`? | No | No ballast is written. A full disk then needs a cleanup from outside the session. `playbook disk reserve` writes it later. |
-| 9 | `attribution` | Attribution | Turn attribution ON, so Claude Code adds its Co-Authored-By trailer, generated-by line and claude.ai session link to commits and pull requests? The default is OFF: playbook sets `attribution` in ~/.claude/settings.json so Claude Code adds none of them. | No | Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link. |
+| 6 | `short-name` | Short name | Add `pb` as a short name for `playbook`, as a symlink `pb -> playbook` in the playbook install folder (~/.local/bin or $PLAYBOOK_BIN_DIR)? No link is made when a `pb` command already exists. | Yes | No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing. |
+| 7 | `policy-guard` | Policy guard | Turn on the policy guard? It denies git commands that skip checks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, Edit or Write on settings.json and settings.local.json, writes to Claude Code's own memory folders, and model-run changes to protected config keys. The choice is stored in ~/.config/playbook. | No | The policy guard setting is not changed. It is off by default, and its hook entry allows every call while off. A guard you turned on stays on until `hooks.policyGuard.enabled` is set to false. Turn it on later with `playbook config set --global hooks.policyGuard.enabled true`. |
+| 8 | `attribution` | Attribution | Turn attribution ON, so Claude Code adds its Co-Authored-By trailer, generated-by line and claude.ai session link to commits and pull requests? The default is OFF: playbook sets `attribution` in ~/.claude/settings.json so Claude Code adds none of them. | No | Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link. |
 
 The security part is never asked about, in a terminal or here. It runs only with `--security` or when `security.defaults` is true.

@@ -125,8 +125,8 @@ pub(crate) fn writes_config_store(words: &[String], home: &str) -> bool {
         return false;
     }
     match program.as_str() {
-        // Deleting is judged by the rm guard, which keeps what cannot be made
-        // again and lets the rest of playbook's folder go.
+        // Deleting is not a write here. The rm guard only stops `/` and the
+        // home folder.
         "rm" => false,
         // A copy or link writes only where it lands.
         "cp" | "install" => copies_into(args, true, store),

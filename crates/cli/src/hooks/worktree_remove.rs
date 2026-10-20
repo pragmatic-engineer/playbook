@@ -58,12 +58,6 @@ fn remove(payload: &Payload) -> Result<String, String> {
 
     let path_s = path.to_string_lossy().to_string();
     git(&main_root, &["worktree", "remove", &path_s])?;
-    if let Some(root) = crate::disk::targets::root_for_main(&main_root) {
-        let home = crate::common::home_dir();
-        if let Some(line) = crate::disk::clean::remove_worktree_target(&home, &root, &path) {
-            eprintln!("playbook worktree-remove: {line}");
-        }
-    }
 
     let owned = branch.starts_with(BRANCH_PREFIX) && branch != default;
     if owned {

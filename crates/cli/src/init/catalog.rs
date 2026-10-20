@@ -95,20 +95,6 @@ pub const PARTS: &[Part] = &[
         undo: "`playbook uninstall` removes exactly the keys `playbook setup` wrote, unless you changed them.",
     },
     Part {
-        id: "collector-service",
-        asked: true,
-        default_on: true,
-        flags: "--collector-service, --no-collector-service",
-        question: "Keep the usage collector (`playbook usage collect`) running in the background, so telemetry has a receiver after every login? This installs a per-user service: a launchd agent in ~/Library/LaunchAgents on macOS, a systemd user unit on Linux. It acts only when telemetry points at the playbook collector.",
-        does: "Installs a per-user service that runs `playbook usage collect --idle-seconds 0` at login and starts it again when it stops. On macOS it is a launchd agent with RunAtLoad and KeepAlive, on Linux a systemd user unit with Restart=always. Other systems get the command to run yourself. Its output goes to collector-service.log next to collector.json. The service file names only the program and the log: the collector reads its token from collector.json, so no secret is written. A no is remembered, so playbook stops reminding you.",
-        changes: concat!(
-            "~/Library/LaunchAgents/",
-            playbook_telemetry::collector_label!(),
-            ".plist (macOS) or ~/.config/systemd/user/playbook-collector.service (Linux), and the log file"
-        ),
-        undo: "`playbook uninstall` stops the service and removes its file.",
-    },
-    Part {
         id: "short-name",
         asked: true,
         default_on: true,
@@ -119,14 +105,14 @@ pub const PARTS: &[Part] = &[
         undo: "Delete `pb` from the install folder and run `playbook config set launcher.shortName false`. `playbook uninstall --remove-binary` also removes the link.",
     },
     Part {
-        id: "disk-ballast",
+        id: "policy-guard",
         asked: true,
         default_on: false,
-        flags: "--disk-ballast, --no-disk-ballast",
-        question: "Keep 1 GB in reserve as a ballast file in ~/.cache/playbook/ballast, so a full disk can get room back with `playbook disk release`?",
-        does: "Runs `playbook disk reserve`: writes a 1 GB file of real blocks. Deleting it needs no free space, so it gives room back for a shell and a cleanup when the disk is full. The disk guard hook deletes it by itself when free space on its volume falls below 1 GB. The folder carries a CACHEDIR.TAG, and on macOS the file is kept out of Time Machine. Setup refuses when writing it would leave less than `disk.warnFreeGb` free. Off by default, and `--yes` leaves it off.",
-        changes: "~/.cache/playbook/ballast (ballast.bin, CACHEDIR.TAG and a lock file)",
-        undo: "Run `playbook disk release`.",
+        flags: "--policy-guard, --no-policy-guard",
+        question: "Turn on the policy guard? It denies git commands that skip checks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, Edit or Write on settings.json and settings.local.json, writes to Claude Code's own memory folders, and model-run changes to protected config keys. The choice is stored in ~/.config/playbook.",
+        does: "Stores `hooks.policyGuard.enabled` true. The hook entry `playbook hook policy-guard` is always in settings.json, and it allows every call while the key is false. It is off by default, and `--yes` leaves it off. See docs/guides/08-policy-guard.md for every rule.",
+        changes: "~/.config/playbook (the key `hooks.policyGuard.enabled`)",
+        undo: "Run `playbook config set --global hooks.policyGuard.enabled false`. `POLICY_GUARD=0` in the environment switches it off for one session.",
     },
     Part {
         id: "attribution",

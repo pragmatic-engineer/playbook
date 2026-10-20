@@ -119,7 +119,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         matcher: None,
         name: "session-init",
         group: Group::Session,
-        purpose: "Prepares the session directory, warns when a resumed session's config drifted, and adds the tool map, a handoff, an auto-learn nudge and a small memory block to the context. Also sweeps stale worktrees. When the disk guard is wired, it warns below `disk.warnFreeGb` and can start `playbook disk clean --auto` in the background.",
+        purpose: "Prepares the session directory, warns when a resumed session's config drifted, and adds the tool map, a handoff, an auto-learn nudge and a small memory block to the context. Also sweeps stale worktrees.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
@@ -351,7 +351,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Bash"),
         name: "rm-workspace-guard",
         group: Group::Safety,
-        purpose: "Stops a deletion whose target is outside your safe roots, `~/.claude`, playbook's own folders and install files, and the scratch roots (contents only): the temp and cache folders for your OS, the `.worktrees` folder next to the repo and `hooks.rmGuard.allowedRoots`. Covers `rm`, `unlink`, `rmdir`, `find -delete`, `git clean`, `git worktree remove` and delete calls in Python, Node, Perl and Ruby one-liners, and follows `cd` and variables the command sets. A built-in deny set (system folders, credentials, personal folders, shell config, Claude Code's settings), playbook data that cannot be made again (memory, `config.db`, plans and handoffs, the spend ledger) and a repo root or `.git` stay blocked whatever the roots say, and a `>` redirect or `chmod -R` over them is blocked too. Only real command words count, so quoted text and heredocs read by other programs are data. A denial names the rule that matched. Runs for every Bash command.",
+        purpose: "Stops an `rm`, `rmdir`, `unlink` or `shred` whose target is the filesystem root or your home folder, such as `rm -rf /` or `rm -rf ~`, also after `sudo`, `env` or `command`, inside a command chain, a group or a `bash -c` script. Every other path is allowed, and it does not follow `cd`, variables or `find -delete`. Runs for every Bash command.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -365,16 +365,6 @@ const GUARD_SPECS: &[HookSpec] = &[
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
-    },
-    HookSpec {
-        event: "PreToolUse",
-        matcher: Some("Bash"),
-        name: "no-slop-guard",
-        group: Group::Safety,
-        purpose: "Denies a posting command (commit, PR text) that contains an em or en dash.",
-        if_cond: None,
-        timeout: Some(10),
-        also_replaces: Some("no-dash-guard"),
     },
     HookSpec {
         event: "PreToolUse",
@@ -401,27 +391,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Bash"),
         name: "policy-guard",
         group: Group::Safety,
-        purpose: "Denies skipped git hooks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, a Bash write to a Claude Code settings file (a redirect, `tee`, `sed -i`, `cp`, `mv` or an interpreter one-liner), and model-run changes to the `rm` guard's roots, the prose lint mode, the PR rules or the disk guard's thresholds (`config set` on `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`, `pr.ticketPatterns` or `disk.*`, `config import`, `config unset`, `config edit`, writes to the config database, a config file or the memory store (reads, copies out and deletions are allowed, deletions being the `rm` guard's call; `mv` and `ln` either way are writes; the denial names the rule that matched), inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`). The denial tells the model to ask the user to run it with `!`. It also denies `playbook uninstall --yes`.",
-        if_cond: None,
-        timeout: Some(10),
-        also_replaces: None,
-    },
-    HookSpec {
-        event: "PreToolUse",
-        matcher: Some("Bash"),
-        name: "disk-guard",
-        group: Group::Safety,
-        purpose: "Denies build commands (`cargo build`, `cargo test`, `npm install`, `docker build`, `make` and the like) when free disk space is below `disk.blockFreeGb`, and warns below `disk.warnFreeGb`, at most once every 10 minutes per session. Reads, `rm`, `cargo clean`, `git worktree remove`, `df`, `du` and every `playbook` command stay allowed so the disk can be cleaned. With `disk.autoCleanup` on it also starts `playbook disk clean --auto` in the background when none runs, and below 1 GB it deletes the ballast file. Runs for every Bash command.",
-        if_cond: None,
-        timeout: Some(10),
-        also_replaces: None,
-    },
-    HookSpec {
-        event: "PreToolUse",
-        matcher: Some("Agent|Task"),
-        name: "disk-guard",
-        group: Group::Safety,
-        purpose: "Denies starting a new agent when free disk space is below `disk.blockFreeGb`, since agents build in parallel, and warns below `disk.warnFreeGb`. Like the Bash entry, it can start `playbook disk clean --auto` and delete the ballast file.",
+        purpose: "Off by default (`hooks.policyGuard.enabled`, see docs/guides/08-policy-guard.md): the entry stays wired and allows every call. When on, it denies skipped git hooks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, a Bash write to a Claude Code settings file (a redirect, `tee`, `sed -i`, `cp`, `mv` or an interpreter one-liner), and model-run changes to the policy guard switch, the prose lint mode or the PR rules (`config set` on `hooks.policyGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars` or `pr.ticketPatterns`, `config import`, `config unset`, `config edit`, writes to the config database, a config file or the memory store (reads, copies out and deletions are allowed, since the `rm` guard stops only `/` and the home folder; `mv` and `ln` either way are writes; the denial names the rule that matched), inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`). The denial tells the model to ask the user to run it with `!`. It also denies `playbook uninstall --yes`.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -441,19 +411,9 @@ const GUARD_SPECS: &[HookSpec] = &[
     HookSpec {
         event: "PreToolUse",
         matcher: Some("Edit|Write"),
-        name: "no-slop-guard",
-        group: Group::Safety,
-        purpose: "Denies new code that carries a slop comment.",
-        if_cond: None,
-        timeout: Some(10),
-        also_replaces: None,
-    },
-    HookSpec {
-        event: "PreToolUse",
-        matcher: Some("Edit|Write"),
         name: "policy-guard",
         group: Group::Safety,
-        purpose: "Denies writes to Claude Code's own memory paths and to playbook's config files, and any Edit or Write on a Claude Code settings file (`settings.json` or `settings.local.json`, user or project). Settings change through the `playbook` binary only. Shows the fact format when a fact file is written to playbook's store.",
+        purpose: "Off by default, like the Bash entry. When on, it denies writes to Claude Code's own memory paths and to playbook's config files, and any Edit or Write on a Claude Code settings file (`settings.json` or `settings.local.json`, user or project). Settings change through the `playbook` binary only. Shows the fact format when a fact file is written to playbook's store.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -890,7 +850,7 @@ pub const HOOK_COMMAND_PREFIX: &str = "playbook hook ";
 
 /// The bare command `wire` writes for the hook named `name`: no path,
 /// resolved on `PATH` the same way a hand-written `rtk hook claude` entry is.
-fn bare_command(name: &str) -> String {
+pub(super) fn bare_command(name: &str) -> String {
     format!("{HOOK_COMMAND_PREFIX}{name}")
 }
 

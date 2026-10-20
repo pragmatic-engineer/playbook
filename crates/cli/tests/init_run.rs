@@ -149,11 +149,10 @@ const PORTED_HOOK_NAMES: &[&str] = &[
     "worktree-remove",
 ];
 
-/// The 6 safety guards, wired the same as `PORTED_HOOK_NAMES`.
+/// The 5 safety guards, wired the same as `PORTED_HOOK_NAMES`.
 const GUARD_HOOK_NAMES: &[&str] = &[
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
     "policy-guard",
@@ -197,10 +196,9 @@ fn base_paths(home: &Path) -> InitPaths {
         security: false,
         telemetry: false,
         telemetry_replace_off: false,
-        collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
-        disk_ballast: false,
+        policy_guard: false,
         pb_target: None,
         attribution: playbook::init::attribution::Choice::Off { replace: false },
         path_setup: None,
@@ -250,9 +248,8 @@ fn fresh_config_gets_fully_wired() {
             "trust",
             "path",
             "telemetry",
-            "collector-service",
             "short-name",
-            "disk-ballast",
+            "policy-guard",
         ]
         .contains(&step.name)
         {
@@ -311,79 +308,59 @@ fn fresh_config_gets_fully_wired() {
 const OLD_STATUSLINE: &str = "bash $HOME/.config/playbook/statusline.sh";
 
 #[test]
-fn the_disk_ballast_part_writes_nothing_unless_chosen_and_keeps_an_existing_ballast() {
-    let home = scratch_home("ballast");
-    let ballast = home.join(".cache/playbook/ballast/ballast.bin");
+fn the_policy_guard_part_stores_nothing_unless_chosen_and_never_turns_it_off() {
+    use playbook::hooks::policy_guard::stored_enabled;
+    let home = scratch_home("policy-guard");
 
     let off = run(&base_paths(&home));
-    assert_eq!(find_step(&off, "disk-ballast").status, StepStatus::Skipped);
-    assert!(!ballast.exists());
+    assert_eq!(find_step(&off, "policy-guard").status, StepStatus::Skipped);
+    assert!(!stored_enabled(&home));
 
-    write_text(&ballast, "already here");
     let on = run(&InitPaths {
-        disk_ballast: true,
+        policy_guard: true,
         ..base_paths(&home)
     });
-    let step = find_step(&on, "disk-ballast");
-    assert_eq!(step.status, StepStatus::AlreadyCorrect, "{}", step.detail);
-    assert!(step.detail.contains("already in place"), "{}", step.detail);
-    assert_eq!(fs::read_to_string(&ballast).unwrap(), "already here");
-}
+    assert_eq!(find_step(&on, "policy-guard").status, StepStatus::Wired);
+    assert!(stored_enabled(&home));
 
-/// More free space than any disk has, so the ballast reserve refuses.
-const UNREACHABLE_WARN_FREE_GB: u64 = 10_000;
-
-#[test]
-fn a_yes_on_a_disk_short_of_space_is_skipped_and_writes_nothing() {
-    use playbook::config::write::{self, Tier};
-    let home = scratch_home("ballast-short");
-    write::set(
-        Tier::Global,
-        "disk.warnFreeGb",
-        json!(UNREACHABLE_WARN_FREE_GB),
-        &home,
-        None,
-    )
-    .expect("the warn threshold should be settable");
-
-    let outcome = run(&InitPaths {
-        disk_ballast: true,
+    let again = run(&InitPaths {
+        policy_guard: true,
         ..base_paths(&home)
     });
-
-    let step = find_step(&outcome, "disk-ballast");
-    assert_eq!(step.status, StepStatus::Skipped, "{}", step.detail);
-    assert!(step.detail.contains("refused"), "{}", step.detail);
-    assert!(!home.join(".cache/playbook/ballast/ballast.bin").exists());
-}
-
-#[test]
-fn only_disk_ballast_runs_that_step_and_not_the_hooks() {
-    let home = scratch_home("ballast-only");
-    write_text(&home.join(".cache/playbook/ballast/ballast.bin"), "x");
-
-    let only = run(&InitPaths {
-        only: true,
-        hooks: false,
-        statusline: false,
-        disk_ballast: true,
-        ..base_paths(&home)
-    });
-    let names: Vec<_> = only.steps.iter().map(|s| s.name).collect();
-    assert!(names.contains(&"disk-ballast"), "{names:?}");
-    assert!(!names.contains(&"hooks"), "{names:?}");
-
-    let hooks_only = run(&InitPaths {
-        only: true,
-        ..base_paths(&home)
-    });
-    let names: Vec<_> = hooks_only.steps.iter().map(|s| s.name).collect();
+    assert_eq!(
+        find_step(&again, "policy-guard").status,
+        StepStatus::AlreadyCorrect
+    );
+    run(&base_paths(&home));
     assert!(
-        names.contains(&"hooks") && !names.contains(&"disk-ballast"),
-        "{names:?}"
+        stored_enabled(&home),
+        "a run without the part kept the choice"
     );
 }
 
+#[test]
+fn choosing_the_policy_guard_in_setup_skips_the_off_by_default_notice() {
+    let home = scratch_home("policy-guard-no-notice");
+    let settings = home.join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let doc = json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "playbook hook policy-guard"}]}]}});
+    fs::write(&settings, doc.to_string()).unwrap();
+
+    let report = run(&InitPaths {
+        policy_guard: true,
+        ..base_paths(&home)
+    });
+
+    assert!(
+        !report
+            .steps
+            .iter()
+            .any(|s| s.detail.contains("now off by default")),
+        "{:?}",
+        report.steps.iter().map(|s| &s.detail).collect::<Vec<_>>()
+    );
+}
 fn status_line_command(claude_home: &Path) -> Value {
     read_json(&claude_home.join("settings.json"))["statusLine"]["command"].clone()
 }
@@ -798,9 +775,8 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
             "trust",
             "path",
             "telemetry",
-            "collector-service",
             "short-name",
-            "disk-ballast",
+            "policy-guard",
         ]
         .contains(&step.name)
         {
@@ -826,6 +802,44 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
         after_first, after_second,
         "a second run must not rewrite any file"
     );
+}
+
+#[test]
+fn the_entry_of_the_removed_disk_guard_hook_is_dropped_by_composed_init() {
+    // Arrange: a 0.38.0 install, whose `settings.json` still runs the disk
+    // guard on Bash and on agents, next to a hook that still exists.
+    let home = scratch_home("retired-disk-guard");
+    let claude_home = claude_home_of(&home);
+    let retired = "playbook hook disk-guard";
+    write_json(
+        &claude_home.join("settings.json"),
+        &json!({
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            {"type": "command", "command": retired},
+                            {"type": "command", "command": "playbook hook policy-guard"}
+                        ]
+                    },
+                    {
+                        "matcher": "Agent|Task",
+                        "hooks": [{"type": "command", "command": retired}]
+                    }
+                ]
+            }
+        }),
+    );
+
+    // Act
+    let outcome = run(&base_paths(&home));
+
+    // Assert
+    assert!(outcome.ok());
+    let commands = all_hook_commands(&read_json(&claude_home.join("settings.json")));
+    assert!(!commands.contains(&retired.to_string()), "{commands:?}");
+    assert!(commands.contains(&"playbook hook policy-guard".to_string()));
 }
 
 #[test]
@@ -921,10 +935,9 @@ fn missing_self_root_skips_template_dependent_steps() {
         security: false,
         telemetry: false,
         telemetry_replace_off: false,
-        collector_service: playbook::init::collector_service::Choice::Skip,
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
-        disk_ballast: false,
+        policy_guard: false,
         pb_target: None,
         attribution: playbook::init::attribution::Choice::Skip,
         path_setup: None,

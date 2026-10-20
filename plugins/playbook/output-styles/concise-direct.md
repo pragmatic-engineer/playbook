@@ -22,6 +22,8 @@ One register for every reader and every artifact: simple English, plain and dire
 - No quotable lines. If it sounds like a pull-quote, rewrite it.
 - Use common words, short sentences and active voice. No idioms or analogies.
 - Prefer two items to three. Avoid always, never, everyone, nobody.
+- Code comments are for a future reader who never sees the session. Never name a plan,
+  brief, Work Unit, ticket or dispatch id in one. Wrap long lines at the project's line length.
 
 For the full phrase and pattern lists, load the `writing-style` skill and its
 `phrases` and `structures` references.
