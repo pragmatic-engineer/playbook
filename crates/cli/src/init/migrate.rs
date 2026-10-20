@@ -1002,7 +1002,7 @@ fn skills_edited(ctx: &Ctx) -> Outcome {
 }
 
 /// FNV-1a 64: stable across builds, which a persisted hash needs.
-fn content_hash(bytes: &[u8]) -> String {
+pub(crate) fn content_hash(bytes: &[u8]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {
         h ^= u64::from(*b);

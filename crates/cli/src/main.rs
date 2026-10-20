@@ -7,13 +7,14 @@ use playbook::init::run::{InitPaths, StepStatus};
 use playbook::{
     adr, agents, atlassian, brief, cc, ci, commit, common, config, deliver, deps, disk, doc,
     doctor, effort, eval, gate, handoff, hooks, init, json, learn, manifest, memory_import, mode,
-    plan_cleanup, planning, pr, prose, review, sanitize, settings, statusline, storage, tools_map,
-    trust, update, usage, worktree, AdrCommand, AgentsCommand, AtlassianCommand, CcCommand, Cli,
-    Command, CommitCommand, ConfigCommand, DepsCommand, DiskCommand, DocCommand, DoctorCommand,
-    EvalCommand, GateCommand, GlossaryCommand, HandoffCommand, JsonCommand, LearnCommand,
-    ManifestCommand, MemoryCommand, ModeArg, ModeCommand, PlanCommand, PrCommand, ProseCommand,
-    ReviewCommand, ReviewWorktreeCommand, SanitizeCommand, SegmentCommand, SegmentTopology,
-    SessionsCommand, SettingsCommand, ToolsCommand, WorktreeCommand,
+    plan_cleanup, planning, pr, prose, review, sanitize, settings, skills_sync, statusline,
+    storage, tools_map, trust, update, usage, worktree, AdrCommand, AgentsCommand,
+    AtlassianCommand, CcCommand, Cli, Command, CommitCommand, ConfigCommand, DepsCommand,
+    DiskCommand, DocCommand, DoctorCommand, EvalCommand, GateCommand, GlossaryCommand,
+    HandoffCommand, JsonCommand, LearnCommand, ManifestCommand, MemoryCommand, ModeArg,
+    ModeCommand, PlanCommand, PrCommand, ProseCommand, ReviewCommand, ReviewWorktreeCommand,
+    SanitizeCommand, SegmentCommand, SegmentTopology, SessionsCommand, SettingsCommand,
+    SkillsCommand, ToolsCommand, WorktreeCommand,
 };
 use std::io::{IsTerminal, Read};
 
@@ -1362,6 +1363,13 @@ fn main() {
                 }
             }
         }
+        Command::Skills { sub } => match sub {
+            SkillsCommand::Sync {
+                agent,
+                dry_run,
+                json,
+            } => std::process::exit(run_skills_sync(agent.as_deref(), dry_run, json)),
+        },
         Command::Config { sub } => {
             let home = common::home_dir();
             for warning in config::adopt_late_config(&home) {
@@ -2580,6 +2588,78 @@ fn print_resolved(
         "{key}: {} (source: {origin})",
         common::mode::value_text(&value)
     );
+}
+
+/// `playbook skills sync`: returns the exit code.
+fn run_skills_sync(agent: Option<&str>, dry_run: bool, json: bool) -> i32 {
+    use skills_sync::{apply, Agent};
+    const TARGET_DIR: &str = ".agents/skills";
+    const NO_AGENTS: &str = "no other agents found (looked for Codex at ~/.codex)";
+    let home = common::home_dir();
+    let path = std::env::var("PATH").unwrap_or_default();
+    let agents: Vec<Agent> = skills_sync::detect(&home, &path)
+        .into_iter()
+        .filter(|a| agent.is_none_or(|name| name == a.key()))
+        .collect();
+    if agents.is_empty() {
+        println!("{NO_AGENTS}");
+        return 0;
+    }
+    // Resolved after the agent check, so a machine with no other agent never
+    // needs the plugin folder.
+    let plugin = match playbook::plugin_root::resolve_here() {
+        Ok(resolved) => resolved.root,
+        Err(err) => {
+            eprintln!("{err}");
+            return 1;
+        }
+    };
+    let version = playbook::plugin_root::plugin_version(&plugin).unwrap_or_default();
+    let rendered = skills_sync::plan::plan(&plugin)
+        .and_then(|targets| skills_sync::render_targets(&plugin, &targets));
+    let folders = match rendered {
+        Ok(folders) => folders,
+        Err(err) => {
+            eprintln!("skills sync: {err}");
+            return 1;
+        }
+    };
+    if folders.is_empty() {
+        // An empty plan would read as every folder dropped and remove them.
+        eprintln!("skills sync: the plugin holds no skills or commands, nothing was changed");
+        return 1;
+    }
+    let root = common::paths::playbook_root_from(&home);
+    let target_root = home.join(TARGET_DIR);
+    let mut lines = Vec::new();
+    let mut clean = true;
+    for agent in agents {
+        let report = apply::apply(
+            &root,
+            agent,
+            &target_root,
+            &version,
+            &folders,
+            dry_run,
+            &apply::Faults::default(),
+        );
+        clean &= report.is_clean();
+        lines.extend(report.lines);
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&lines).unwrap_or_default()
+        );
+    } else {
+        for line in &lines {
+            println!("{line}");
+        }
+    }
+    if !clean {
+        eprintln!("skills sync: not every folder was synced");
+    }
+    i32::from(!clean)
 }
 
 /// Parse `config set`'s raw `value` string into the JSON type `key` expects,
