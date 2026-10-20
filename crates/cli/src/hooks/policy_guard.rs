@@ -768,6 +768,7 @@ mod tests {
             "playbook config get hooks.proseLint.mode",
             "playbook config set --global pr.draft false",
             "playbook config set pr.rulesX true",
+            "playbook config set disk.blockFreeGb 0",
             "playbook config get pr.rules.prose",
             "echo \"playbook config set hooks.proseLint.mode off\"",
             "playbook config list",

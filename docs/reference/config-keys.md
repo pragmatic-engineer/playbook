@@ -97,6 +97,8 @@ Older versions kept `config.json` files. The first run imports them and renames 
 
 The key `launcher.systemPromptMode` was removed. The launcher replaces Claude Code's system prompt with the playbook one and never appends to it. A plain `claude` keeps Claude Code's built-in prompt.
 
+The `disk.*` keys were removed with the disk guard. A stored value is ignored. A `config export` file made on 0.38.0 that holds a `disk.*` key fails `config import` as a whole, so delete those entries from the file first.
+
 ## What the effort ceiling does and does not cap
 
 Playbook's ceiling caps the agent variants the launcher renders for a session, the default effort the launcher adds, and what `playbook effort` and `playbook doctor` report. It does not cap a command, skill or base agent that ships its own `effort`, or a level you state for the session (`--effort`, `effortLevel`, `CLAUDE_CODE_EFFORT_LEVEL`, `/effort`), because the only mechanism for that is Claude Code's `maxEffortLevel` setting, and playbook never writes a Claude Code settings file.
@@ -143,6 +145,6 @@ Off by default. Set it with `playbook config set --global effort.auto suggest` (
 - [Plan and implement](../guides/01-plan-and-implement.md): the `/playbook:fix` limits.
 - [Worktree engine](../internals/03-worktree.md): the sweep that the `worktreeCleanup.*` keys control.
 
-The model cannot change `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`, `pr.ticketPatterns` or `disk.*`. The policy guard refuses a model-run `config set`, `import`, `unset` or `edit` on them. Run the change yourself in the prompt with `!`.
+The model cannot change `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars` or `pr.ticketPatterns`. The policy guard refuses a model-run `config set`, `import`, `unset` or `edit` on them. Run the change yourself in the prompt with `!`.
 
 The model cannot write Claude Code's `settings.json` or `settings.local.json` (user or project) with the Edit or Write tools or with a Bash command. Settings change through `playbook setup`, `uninstall`, `config set` and `doctor`, or by you in the prompt with `!`.
