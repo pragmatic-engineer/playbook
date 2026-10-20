@@ -7,6 +7,9 @@
 //! blocks can pass while blocking everything, which breaks the tool it guards;
 //! one that only proves it allows can pass while guarding nothing.
 
+#[path = "support/isolated.rs"]
+mod isolated;
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -15,7 +18,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Scratch space for fixtures, deliberately NOT `std::env::temp_dir()`.
+/// Scratch space for fixtures, deliberately NOT `std::env::temp_dir()` and
+/// never under the real `HOME`: cargo's own scratch folder for tests.
 ///
 /// The guard always allows paths inside `/tmp`, and on Linux `temp_dir()` IS
 /// `/tmp`. A fixture placed there would be allowed no matter what the root
@@ -24,7 +28,7 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 /// macOS where `temp_dir()` is `/var/folders`.
 fn scratch(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let base = PathBuf::from(std::env::var("HOME").expect("HOME")).join(".cache/playbook-tests");
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("playbook-tests");
     let dir = base.join(format!(
         "playbook-guards-{tag}-{}-{n}",
         playbook::testing::run_id()
@@ -38,7 +42,7 @@ fn scratch(tag: &str) -> PathBuf {
 /// process's own environment cannot mask a stdin regression.
 fn run_guard_via_stdin(name: &str, command: &str) -> String {
     let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_playbook"))
+    let mut child = isolated::playbook()
         .env_remove("CI")
         .env_remove("PLAYBOOK_HEADLESS")
         .args(["hook", name])
@@ -83,10 +87,9 @@ mod rm_workspace_guard {
     /// names the home folder names the scratch one. Nothing is executed.
     fn run_in_home(command: &str, home: &Path) -> String {
         let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
-        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        let out = isolated::playbook_in(home)
             .env_remove("CI")
             .env_remove("PLAYBOOK_HEADLESS")
-            .env("HOME", home)
             .args(["hook", "rm-workspace-guard"])
             .env("HOOK_INPUT", payload)
             .output()
@@ -162,7 +165,7 @@ mod rm_workspace_guard {
     #[test]
     fn malformed_payloads_exit_silently() {
         for raw in ["", "{", "null", r#"{"tool_input":{}}"#] {
-            let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            let out = isolated::playbook()
                 .env_remove("CI")
                 .env_remove("PLAYBOOK_HEADLESS")
                 .args(["hook", "rm-workspace-guard"])
@@ -212,7 +215,7 @@ mod precommit_check {
     /// Runs with the scratch repo as cwd, which is how the guard finds the diff.
     fn warns_in(dir: &PathBuf, command: &str) -> bool {
         let payload = serde_json::json!({ "tool_input": { "command": command } }).to_string();
-        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        let out = isolated::playbook()
             .env_remove("CI")
             .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "precommit-check"])
@@ -311,7 +314,7 @@ mod precommit_check {
         git_in(&dir, &["add", "-f", ".env"]);
         let payload =
             serde_json::json!({ "tool_input": { "command": "git commit -m x" } }).to_string();
-        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        let out = isolated::playbook()
             .env_remove("CI")
             .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "precommit-check"])
@@ -363,7 +366,7 @@ mod precommit_check {
         let payload =
             serde_json::json!({ "tool_input": { "command": "git commit -m x" } }).to_string();
 
-        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        let out = isolated::playbook()
             .env_remove("CI")
             .env_remove("PLAYBOOK_HEADLESS")
             .env(
@@ -409,7 +412,7 @@ mod bg_await_guard {
             "tool_input": { "command": command, "run_in_background": background }
         })
         .to_string();
-        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        let out = isolated::playbook()
             .env_remove("CI")
             .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "bg-await-guard"])
@@ -476,7 +479,7 @@ mod bg_await_guard {
     #[test]
     fn the_nudge_names_background_and_timeout_and_stays_quiet_with_a_timeout() {
         let run = |input: serde_json::Value| {
-            let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            let out = isolated::playbook()
                 .env_remove("CI")
                 .env_remove("PLAYBOOK_HEADLESS")
                 .args(["hook", "bg-await-guard"])
@@ -527,7 +530,7 @@ mod bg_await_guard {
             "tool_input": { "command": "npm install", "run_in_background": true }
         })
         .to_string();
-        let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+        let out = isolated::playbook()
             .env_remove("CI")
             .env_remove("PLAYBOOK_HEADLESS")
             .args(["hook", "bg-await-guard"])
@@ -547,7 +550,7 @@ mod bg_await_guard {
             r#"{"tool_input":{}}"#,
             r#"{"tool_input":{"command":"npm install"}}"#,
         ] {
-            let out = Command::new(env!("CARGO_BIN_EXE_playbook"))
+            let out = isolated::playbook()
                 .env_remove("CI")
                 .env_remove("PLAYBOOK_HEADLESS")
                 .args(["hook", "bg-await-guard"])
