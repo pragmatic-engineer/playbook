@@ -5,15 +5,21 @@
 //! JSON output.
 
 use super::command::UsageCommand;
+use super::daemon::{self, Stopped};
 use super::period::Period;
 use super::query::{self, Range, WeekStart};
 use super::run::{ingest_new, run_summary, Paths};
 use super::{api, db, tui};
 use rusqlite::Connection;
+use std::path::Path;
+use std::time::Duration;
 
 /// What the removed `usage ingest` says to anyone who still calls it.
 const INGEST_REMOVED: &str =
     "`usage ingest` was removed: use `playbook usage --summary`, the terminal view warms itself";
+
+/// How long `usage stop` waits for the collector before it may kill it.
+const STOP_BUDGET: Duration = Duration::from_secs(3);
 
 /// The flags of `playbook usage` itself.
 pub struct Opts {
@@ -87,10 +93,17 @@ pub fn run(
             raw,
         ));
     }
+    // Stopping needs no data file, so it creates none.
+    if let Some(UsageCommand::Stop) = sub {
+        return stop_text(
+            daemon::stop(paths, STOP_BUDGET, true),
+            &daemon::lock_path(paths),
+        );
+    }
     super::db::open_db(&paths.db).map(drop)?;
     match sub {
         // Answered above, before the data file is created.
-        Some(UsageCommand::Doctor { .. }) => Ok(String::new()),
+        Some(UsageCommand::Doctor { .. } | UsageCommand::Stop) => Ok(String::new()),
         Some(UsageCommand::Ingest) => Err(INGEST_REMOVED.to_string()),
         Some(UsageCommand::Warm) => super::warm::run_warm(paths).map(|()| String::new()),
         Some(UsageCommand::Collect { port, idle_seconds }) => {
@@ -127,6 +140,20 @@ pub fn run(
     }
 }
 
+/// What `usage stop` prints for each outcome.
+fn stop_text(stopped: Stopped, lock: &Path) -> Result<String, String> {
+    match stopped {
+        Stopped::Stopped | Stopped::Killed => Ok("stopped".to_string()),
+        Stopped::NotRunning => Ok("not running".to_string()),
+        Stopped::StillRunning => Err(format!(
+            "the collector did not stop within {} seconds; see who holds {}",
+            STOP_BUDGET.as_secs(),
+            lock.display()
+        )),
+        Stopped::Unavailable => Err(format!("cannot read the lock {}", lock.display())),
+    }
+}
+
 /// The range of `--json` when `--range` is not given.
 const DEFAULT_RANGE: &str = "30d";
 
@@ -159,6 +186,58 @@ pub fn parse_range(value: &str) -> Result<Range, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn paths(name: &str) -> Paths {
+        let dir = crate::util::scratch_dir(name);
+        let mut p = Paths::from_home(&dir);
+        p.db = dir.join("usage").join("usage.db");
+        p
+    }
+
+    fn no_opts() -> Opts {
+        Opts {
+            json: false,
+            summary: false,
+            range: None,
+        }
+    }
+
+    #[test]
+    fn stop_with_nothing_running_says_so_and_creates_no_data_file() {
+        let p = paths("entry-stop-none");
+
+        let out = run(Some(UsageCommand::Stop), &no_opts(), &p, false);
+
+        assert_eq!(out, Ok("not running".to_string()));
+        assert!(!p.db.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_ends_a_running_collector_and_frees_the_lock() {
+        let p = paths("entry-stop-running");
+        let _collector = crate::collector::tests::Running::start(&p);
+
+        let out = run(Some(UsageCommand::Stop), &no_opts(), &p, false);
+
+        assert_eq!(out, Ok("stopped".to_string()));
+        assert_eq!(
+            crate::daemon::lock_state(&p),
+            crate::daemon::LockState::Free
+        );
+    }
+
+    #[test]
+    fn a_collector_that_stays_is_an_error() {
+        let err = stop_text(Stopped::StillRunning, Path::new("/x/collector.lock")).unwrap_err();
+        assert!(err.contains("did not stop"), "{err}");
+        let err = stop_text(Stopped::Unavailable, Path::new("/x/collector.lock")).unwrap_err();
+        assert!(err.contains("/x/collector.lock"), "{err}");
+        assert_eq!(
+            stop_text(Stopped::Killed, Path::new("/x")),
+            Ok("stopped".into())
+        );
+    }
 
     #[test]
     fn a_range_names_one_of_the_nine_values() {
