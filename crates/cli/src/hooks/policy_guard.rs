@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Denies these things the system prompt used to ask for in prose:
+//! Optional and off by default. It denies nothing until
+//! `hooks.policyGuard.enabled` is true (or `POLICY_GUARD=1`); see
+//! `docs/guides/` "The policy guard". When on, it denies these things the
+//! system prompt used to ask for in prose:
 //!
 //! - skipping git hooks or signing (`--no-verify`, `-n` on commit,
 //!   `--no-gpg-sign`, `-c commit.gpgsign=false`),
@@ -42,7 +45,8 @@
 //! One hook on two matchers: Bash looks at the command, Edit and Write look at
 //! the target path. It fails safe: a payload it cannot read, a command the
 //! reader cannot split, or anything unexpected allows the call, and it never
-//! spawns a process. `POLICY_GUARD=0` turns it off. It only denies, it never
+//! spawns a process. It denies nothing until `hooks.policyGuard.enabled` is
+//! true or `POLICY_GUARD=1` is set; `POLICY_GUARD=0` turns it off. It only denies, it never
 //! writes anything.
 //!
 //! A guardrail against an agent drifting, not a security boundary: it does not
@@ -166,6 +170,40 @@ const SETTINGS_EDIT_REASON: &str = concat!(
 
 const MEMORY_REASON: &str = "Claude Code's own memory is off limits here. Save the fact in playbook's store instead, with the Write tool: ~/.config/playbook/memory/ for a global fact, <owner>/<repo>/ under it for a project fact.";
 
+/// The per-user key that switches the denials on. Off unless set to true.
+pub const ENABLED_KEY: &str = "hooks.policyGuard.enabled";
+
+/// Whether the denials are on: `POLICY_GUARD=1` or `0` decides, else the
+/// stored `hooks.policyGuard.enabled`, which is off by default.
+pub fn enabled() -> bool {
+    enabled_for(&crate::common::home_dir())
+}
+
+/// [`enabled`] for a given home, so doctor reads what the hook reads.
+pub fn enabled_for(home: &Path) -> bool {
+    match env_override() {
+        Some(on) => on,
+        None => stored_enabled(home),
+    }
+}
+
+/// `POLICY_GUARD=1` or `0` from the environment; any other value is ignored.
+pub fn env_override() -> Option<bool> {
+    match std::env::var("POLICY_GUARD").as_deref() {
+        Ok("0") => Some(false),
+        Ok("1") => Some(true),
+        _ => None,
+    }
+}
+
+/// `hooks.policyGuard.enabled` as stored. An unreadable value counts as off.
+pub fn stored_enabled(home: &Path) -> bool {
+    matches!(
+        crate::config::resolve_valid(ENABLED_KEY, home, None),
+        Ok((serde_json::Value::Bool(true), _, _))
+    )
+}
+
 pub fn run(payload: &Payload) {
     if std::env::var("POLICY_GUARD").as_deref() == Ok("0") {
         return;
@@ -173,7 +211,11 @@ pub fn run(payload: &Payload) {
     let home = std::env::var("HOME").unwrap_or_default();
     let command = payload.field(".tool_input.command");
     let path = payload.field(".tool_input.file_path");
-    let reason = decide(&command, &path, &home);
+    let reason = if enabled() {
+        decide(&command, &path, &home)
+    } else {
+        None
+    };
     if let Some(reason) = reason {
         emit_pre_deny(reason);
     } else if payload.field(".tool_name") == "Write"
@@ -206,7 +248,8 @@ fn is_fact_file(path: &str, memory_dir: &Path) -> bool {
 /// The config keys the model may not change: the `rm` guard's roots, the
 /// prose lint mode, the pull request rules and the disk guard's thresholds.
 /// Matched on lowercase prefixes.
-const PROTECTED_KEY_PREFIXES: [&str; 6] = [
+const PROTECTED_KEY_PREFIXES: [&str; 7] = [
+    "hooks.policyguard",
     "hooks.rmguard",
     "hooks.proselint",
     "pr.rules.",

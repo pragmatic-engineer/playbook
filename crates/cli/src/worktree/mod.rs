@@ -295,13 +295,6 @@ fn remove_data_of(repo_root: &Path, home: &Path, repo_slug: Option<&str>, path: 
     crate::common::data::remove_worktree_dbs(&crate::common::data::data_dir_from(home), slug, &id);
 }
 
-/// Removes the cargo target folder that belonged to the removed worktree at
-/// `path`, as `disk::clean::remove_worktree_target` allows.
-fn remove_target_of(repo_root: &Path, home: &Path, path: &Path) -> Option<String> {
-    let root = crate::disk::targets::worktrees_root(repo_root)?;
-    crate::disk::clean::remove_worktree_target(home, &root, path)
-}
-
 /// The worktree ids of every worktree registered against `repo_root`, or
 /// `None` when git cannot say (so nothing is reported as orphaned).
 pub fn live_worktree_ids(repo_root: &Path) -> Option<Vec<String>> {
@@ -788,10 +781,7 @@ pub fn remove(
     let report = decide_and_report(&entry, landed, &lock, repo_root, false);
     if report.ends_with(": removed") {
         remove_data_of(repo_root, home, repo_slug, &entry.path);
-        match remove_target_of(repo_root, home, &entry.path) {
-            Some(target) => Ok(format!("{report}; {target}")),
-            None => Ok(report),
-        }
+        Ok(report)
     } else {
         Err(report.trim_start_matches("worktree ").to_string())
     }
@@ -889,14 +879,10 @@ pub fn sweep(
         if !dry_run && (line.ends_with(": removed") || line.contains(": failed to remove")) {
             log_removal(home, now_epoch, &line);
         }
-        let removed = !dry_run && line.ends_with(": removed");
-        if removed {
+        if !dry_run && line.ends_with(": removed") {
             remove_data_of(repo_root, home, repo_slug, &entry.path);
         }
         report.push(line);
-        if removed {
-            report.extend(remove_target_of(repo_root, home, &entry.path));
-        }
     }
     Ok(report)
 }
