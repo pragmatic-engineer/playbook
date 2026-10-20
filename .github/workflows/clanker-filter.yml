@@ -18,16 +18,17 @@
 #      (cleaning them up) passes; LICENSE / NOTICE / COPYING files are
 #      exempt since upstream third party text legitimately contains them.
 #
-# SAFETY: pull_request_target runs with base-branch write context even for
-# fork PRs. This workflow intentionally has NO checkout step so that no
-# untrusted code from the PR head can be executed. The diff scan uses the
-# REST API (pulls.listFiles) which returns the patch text, not file
-# contents, so untrusted code is never evaluated.
+# SAFETY: this runs on plain pull_request, so a fork PR gets a read-only
+# token and no secrets. There is no checkout step, and the diff scan uses the
+# REST API (pulls.listFiles), which returns patch text, so no PR code runs.
+# On a fork PR the gate cannot comment, label or close; it fails the check
+# and writes a job summary instead. Writes (comment, label, close) are tried
+# only when the PR head lives in this repository.
 
 name: PR Quality Gate
 
 on:
-  pull_request_target:
+  pull_request:
     # Re-evaluate on every event that can change the PR's signal: open /
     # reopen / ready-for-review (initial gate), edited (title or body
     # change can flip the linked-issue or AI-marker checks), synchronize
@@ -58,12 +59,16 @@ jobs:
       - name: Evaluate PR quality
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const pr      = context.payload.pull_request;
             const author  = pr.user.login;
             const title   = pr.title  || '';
             const body    = pr.body   || '';
+
+            // A fork PR token is read-only. Write calls (comment, label,
+            // close) are attempted only when the head is in this repo.
+            const canWrite = !!pr.head.repo &&
+              pr.head.repo.full_name === context.repo.owner + '/' + context.repo.repo;
 
             // Skip closed PRs entirely: the rejection has already happened
             // (or the PR was closed for an unrelated reason). Re-running on
@@ -81,6 +86,7 @@ jobs:
             const currentLabels = (pr.labels || []).map(l => l.name);
 
             async function clearManagedLabels() {
+              if (!canWrite) return;
               for (const label of MANAGED_LABELS) {
                 if (!currentLabels.includes(label)) continue;
                 try {
@@ -133,31 +139,50 @@ jobs:
               'Please review the contribution guidelines and resubmit. If you believe this rejection is in error, open an issue.',
             ].join('\n');
 
-            // Helper: post a comment and close the PR.
-            async function reject(label, commentBody) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo:  context.repo.repo,
-                issue_number: pr.number,
-                body: commentBody,
-              });
+            const OPAQUE_FAILURE = 'PR Quality Gate: rejected. This pull request did not pass the automated quality review for this repository. See the contribution guidelines.';
+
+            // Helper: report the rejection. Always writes a job summary and
+            // fails the check. Comments, labels and closes the PR only when
+            // the token can write (same-repo PR); a write error never hides
+            // the failure.
+            async function reject(label, commentBody, failMessage) {
+              if (canWrite) {
+                try {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo:  context.repo.repo,
+                    issue_number: pr.number,
+                    body: commentBody,
+                  });
+                  try {
+                    await github.rest.issues.addLabels({
+                      owner:        context.repo.owner,
+                      repo:         context.repo.repo,
+                      issue_number: pr.number,
+                      labels:       [label],
+                    });
+                  } catch { /* label may not exist; non-fatal */ }
+                  await github.rest.pulls.update({
+                    owner:       context.repo.owner,
+                    repo:        context.repo.repo,
+                    pull_number: pr.number,
+                    state:       'closed',
+                  });
+                } catch (err) {
+                  core.warning('Could not comment on or close the PR: ' + err.message);
+                }
+              } else {
+                core.info('Fork PR: token is read-only; reporting through the check result only');
+              }
               try {
-                await github.rest.issues.addLabels({
-                  owner:        context.repo.owner,
-                  repo:         context.repo.repo,
-                  issue_number: pr.number,
-                  labels:       [label],
-                });
-              } catch { /* label may not exist; non-fatal */ }
-              await github.rest.pulls.update({
-                owner:       context.repo.owner,
-                repo:        context.repo.repo,
-                pull_number: pr.number,
-                state:       'closed',
-              });
+                await core.summary.addRaw(commentBody + '\n', true).write();
+              } catch (err) {
+                core.warning('Could not write the job summary: ' + err.message);
+              }
+              core.setFailed(failMessage);
             }
 
-            // ── 1. Unapproved bot author ────────────────────────────────
+            // -- 1. Unapproved bot author --------------------------------
             if (author.endsWith('[bot]')) {
               await reject('gate:quality:unapproved-bot', [
                 '## PR Quality Gate: unapproved bot author',
@@ -166,12 +191,11 @@ jobs:
                 'Automated PRs must come through Dependabot or a bot explicitly approved by the maintainer.',
                 '',
                 'If you intended to open this yourself, please reopen from a human account.',
-              ].join('\n'));
-              core.setFailed("Rejected: unapproved bot author '" + author + "'");
+              ].join('\n'), "Rejected: unapproved bot author '" + author + "'");
               return;
             }
 
-            // ── 2. AI-generation markers ────────────────────────────────
+            // -- 2. AI-generation markers --------------------------------
             // Detects common AI tool disclosures in title or body.
             const AI_PATTERNS = [
               /generated by claude/i,
@@ -181,17 +205,16 @@ jobs:
               /co-authored-by:?\s+claude/i,
               /co-authored-by:?\s+chatgpt/i,
               /this (pr|pull request) was (created|generated|written) by (an? )?ai/i,
-              /🤖/,
+              /\u{1F916}/u,
             ];
             const fullText = title + '\n' + body;
             const aiMatch = AI_PATTERNS.find(p => p.test(fullText));
             if (aiMatch) {
-              await reject('gate:quality:rejected', OPAQUE_REJECTION);
-              core.setFailed('Rejected: AI-generation markers detected');
+              await reject('gate:quality:rejected', OPAQUE_REJECTION, OPAQUE_FAILURE);
               return;
             }
 
-            // ── 3. Em or en dashes in title, body, or added diff lines ──
+            // -- 3. Em or en dashes in title, body, or added diff lines --
             // Project convention: ASCII-only punctuation. Em (U+2014) and
             // en (U+2013) dashes are forbidden in source files, project
             // docs, and PR metadata. They are a common tell of AI text.
@@ -205,7 +228,7 @@ jobs:
             // their .md / .txt / .rst variants) are skipped because
             // upstream third-party license text legitimately contains
             // these characters.
-            const DASH_RE        = /[–—]/;
+            const DASH_RE        = /[\u2013\u2014]/;
             const DASH_EXEMPT_RE = /^(LICENSE|NOTICE|COPYING)(?:[.\-_].*)?$/i;
             const dashViolations = [];
             if (DASH_RE.test(title)) {
@@ -250,7 +273,6 @@ jobs:
               core.warning('Could not list PR files for em or en dash scan: ' + err.message);
             }
             if (dashViolations.length > 0) {
-              await reject('gate:quality:rejected', OPAQUE_REJECTION);
               // Detail is logged to the workflow run only (visible to
               // maintainers, not posted as a PR comment) so AI tools
               // reading the rejection cannot learn what pattern fired.
@@ -260,11 +282,11 @@ jobs:
               if (dashViolations.length > 25) {
                 core.warning('Em/en dash violations: and ' + (dashViolations.length - 25) + ' more (truncated)');
               }
-              core.setFailed('Rejected: em or en dash detected in title, body, or added diff lines');
+              await reject('gate:quality:rejected', OPAQUE_REJECTION, OPAQUE_FAILURE);
               return;
             }
 
-            // ── 4. Linked issue ─────────────────────────────────────────
+            // -- 4. Linked issue ----------------------------------------─
             // Accepted keywords from the GitHub autolink spec (case-insensitive).
             // Matches "closes #N", "fixes #N", "resolves #N" and their variants,
             // as well as cross-repo refs ("owner/repo#N").
@@ -301,8 +323,7 @@ jobs:
                   '```',
                   '',
                   'Replace `N` with the issue number. If no issue exists yet, please open one first.',
-                ].join('\n'));
-                core.setFailed('Rejected: no linked issue in PR body');
+                ].join('\n'), 'Rejected: no linked issue in PR body');
                 return;
               }
             }
