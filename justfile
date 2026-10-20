@@ -75,6 +75,12 @@ check: build
     scripts/check-plugin.sh version
     INTENTS_STRICT=1 scripts/check-intents.sh {{ bin }}
 
+# Lint the GitHub workflows with zizmor, as the zizmor workflow does (brew install zizmor).
+#
+# Dev tooling only. Online audits run when GH_TOKEN is set, or gh is signed in.
+zizmor:
+    GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}" zizmor --persona auditor --min-severity medium --no-progress .
+
 # cargo-nextest schedules tests across every test binary at once.
 #
 # Run the test suite with cargo-nextest, then the doc tests.
