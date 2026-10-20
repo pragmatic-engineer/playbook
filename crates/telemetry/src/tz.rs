@@ -166,7 +166,9 @@ fn day_start_with(off: &dyn Fn(i64) -> i64, day: i64) -> i64 {
 /// In the library's own unit tests the state lives per thread, not per
 /// process. The test harness runs each test on its own thread, so a test that
 /// installs a zone (directly, or through `entry::run` calling `ensure_init`)
-/// cannot change the zone another parallel test reads.
+/// cannot change the zone another parallel test reads. The flip side: a zone
+/// set in a unit test applies to that thread only, and a thread the code under
+/// test starts reads UTC.
 #[cfg(not(test))]
 mod state {
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};

@@ -17,11 +17,13 @@ pub fn write_graph_fixture(mem_dir: &std::path::Path, json: &str) {
 
 /// Set in a child process that [`in_scratch_home`] started, so the child
 /// knows to run the test body instead of starting another child.
+#[cfg(test)]
 const SCRATCH_CHILD_ENV: &str = "PLAYBOOK_TEST_SCRATCH_HOME_CHILD";
 
 /// Panics unless `$HOME` is set and is not the home the account database
-/// lists for this user. A unit test that dispatches a hook calls this first,
-/// so a hook can never write the real `~/.config/playbook`.
+/// lists for this user. [`in_scratch_home`] calls it in its child; a hook
+/// test that does not use that helper is not covered.
+#[cfg(test)]
 pub fn assert_home_is_scratch() {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let Some(home) = home.filter(|h| !h.as_os_str().is_empty()) else {
@@ -48,6 +50,7 @@ pub fn assert_home_is_scratch() {
 /// }
 /// // body: runs with a scratch HOME
 /// ```
+#[cfg(test)]
 pub fn in_scratch_home(test_path: &str) -> bool {
     if std::env::var_os(SCRATCH_CHILD_ENV).is_some() {
         assert_home_is_scratch();

@@ -121,8 +121,8 @@ mod tests {
     }
 
     /// The guard behind the scratch home: it refuses a `$HOME` that is the
-    /// account's real home, so a hook test that skips the scratch home fails
-    /// instead of writing there.
+    /// account's real home. `in_scratch_home` runs it in its child, so a hook
+    /// test built on that helper fails instead of writing there.
     #[test]
     fn the_scratch_home_guard_refuses_the_real_home() {
         // Arrange: whatever `$HOME` is here counts as the account's home.
