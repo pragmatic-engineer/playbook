@@ -431,9 +431,10 @@ fn hook_cases() -> Vec<Case> {
         ("context-hygiene", SESSION_PAYLOAD),
         ("doc-read-hint", EDIT_PAYLOAD),
         ("usage-warm", SESSION_PAYLOAD),
-        ("disk-guard", BASH_PAYLOAD),
-        // Retired, kept so an old plugin cache stays quiet: no output, no files.
+        // Retired, kept so an old plugin cache or settings entry stays quiet:
+        // no output, no files.
         ("migration-check", SESSION_PAYLOAD),
+        ("disk-guard", BASH_PAYLOAD),
     ];
     hooks.iter().map(|(name, payload)| {
             let c = case(&format!("hook {name}"), &["hook", name]).stdin(payload);
@@ -441,7 +442,7 @@ fn hook_cases() -> Vec<Case> {
                 // A worktree hook with no worktree name refuses and says so.
                 "worktree-create" => c.code(1).err("unsafe worktree name"),
                 "worktree-remove" => c.err("worktree_path is missing"),
-                "migration-check" | "no-slop-guard" => c,
+                "migration-check" | "disk-guard" | "no-slop-guard" => c,
                 // These keep a log or a counter, so a second run adds to it.
                 "session-init" | "session-clean-exit" | "search-counter" | "precompact-warn"
                 | "usage-warm" => c.grows(),
