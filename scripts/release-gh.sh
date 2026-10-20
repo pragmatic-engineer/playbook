@@ -13,7 +13,7 @@
 #     its HEAD, which must still be the head of the default branch, so the
 #     commit cannot undo a change that landed after the checkout. The commit
 #     is made with createCommitOnBranch, so GitHub signs it. <branch> must be
-#     release/vX.Y.Z, and each <file> a regular file inside <dir>. An open
+#     release/vX.Y.Z (the flake: release/nix-vX.Y.Z), and each <file> a regular file inside <dir>. An open
 #     pull request from <branch> in <repo> by the app is reused when its
 #     files match <dir> (auto-merge is turned on again), and a merged one is
 #     reported as merged. Any other open pull request on <branch> stops the
@@ -84,7 +84,7 @@ pr() {
   [ "$#" -ge 6 ] || usage
   local repo="$1" branch="$2" title="$3" body="$4" dir="$5"
   shift 5
-  [[ "$branch" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "branch '$branch' is not release/vX.Y.Z"
+  [[ "$branch" =~ ^release/(nix-)?v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "branch '$branch' is not release/vX.Y.Z or release/nix-vX.Y.Z"
   local number base head want f root parent open
   # Each file is a regular file inside <dir>, checked before anything is
   # written. A symlink, the file or a folder on its path, could make jq read
@@ -243,7 +243,7 @@ release() {
 find_cmd() {
   [ "$#" -eq 2 ] || usage
   local repo="$1" branch="$2" base number state
-  [[ "$branch" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "branch '$branch' is not release/vX.Y.Z"
+  [[ "$branch" =~ ^release/(nix-)?v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "branch '$branch' is not release/vX.Y.Z or release/nix-vX.Y.Z"
   base="$(gh api "repos/$repo" --jq .default_branch)"
   for state in open merged; do
     number="$(find_pr "$repo" "$branch" "$base" "$state")"

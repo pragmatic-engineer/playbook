@@ -24,7 +24,8 @@
 #   other        every other type, and subjects that are not conventional
 # A breaking item shows the footer text when there is one, else the subject.
 # A trailing "(#123)" becomes the pull request number.
-# The release commit, "chore(release): playbook X.Y.Z", is left out.
+# The release commit, "chore(release): playbook X.Y.Z", is left out, and so
+# is the flake commit that follows a release, "chore(release): nix flake X.Y.Z".
 #
 # GITHUB_REPOSITORY names the repository for the links. A shallow clone is
 # deepened, with its tags. Run from anywhere inside the repository; a
@@ -180,7 +181,7 @@ json() {
       # sets the version and the changelog (scripts/release-prepare.sh).
       [split("\u0000")[] | ltrimstr("\n") | select(test("\\S")) | item
         | select((.type == "chore" and .scope == "release"
-                  and (.text | test("^playbook [0-9]+\\.[0-9]+\\.[0-9]+$"))) | not)] as $items
+                  and (.text | test("^(playbook|nix flake) [0-9]+\\.[0-9]+\\.[0-9]+$"))) | not)] as $items
       | [
           {name: "breaking", title: "Breaking changes"},
           {name: "features", title: "Features"},
