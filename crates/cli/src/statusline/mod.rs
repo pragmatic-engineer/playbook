@@ -481,7 +481,10 @@ pub fn render(input: &str, env: &Env, now: i64) -> Vec<u8> {
         show_cache_ratio: env.flag("STATUSLINE_SHOW_CACHE_RATIO"),
         show_rate_limits: env.flag("STATUSLINE_SHOW_RATE_LIMITS"),
         bar_width: env.int("STATUSLINE_CTX_BAR_WIDTH", 10).clamp(0, MAX_WIDTH),
-        compact_trigger: env.int("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", 90),
+        compact_trigger: env
+            .get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+            .and_then(|w| fmt::compact_trigger_pct(w, &session.ctx_window_size))
+            .unwrap_or_else(|| env.int("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", 90)),
         home,
         now,
     };
