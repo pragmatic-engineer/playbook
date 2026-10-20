@@ -125,4 +125,6 @@ No project-specific code style rules beyond the baseline. See [.github/CONTRIBUT
 
 See the [justfile](justfile) for test commands. `just check` runs the checks CI runs, apart from the cross builds and `cargo audit`.
 
+A change under `.github/` also needs `just zizmor` to pass (`brew install zizmor`). It lints the workflows the way the `zizmor` workflow does, and fails on findings of medium severity and above. The workflow itself only reports and never blocks a merge. Ignores go in `.github/zizmor.yml`, one rule and one file each, with the reason. This is dev tooling only, not part of the `playbook` binary or the plugin.
+
 A test that starts the built `playbook` gives it a scratch home: use `isolated::playbook()` from `crates/cli/tests/support/isolated.rs`, or set `HOME` yourself. `test_isolation.rs` fails for a spawn that does neither. As a second net, a debug build started by cargo or nextest does not run migrations, the upgrade heal or the real `launchctl` and `systemctl` against the real home of your account, and prints a note instead. Other writes are not covered by that net, so the scratch home stays the rule. Set `PLAYBOOK_ALLOW_REAL_HOME=1` to run a dev build against your real home on purpose.
