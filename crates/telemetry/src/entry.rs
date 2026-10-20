@@ -52,7 +52,7 @@ pub fn json_report(
     let live = api::live_json(&i.window, &i.sessions, &i.latest, now);
     let since = super::limits_source::events_since(now, configured_week_start());
     let limit_events = db::load_usage_events_since(conn, since)?;
-    let limits = super::run::limits_json(paths, &limit_events, now);
+    let limits = super::run::limits_json(paths, conn, &limit_events, now);
     if let Some(map) = data.as_object_mut() {
         map.insert("live".to_string(), live);
         map.insert("limits".to_string(), limits);
