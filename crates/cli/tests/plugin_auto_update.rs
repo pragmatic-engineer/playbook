@@ -169,7 +169,12 @@ impl Fixture {
         for var in CI_VARS {
             cmd.env_remove(var);
         }
-        if (tty || env.iter().any(|(k, _)| *k == ASSUME_TTY_ENV)) && !cfg!(debug_assertions) {
+        if (tty
+            || env
+                .iter()
+                .any(|(k, _)| *k == ASSUME_TTY_ENV || *k == NO_SPAWN_ENV))
+            && !cfg!(debug_assertions)
+        {
             panic!(
                 "the terminal seam exists only in debug builds; run these tests without --release"
             );
@@ -524,6 +529,8 @@ fn the_detached_refresh_stores_the_updated_line_and_prints_nothing() {
     // Arrange
     let f = Fixture::new(true, 0);
 
+    f.set_marker(&format!("{VERSION} running {}", now()));
+
     // Act
     let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
 
@@ -548,9 +555,22 @@ fn the_detached_refresh_stores_the_updated_line_and_prints_nothing() {
 }
 
 #[test]
+fn a_refresh_started_by_hand_without_a_claim_runs_nothing() {
+    let f = Fixture::new(true, 0);
+
+    let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(f.calls(), "");
+    assert_eq!(f.marker(), None);
+}
+
+#[test]
 fn a_failed_detached_refresh_stores_the_failure_line_and_marks_failed() {
     // Arrange
     let f = Fixture::new(false, 1);
+
+    f.set_marker(&format!("{VERSION} running {}", now()));
 
     // Act
     let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
@@ -590,6 +610,8 @@ fn a_failed_detached_refresh_stores_the_failure_line_and_marks_failed() {
 fn a_refresh_that_leaves_the_plugin_older_stores_the_still_older_notice() {
     // Arrange: claude exits 0 and leaves the old plugin in place
     let f = Fixture::new(false, 0);
+
+    f.set_marker(&format!("{VERSION} running {}", now()));
 
     // Act
     f.run(&["update", "--refresh-plugin"], false, "", &[]);

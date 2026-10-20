@@ -85,9 +85,12 @@ impl Outcome {
     }
 }
 
+/// The start of every [`command`], for code that tells a plugin fix apart.
+pub const COMMAND_PREFIX: &str = "claude plugin update ";
+
 /// The command that updates plugin `id`.
 pub fn command(id: &str) -> String {
-    format!("claude plugin update {id}")
+    format!("{COMMAND_PREFIX}{id}")
 }
 
 /// What `update.plugin` asks for.
@@ -267,7 +270,16 @@ pub fn run(probe: &Probe) -> Outcome {
 /// [`SKIP_ENV`]. `None` when it was not asked to run.
 pub fn run_for_command(home: &Path, no_plugin: bool) -> Option<Outcome> {
     let skip = no_plugin || std::env::var_os(SKIP_ENV).is_some_and(|v| v == SKIP_VALUE);
-    (!skip).then(|| run(&Probe::for_home(home)))
+    if skip {
+        return None;
+    }
+    let root = crate::common::paths::playbook_root_from(home);
+    if in_flight(&root, env!("CARGO_PKG_VERSION"), now()) {
+        return Some(Outcome::Skipped(
+            "another playbook process is already updating it".to_string(),
+        ));
+    }
+    Some(run(&Probe::for_home(home)))
 }
 
 /// The state key of the once-per-binary-version marker.
@@ -496,6 +508,16 @@ fn notice_line(outcome: &Outcome, state: State) -> Option<String> {
                 command(id)
             ))
         }
+        // The next session may already run the new plugin, so no restart advice.
+        Outcome::Updated { id, from, to } => Some(format!(
+            "plugin: updated {id}{}{}",
+            from.as_deref()
+                .map(|v| format!(" from {v}"))
+                .unwrap_or_default(),
+            to.as_deref()
+                .map(|v| format!(" to {v}"))
+                .unwrap_or_default(),
+        )),
         _ => outcome.line(),
     }
 }
@@ -531,16 +553,12 @@ fn write(root: &Path, running: &str, state: State, now: u64) {
 /// hook started cannot be stopped by its own variable.
 pub fn refresh_plugin(home: &Path) {
     let root = crate::common::paths::playbook_root_from(home);
-    let claude_home = home.join(".claude");
-    let outcome = run(&Probe::for_home(home));
-    let after = plugin_id(&claude_home).and_then(|id| installed_version(&claude_home, id.as_str()));
-    let state = finish(
-        &root,
-        &outcome,
-        env!("CARGO_PKG_VERSION"),
-        after.as_deref(),
-        now(),
-    );
+    // Only a run the hook claimed proceeds, so a hand-started flag cannot
+    // run a second update beside it.
+    if !in_flight(&root, env!("CARGO_PKG_VERSION"), now()) {
+        return;
+    }
+    let (outcome, state) = attempt(home, &root);
     if let Some(line) = notice_line(&outcome, state) {
         crate::notices::store_notice(&root, &line);
     }
@@ -713,22 +731,32 @@ fn ask() -> Option<bool> {
 }
 
 fn update_and_report(home: &Path, root: &Path) {
-    let claude_home = home.join(".claude");
-    if let Some(id) = plugin_id(&claude_home) {
+    if let Some(id) = plugin_id(&home.join(".claude")) {
         eprintln!("playbook: updating the playbook plugin ({})", command(&id));
     }
+    let (outcome, state) = attempt(home, root);
+    let line = match outcome {
+        Outcome::Updated { .. } => outcome.line(),
+        _ => notice_line(&outcome, state),
+    };
+    if let Some(line) = line {
+        eprintln!("{line}");
+    }
+}
+
+/// Runs the update, records how it ended and returns both.
+fn attempt(home: &Path, root: &Path) -> (Outcome, State) {
+    let claude_home = home.join(".claude");
     let outcome = run(&Probe::for_home(home));
     let after = plugin_id(&claude_home).and_then(|id| installed_version(&claude_home, &id));
-    finish(
+    let state = finish(
         root,
         &outcome,
         env!("CARGO_PKG_VERSION"),
         after.as_deref(),
         now(),
     );
-    if let Some(line) = outcome.line() {
-        eprintln!("{line}");
-    }
+    (outcome, state)
 }
 
 #[cfg(test)]

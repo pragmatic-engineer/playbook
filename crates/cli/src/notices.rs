@@ -112,6 +112,14 @@ pub fn store_notice(root: &Path, line: &str) {
 /// Reads and deletes the stored plugin line in one transaction, so two
 /// sessions show it once between them.
 pub fn take_notice(root: &Path) -> Option<String> {
+    // Most sessions have none, so look first without taking the write lock.
+    let stored = crate::state::list_read_only(root, PLUGIN_UPDATE_KEY).ok()?;
+    if !stored
+        .iter()
+        .any(|(k, v)| k == PLUGIN_UPDATE_KEY && !v.is_empty())
+    {
+        return None;
+    }
     crate::state::transaction(root, |tx| {
         let line = tx.get(PLUGIN_UPDATE_KEY)?.filter(|v| !v.is_empty());
         if line.is_some() {

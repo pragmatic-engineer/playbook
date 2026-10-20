@@ -16,8 +16,6 @@ use std::time::{Duration, Instant};
 const BINARY_KEY: &str = "versions/binary";
 const SCHEMA_KEY: &str = "versions/schema";
 const PLUGIN_KEY: &str = "versions/plugin";
-/// The start of the fix an item carries when the plugin needs updating.
-const PLUGIN_UPDATE_FIX_PREFIX: &str = "claude plugin update ";
 const PENDING_KEY: &str = "versions/pending";
 const FAILED_AT_KEY: &str = "versions/failed-at";
 
@@ -504,7 +502,7 @@ fn notice(home: &Path, out: &Outcome, now: u64, shown: bool) -> Option<String> {
         // An update already started says it is updating, so the manual fix
         // would contradict it.
         if crate::plugin_update::in_flight(&root, env!("CARGO_PKG_VERSION"), now) {
-            open.retain(|i| !i.fix.starts_with(PLUGIN_UPDATE_FIX_PREFIX));
+            open.retain(|i| !i.fix.starts_with(crate::plugin_update::COMMAND_PREFIX));
         }
         crate::pending::session_notice(&root, &open, now, shown, prune)
     };
