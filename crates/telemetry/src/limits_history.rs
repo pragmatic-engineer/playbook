@@ -20,6 +20,8 @@ use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 /// The largest the file may be. A bigger file is ignored by readers and
 /// replaced by the next write.
@@ -212,21 +214,29 @@ fn trim_and_append(
     write_atomic_private_unsynced(path, out)
 }
 
-/// The readings in the file as `(window, time, percent)`, oldest first. An
-/// unreadable or oversized file gives none, and a line that is not valid is
-/// skipped.
-pub fn load(usage_dir: &Path) -> Vec<(LimitPeriod, i64, f64)> {
-    let path = history_path(usage_dir);
-    let Ok(meta) = fs::metadata(&path) else {
-        return Vec::new();
-    };
-    if !meta.is_file() || meta.len() > MAX_BYTES {
-        return Vec::new();
-    }
-    let Ok(bytes) = fs::read(&path) else {
-        return Vec::new();
-    };
-    let mut out: Vec<(LimitPeriod, i64, f64)> = String::from_utf8_lossy(&bytes)
+type Readings = Vec<(LimitPeriod, i64, f64)>;
+
+/// The last file `load` parsed and what it made of it, keyed by path, modified
+/// time and size, so a refresh that finds the file unchanged parses nothing.
+struct Cached {
+    path: PathBuf,
+    modified: Option<SystemTime>,
+    len: u64,
+    readings: Readings,
+}
+
+static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
+
+#[cfg(test)]
+thread_local! {
+    /// How many times `load` parsed the file on this thread.
+    static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn parse_all(bytes: &[u8]) -> Readings {
+    #[cfg(test)]
+    PARSES.with(|p| p.set(p.get() + 1));
+    let mut out: Readings = String::from_utf8_lossy(bytes)
         .lines()
         .filter_map(parse_line)
         .flat_map(|r| {
@@ -239,6 +249,40 @@ pub fn load(usage_dir: &Path) -> Vec<(LimitPeriod, i64, f64)> {
         .collect();
     out.sort_by_key(|(_, t, _)| *t);
     out
+}
+
+/// The readings in the file as `(window, time, percent)`, oldest first. An
+/// unreadable or oversized file gives none, and a line that is not valid is
+/// skipped. The parsed result is kept until the file's modified time or size
+/// changes, because the TUI asks on every refresh.
+pub fn load(usage_dir: &Path) -> Readings {
+    let path = history_path(usage_dir);
+    let Ok(meta) = fs::metadata(&path) else {
+        return Vec::new();
+    };
+    if !meta.is_file() || meta.len() > MAX_BYTES {
+        return Vec::new();
+    }
+    let (modified, len) = (meta.modified().ok(), meta.len());
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(c) = cache
+        .as_ref()
+        .filter(|c| c.path == path && c.modified == modified && c.len == len)
+    {
+        return c.readings.clone();
+    }
+    let Ok(bytes) = fs::read(&path) else {
+        return Vec::new();
+    };
+    let readings = parse_all(&bytes);
+    // A file without a modified time cannot tell a change apart: do not keep it.
+    *cache = modified.map(|modified| Cached {
+        path,
+        modified: Some(modified),
+        len,
+        readings: readings.clone(),
+    });
+    readings
 }
 
 #[cfg(test)]
@@ -312,6 +356,45 @@ mod tests {
             NOW - 1000
         );
         fs::write(history_path(&d), newer).unwrap();
+
+        assert!(load(&d).is_empty());
+    }
+
+    #[test]
+    fn an_unchanged_file_is_parsed_once_across_loads() {
+        let d = dir("cache-hit");
+        record(&d, Some(10.0), None, NOW);
+        let before = PARSES.with(|p| p.get());
+
+        let first = load(&d);
+        let second = load(&d);
+
+        assert_eq!(first, second);
+        assert_eq!(first, vec![(LimitPeriod::FiveHour, NOW, 10.0)]);
+        assert_eq!(PARSES.with(|p| p.get()) - before, 1);
+    }
+
+    #[test]
+    fn a_new_line_makes_the_next_load_parse_again() {
+        let d = dir("cache-miss");
+        record(&d, Some(10.0), None, NOW);
+        let _ = load(&d);
+        let before = PARSES.with(|p| p.get());
+
+        record(&d, Some(11.0), None, NOW + 300);
+        let got = load(&d);
+
+        assert_eq!(got.len(), 2);
+        assert_eq!(PARSES.with(|p| p.get()) - before, 1);
+    }
+
+    #[test]
+    fn a_deleted_file_gives_no_readings_even_after_a_cached_load() {
+        let d = dir("cache-gone");
+        record(&d, Some(10.0), None, NOW);
+        assert_eq!(load(&d).len(), 1);
+
+        fs::remove_file(history_path(&d)).unwrap();
 
         assert!(load(&d).is_empty());
     }
