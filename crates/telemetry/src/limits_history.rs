@@ -38,6 +38,10 @@ const TRIM_TO_BYTES: u64 = MAX_BYTES / 4 * 3;
 /// than the longest line.
 const EDGE_BYTES: u64 = 512;
 
+/// The format version written on every line as `v`. A line without `v` is an
+/// older line and is read as this version; a line with a newer `v` is skipped.
+pub const LINE_VERSION: i64 = 1;
+
 /// One line of the file.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Reading {
@@ -64,6 +68,10 @@ fn percent(v: &Value, key: &str) -> Option<f64> {
 
 fn parse_line(line: &str) -> Option<Reading> {
     let v: Value = serde_json::from_str(line.trim()).ok()?;
+    // No `v` is a line from before the field existed: same shape as version 1.
+    if v.get("v").is_some_and(|n| n.as_i64() != Some(LINE_VERSION)) {
+        return None;
+    }
     Some(Reading {
         t: v.get("t")?.as_i64().filter(|t| *t > 0)?,
         five_hour: percent(&v, "five_hour"),
@@ -74,7 +82,7 @@ fn parse_line(line: &str) -> Option<Reading> {
 fn line_of(r: &Reading) -> String {
     format!(
         "{}\n",
-        json!({"t": r.t, "five_hour": r.five_hour, "seven_day": r.seven_day})
+        json!({"v": LINE_VERSION, "t": r.t, "five_hour": r.five_hour, "seven_day": r.seven_day})
     )
 }
 
@@ -263,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn a_line_holds_only_the_time_and_the_two_percentages() {
+    fn a_line_holds_only_the_version_the_time_and_the_two_percentages() {
         let d = dir("shape");
 
         record(&d, Some(12.5), None, NOW);
@@ -271,9 +279,41 @@ mod tests {
         assert_eq!(
             lines(&d),
             vec![format!(
-                r#"{{"t":{NOW},"five_hour":12.5,"seven_day":null}}"#
+                r#"{{"v":1,"t":{NOW},"five_hour":12.5,"seven_day":null}}"#
             )]
         );
+    }
+
+    #[test]
+    fn a_line_from_before_the_version_field_is_still_read() {
+        let d = dir("legacy");
+        let old = format!(
+            "{{\"t\":{},\"five_hour\":5.0,\"seven_day\":null}}\n",
+            NOW - 1000
+        );
+        fs::write(history_path(&d), old).unwrap();
+
+        record(&d, Some(6.0), None, NOW);
+
+        assert_eq!(
+            load(&d),
+            vec![
+                (LimitPeriod::FiveHour, NOW - 1000, 5.0),
+                (LimitPeriod::FiveHour, NOW, 6.0)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_line_with_a_newer_version_is_skipped_by_readers() {
+        let d = dir("newer");
+        let newer = format!(
+            "{{\"v\":2,\"t\":{},\"five_hour\":9.0,\"seven_day\":null}}\n",
+            NOW - 1000
+        );
+        fs::write(history_path(&d), newer).unwrap();
+
+        assert!(load(&d).is_empty());
     }
 
     #[test]
