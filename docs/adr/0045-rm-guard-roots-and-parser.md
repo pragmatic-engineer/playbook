@@ -1,6 +1,6 @@
 # ADR-0045: Read rm Commands as Real Words and Build In the Safe Roots
 
-- **Status:** Accepted, amended 2026-10-19 (playbook's footprint hard-coded)
+- **Status:** Accepted, amended 2026-10-19 (playbook's footprint hard-coded; then cut down to a short fixed rule, which supersedes the roots and the parser below)
 - **Date created:** 2026-10-18
 - **Date modified:** 2026-10-19
 - **Amends:** [ADR 0002](0002-plugin-based-install-safety-hooks.md), which ships the `rm-workspace-guard` always on. Builds on the self-healing goal of [ADR 0034](0034-self-healing-upgrades.md): the model may clean up playbook's leftovers while it repairs an install.
@@ -102,3 +102,19 @@ The policy guard follows the same line. It leaves `rm` of the store to the rm gu
 - Not verified: Windows. The crate builds there, but the guard's path logic splits on `/` and has not run on Windows.
 - Known gap: the hook is wired with `if: Bash(rm:*)`, so a `find -delete` or `xargs` command with no `rm` word never reaches it.
 - `$TMPDIR` written in a command is not expanded, because the Bash tool's shell can hold a different value than the hook. Expanding it could allow a path the shell sends elsewhere.
+
+## Amendment 2026-10-19: the guard is cut down to a short fixed rule
+
+### Why
+
+The roots and the parser kept denying harmless commands, and each denial became a support request. The rule set (safe roots, a deny set, `cd` and variable following, `find` and `xargs` handling) was about 4,600 lines with tests and could not be made right for every shell command. The cost in false positives and support was larger than the protection it gave. The maintainer chose to keep the one case nobody argues about.
+
+### What
+
+The `rm-workspace-guard` hook keeps its name, because the wiring written to users' settings.json names it. It now denies only an `rm`, `rmdir`, `unlink` or `shred` whose target is `/`, `/*`, `~`, `~/`, `~/*`, `$HOME`, `${HOME}`, `$HOME/`, `$HOME/*` or the literal path of the user's home folder (also `/**`, `~/.*` and `${HOME:?}`), with any flags, after a wrapper (`sudo`, `doas`, `command`, `env`, `exec`, `nohup`, `time`, `nice`, `ionice`, `timeout` or `xargs`), and in a chain split on `;`, `&`, `|`, `(`, `)`, backticks and line breaks. It also reads the script of `sh -c` and `bash -c`. Every other path is allowed. The guard does not follow `cd`, variables, `find -delete`, the input of `xargs`, here-docs or script files, and anything it cannot read passes. The denial is one fixed sentence.
+
+Removed: `rm_workspace_guard/{parse,roots,message,expand,interp}.rs`, their corpus tests, the `hooks.rmGuard.allowedRoots` key (a stored value is kept, ignored and skipped by `config import` for one release; `config set` refuses it) and `playbook hooks explain-rm` (it prints a note and exits 2). The policy guard still refuses a model-run change to `hooks.rmGuard.*`. A one-time notice, the Auto migration `rm-guard-simplified`, tells an install that had the guard wired what changed. `playbook disk clean` keeps its own list of protected playbook data and does not depend on the guard.
+
+### Consequence
+
+The guard no longer protects a project folder, `~/.ssh`, `~/.claude`, the memory store, `config.db`, plans or handoffs from an `rm`. With the seed `defaultMode` set to `auto`, the only remaining deletion safety is Claude Code's own permission handling and the user's deny rules in settings.json. A user who wants a path protected adds a deny or ask rule for it there. The earlier decisions on roots, the footprint, the deny set and the parser in this ADR no longer apply, and the known gaps and accepted risks above are moot.

@@ -98,11 +98,6 @@
           },
           {
             "type": "command",
-            "command": "playbook hook no-slop-guard",
-            "timeout": 10
-          },
-          {
-            "type": "command",
             "command": "playbook hook precommit-check",
             "if": "Bash(git commit:*)",
             "timeout": 10
@@ -122,11 +117,6 @@
       {
         "matcher": "Edit|Write",
         "hooks": [
-          {
-            "type": "command",
-            "command": "playbook hook no-slop-guard",
-            "timeout": 10
-          },
           {
             "type": "command",
             "command": "playbook hook policy-guard",

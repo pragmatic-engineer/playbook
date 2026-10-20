@@ -369,16 +369,6 @@ const GUARD_SPECS: &[HookSpec] = &[
     HookSpec {
         event: "PreToolUse",
         matcher: Some("Bash"),
-        name: "no-slop-guard",
-        group: Group::Safety,
-        purpose: "Denies a posting command (commit, PR text) that contains an em or en dash.",
-        if_cond: None,
-        timeout: Some(10),
-        also_replaces: Some("no-dash-guard"),
-    },
-    HookSpec {
-        event: "PreToolUse",
-        matcher: Some("Bash"),
         name: "precommit-check",
         group: Group::Safety,
         purpose: "Warns about debug leftovers, secret-shaped file names and oversized commits in the staged diff. Runs only for `git commit`.",
@@ -401,7 +391,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Bash"),
         name: "policy-guard",
         group: Group::Safety,
-        purpose: "Denies skipped git hooks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, a Bash write to a Claude Code settings file (a redirect, `tee`, `sed -i`, `cp`, `mv` or an interpreter one-liner), and model-run changes to the prose lint mode, the PR rules or the disk guard's thresholds (`config set` on `hooks.rmGuard.*` (a retired key), `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`, `pr.ticketPatterns` or `disk.*`, `config import`, `config unset`, `config edit`, writes to the config database, a config file or the memory store (reads, copies out and deletions are allowed, deletions being the `rm` guard's call; `mv` and `ln` either way are writes; the denial names the rule that matched), inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`). The denial tells the model to ask the user to run it with `!`. It also denies `playbook uninstall --yes`.",
+        purpose: "Denies skipped git hooks or signing, a hand-run `gh pr create`, memory writes outside playbook's store, a Bash write to a Claude Code settings file (a redirect, `tee`, `sed -i`, `cp`, `mv` or an interpreter one-liner), and model-run changes to the prose lint mode, the PR rules or the disk guard's thresholds (`config set` on `hooks.rmGuard.*` (a retired key), `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`, `pr.ticketPatterns` or `disk.*`, `config import`, `config unset`, `config edit`, writes to the config database, a config file or the memory store (reads, copies out and deletions are allowed, since the `rm` guard stops only `/` and the home folder; `mv` and `ln` either way are writes; the denial names the rule that matched), inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`). The denial tells the model to ask the user to run it with `!`. It also denies `playbook uninstall --yes`.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
@@ -416,16 +406,6 @@ const GUARD_SPECS: &[HookSpec] = &[
         purpose: "Backstop for what the PreToolUse rewrite did not see. It can amend a signed commit and edit a PR.",
         if_cond: None,
         timeout: Some(60),
-        also_replaces: None,
-    },
-    HookSpec {
-        event: "PreToolUse",
-        matcher: Some("Edit|Write"),
-        name: "no-slop-guard",
-        group: Group::Safety,
-        purpose: "Denies new code that carries a slop comment.",
-        if_cond: None,
-        timeout: Some(10),
         also_replaces: None,
     },
     HookSpec {
@@ -870,7 +850,7 @@ pub const HOOK_COMMAND_PREFIX: &str = "playbook hook ";
 
 /// The bare command `wire` writes for the hook named `name`: no path,
 /// resolved on `PATH` the same way a hand-written `rtk hook claude` entry is.
-fn bare_command(name: &str) -> String {
+pub(super) fn bare_command(name: &str) -> String {
     format!("{HOOK_COMMAND_PREFIX}{name}")
 }
 
