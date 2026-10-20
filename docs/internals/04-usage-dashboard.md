@@ -206,6 +206,23 @@ The plan name comes from the rate limit tier names in the config file. Only the 
 
 A manual budget is the UTC calendar month or week (the week starts on `usage.weekStart`), and the spend is the estimated cost from your local history, which is not your bill. Set it with `playbook config set --global usage.budget.monthlyUsd 200`. `0` means no budget.
 
+### What you see in each case
+
+You set no limit for any of these. The rows come from what Claude Code reports on this machine, and the dashboard works out the burn rate, the projection and the time each of 50, 80 and 100 percent is crossed itself. The Burn-up panel charts the most used limit. Nothing is sent anywhere and no login token is read.
+
+| Case | What Claude Code reports | Rows shown | Burn-up chart |
+|---|---|---|---|
+| A. Pro or Max with windows | The 5 hour and weekly windows, from the statusline or the cache. | One row per window: percent used, reset in, burn per hour, projected percent at reset, crossings. The plan label comes from the tier names. | A chart for a window, as a straight line from the window start to the reported percent, with the projection to the reset and the cutoff lines. |
+| B. Max with extra usage on, cap not known | A, and the extra usage flag. | The same as A. The extra usage flag is kept in the plan fields that `--raw` shows. | As A. |
+| C. Max with the extra usage cap known | A, and the cache `spend` block. | A, and a dollar row with used, cap, left, reset and crossings. | A, and a monthly dollar chart from this machine's cost, with the reported figure marked and the cutoff lines at the cap. |
+| D. No windows, dollar cap known | The cache `spend` block, or the statusline `spend_limit`. | One dollar row. The row is tagged `measured` or `cached`. When a reported figure and this machine's estimate both exist, a line next to the row shows both, with the reported one labeled "reported by Claude". | Monthly spend, the projection to the end of the period and the cutoff lines. |
+| E. Cap not reported | Nothing. | One line that says what is missing: a window plan is told to run a session with the playbook statusline, a dollar or unknown plan is told the cap is not reported by Claude Code on this login. Local spend and burn still show. | Spend and projection, and no cutoff lines. A limit of zero is never drawn. |
+| F. API key, Bedrock, Vertex or Foundry | Nothing. | As E, and the `usage.budget.*` lines when you set them. | As E, or with the budget as the 100 percent line. |
+| G. Reading over 6 hours old | Any. | A statusline reading stays and is tagged `measured, stale`. A cached dollar limit over 6 hours old is used only when no budget is set and is tagged `cached, stale`. A cached window over 6 hours old is dropped. The comparison line says "stale, read N ago". | The monthly dollar chart marks the time of the reported figure. A window chart ends at the last reading. |
+| H. Window already reset | Any. | The window is dropped, as Claude Code drops it. | None. |
+
+A ninth case, a rate limit error seen in the Claude Code telemetry, is not shown yet. When the reported dollar figure and this machine's estimate both exist, the summary shows both and says whether they differ by at least the larger of 1 dollar and 10 percent of the reported figure.
+
 ### The math
 
 For a limit over a period from `start` to `end`, with `used` so far at `now` (all UTC seconds):
