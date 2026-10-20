@@ -79,7 +79,6 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `launcher.shortName` | `false` | `true`, `false` |
 | `systemPrompt.enabled` | `true` | `true`, `false` |
 | `attribution.enabled` | `false` | `true`, `false` |
-| `hooks.rmGuard.allowedRoots` | `[]` | see the config keys page |
 | `hooks.proseLint.mode` | `warn` | `warn`, `block`, `off` |
 | `update.mode` | `notify` | `notify`, `auto`, `off` |
 | `update.checkIntervalHours` | `24` | a number, see the config keys page for the range |
@@ -99,7 +98,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `disk`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `disk`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -859,19 +858,9 @@ Print the rules and template for writing a handoff
 
 ### `playbook hooks`
 
-List the hooks that `playbook setup` wires into Claude Code, or explain a guard verdict
+List the hooks that `playbook setup` wires into Claude Code
 
-Subcommands: `explain-rm`, `list`
-
-### `playbook hooks explain-rm`
-
-Show what the rm guard does with a Bash command
-
-Reads the command the way the guard does and prints each path it deletes or overwrites, with the verdict and the rule that matched, then the denial text Claude would see. Runs nothing and changes nothing.
-
-- `<COMMAND>`: The Bash command, quoted as one argument
-- `--cwd <CWD>`: The folder the command runs in (default: the current folder)
-- `--json`: Print JSON instead of text
+Subcommands: `list`
 
 ### `playbook hooks list`
 
@@ -1439,6 +1428,26 @@ Example: `playbook setup --no-hooks --system-prompt`
 - `-y, --yes`: Never ask: use the default for every part you did not answer with a flag
 - `--dry-run`: Print what would change for each part and change nothing
 - `--explain <PART>`: Describe a part, or every part when none is named, and change nothing
+
+### `playbook skills`
+
+Share the playbook skills with other agents
+
+`sync` copies the plugin's skills and commands into the folder that Codex reads, `~/.agents/skills`, as `playbook-*` folders. It never touches folders you made yourself or edited.
+
+Example: `playbook skills sync --dry-run`
+
+Subcommands: `sync`
+
+### `playbook skills sync`
+
+Copy the playbook skills into another agent's skill folder
+
+Without `--agent`, every agent found on this machine is synced. A second run with nothing new changes nothing.
+
+- `--agent <AGENT>`: Sync only this agent (one of `codex`)
+- `--dry-run`: Show what would change and write nothing
+- `--json`: Print the report lines as a JSON array
 
 ### `playbook state`
 
