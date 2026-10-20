@@ -1,0 +1,22 @@
+{
+  "_fixture": {
+    "origin": "schema-derived",
+    "codex_version": null,
+    "source": "Codex hooks docs, read 2026-10-20",
+    "guard": "commit-message-sanitizer",
+    "expect": "silent",
+    "description": "apply_patch carries patch text in tool_input.command and is allowed"
+  },
+  "session_id": "019a0000-0000-7000-8000-000000000001",
+  "transcript_path": null,
+  "cwd": "/private/tmp",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6.1-sol",
+  "turn_id": "turn-1",
+  "permission_mode": "default",
+  "tool_name": "apply_patch",
+  "tool_use_id": "call-1",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch"
+  }
+}
