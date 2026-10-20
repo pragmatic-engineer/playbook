@@ -437,6 +437,7 @@ jobs:
           allowed-endpoints: >
             api.github.com:443
             archive.ubuntu.com:443
+            auth.docker.io:443
             azure.archive.ubuntu.com:80
             crates.io:443
             fulcio.githubapp.com:443
@@ -444,7 +445,12 @@ jobs:
             github.com:443
             index.crates.io:443
             objects.githubusercontent.com:443
+            ports.ubuntu.com:80
+            production.cloudfront.docker.com:443
+            production.cloudflare.docker.com:443
+            registry-1.docker.io:443
             rekor.sigstore.dev:443
+            release-assets.githubusercontent.com:443
             security.ubuntu.com:443
             static.crates.io:443
             static.rust-lang.org:443
@@ -534,6 +540,26 @@ jobs:
           cd dist
           if command -v shasum >/dev/null 2>&1; then shasum -a 256 ./*; else sha256sum ./*; fi
 
+      # One .deb and one .rpm per Linux architecture, built with a pinned nfpm
+      # from the static binaries of this leg (scripts/nfpm.yaml). Each is
+      # installed, upgraded and removed in Debian, Ubuntu and Fedora
+      # containers before anything is uploaded. A dry run builds and tests
+      # them too, under the version the binary reports.
+      - name: Build and test the .deb and .rpm packages
+        if: runner.os == 'Linux'
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          ver="$VERSION"
+          if [ "$DRY_RUN" = true ]; then ver="$(scripts/check-plugin.sh cargo-version)"; fi
+          scripts/package-linux.sh install-nfpm "$RUNNER_TEMP/nfpm"
+          PATH="$RUNNER_TEMP/nfpm:$PATH" scripts/package-linux.sh build "$ver" "$TARGET" "target/$TARGET/release" dist
+          scripts/package-smoke.sh dist "$ver" "$TARGET"
+          (cd dist && sha256sum ./*.deb ./*.rpm)
+
       # Every command the session tool map and the playbook:cli skill name
       # must exist in the built binary's `playbook commands --json`.
       - name: Check the commands the plugin names
@@ -610,19 +636,21 @@ jobs:
           [ "$(scripts/release-gh.sh state "$GH_REPO" "$TAG")" = release=draft ] \
             || { echo "::error::$TAG is not a draft. Nothing is published." >&2; exit 1; }
           mkdir -p dist && cd dist
-          for p in "playbook-$VERSION-*" "pbtop-$VERSION-*"; do
+          # The binaries, the pbtop archives, and the .deb and .rpm of the two
+          # Linux targets (playbook-X.Y.Z.<arch>.rpm, playbook_X.Y.Z_<arch>.deb).
+          for p in "playbook-$VERSION-*" "pbtop-$VERSION-*" "playbook-$VERSION.*.rpm" "playbook_${VERSION}_*.deb"; do
             gh release download "$TAG" --pattern "$p" --clobber
           done
           count="$(find . -type f | wc -l | tr -d ' ')"
-          if [ "$count" -ne 10 ]; then
-            echo "::error::expected 10 assets, found $count. Refusing to publish a partial release." >&2
+          if [ "$count" -ne 14 ]; then
+            echo "::error::expected 14 assets, found $count. Refusing to publish a partial release." >&2
             find . -type f
             exit 1
           fi
           # Each asset must carry the attestation its build leg made. A fetch
           # failure, a missing attestation and a mismatch each get their own
           # message.
-          for f in playbook-* pbtop-*; do
+          for f in playbook-* playbook_* pbtop-*; do
             if ! err="$(gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
               --signer-workflow "$GH_REPO/.github/workflows/release.yml" 2>&1 >/dev/null)"; then
               echo "$err" >&2
@@ -639,7 +667,7 @@ jobs:
             fi
           done
           gh release download "$TAG" --pattern release-notes.json --clobber
-          shasum -a 256 playbook-* pbtop-* release-notes.json > SHA256SUMS
+          shasum -a 256 playbook-* playbook_* pbtop-* release-notes.json > SHA256SUMS
           shasum -a 256 -c SHA256SUMS
           gh release upload "$TAG" SHA256SUMS --clobber
 
@@ -698,7 +726,7 @@ jobs:
           mkdir -p check && cd check
           gh release download "$TAG"
           sha256sum -c SHA256SUMS
-          for f in playbook-* pbtop-* release-notes.json SHA256SUMS; do
+          for f in playbook-* playbook_* pbtop-* release-notes.json SHA256SUMS; do
             gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
               --signer-workflow "$GH_REPO/.github/workflows/release.yml" >/dev/null
           done
@@ -713,6 +741,80 @@ jobs:
             echo "$bin: $out"
           done
           echo "Checked $(wc -l < SHA256SUMS) assets, their attestations and the versions." >> "$GITHUB_STEP_SUMMARY"
+
+  # Installs the published .deb and .rpm in clean Debian, Ubuntu and Fedora
+  # containers, after checking them against SHA256SUMS and their attestation.
+  # A leaf job: it blocks no other channel, a red result fails the run, and a
+  # run with the same version starts it again. The build legs already tested
+  # both architectures before the upload. This one tests what users download,
+  # on x86_64. A release published before the packages existed has none, and
+  # the job says so and stops.
+  verify-packages:
+    needs: [plan, verify]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.plan.outputs.dry_run != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            auth.docker.io:443
+            github.com:443
+            objects.githubusercontent.com:443
+            production.cloudfront.docker.com:443
+            production.cloudflare.docker.com:443
+            registry-1.docker.io:443
+            release-assets.githubusercontent.com:443
+            tmaproduction.blob.core.windows.net:443
+            tuf-repo.github.com:443
+            tuf-repo-cdn.sigstore.dev:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.tag }}
+          persist-credentials: false
+
+      - name: Check the packages and install them in containers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          SOURCE_REF: refs/heads/${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          t=x86_64-unknown-linux-musl
+          mkdir -p check && cd check
+          gh release download "$TAG" --pattern SHA256SUMS
+          # The file decides what is checked, so it is checked first.
+          gh attestation verify SHA256SUMS --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
+            --signer-workflow "$GH_REPO/.github/workflows/release.yml" >/dev/null
+          mapfile -t names < <(../scripts/package-linux.sh names "$VERSION" "$t")
+          listed=0
+          for f in "${names[@]}"; do
+            if grep -qF "  $f" SHA256SUMS; then listed=$((listed + 1)); fi
+          done
+          if [ "$listed" -eq 0 ]; then
+            echo "::notice::$TAG lists no .deb or .rpm, so it was published without packages. Nothing to check."
+            exit 0
+          fi
+          [ "$listed" -eq "${#names[@]}" ] \
+            || { echo "::error::SHA256SUMS of $TAG lists only some of ${names[*]}." >&2; exit 1; }
+          for f in "${names[@]}"; do gh release download "$TAG" --pattern "$f"; done
+          # Only the package lines are checked here. The verify job checked
+          # the whole file.
+          { for f in "${names[@]}"; do grep -F "  $f" SHA256SUMS; done; } | sha256sum -c -
+          for f in "${names[@]}"; do
+            gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
+              --signer-workflow "$GH_REPO/.github/workflows/release.yml" >/dev/null
+          done
+          ../scripts/package-smoke.sh . "$VERSION" "$t"
+          echo "Installed ${names[*]} in Debian, Ubuntu and Fedora containers." >> "$GITHUB_STEP_SUMMARY"
 
   # Writes the tap formulas with the tap's own bump script (ADR 0039 decision
   # 9). This job has no secrets, so code from the tap never runs next to an
