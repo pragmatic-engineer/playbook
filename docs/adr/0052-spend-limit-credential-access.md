@@ -36,7 +36,7 @@ Reading the token means reading a credential that belongs to another application
 
 7. **Cache and rate.** The parsed numbers and `fetched_at` are cached for `usage.spend.cacheSeconds` (default 60, from 30 to 600) in `<data>/usage-spend.json` through `write_atomic_private`. A failure caches a short negative entry, 5 minutes, or 15 for 401 and 403, so a bad token cannot cause a retry storm. There is one request per refresh window and no retry inside a call.
 
-8. **Where it may run.** Only the usage worker thread and the one-shot `--summary` and `--json`, through `Host::spend_fetcher()`, which returns nothing by default. That method is read in one function, and a test with a counting host proves the other entry points make zero calls. Hooks, the statusline, `warm`, `collect`, session start and `pbtop` never call it, and `pbtop` keeps its size.
+8. **Where it may run.** Only the usage worker thread and the one-shot `--summary` and `--json`, through `Host::spend_fetcher()`, which returns nothing by default. That method is read in one function, and a test fails if any other source file asks for it. With the key off, or on without the acknowledgement, a counting fake host sees no fetch. Hooks, the statusline, `warm`, `collect`, session start and `pbtop` never call it, and `pbtop` keeps its size.
 
 ## Alternatives considered
 
