@@ -74,6 +74,13 @@ test *args:
     cargo nextest run --workspace --config-file .github/nextest.toml {{ args }}
     cargo test --workspace --doc
 
+# Start 1000 collectors at once and check that one stays (done bar D2).
+#
+# Debug profile on purpose: the test-only stamp variable is read only by
+# debug builds, so the release `bin` above would pass for the wrong reason.
+stress-collector:
+    cargo nextest run -p playbook --config-file .github/nextest.toml --test collector_daemon --run-ignored only -E 'test(d2_stress)'
+
 # Run every `*.test.sh` suite the way shell-ci does.
 test-shell:
     #!/usr/bin/env bash
