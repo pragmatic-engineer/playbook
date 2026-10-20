@@ -60,12 +60,6 @@ pub struct State {
     pub version: String,
 }
 
-/// Whether a collector runs from a build other than this one, so a
-/// background service should restart it after an upgrade.
-pub fn runs_other_build(state: &State) -> bool {
-    running(state) && state.version != env!("CARGO_PKG_VERSION")
-}
-
 pub fn state_path(paths: &Paths) -> PathBuf {
     paths
         .db
@@ -271,12 +265,6 @@ pub struct Status {
     /// How telemetry is configured, in words, and the one-line fix if any.
     pub telemetry: String,
     pub telemetry_fix: Option<String>,
-    /// The background service that runs the collector, in words, when one
-    /// is installed (ADR 0043).
-    pub service: Option<String>,
-    /// What to do while the collector is down, for the text.
-    #[serde(skip)]
-    pub collector_fix: String,
 }
 
 /// The time of the newest stored telemetry event, unix seconds. Opens the
@@ -346,8 +334,6 @@ pub fn status(paths: &Paths, retention: Retention) -> Result<Status, String> {
         last_event,
         telemetry: mode.text().to_string(),
         telemetry_fix: mode.fix().map(str::to_string),
-        service: super::service::installed(&super::host::home_dir()),
-        collector_fix: super::service::collector_fix(&super::host::home_dir()),
     })
 }
 
@@ -374,16 +360,12 @@ impl Status {
             }
             _ => {
                 lines.push("collector: not running".to_string());
-                lines.push(self.collector_fix.clone());
+                lines.push(format!("fix: {}", super::host::start_hint()));
                 if let Some(port) = self.port {
                     lines.push(format!("last port: {port}"));
                 }
             }
         }
-        lines.push(match &self.service {
-            Some(service) => format!("background service: {service}"),
-            None => "background service: none".to_string(),
-        });
         lines.push(format!(
             "rows: {} requests, {} tool calls, {} api errors, {} metric points",
             self.requests, self.tool_calls, self.api_errors, self.metric_points
@@ -586,25 +568,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_collector_from_another_build_is_flagged_for_a_restart() {
+    fn a_collector_records_the_version_that_started_it() {
         let p = paths("collector-version");
         let stop = Arc::new(AtomicBool::new(false));
         run_collect(&p, Some(0), 1, &stop).unwrap();
         let written = read_state(&state_path(&p)).unwrap();
         assert_eq!(written.version, env!("CARGO_PKG_VERSION"));
-
-        let listener = bind(0).unwrap();
-        let live = |version: &str| State {
-            pid: std::process::id(),
-            port: listener.local_addr().unwrap().port(),
-            version: version.into(),
-            ..State::default()
-        };
-
-        assert!(runs_other_build(&live("0.1.0")));
-        assert!(runs_other_build(&live("")));
-        assert!(!runs_other_build(&live(env!("CARGO_PKG_VERSION"))));
-        assert!(!runs_other_build(&State::default()));
     }
 
     /// Sets the stop flag and wakes the blocking accept on `port`.

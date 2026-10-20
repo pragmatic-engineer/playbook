@@ -10,7 +10,7 @@
 //! - `path` puts the binary's directory on PATH for every shell start.
 //! - `shim` installs the bash and zsh launcher shim idempotently.
 //! - `attribution` sets the commit and PR attribution OFF (the default) or ON.
-//! - `collector_service` installs the background service for the usage collector, with consent.
+//! - `collector_service` removes the files of the retired collector service.
 //! - `statusline` moves a legacy `statusLine.command` to `playbook statusline`.
 //! - `system_prompt` places the opt-in `prompts/SYSTEM_PROMPT.md`.
 //! - `memory_migrate`, `migrate` and `self_root` handle upgrades and the plugin root.
@@ -39,6 +39,7 @@ pub mod migrate;
 pub mod path;
 pub mod pb_link;
 pub mod preview;
+pub mod retired_hooks;
 pub mod run;
 pub mod self_root;
 pub mod shim;

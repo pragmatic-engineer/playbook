@@ -12,12 +12,12 @@
 //!
 //! Manual limits come from the `usage.budget.*` config keys.
 
-use super::burnup::burnup_for;
-use super::limits::{spent, Burn, CrossState, Crossing, Limit, LimitPeriod, Origin, State, Unit};
+use super::burnup::burnups_for;
+use super::limits::{Burn, CrossState, Crossing, Limit, LimitPeriod, Origin, State, Unit};
 use super::period::Period;
-use super::plan::{Account, Capabilities, DisplayLine, LoginKind, PlanChoice};
-use super::query::{month_first_day, WeekStart};
-use super::spend::{dollars, Comparison, Money, NotCompared, Reason, Scope, SpendFigure};
+use super::plan::Account;
+use super::query::{utc_month_bounds, WeekStart};
+use super::spend::{BilledComparison, NotCompared, SpendFigure};
 use super::UsageEvent;
 use crate::util::atomic::write_atomic_private;
 use serde_json::{json, Value};
@@ -53,6 +53,18 @@ pub struct Snapshot {
     pub five_hour: Option<Window>,
     pub seven_day: Option<Window>,
     pub spend_limit: Option<Spend>,
+    /// When each part was read, where that differs from `captured_at`: a
+    /// reading that carries one window keeps the other as it was stored.
+    pub read: ReadTimes,
+}
+
+/// When each part of a [`Snapshot`] was read, UTC seconds. `None` means
+/// `captured_at`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ReadTimes {
+    pub five_hour: Option<i64>,
+    pub seven_day: Option<i64>,
+    pub spend_limit: Option<i64>,
 }
 
 fn window(v: Option<&Value>) -> Option<Window> {
@@ -97,6 +109,7 @@ impl Snapshot {
             five_hour: window(r.get("five_hour")),
             seven_day: window(r.get("seven_day")),
             spend_limit: spend(r.get("spend_limit")),
+            read: ReadTimes::default(),
         };
         (snap.five_hour.is_some() || snap.seven_day.is_some() || snap.spend_limit.is_some())
             .then_some(snap)
@@ -118,6 +131,11 @@ impl Snapshot {
                 "limit_usd": s.limit_usd,
                 "period": s.period.map(LimitPeriod::key),
             })),
+            "read": {
+                "five_hour": self.read.five_hour,
+                "seven_day": self.read.seven_day,
+                "spend_limit": self.read.spend_limit,
+            },
         })
     }
 
@@ -127,11 +145,89 @@ impl Snapshot {
             five_hour: window(v.get("five_hour")),
             seven_day: window(v.get("seven_day")),
             spend_limit: spend(v.get("spend_limit")),
+            read: ReadTimes {
+                five_hour: v
+                    .pointer("/read/five_hour")
+                    .and_then(Value::as_i64)
+                    .filter(|t| *t >= 0),
+                seven_day: v
+                    .pointer("/read/seven_day")
+                    .and_then(Value::as_i64)
+                    .filter(|t| *t >= 0),
+                spend_limit: v
+                    .pointer("/read/spend_limit")
+                    .and_then(Value::as_i64)
+                    .filter(|t| *t >= 0),
+            },
         }
     }
 
+    /// When the oldest part held was read. A snapshot is stale as soon as one
+    /// part is.
+    pub fn oldest_read(&self) -> i64 {
+        [
+            (self.five_hour.is_some(), self.read.five_hour),
+            (self.seven_day.is_some(), self.read.seven_day),
+            (self.spend_limit.is_some(), self.read.spend_limit),
+        ]
+        .into_iter()
+        .filter(|(held, _)| *held)
+        .map(|(_, at)| at.unwrap_or(self.captured_at))
+        .min()
+        .unwrap_or(self.captured_at)
+    }
+
     pub fn is_stale(&self, now: i64) -> bool {
-        now - self.captured_at > STALE_SECONDS
+        now.saturating_sub(self.oldest_read()) > STALE_SECONDS
+    }
+
+    /// When the part for `period` was read: its own read time, else when the
+    /// file was captured.
+    pub fn read_of(&self, period: LimitPeriod) -> i64 {
+        match period {
+            LimitPeriod::FiveHour => self.read.five_hour,
+            LimitPeriod::SevenDay => self.read.seven_day,
+            _ => self.read.spend_limit,
+        }
+        .unwrap_or(self.captured_at)
+    }
+
+    /// This reading laid over the one stored before it. A part this reading
+    /// carries replaces the stored one. A part it lacks is kept as stored, with
+    /// its own read time, unless its reset time has passed. Claude Code sends
+    /// one window at times, so overwriting the file would lose the other.
+    pub fn merged_over(self, stored: Option<Snapshot>, now: i64) -> Snapshot {
+        let Some(old) = stored else {
+            return self;
+        };
+        let stored_at = |at: Option<i64>| at.unwrap_or(old.captured_at);
+        let live = |at: i64| at > now;
+        let mut out = self;
+        let new_at = out.captured_at;
+        out.read = ReadTimes {
+            five_hour: out.five_hour.as_ref().map(|_| new_at),
+            seven_day: out.seven_day.as_ref().map(|_| new_at),
+            spend_limit: out.spend_limit.as_ref().map(|_| new_at),
+        };
+        if out.five_hour.is_none() {
+            if let Some(w) = old.five_hour.clone().filter(|w| live(w.resets_at)) {
+                out.five_hour = Some(w);
+                out.read.five_hour = Some(stored_at(old.read.five_hour));
+            }
+        }
+        if out.seven_day.is_none() {
+            if let Some(w) = old.seven_day.clone().filter(|w| live(w.resets_at)) {
+                out.seven_day = Some(w);
+                out.read.seven_day = Some(stored_at(old.read.seven_day));
+            }
+        }
+        if out.spend_limit.is_none() {
+            if let Some(sp) = old.spend_limit.clone().filter(|sp| live(sp.resets_at)) {
+                out.spend_limit = Some(sp);
+                out.read.spend_limit = Some(stored_at(old.read.spend_limit));
+            }
+        }
+        out
     }
 
     /// The measured limits that still apply at `now`. A window whose reset time
@@ -199,6 +295,15 @@ pub fn save(usage_dir: &Path, snap: &Snapshot) {
     let _ = write_atomic_private(&snapshot_path(usage_dir), snap.to_value().to_string());
 }
 
+/// Keeps what the statusline input carries: reads `rate_limits`, lays it over
+/// the stored reading and saves the result. Does nothing when the input is not
+/// JSON or has no usable part. Best effort, like [`save`].
+pub fn remember(usage_dir: &Path, input: &str, now: i64) {
+    if let Some(new) = Snapshot::from_statusline(input, now) {
+        save(usage_dir, &new.merged_over(load(usage_dir), now));
+    }
+}
+
 /// The stored snapshot, or `None` when there is none or it is unreadable.
 pub fn load(usage_dir: &Path) -> Option<Snapshot> {
     let text = std::fs::read_to_string(snapshot_path(usage_dir)).ok()?;
@@ -229,23 +334,12 @@ pub struct Sources {
     pub snapshot: Option<Snapshot>,
     pub budgets: Vec<(LimitPeriod, f64)>,
     pub account: Account,
-    /// The figure the server billed, when one was fetched.
-    pub server: Option<SpendFigure>,
-    /// The `usage.plan` setting.
-    pub plan_choice: PlanChoice,
-    /// Why no server figure is shown, when a fetch was meant to give one.
-    pub spend_unavailable: Option<Reason>,
 }
 
 impl Sources {
     /// Reads the sources. `usage_dir` is the folder of the usage database.
     pub fn load(usage_dir: Option<&Path>, claude_json: &Path, home: &Path) -> Sources {
-        Sources {
-            plan_choice: super::host::config_value("usage.plan", home)
-                .and_then(|v| v.as_str().and_then(PlanChoice::parse))
-                .unwrap_or_default(),
-            ..Sources::new(usage_dir, claude_json, manual_budgets(home), true)
-        }
+        Sources::new(usage_dir, claude_json, manual_budgets(home), true)
     }
 
     /// The sources with the budgets given. The terminal view asks for the
@@ -265,9 +359,6 @@ impl Sources {
             } else {
                 super::plan::read(claude_json)
             },
-            server: None,
-            plan_choice: PlanChoice::Auto,
-            spend_unavailable: None,
         }
     }
 
@@ -283,15 +374,6 @@ pub enum Monthly {
     /// The statusline reported one (behind a Claude apps gateway). The cache
     /// is not used then, and a manual budget is shown beside it.
     Measured,
-    /// The spend limit the server reported. `fresh` is false once the figure
-    /// is over six hours old.
-    Server {
-        limit_usd: f64,
-        used_usd: Option<f64>,
-        fetched_at: i64,
-        age: i64,
-        fresh: bool,
-    },
     /// The spend limit in the Claude Code cache. `fresh` is false once the
     /// cache is over six hours old.
     Cached {
@@ -306,19 +388,10 @@ pub enum Monthly {
     Unset,
 }
 
-/// The first second of the UTC month that holds `now`.
-fn utc_month_start(now: i64) -> i64 {
-    let utc = crate::tz::Zone::Utc;
-    utc.day_start(month_first_day(utc.day_of(now)))
-}
-
-/// The monthly limit to use. A measured one comes first. Then a server figure
-/// under six hours old that is newer than the cache, because it is the amount
-/// billed. Then a cached spend limit under six hours old, because it is what
-/// Claude Code enforces. Then the manual budget, because it is what the user
-/// chose on purpose. An older figure is the last resort, the later fetched of
-/// the two. A server figure fetched before this month began describes the
-/// last month and is never used.
+/// The monthly limit to use. A measured one comes first. Then a cached spend
+/// limit under six hours old, because it is what Claude Code enforces. Then
+/// the manual budget, because it is what the user chose on purpose. An older
+/// cache is the last resort.
 pub fn monthly(s: &Sources, now: i64) -> Monthly {
     let measured = s.snapshot.as_ref().is_some_and(|sn| {
         sn.limits(now)
@@ -347,43 +420,11 @@ pub fn monthly(s: &Sources, now: i64) -> Monthly {
                 fresh: c.is_fresh(now),
             })
         });
-    // The server bills by the UTC month, whatever zone this machine is in.
-    let month_start = utc_month_start(now);
-    let server = s
-        .server
-        .as_ref()
-        .filter(|f| !f.is_from_the_future(now) && f.fetched_at >= month_start)
-        .and_then(|f| {
-            f.limit_usd().map(|limit_usd| Monthly::Server {
-                limit_usd,
-                used_usd: f.used_usd(),
-                fetched_at: f.fetched_at,
-                age: f.age(now),
-                fresh: f.is_fresh(now),
-            })
-        });
-    let fetched = |m: &Monthly| match m {
-        Monthly::Server { fetched_at, .. } | Monthly::Cached { fetched_at, .. } => *fetched_at,
-        _ => i64::MIN,
-    };
-    match (server, cached, manual) {
-        (Some(sv @ Monthly::Server { fresh: true, .. }), c, _)
-            if !matches!(c, Some(Monthly::Cached { fresh: true, .. }))
-                || c.is_some_and(|c| fetched(&sv) > fetched(&c)) =>
-        {
-            sv
-        }
-        (_, Some(c @ Monthly::Cached { fresh: true, .. }), _) => c,
-        (_, _, Some(usd)) => Monthly::Manual(usd),
-        (Some(sv), Some(c), None) => {
-            if fetched(&sv) > fetched(&c) {
-                sv
-            } else {
-                c
-            }
-        }
-        (Some(only), None, None) | (None, Some(only), None) => only,
-        (None, None, None) => Monthly::Unset,
+    match (cached, manual) {
+        (Some(c @ Monthly::Cached { fresh: true, .. }), _) => c,
+        (_, Some(usd)) => Monthly::Manual(usd),
+        (Some(c), None) => c,
+        (None, None) => Monthly::Unset,
     }
 }
 
@@ -400,10 +441,6 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
     // replaces one the statusline read before the cache was fetched. Only a
     // fresh cache is used: a percentage changes within minutes.
     if let Some(c) = s.account.cache.as_ref().filter(|c| c.is_fresh(now)) {
-        let newer = s
-            .snapshot
-            .as_ref()
-            .is_none_or(|sn| c.fetched_at > sn.captured_at);
         for (period, w) in [
             (LimitPeriod::FiveHour, &c.five_hour),
             (LimitPeriod::SevenDay, &c.seven_day),
@@ -411,6 +448,12 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
             let Some(w) = w.as_ref().filter(|w| w.resets_at > now) else {
                 continue;
             };
+            // The cache replaces a reading of the same window only when it was
+            // fetched after that window was read.
+            let newer = s
+                .snapshot
+                .as_ref()
+                .is_none_or(|sn| c.fetched_at > sn.read_of(period));
             let known = out.iter().any(|l| l.period == period);
             if known && !newer {
                 continue;
@@ -429,43 +472,32 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
         }
     }
     let choice = monthly(s, now);
-    let figure_wins = matches!(choice, Monthly::Cached { .. } | Monthly::Server { .. });
+    let cached_wins = matches!(choice, Monthly::Cached { .. });
     for (period, usd) in &s.budgets {
-        if *period == LimitPeriod::Monthly && figure_wins {
+        if *period == LimitPeriod::Monthly && cached_wins {
             continue;
         }
         out.push(Limit::manual_budget(*period, *usd, events, now, week));
     }
-    let figure = match choice {
-        Monthly::Cached {
-            limit_usd,
-            used_usd,
-            fetched_at,
-            fresh,
-            ..
-        } => Some((Origin::Cached, limit_usd, used_usd, fetched_at, fresh)),
-        Monthly::Server {
-            limit_usd,
-            used_usd,
-            fetched_at,
-            fresh,
-            ..
-        } => Some((Origin::Server, limit_usd, used_usd, fetched_at, fresh)),
-        _ => None,
-    };
-    if let Some((origin, limit_usd, used_usd, fetched_at, fresh)) = figure {
+    if let Monthly::Cached {
+        limit_usd,
+        used_usd,
+        fetched_at,
+        fresh,
+        ..
+    } = choice
+    {
         let mut l = Limit::manual_budget(LimitPeriod::Monthly, limit_usd, events, now, week);
-        l.origin = origin;
-        // The server's own reset time is the true end of its period.
-        let reset = s.server.as_ref().and_then(|f| f.resets_at);
-        if let (Origin::Server, Some(r)) = (origin, reset.filter(|r| *r > now)) {
-            (l.start, l.end) = LimitPeriod::Monthly.ending_at(r);
-            l.used = spent(events, l.start, now);
-        }
-        // A fresh figure knows the spend of every machine on the account, so
+        l.origin = Origin::Cached;
+        // A fresh cache knows the spend of every machine on the account, so
         // it replaces this machine's estimate, unless it was fetched before
         // this month began.
-        if let Some(used) = used_usd.filter(|_| fresh && fetched_at >= l.start) {
+        let (month_start, month_end) = utc_month_bounds(now);
+        if let Some(used) = used_usd.filter(|_| fresh && fetched_at >= month_start) {
+            // The figure counts the UTC month, so the limit's window is that
+            // month too, not the local one.
+            l.start = month_start;
+            l.end = month_end;
             l.used = used;
         }
         out.push(l);
@@ -473,23 +505,73 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
     out
 }
 
-/// The server billed amount next to this machine's estimate for the month
-/// that holds `now`. `None` when no server figure is used for the monthly
-/// limit. The inner error says why the two were not compared.
-pub fn compare_server(
+/// The figure Claude reports for this UTC month with an amount used: the
+/// statusline gateway amount when it is monthly, else the usage cache. A
+/// gateway figure counts its own period, so only a monthly one is comparable
+/// with the local spend of the month.
+fn billed_figure(s: &Sources, now: i64) -> Option<SpendFigure> {
+    let month_start = utc_month_bounds(now).0;
+    let usable = |f: &SpendFigure| f.used.is_some() && f.fetched_at >= month_start;
+    let statusline = s
+        .snapshot
+        .as_ref()
+        .and_then(|sn| {
+            let sp = sn
+                .spend_limit
+                .as_ref()
+                .filter(|sp| sp.resets_at > now && sp.period == Some(LimitPeriod::Monthly))?;
+            SpendFigure::from_usd(
+                sp.limit_usd,
+                sp.used_usd,
+                sn.read.spend_limit.unwrap_or(sn.captured_at),
+            )
+        })
+        .filter(usable);
+    statusline.or_else(|| {
+        s.account
+            .cache
+            .as_ref()
+            .filter(|c| !c.is_from_the_future(now))
+            .and_then(|c| c.billed.clone())
+            .filter(usable)
+    })
+}
+
+/// When Claude read the amount used this month and what it was, in dollars,
+/// for the burn-up chart.
+pub fn billed_anchor(s: &Sources, now: i64) -> Option<(i64, f64)> {
+    let f = billed_figure(s, now)?;
+    f.used_usd().map(|used| (f.fetched_at, used))
+}
+
+/// Whether this is the monthly dollar limit the burn-up table follows.
+pub(crate) fn is_monthly_dollars(l: &Limit) -> bool {
+    l.period == LimitPeriod::Monthly && l.unit == Unit::Dollars
+}
+
+/// The amount Claude Code reports as used next to this machine's estimate for
+/// the UTC month that holds `now`. The figure is the statusline gateway
+/// `spend_limit` when there is one, else the `spend` block of the usage cache.
+/// `None` when neither carries an amount used this month, or the cache is dated
+/// in the future. The inner error says why the two were not compared, so a
+/// figure in another currency or without one is reported and never dropped.
+pub fn compare_billed(
     s: &Sources,
     events: &[UsageEvent],
     now: i64,
-) -> Option<Result<Comparison, NotCompared>> {
-    if !matches!(monthly(s, now), Monthly::Server { .. }) {
-        return None;
-    }
-    let figure = s.server.clone()?;
-    // The server billed up to the moment it was asked, so only the local
-    // spend up to then is comparable.
+) -> Option<Result<BilledComparison, NotCompared>> {
+    let month_start = utc_month_bounds(now).0;
+    let figure = billed_figure(s, now)?;
+    // Claude reported the amount at `fetched_at`, so only the local spend up
+    // to then is comparable.
     let until = now.min(figure.fetched_at);
-    let local = spent(events, utc_month_start(now), until);
-    Some(Comparison::new(figure, local))
+    let local = events
+        .iter()
+        .filter(|e| e.timestamp >= month_start && e.timestamp <= until)
+        .map(|e| e.cost_usd)
+        .sum::<f64>()
+        + 0.0;
+    Some(BilledComparison::new(figure, local))
 }
 
 /// The line for the 5 hour and weekly windows when none is known. A plan
@@ -511,8 +593,8 @@ pub fn windows_note(s: &Sources, limits: &[Limit]) -> Option<&'static str> {
 }
 
 /// The plan label, for views that name it.
-pub fn plan_label(s: &Sources) -> String {
-    super::plan::plan_label(s.account.plan, s.plan_choice)
+pub fn plan_label(s: &Sources) -> &'static str {
+    s.account.plan.label()
 }
 
 /// The empty state shown where a limit would be.
@@ -540,83 +622,11 @@ pub fn burn_pair(events: &[UsageEvent], period: Period, now: i64) -> (Burn, Burn
     )
 }
 
-/// What the best source for this moment carries, with the `usage.plan`
-/// setting applied.
-fn capabilities(s: &Sources, now: i64) -> Capabilities {
-    let base = if let Some(f) = server_in_use(s, now) {
-        Capabilities::from_figure(f)
-    } else if let Some(c) = s.account.cache.as_ref().filter(|c| c.is_fresh(now)) {
-        Capabilities::from_cache(c)
-    } else if let Some(sn) = &s.snapshot {
-        Capabilities::from_snapshot(sn)
-    } else {
-        Capabilities::from_cache(&super::plan::UsageCache::default())
-    };
-    // The login kind is not read here: a view never reads the environment.
-    // The fetch reads it and decides before asking, so this stays `Unknown`.
-    base.for_login(LoginKind::Unknown, s.plan_choice)
-}
-
-fn capabilities_json(s: &Sources, now: i64) -> Value {
-    let c = capabilities(s, now);
-    json!({
-        "lines": c.lines().iter().map(DisplayLine::key).collect::<Vec<_>>(),
-        "scope": c.scope.key(),
-        "local_only": c.local_only,
-        "note": c.note(s.account.plan, s.plan_choice),
-    })
-}
-
-fn money_json(m: &Money) -> Value {
-    json!({"minor": m.minor, "decimals": m.decimals, "currency": m.currency})
-}
-
-/// The server figure in use and its comparison with the local estimate, or
-/// `null` when none is used.
-fn spend_json(s: &Sources, events: &[UsageEvent], now: i64) -> Value {
-    let Some(f) = server_in_use(s, now) else {
-        return Value::Null;
-    };
-    let (comparison, skipped) = match compare_server(s, events, now) {
-        Some(Ok(c)) => (
-            json!({
-                "billed_usd": c.billed_usd,
-                "local_estimate_usd": c.local_estimate_usd,
-                "delta_usd": c.delta_usd,
-                "delta_pct": c.delta_pct,
-                "disagrees": c.disagrees,
-            }),
-            Value::Null,
-        ),
-        Some(Err(why)) => (Value::Null, json!(why.to_string())),
-        None => (Value::Null, Value::Null),
-    };
-    json!({
-        "fetched_at": f.fetched_at,
-        "age_seconds": f.age(now),
-        "fresh": f.is_fresh(now),
-        "limit": f.limit.as_ref().map(money_json),
-        "used": f.used.as_ref().map(money_json),
-        "percent": f.percent,
-        "severity": f.severity,
-        "resets_at": f.resets_at,
-        "limit_reached": f.limit_reached,
-        "scope": f.scope.key(),
-        "comparison": comparison,
-        "comparison_skipped": skipped,
-    })
-}
-
-/// Whether this is the monthly dollar limit the burn-up chart follows.
-pub(crate) fn is_monthly_dollars(l: &Limit) -> bool {
-    l.period == LimitPeriod::Monthly && l.unit == Unit::Dollars
-}
-
 /// The limits and burn rates as JSON, for `--json`.
 pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart) -> Value {
     let snapshot = s.snapshot.as_ref();
     let limits = all_limits(s, events, now, week);
-    let burnup = burnup_for(s, &limits, events, now);
+    let burnups = burnups_for(s, &limits, events, &[], now);
     let burn: serde_json::Map<String, Value> = [Period::Today, Period::Week(week), Period::Month]
         .into_iter()
         .map(|p| {
@@ -635,23 +645,163 @@ pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart
         "plan": s.account.plan.key(),
         "plan_label": plan_label(s),
         "windows_note": windows_note(s, &limits),
-        "capabilities": capabilities_json(s, now),
-        "spend": spend_json(s, events, now),
-        "spend_unavailable": s.spend_unavailable.map(Reason::key),
+        "reason": reason(s, now).map(Reason::key),
+        "comparison": comparison_json(s, events, now),
         "cache": s.account.cache.as_ref().map(|c| json!({
             "fetched_at": c.fetched_at,
             "age_seconds": c.age(now),
             "fresh": c.is_fresh(now),
         })),
-        "limits": limits.iter().map(|l| {
+        "limits": limits.iter().zip(burnups).map(|(l, b)| {
             let mut v = l.to_json(now);
-            if let (Some(map), true) = (v.as_object_mut(), is_monthly_dollars(l)) {
-                map.insert("series".into(), burnup.series_json());
+            if let (Some(map), Some(b)) = (v.as_object_mut(), b) {
+                map.insert("series".into(), b.series_json());
             }
             v
         }).collect::<Vec<_>>(),
         "burn": burn,
     })
+}
+
+/// Why no limit from Claude is shown. The words are the ones the output uses,
+/// in `--summary` and in the `reason` of `--json`. None of them is an error:
+/// every one has a line that says what to do, or that nothing can be done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reason {
+    /// No statusline reading and no usable cache yet.
+    NoReading,
+    /// The only reading is a cache over six hours old, which is not used.
+    Stale,
+    /// Nothing identifies a limit on this login and no source carries one.
+    CapUnknown,
+    /// The last reading held windows, and they have all reset.
+    WindowsReset,
+}
+
+impl Reason {
+    pub fn key(self) -> &'static str {
+        match self {
+            Reason::NoReading => "no-reading",
+            Reason::Stale => "stale",
+            Reason::CapUnknown => "cap-unknown",
+            Reason::WindowsReset => "windows-reset",
+        }
+    }
+
+    /// The one line that stands where the limit would be.
+    pub fn line(self) -> &'static str {
+        match self {
+            Reason::NoReading => {
+                "no limit reading yet: run a session with the playbook statusline"
+            }
+            Reason::Stale => {
+                "the last limit reading is over 6 hours old and is not used: run a session with the playbook statusline"
+            }
+            Reason::CapUnknown => "cap not reported by Claude Code on this login",
+            Reason::WindowsReset => {
+                "the windows of the last reading have reset: run a session with the playbook statusline for a new one"
+            }
+        }
+    }
+}
+
+/// Why no limit from Claude is shown, `None` when one is. A limit from Claude
+/// is any that did not come from a manual budget.
+pub fn reason(s: &Sources, now: i64) -> Option<Reason> {
+    let has_limit = all_limits(s, &[], now, WeekStart::Monday)
+        .iter()
+        .any(|l| l.origin != Origin::Manual);
+    if has_limit {
+        return None;
+    }
+    let held = s.snapshot.as_ref().is_some_and(|sn| {
+        sn.five_hour.is_some() || sn.seven_day.is_some() || sn.spend_limit.is_some()
+    });
+    Some(if held {
+        Reason::WindowsReset
+    } else if s.account.cache.as_ref().is_some_and(|c| !c.is_fresh(now)) {
+        Reason::Stale
+    } else if s.account.plan.has_windows() {
+        Reason::NoReading
+    } else {
+        Reason::CapUnknown
+    })
+}
+
+/// How old a reading is, with the stale marker once it is over six hours old.
+fn read_text(fetched_at: i64, now: i64) -> String {
+    let age = (now - fetched_at).max(0);
+    let ago = super::period::elapsed_text(age);
+    if age > STALE_SECONDS {
+        format!("stale, read {ago} ago")
+    } else {
+        format!("read {ago} ago")
+    }
+}
+
+/// The comparison of the amount Claude reports with the local estimate as
+/// JSON: the numbers, or why they were not compared, or `null`.
+fn comparison_json(s: &Sources, events: &[UsageEvent], now: i64) -> Value {
+    match compare_billed(s, events, now) {
+        Some(Ok(c)) => json!({
+            "billed_usd": c.billed_usd,
+            "local_estimate_usd": c.local_estimate_usd,
+            "delta_usd": c.delta_usd,
+            "delta_pct": c.delta_pct,
+            "disagrees": c.disagrees,
+            "read_at": c.billed.fetched_at,
+            "stale": now - c.billed.fetched_at > STALE_SECONDS,
+        }),
+        Some(Err(why)) => json!({"skipped": why.to_string()}),
+        None => Value::Null,
+    }
+}
+
+/// An instant as text, in the chosen zone.
+fn stamp(at: i64) -> String {
+    crate::tz::iso(at).replace('T', " ")
+}
+
+/// One threshold as a phrase.
+pub(crate) fn crossing_text(c: &Crossing) -> String {
+    let pct = c.pct;
+    match c.state {
+        CrossState::Crossed { at } => format!("{pct}% crossed about {}", stamp(at)),
+        CrossState::Projected { at } => format!("{pct}% projected about {}", stamp(at)),
+        CrossState::Beyond { period_end } => {
+            format!("{pct}% not before the period ends {}", stamp(period_end))
+        }
+        CrossState::Unknown => format!("{pct}% too early to say"),
+    }
+}
+
+/// The lines about what Claude reports for `--summary`: the amount used
+/// beside the local estimate, with its age, when 50, 80 and 100 percent are
+/// crossed for each limit, and the one line saying why there is no limit from
+/// Claude when there is none.
+pub fn limit_lines(s: &Sources, limits: &[Limit], events: &[UsageEvent], now: i64) -> Vec<String> {
+    let mut out = Vec::new();
+    match compare_billed(s, events, now) {
+        Some(Ok(c)) => out.push(format!(
+            "{} ({})",
+            c.line(),
+            read_text(c.billed.fetched_at, now)
+        )),
+        Some(Err(why)) => out.push(format!("local estimate not compared: {why}")),
+        None => {}
+    }
+    for l in limits {
+        if let Some(c) = l.thresholds(now) {
+            out.push(format!(
+                "{} crossings ({}): {}",
+                l.period.key().replace('_', " "),
+                l.origin.key(),
+                c.iter().map(crossing_text).collect::<Vec<_>>().join(", ")
+            ));
+        }
+    }
+    out.extend(reason(s, now).map(|r| r.line().to_string()));
+    out
 }
 
 /// A dollar or percent amount with its unit.
@@ -668,7 +818,6 @@ pub fn describe(l: &Limit, now: i64) -> String {
         Origin::Measured => "measured from Claude Code",
         Origin::Manual => "manual limit",
         Origin::Cached => "cached by Claude Code",
-        Origin::Server => "server billed",
     };
     let head = format!(
         "{} {}: {} of {} used ({source})",
@@ -705,110 +854,6 @@ pub fn describe(l: &Limit, now: i64) -> String {
     )
 }
 
-/// An instant as text, in the chosen zone.
-fn stamp(at: i64) -> String {
-    crate::tz::iso(at).replace('T', " ")
-}
-
-/// One threshold as a phrase.
-pub(crate) fn crossing_text(c: &Crossing) -> String {
-    let pct = c.pct;
-    match c.state {
-        CrossState::Crossed { at } => format!("{pct}% crossed about {}", stamp(at)),
-        CrossState::Projected { at } => format!("{pct}% projected about {}", stamp(at)),
-        CrossState::Beyond { period_end } => {
-            format!("{pct}% not before the period ends {}", stamp(period_end))
-        }
-        CrossState::Unknown => format!("{pct}% too early to say"),
-    }
-}
-
-/// How the scope of a figure is named. Nothing says "your spend": whose
-/// spend it is stays as the server reported it.
-fn scope_text(scope: Scope) -> &'static str {
-    match scope {
-        Scope::Member => "member scope",
-        Scope::Org => "organization scope",
-        Scope::Unspecified => "as reported by the server",
-    }
-}
-
-/// The server figure used for the monthly limit, if one is.
-pub(crate) fn server_in_use(s: &Sources, now: i64) -> Option<&SpendFigure> {
-    if matches!(monthly(s, now), Monthly::Server { .. }) {
-        s.server.as_ref()
-    } else {
-        None
-    }
-}
-
-/// The "server billed" sentence: the amounts, the share, what is left, the
-/// reset time, the severity and whose spend it is.
-fn billed_line(f: &SpendFigure, limits: &[Limit]) -> String {
-    let mut parts = Vec::new();
-    match (f.used_usd(), f.limit_usd()) {
-        (Some(used), Some(limit)) => {
-            parts.push(format!("{} of {}", dollars(used), dollars(limit)));
-            if let Some(p) = f.percent {
-                parts.push(format!("{p:.1}%"));
-            }
-            parts.push(format!("{} left", dollars((limit - used).max(0.0))));
-        }
-        (None, Some(limit)) => parts.push(format!(
-            "limit {}, amount used not reported",
-            dollars(limit)
-        )),
-        _ => {}
-    }
-    if let Some(l) = limits.iter().find(|l| l.origin == Origin::Server) {
-        parts.push(format!("resets {}", stamp(f.resets_at.unwrap_or(l.end))));
-    }
-    if let Some(sev) = &f.severity {
-        parts.push(format!("severity {sev}"));
-    }
-    parts.push(scope_text(f.scope).to_string());
-    format!("server billed: {}", parts.join(", "))
-}
-
-/// The lines about the server spend limit for `--summary`: what the server
-/// billed, how it compares with the local estimate, the plan, when 50, 80 and
-/// 100 percent are crossed, and the one line saying why there is no figure
-/// when there is none in use.
-pub fn spend_lines(s: &Sources, limits: &[Limit], events: &[UsageEvent], now: i64) -> Vec<String> {
-    let mut out = Vec::new();
-    let figure = server_in_use(s, now);
-    if let Some(f) = figure {
-        out.push(billed_line(f, limits));
-        match compare_server(s, events, now) {
-            Some(Ok(c)) => out.push(c.line()),
-            Some(Err(why)) => out.push(format!("local estimate not compared: {why}")),
-            None => {}
-        }
-        out.push(format!("plan: {}", plan_label(s)));
-    }
-    // A stale server figure leaves the amount used at this machine's estimate.
-    let local_used = figure.is_some_and(|f| !f.is_fresh(now));
-    for l in limits {
-        if let Some(c) = l.thresholds(now) {
-            let basis = if local_used && l.origin == Origin::Server {
-                ", from the local estimate"
-            } else {
-                ""
-            };
-            out.push(format!(
-                "{} crossings ({}{basis}): {}",
-                l.period.key().replace('_', " "),
-                l.origin.key(),
-                c.iter().map(crossing_text).collect::<Vec<_>>().join(", ")
-            ));
-        }
-    }
-    if figure.is_none() {
-        out.extend(s.spend_unavailable.map(Reason::line));
-    }
-    out
-}
-
 /// The limits section of `--summary`.
 pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart) -> String {
     let limits = all_limits(s, events, now, week);
@@ -818,15 +863,6 @@ pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekS
     }
     for l in &limits {
         out.push_str(&format!("  {}\n", describe(l, now)));
-    }
-    for line in spend_lines(s, &limits, events, now) {
-        out.push_str(&format!("  {line}\n"));
-    }
-    if limits.iter().any(is_monthly_dollars) {
-        out.push_str("  burn-up, cumulative spend this period\n");
-        for line in burnup_for(s, &limits, events, now).table(BURNUP_TABLE_ROWS) {
-            out.push_str(&format!("    {line}\n"));
-        }
     }
     if s.stale(now) {
         out.push_str("  note: the plan limits were read over 6 hours ago\n");
@@ -838,22 +874,29 @@ pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekS
         .filter(|_| limits.iter().any(|l| l.origin == Origin::Cached))
     {
         out.push_str(&format!(
-            "  note: the cached limits were fetched by Claude Code {} ago\n",
-            super::period::elapsed_text(c.age(now))
+            "  note: the cached limits were fetched by Claude Code {} ago{}\n",
+            super::period::elapsed_text(c.age(now)),
+            if c.is_fresh(now) { "" } else { " (stale)" }
         ));
     }
-    if let Some(f) = s
-        .server
-        .as_ref()
-        .filter(|_| limits.iter().any(|l| l.origin == Origin::Server))
-    {
-        out.push_str(&format!(
-            "  note: the server billed figure was fetched {} ago\n",
-            super::period::elapsed_text(f.age(now))
-        ));
-    }
-    if let Some(note) = windows_note(s, &limits) {
+    // The reason line below says the same, so the note stays for the case where
+    // some limit is known but one window is not.
+    if let Some(note) = windows_note(s, &limits).filter(|_| reason(s, now).is_none()) {
         out.push_str(&format!("  {note}\n"));
+    }
+    for line in limit_lines(s, &limits, events, now) {
+        out.push_str(&format!("  {line}\n"));
+    }
+    let burnups = burnups_for(s, &limits, events, &[], now);
+    if let Some(b) = limits
+        .iter()
+        .zip(burnups)
+        .find_map(|(l, b)| b.filter(|_| is_monthly_dollars(l)))
+    {
+        out.push_str("  burn-up, cumulative spend this period\n");
+        for line in b.table(BURNUP_TABLE_ROWS) {
+            out.push_str(&format!("    {line}\n"));
+        }
     }
     for p in [Period::Today, Period::Week(week), Period::Month] {
         let (c, v) = burn_pair(events, p, now);
@@ -1037,6 +1080,8 @@ mod tests {
                 five_hour,
                 seven_day,
                 spend,
+                billed: None,
+                extra_windows: Vec::new(),
             }),
         }
     }
@@ -1226,48 +1271,6 @@ mod tests {
     }
 
     #[test]
-    fn the_plan_setting_changes_only_the_label_in_the_json() {
-        let s = Sources {
-            plan_choice: PlanChoice::Team,
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
-            ..Sources::default()
-        };
-
-        let mut v = report_json(&s, &[], NOW, WeekStart::Monday);
-        let mut base = report_json(
-            &Sources {
-                plan_choice: PlanChoice::Auto,
-                ..s.clone()
-            },
-            &[],
-            NOW,
-            WeekStart::Monday,
-        );
-
-        assert_eq!(v["plan_label"], "Team (set by you)");
-        for key in ["plan_label", "capabilities"] {
-            v.as_object_mut().unwrap().remove(key);
-            base.as_object_mut().unwrap().remove(key);
-        }
-        assert_eq!(v, base);
-    }
-
-    #[test]
-    fn load_reads_the_plan_setting_from_the_config_store() {
-        let home = crate::util::scratch_dir("limits-load-plan");
-        let dir = home.join(".config/playbook");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("config.json"), r#"{"usage":{"plan":"team"}}"#).unwrap();
-        let none = crate::util::scratch_dir("limits-load-plan-none");
-
-        let set = Sources::load(None, &home.join(".claude.json"), &home);
-        let unset = Sources::load(None, &none.join(".claude.json"), &none);
-
-        assert_eq!(plan_label(&set), "Team (set by you)");
-        assert_eq!(unset.plan_choice, PlanChoice::Auto);
-    }
-
-    #[test]
     fn the_json_names_the_plan_and_the_cache_age() {
         let s = Sources {
             account: cache(600, spend(500.0, None), None),
@@ -1292,7 +1295,6 @@ mod tests {
             snapshot: Some(gateway_snapshot()),
             budgets: vec![(LimitPeriod::Monthly, 100.0)],
             account: cache(600, spend(500.0, Some(120.0)), None),
-            ..Sources::default()
         };
 
         let l = all_limits(&s, &[], NOW, WeekStart::Monday);
@@ -1443,528 +1445,563 @@ mod tests {
         assert!(text.contains("manual limit"), "{text}");
     }
 
-    use crate::spend::{Money, SpendFigure};
-
-    const HOUR: i64 = 3600;
-    const MONTH_START: i64 = 1_798_761_600;
-
-    fn dollars(minor: i64) -> Option<Money> {
-        Some(Money {
-            minor,
-            decimals: 2,
-            currency: Some("USD".to_string()),
-        })
-    }
-
-    fn server_at(fetched_at: i64, limit_minor: i64, used_minor: Option<i64>) -> SpendFigure {
-        SpendFigure {
-            limit: dollars(limit_minor),
-            used: used_minor.and_then(dollars),
-            percent: None,
-            severity: None,
-            resets_at: None,
-            limit_reached: None,
-            scope: crate::spend::Scope::Unspecified,
-            windows: Vec::new(),
-            fetched_at,
-            origin: Origin::Server,
-        }
-    }
-
-    fn monthly_of(l: &[Limit]) -> Vec<&Limit> {
-        l.iter()
-            .filter(|x| x.period == LimitPeriod::Monthly)
-            .collect()
-    }
-
     #[test]
-    fn a_measured_limit_beats_a_fresh_server_figure() {
+    fn the_cache_used_amount_is_compared_with_the_local_estimate_of_the_utc_month() {
+        let mut account = cache(60, spend(1500.0, Some(1059.5)), None);
+        let fetched = NOW - 60;
+        let c = account.cache.as_mut().unwrap();
+        c.billed = SpendFigure::from_usd(Some(1500.0), Some(1059.5), fetched);
         let s = Sources {
-            snapshot: Some(gateway_snapshot()),
-            server: Some(server_at(NOW - 60, 50_000, Some(20_000))),
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
+            account,
             ..Sources::default()
         };
-
-        assert_eq!(monthly(&s, NOW), Monthly::Measured);
-        let l = all_limits(&s, &[], NOW, WeekStart::Monday);
-        assert!(monthly_of(&l).iter().all(|x| x.origin != Origin::Server));
-    }
-
-    #[test]
-    fn a_fresh_server_figure_replaces_the_local_sum_and_the_manual_budget() {
-        let s = Sources {
-            server: Some(server_at(NOW - 60, 150_000, Some(105_950))),
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
-            ..Sources::default()
-        };
-
-        let l = all_limits(&s, &[cost(NOW - 10, 3.0)], NOW, WeekStart::Monday);
-
-        let m = monthly_of(&l);
-        assert_eq!(m.len(), 1);
-        assert_eq!(m[0].origin, Origin::Server);
-        assert_eq!(m[0].limit, 1500.0);
-        assert_eq!(m[0].used, 1059.5);
-        assert_eq!(m[0].to_json(NOW)["origin"], "server");
-    }
-
-    #[test]
-    fn the_later_fetched_of_a_fresh_server_figure_and_a_fresh_cache_wins() {
-        let cache_5h_old = Account {
-            ..cache(5 * HOUR, spend(500.0, Some(120.0)), None)
-        };
-        let cache_1m_old = cache(60, spend(500.0, Some(120.0)), None);
-
-        let server_newer = Sources {
-            server: Some(server_at(NOW - 60, 150_000, None)),
-            account: cache_5h_old,
-            ..Sources::default()
-        };
-        let server_older = Sources {
-            server: Some(server_at(NOW - 5 * HOUR, 150_000, None)),
-            account: cache_1m_old,
-            ..Sources::default()
-        };
-
-        assert!(matches!(
-            monthly(&server_newer, NOW),
-            Monthly::Server { .. }
-        ));
-        assert!(matches!(
-            monthly(&server_older, NOW),
-            Monthly::Cached { .. }
-        ));
-    }
-
-    #[test]
-    fn a_fresh_measured_cache_is_not_outranked_by_an_equally_old_server_figure() {
-        let s = Sources {
-            server: Some(server_at(NOW - 60, 150_000, None)),
-            account: cache(60, spend(500.0, Some(120.0)), None),
-            ..Sources::default()
-        };
-
-        assert!(matches!(monthly(&s, NOW), Monthly::Cached { .. }));
-    }
-
-    #[test]
-    fn a_fresh_server_figure_is_used_when_it_is_the_only_source() {
-        let s = Sources {
-            server: Some(server_at(NOW - 60, 150_000, Some(1))),
-            ..Sources::default()
-        };
-
-        assert!(matches!(
-            monthly(&s, NOW),
-            Monthly::Server { fresh: true, .. }
-        ));
-    }
-
-    #[test]
-    fn a_stale_server_figure_loses_to_a_fresh_cache_and_to_the_manual_budget() {
-        let stale = server_at(NOW - 7 * HOUR, 150_000, Some(105_950));
-        let with_cache = Sources {
-            server: Some(stale.clone()),
-            account: cache(600, spend(500.0, Some(120.0)), None),
-            ..Sources::default()
-        };
-        let with_manual = Sources {
-            server: Some(stale),
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
-            ..Sources::default()
-        };
-
-        assert!(matches!(monthly(&with_cache, NOW), Monthly::Cached { .. }));
-        assert_eq!(monthly(&with_manual, NOW), Monthly::Manual(100.0));
-    }
-
-    #[test]
-    fn a_stale_server_figure_is_the_last_resort_and_keeps_the_local_sum() {
-        let s = Sources {
-            server: Some(server_at(NOW - 7 * HOUR, 150_000, Some(105_950))),
-            ..Sources::default()
-        };
-
-        assert!(matches!(
-            monthly(&s, NOW),
-            Monthly::Server { fresh: false, .. }
-        ));
-        let l = all_limits(&s, &[cost(NOW - 10, 3.0)], NOW, WeekStart::Monday);
-        assert_eq!(monthly_of(&l)[0].used, 3.0);
-    }
-
-    #[test]
-    fn the_later_of_a_stale_server_figure_and_a_stale_cache_is_the_last_resort() {
-        let server_later = Sources {
-            server: Some(server_at(NOW - 8 * HOUR, 150_000, None)),
-            account: cache(9 * HOUR, spend(500.0, None), None),
-            ..Sources::default()
-        };
-        let cache_later = Sources {
-            server: Some(server_at(NOW - 9 * HOUR, 150_000, None)),
-            account: cache(8 * HOUR, spend(500.0, None), None),
-            ..Sources::default()
-        };
-
-        assert!(matches!(
-            monthly(&server_later, NOW),
-            Monthly::Server { .. }
-        ));
-        assert!(matches!(monthly(&cache_later, NOW), Monthly::Cached { .. }));
-    }
-
-    #[test]
-    fn a_server_figure_fetched_before_the_month_began_is_ignored() {
-        let s = Sources {
-            server: Some(server_at(MONTH_START - 1, 150_000, Some(105_950))),
-            ..Sources::default()
-        };
-
-        assert_eq!(monthly(&s, MONTH_START + HOUR), Monthly::Unset);
-    }
-
-    #[test]
-    fn a_server_figure_from_the_future_or_without_a_dollar_limit_is_ignored() {
-        let future = Sources {
-            server: Some(server_at(NOW + HOUR, 150_000, None)),
-            ..Sources::default()
-        };
-        let mut euro = server_at(NOW - 60, 150_000, None);
-        euro.limit.as_mut().unwrap().currency = Some("EUR".to_string());
-        let other = Sources {
-            server: Some(euro),
-            ..Sources::default()
-        };
-
-        assert_eq!(monthly(&future, NOW), Monthly::Unset);
-        assert_eq!(monthly(&other, NOW), Monthly::Unset);
-    }
-
-    #[test]
-    fn the_summary_says_server_billed_and_how_old_the_figure_is() {
-        let s = Sources {
-            server: Some(server_at(NOW - 600, 150_000, Some(105_950))),
-            ..Sources::default()
-        };
-
-        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
-
-        assert!(
-            text.contains("monthly budget: $1059.50 of $1500.00 used (server billed)"),
-            "{text}"
-        );
-        assert!(
-            text.contains("server billed figure was fetched 10m ago"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn a_fresh_server_figure_beats_a_stale_cache_and_the_manual_budget() {
-        let s = Sources {
-            server: Some(server_at(NOW - 60, 150_000, None)),
-            account: cache(7 * HOUR, spend(500.0, Some(120.0)), None),
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
-            ..Sources::default()
-        };
-
-        assert!(matches!(
-            monthly(&s, NOW),
-            Monthly::Server { fresh: true, .. }
-        ));
-    }
-
-    #[test]
-    fn the_comparison_ignores_local_spend_after_the_figure_was_fetched() {
-        let s = Sources {
-            server: Some(server_at(NOW - 5 * HOUR, 150_000, Some(90_000))),
-            ..Sources::default()
-        };
-        let events = [cost(NOW - 6 * HOUR, 900.0), cost(NOW - HOUR, 400.0)];
-
-        let c = compare_server(&s, &events, NOW).unwrap().unwrap();
-
-        assert_eq!(c.local_estimate_usd, 900.0);
-        assert!(!c.disagrees);
-    }
-
-    #[test]
-    fn the_month_is_the_utc_month_in_any_zone() {
-        assert_eq!(utc_month_start(MONTH_START), MONTH_START);
-        assert_eq!(utc_month_start(MONTH_START - 1), MONTH_START - 31 * 86_400);
-        assert_eq!(utc_month_start(NOW), MONTH_START);
-    }
-
-    #[test]
-    fn the_server_figure_is_compared_with_the_local_sum_of_the_month() {
-        let s = Sources {
-            server: Some(server_at(NOW - 60, 150_000, Some(105_950))),
-            ..Sources::default()
-        };
+        let month_start = utc_month_bounds(NOW).0;
         let events = [
-            cost(MONTH_START + 10, 900.0),
-            cost(MONTH_START - 10, 5000.0),
+            cost(month_start - 1, 50.0),
+            cost(month_start, 3.0),
+            cost(fetched, 4.0),
+            cost(fetched + 1, 100.0),
         ];
 
-        let c = compare_server(&s, &events, NOW).unwrap().unwrap();
+        let c = compare_billed(&s, &events, NOW).unwrap().unwrap();
 
-        assert_eq!(c.local_estimate_usd, 900.0);
-        assert!(c.disagrees);
+        assert_eq!(c.billed_usd, 1059.5);
+        assert_eq!(c.local_estimate_usd, 7.0);
     }
 
     #[test]
-    fn nothing_is_compared_when_no_server_figure_is_used() {
-        let s = Sources {
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
-            ..Sources::default()
+    fn a_figure_in_another_currency_or_without_one_is_reported_not_dropped() {
+        let money = |currency: Option<&str>| {
+            Some(crate::spend::Money {
+                minor: 105_950,
+                decimals: 2,
+                currency: currency.map(str::to_string),
+            })
         };
-
-        assert!(compare_server(&s, &[], NOW).is_none());
-    }
-
-    fn with_server_summary() -> String {
-        crate::tz::set(crate::tz::Zone::Utc);
-        let s = Sources {
-            server: Some(server_at(NOW - 600, 150_000, Some(105_950))),
-            ..Sources::default()
-        };
-        let events = [cost(MONTH_START + 10, 900.0)];
-        summary_section(&s, &events, NOW, WeekStart::Monday)
-    }
-
-    #[test]
-    fn the_summary_shows_the_server_billed_line_the_comparison_and_the_plan() {
-        let text = with_server_summary();
-
-        assert!(
-            text.contains(
-                "  server billed: $1,059.50 of $1,500.00, $440.50 left, resets 2027-02-01 00:00:00Z, as reported by the server\n"
-            ),
-            "{text}"
-        );
-        assert!(
-            text.contains("  local estimate (this machine only) $900.00 differs from server billed $1,059.50\n"),
-            "{text}"
-        );
-        assert!(
-            text.contains("  plan: Enterprise or unknown plan\n"),
-            "{text}"
-        );
-        assert!(!text.contains("wrong"), "{text}");
-    }
-
-    #[test]
-    fn the_summary_dates_every_crossing_from_the_fixed_clock() {
-        let text = with_server_summary();
-
-        assert!(
-            text.contains(
-                "  monthly crossings (server): 50% crossed about 2027-01-11 03:30:40Z, 80% projected about 2027-01-17 05:37:04Z, 100% projected about 2027-01-21 07:01:20Z\n"
-            ),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn a_figure_without_an_amount_used_says_so_and_is_not_compared() {
-        crate::tz::set(crate::tz::Zone::Utc);
-        let s = Sources {
-            server: Some(server_at(NOW - 60, 150_000, None)),
-            ..Sources::default()
-        };
-
-        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
-
-        assert!(
-            text.contains("limit $1,500.00, amount used not reported"),
-            "{text}"
-        );
-        assert!(
-            text.contains("local estimate not compared: amount used not reported, not compared"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn the_summary_names_scope_and_severity_when_the_server_gave_them() {
-        crate::tz::set(crate::tz::Zone::Utc);
-        let mut f = server_at(NOW - 60, 150_000, Some(105_950));
-        f.scope = Scope::Org;
-        f.severity = Some("warning".to_string());
-        f.percent = Some(70.6);
-        let s = Sources {
-            server: Some(f),
-            ..Sources::default()
-        };
-
-        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
-
-        assert!(
-            text.contains(
-                "$440.50 left, resets 2027-02-01 00:00:00Z, severity warning, organization scope"
-            ),
-            "{text}"
-        );
-        assert!(text.contains("$1,059.50 of $1,500.00, 70.6%, "), "{text}");
-    }
-
-    #[test]
-    fn each_unavailable_reason_prints_one_line_and_nothing_else_about_the_server() {
-        for reason in [
-            Reason::Disabled,
-            Reason::NoConsent,
-            Reason::NoToken,
-            Reason::Unauthorized,
-            Reason::RateLimited,
-            Reason::Timeout,
-            Reason::Schema,
-            Reason::UnsupportedLogin,
-            Reason::Network,
-            Reason::Internal,
-            Reason::Fetching,
+        for (currency, text) in [
+            (Some("EUR"), "currency EUR, not compared"),
+            (None, "currency not reported or not readable, not compared"),
         ] {
+            let mut account = cache(60, None, None);
+            account.cache.as_mut().unwrap().billed = Some(SpendFigure {
+                limit: None,
+                used: money(currency),
+                fetched_at: NOW - 60,
+            });
             let s = Sources {
-                spend_unavailable: Some(reason),
+                account,
                 ..Sources::default()
             };
 
-            let text = summary_section(&s, &[], NOW, WeekStart::Monday);
-            let v = report_json(&s, &[], NOW, WeekStart::Monday);
+            let r = compare_billed(&s, &[], NOW).unwrap();
 
-            assert_eq!(
-                text.matches("spend limit unavailable").count(),
-                1,
-                "{reason:?}"
-            );
-            assert!(text.contains(&format!("  {}\n", reason.line())), "{text}");
-            assert!(!text.contains("server billed"), "{text}");
-            assert_eq!(v["spend_unavailable"], reason.key());
-            assert!(v["spend"].is_null());
+            assert_eq!(r.unwrap_err().to_string(), text);
         }
     }
 
     #[test]
-    fn without_a_server_figure_or_a_reason_the_summary_adds_no_spend_line() {
-        let s = Sources {
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
-            ..Sources::default()
+    fn nothing_is_compared_without_an_amount_used_this_utc_month() {
+        let fig = |fetched_at, used: Option<f64>| {
+            let mut account = cache_at(fetched_at, None, None, None);
+            account.cache.as_mut().unwrap().billed =
+                SpendFigure::from_usd(Some(100.0), used, fetched_at);
+            Sources {
+                account,
+                ..Sources::default()
+            }
         };
 
-        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
-        let v = report_json(&s, &[], NOW, WeekStart::Monday);
-
-        assert!(!text.contains("server billed"), "{text}");
-        assert!(!text.contains("spend limit unavailable"), "{text}");
-        assert!(v["spend"].is_null() && v["spend_unavailable"].is_null());
+        assert!(compare_billed(&Sources::default(), &[], NOW).is_none());
+        assert!(compare_billed(&fig(NOW - 60, None), &[], NOW).is_none());
+        assert!(compare_billed(&fig(utc_month_bounds(NOW).0 - 1, Some(5.0)), &[], NOW).is_none());
+        assert!(compare_billed(&fig(NOW + 3600, Some(5.0)), &[], NOW).is_none());
     }
 
     #[test]
-    fn the_json_adds_spend_capabilities_and_thresholds_without_changing_old_keys() {
+    fn the_statusline_gateway_amount_is_compared_too() {
         let s = Sources {
-            server: Some(server_at(NOW - 600, 150_000, Some(105_950))),
+            snapshot: Some(gateway_snapshot()),
             ..Sources::default()
         };
-        let events = [cost(MONTH_START + 10, 900.0)];
 
-        let v = report_json(&s, &events, NOW, WeekStart::Monday);
+        let c = compare_billed(&s, &[cost(NOW - 120, 4.0)], NOW)
+            .unwrap()
+            .unwrap();
 
-        assert_eq!(v["spend"]["comparison"]["disagrees"], true);
-        assert_eq!(v["spend"]["limit"]["minor"], 150_000);
-        assert_eq!(v["spend"]["scope"], "unspecified");
-        assert_eq!(v["spend"]["comparison_skipped"], Value::Null);
-        assert_eq!(
-            v["capabilities"]["lines"],
-            json!(["monthly_cap", "local_estimate"])
+        assert_eq!(c.billed_usd, 10.0);
+        assert_eq!(c.local_estimate_usd, 4.0);
+    }
+
+    #[test]
+    fn the_cached_used_amount_counts_from_the_utc_month_not_the_local_one() {
+        let month_start = utc_month_bounds(NOW).0;
+        let s = Sources {
+            account: cache_at(month_start, spend(500.0, Some(120.0)), None, None),
+            ..Sources::default()
+        };
+
+        let l = all_limits(&s, &[], month_start + 60, WeekStart::Monday);
+
+        let m: Vec<_> = l
+            .iter()
+            .filter(|x| x.period == LimitPeriod::Monthly)
+            .collect();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].used, 120.0);
+        assert_eq!((m[0].start, m[0].end), utc_month_bounds(NOW));
+    }
+
+    #[test]
+    fn a_figure_fetched_at_the_utc_month_start_is_compared_and_the_clock_clamps() {
+        let at = |fetched_at: i64| {
+            let mut account = cache_at(fetched_at, None, None, None);
+            account.cache.as_mut().unwrap().billed =
+                SpendFigure::from_usd(Some(100.0), Some(5.0), fetched_at);
+            Sources {
+                account,
+                ..Sources::default()
+            }
+        };
+        let start = utc_month_bounds(NOW).0;
+
+        assert!(compare_billed(&at(start), &[], NOW).is_some());
+
+        // Fetched 120 s ahead of this clock, inside the skew allowance: spend
+        // after `now` is not counted.
+        let c = compare_billed(
+            &at(NOW + 120),
+            &[cost(NOW - 1, 1.0), cost(NOW, 2.0), cost(NOW + 60, 4.0)],
+            NOW,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(c.local_estimate_usd, 3.0);
+    }
+
+    #[test]
+    fn the_statusline_amount_wins_over_the_cache_only_when_monthly_and_usable() {
+        let cached = |s: &mut Sources| {
+            s.account = cache(60, None, None);
+            s.account.cache.as_mut().unwrap().billed =
+                SpendFigure::from_usd(Some(500.0), Some(77.0), NOW - 60);
+        };
+        let mut both = Sources {
+            snapshot: Some(gateway_snapshot()),
+            ..Sources::default()
+        };
+        cached(&mut both);
+        let billed = |s: &Sources| compare_billed(s, &[], NOW).unwrap().unwrap().billed_usd;
+
+        assert_eq!(billed(&both), 10.0);
+
+        let weekly = both
+            .snapshot
+            .as_mut()
+            .unwrap()
+            .spend_limit
+            .as_mut()
+            .unwrap();
+        weekly.period = Some(LimitPeriod::Weekly);
+        assert_eq!(billed(&both), 77.0);
+
+        let mut no_used = both.clone();
+        let sp = no_used
+            .snapshot
+            .as_mut()
+            .unwrap()
+            .spend_limit
+            .as_mut()
+            .unwrap();
+        sp.period = Some(LimitPeriod::Monthly);
+        sp.used_usd = None;
+        assert_eq!(billed(&no_used), 77.0);
+
+        let mut ended = both.clone();
+        let sp = ended
+            .snapshot
+            .as_mut()
+            .unwrap()
+            .spend_limit
+            .as_mut()
+            .unwrap();
+        sp.period = Some(LimitPeriod::Monthly);
+        sp.resets_at = NOW;
+        assert_eq!(billed(&ended), 77.0);
+
+        let mut old = both.clone();
+        let snap = old.snapshot.as_mut().unwrap();
+        snap.captured_at = utc_month_bounds(NOW).0 - 1;
+        snap.spend_limit.as_mut().unwrap().period = Some(LimitPeriod::Monthly);
+        assert_eq!(billed(&old), 77.0);
+    }
+
+    // The merge of a statusline reading over the stored one.
+
+    fn merge_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pb-limits-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn reading(five: Option<(f64, i64)>, seven: Option<(f64, i64)>) -> String {
+        let part = |name: &str, v: Option<(f64, i64)>| {
+            v.map(|(pct, at)| format!(r#""{name}":{{"used_percentage":{pct},"resets_at":{at}}}"#))
+        };
+        let parts: Vec<String> = [part("five_hour", five), part("seven_day", seven)]
+            .into_iter()
+            .flatten()
+            .collect();
+        format!(r#"{{"rate_limits":{{{}}}}}"#, parts.join(","))
+    }
+
+    fn stored_in(dir: &Path) -> Snapshot {
+        load(dir).unwrap()
+    }
+
+    #[test]
+    fn a_reading_with_one_window_keeps_the_other_as_stored() {
+        let dir = merge_dir("keep");
+        remember(
+            &dir,
+            &reading(Some((10.0, NOW + 3600)), Some((20.0, NOW + 86_400))),
+            NOW,
         );
-        assert_eq!(v["capabilities"]["local_only"], false);
-        assert_eq!(v["limits"][0]["origin"], "server");
-        assert_eq!(v["limits"][0]["thresholds"].as_array().unwrap().len(), 3);
-        for key in [
-            "known",
-            "hint",
-            "plan",
-            "plan_label",
-            "windows_note",
-            "cache",
-            "limits",
-            "burn",
-        ] {
-            assert!(v.get(key).is_some(), "{key}");
+
+        remember(&dir, &reading(None, Some((25.0, NOW + 86_400))), NOW + 60);
+
+        let s = stored_in(&dir);
+        assert_eq!(s.five_hour.unwrap().used_percentage, 10.0);
+        assert_eq!(s.seven_day.unwrap().used_percentage, 25.0);
+        assert_eq!(s.read.five_hour, Some(NOW));
+        assert_eq!(s.read.seven_day, Some(NOW + 60));
+        assert_eq!(s.captured_at, NOW + 60);
+    }
+
+    #[test]
+    fn each_window_keeps_its_own_reading_time_and_one_old_part_makes_it_stale() {
+        let dir = merge_dir("stale");
+        let later = NOW + 7 * HOUR;
+        remember(&dir, &reading(Some((10.0, NOW + 10 * HOUR)), None), NOW);
+        remember(&dir, &reading(None, Some((20.0, later + 86_400))), later);
+
+        let s = stored_in(&dir);
+
+        // Both are held, each with the time it was read.
+        assert_eq!(s.read.five_hour, Some(NOW));
+        assert_eq!(s.read.seven_day, Some(later));
+        assert_eq!(s.captured_at, later);
+        assert_eq!(s.oldest_read(), NOW);
+        // The old five hour window, still live, makes the reading stale.
+        assert!(s.is_stale(later));
+        // Without it only the fresh part is left and the reading is fresh.
+        assert!(!Snapshot {
+            five_hour: None,
+            ..s
+        }
+        .is_stale(later));
+    }
+
+    #[test]
+    fn a_dropped_window_leaves_no_read_time_behind() {
+        let dir = merge_dir("dropped");
+        let later = NOW + 7 * HOUR;
+        remember(&dir, &reading(Some((10.0, NOW + 5 * HOUR)), None), NOW);
+        remember(&dir, &reading(None, Some((20.0, later + 86_400))), later);
+
+        let s = stored_in(&dir);
+
+        assert!(s.five_hour.is_none());
+        assert_eq!(s.read.five_hour, None);
+        assert!(!s.is_stale(later));
+    }
+
+    #[test]
+    fn a_stored_window_is_dropped_when_its_reset_time_has_come_and_kept_one_second_before() {
+        for (resets_at, kept) in [(NOW, false), (NOW + 1, true), (NOW - 1, false)] {
+            let dir = merge_dir(&format!("edge{kept}{}", resets_at - NOW));
+            remember(&dir, &reading(Some((10.0, resets_at)), None), NOW - 60);
+
+            remember(&dir, &reading(None, Some((20.0, NOW + 86_400))), NOW);
+
+            assert_eq!(stored_in(&dir).five_hour.is_some(), kept, "{resets_at}");
         }
     }
 
     #[test]
-    fn a_skipped_comparison_is_named_in_the_json() {
-        let mut f = server_at(NOW - 60, 150_000, Some(105_950));
-        f.used.as_mut().unwrap().currency = Some("EUR".to_string());
-        let s = Sources {
-            server: Some(f),
-            ..Sources::default()
-        };
+    fn an_input_with_no_window_or_that_is_not_json_changes_nothing() {
+        let dir = merge_dir("noop");
+        remember(&dir, &reading(Some((10.0, NOW + 3600)), None), NOW);
+        let before = std::fs::read_to_string(snapshot_path(&dir)).unwrap();
 
-        let v = report_json(&s, &[], NOW, WeekStart::Monday);
+        for bad in [r#"{"rate_limits":{}}"#, "not json", r#"{"model":"x"}"#, ""] {
+            remember(&dir, bad, NOW + 60);
+        }
 
-        // The limit is in dollars, the amount used in euros: no comparison.
-        assert_eq!(v["spend"]["comparison"], Value::Null);
         assert_eq!(
-            v["spend"]["comparison_skipped"],
-            "currency EUR, not compared"
+            std::fs::read_to_string(snapshot_path(&dir)).unwrap(),
+            before
         );
     }
 
     #[test]
-    fn a_manual_budget_gets_its_own_crossings_line_and_no_server_text() {
+    fn an_unreadable_stored_file_is_replaced_by_the_new_reading_alone() {
+        let dir = merge_dir("broken");
+        std::fs::write(snapshot_path(&dir), "{{{").unwrap();
+
+        remember(&dir, &reading(Some((10.0, NOW + 3600)), None), NOW);
+
+        let s = stored_in(&dir);
+        assert_eq!(s.five_hour.unwrap().used_percentage, 10.0);
+        assert!(s.seven_day.is_none());
+    }
+
+    #[test]
+    fn two_writers_that_both_loaded_first_leave_the_last_writers_file() {
+        let dir = merge_dir("race");
+        remember(
+            &dir,
+            &reading(Some((10.0, NOW + 3600)), Some((20.0, NOW + 86_400))),
+            NOW,
+        );
+        // Both load the same stored reading, then save in turn.
+        let base = load(&dir);
+        let a = Snapshot::from_statusline(&reading(Some((11.0, NOW + 3600)), None), NOW + 1)
+            .unwrap()
+            .merged_over(base.clone(), NOW + 1);
+        let b = Snapshot::from_statusline(&reading(None, Some((21.0, NOW + 86_400))), NOW + 2)
+            .unwrap()
+            .merged_over(base, NOW + 2);
+
+        save(&dir, &a);
+        save(&dir, &b);
+
+        let s = stored_in(&dir);
+        assert_eq!(s.five_hour.unwrap().used_percentage, 10.0);
+        assert_eq!(s.seven_day.unwrap().used_percentage, 21.0);
+    }
+
+    #[test]
+    fn the_gateway_spend_limit_is_kept_the_same_way() {
+        let dir = merge_dir("spend");
+        let with_spend = format!(
+            r#"{{"rate_limits":{{"spend_limit":{{"used_percentage":10,"resets_at":{},"used_usd":1.0,"limit_usd":10.0,"period":"monthly"}}}}}}"#,
+            NOW + 86_400
+        );
+        remember(&dir, &with_spend, NOW);
+
+        remember(&dir, &reading(Some((5.0, NOW + 3600)), None), NOW + 60);
+
+        let s = stored_in(&dir);
+        assert_eq!(s.spend_limit.unwrap().limit_usd, Some(10.0));
+        assert_eq!(s.read.spend_limit, Some(NOW));
+        assert_eq!(s.five_hour.unwrap().used_percentage, 5.0);
+    }
+
+    // Why no limit is shown, the crossings and the comparison in the outputs.
+
+    const HOUR: i64 = 3600;
+
+    fn max_plan(cache: Option<crate::plan::UsageCache>) -> Account {
+        Account {
+            plan: crate::plan::Plan::Max5x,
+            cache,
+        }
+    }
+
+    fn window_snapshot(resets_in: i64) -> Snapshot {
+        Snapshot {
+            captured_at: NOW - 60,
+            five_hour: Some(window_at(50.0, NOW + resets_in)),
+            ..Snapshot::default()
+        }
+    }
+
+    #[test]
+    fn each_reason_word_has_its_case_and_its_line() {
+        let stale_cache = crate::plan::UsageCache {
+            fetched_at: NOW - 7 * HOUR,
+            ..crate::plan::UsageCache::default()
+        };
+        let cases: [(Sources, Option<Reason>, &str); 6] = [
+            (
+                Sources { account: max_plan(None), ..Sources::default() },
+                Some(Reason::NoReading),
+                "no limit reading yet: run a session with the playbook statusline",
+            ),
+            (
+                Sources::default(),
+                Some(Reason::CapUnknown),
+                "cap not reported by Claude Code on this login",
+            ),
+            (
+                Sources { account: max_plan(Some(stale_cache)), ..Sources::default() },
+                Some(Reason::Stale),
+                "the last limit reading is over 6 hours old and is not used: run a session with the playbook statusline",
+            ),
+            (
+                Sources { snapshot: Some(window_snapshot(0)), ..Sources::default() },
+                Some(Reason::WindowsReset),
+                "the windows of the last reading have reset: run a session with the playbook statusline for a new one",
+            ),
+            (
+                Sources { snapshot: Some(window_snapshot(3600)), ..Sources::default() },
+                None,
+                "",
+            ),
+            (
+                Sources { snapshot: Some(gateway_snapshot()), ..Sources::default() },
+                None,
+                "",
+            ),
+        ];
+
+        for (sources, want, line) in cases {
+            let got = reason(&sources, NOW);
+
+            assert_eq!(got, want);
+            if let Some(r) = got {
+                assert_eq!(r.line(), line);
+                let text = summary_section(&sources, &[], NOW, WeekStart::Monday);
+                assert!(text.contains(&format!("  {line}\n")), "{text}");
+                assert_eq!(
+                    report_json(&sources, &[], NOW, WeekStart::Monday)["reason"],
+                    r.key()
+                );
+            } else {
+                let json = report_json(&sources, &[], NOW, WeekStart::Monday);
+                assert!(json["reason"].is_null());
+            }
+        }
+        let keys = [
+            Reason::NoReading,
+            Reason::Stale,
+            Reason::CapUnknown,
+            Reason::WindowsReset,
+        ]
+        .map(Reason::key);
+        assert_eq!(
+            keys,
+            ["no-reading", "stale", "cap-unknown", "windows-reset"]
+        );
+    }
+
+    #[test]
+    fn a_manual_budget_alone_still_says_no_limit_comes_from_claude() {
+        let s = Sources {
+            budgets: vec![(LimitPeriod::Monthly, 200.0)],
+            ..Sources::default()
+        };
+
+        assert_eq!(reason(&s, NOW), Some(Reason::CapUnknown));
+    }
+
+    #[test]
+    fn the_summary_lists_when_50_80_and_100_percent_are_crossed_for_each_limit() {
         crate::tz::set(crate::tz::Zone::Utc);
         let s = Sources {
-            budgets: vec![(LimitPeriod::Monthly, 1500.0)],
-            ..Sources::default()
-        };
-        let events = [cost(MONTH_START + 10, 1059.5)];
-
-        let text = summary_section(&s, &events, NOW, WeekStart::Monday);
-
-        assert!(
-            text.contains("  monthly crossings (manual): 50% crossed about"),
-            "{text}"
-        );
-        assert!(!text.contains("server billed"), "{text}");
-    }
-
-    #[test]
-    fn a_server_figure_that_is_not_in_use_prints_and_reports_nothing() {
-        let s = Sources {
-            server: Some(server_at(MONTH_START - 1, 150_000, Some(105_950))),
-            spend_unavailable: Some(Reason::Network),
+            snapshot: Some(window_snapshot(3600)),
             ..Sources::default()
         };
 
         let text = summary_section(&s, &[], NOW, WeekStart::Monday);
-        let v = report_json(&s, &[], NOW, WeekStart::Monday);
 
-        assert!(!text.contains("server billed"), "{text}");
-        assert!(text.contains("spend limit unavailable (network)"), "{text}");
-        assert!(v["spend"].is_null());
+        let line = text
+            .lines()
+            .find(|l| l.contains("five hour crossings (measured):"))
+            .unwrap_or_else(|| panic!("{text}"));
+        // The window began 4 hours before NOW and ends 1 hour after it, and 50
+        // percent of it is used, so 50 percent is crossed at NOW.
+        let at = |secs: i64| stamp(secs);
+        assert_eq!(
+            line.trim(),
+            format!(
+                "five hour crossings (measured): 50% crossed about {}, 80% not before the period ends {end}, 100% not before the period ends {end}",
+                at(NOW),
+                end = at(NOW + HOUR)
+            )
+        );
+        // 50 percent after 4 of 5 hours projects 62.5 percent at the end.
     }
 
     #[test]
-    fn a_stale_figure_in_use_hides_the_unavailable_line_and_labels_its_crossings() {
-        crate::tz::set(crate::tz::Zone::Utc);
+    fn the_comparison_shows_its_age_and_a_stale_marker_over_six_hours() {
+        let billed = |age: i64| {
+            let mut account = cache(age, spend(1500.0, Some(1059.5)), None);
+            account.cache.as_mut().unwrap().billed =
+                SpendFigure::from_usd(Some(1500.0), Some(1059.5), NOW - age);
+            Sources {
+                account,
+                ..Sources::default()
+            }
+        };
+        let events = [cost(NOW - 8 * HOUR, 5.0)];
+
+        let fresh = summary_section(&billed(600), &events, NOW, WeekStart::Monday);
+        let stale = summary_section(&billed(7 * HOUR), &events, NOW, WeekStart::Monday);
+
+        assert!(
+            fresh.contains("reported by Claude (read 10m ago)"),
+            "{fresh}"
+        );
+        assert!(
+            stale.contains("reported by Claude (stale, read 7h"),
+            "{stale}"
+        );
+        assert!(stale.contains("(stale)"), "{stale}");
+        let j = report_json(&billed(7 * HOUR), &events, NOW, WeekStart::Monday);
+        assert_eq!(j["comparison"]["stale"], true);
+        assert_eq!(j["comparison"]["billed_usd"], 1059.5);
+        assert!(
+            report_json(&Sources::default(), &[], NOW, WeekStart::Monday)["comparison"].is_null()
+        );
+    }
+
+    #[test]
+    fn a_figure_that_cannot_be_compared_says_why_in_text_and_json() {
+        let mut account = cache(60, None, None);
+        account.cache.as_mut().unwrap().billed = Some(SpendFigure {
+            limit: None,
+            used: Some(crate::spend::Money {
+                minor: 100,
+                decimals: 2,
+                currency: Some("EUR".to_string()),
+            }),
+            fetched_at: NOW - 60,
+        });
         let s = Sources {
-            server: Some(server_at(NOW - 7 * HOUR, 150_000, Some(105_950))),
-            spend_unavailable: Some(Reason::Network),
+            account,
             ..Sources::default()
         };
 
-        let text = summary_section(&s, &[cost(NOW - 10, 3.0)], NOW, WeekStart::Monday);
+        let text = summary_section(&s, &[], NOW, WeekStart::Monday);
+        let json = report_json(&s, &[], NOW, WeekStart::Monday);
 
-        assert!(text.contains("server billed:"), "{text}");
-        assert!(!text.contains("spend limit unavailable"), "{text}");
         assert!(
-            text.contains("monthly crossings (server, from the local estimate):"),
+            text.contains("local estimate not compared: currency EUR, not compared"),
             "{text}"
         );
+        assert_eq!(json["comparison"]["skipped"], "currency EUR, not compared");
     }
+
+    #[test]
+    fn every_limit_in_the_json_carries_three_thresholds() {
+        let s = Sources {
+            snapshot: Some(window_snapshot(3600)),
+            ..Sources::default()
+        };
+
+        let json = report_json(&s, &[], NOW, WeekStart::Monday);
+
+        let limits = json["limits"].as_array().unwrap();
+        assert!(!limits.is_empty());
+        for l in limits {
+            assert_eq!(l["thresholds"].as_array().unwrap().len(), 3);
+        }
+    }
+
+    /// 2027-01-01 00:00 UTC, the month that holds NOW.
+    const MONTH_START: i64 = 1_798_761_600;
 
     #[test]
     fn the_summary_prints_the_burn_up_table_for_a_monthly_dollar_limit_only() {
@@ -1977,6 +2014,10 @@ mod tests {
             budgets: vec![(LimitPeriod::Weekly, 100.0)],
             ..Sources::default()
         };
+        let window = Sources {
+            snapshot: Some(window_snapshot(3600)),
+            ..Sources::default()
+        };
         let events = [
             cost(MONTH_START + 10, 25.0),
             cost(MONTH_START + 3 * 86_400, 25.0),
@@ -1984,6 +2025,7 @@ mod tests {
 
         let text = summary_section(&with, &events, NOW, WeekStart::Monday);
         let other = summary_section(&weekly, &events, NOW, WeekStart::Monday);
+        let win = summary_section(&window, &events, NOW, WeekStart::Monday);
 
         assert!(
             text.contains("  burn-up, cumulative spend this period\n"),
@@ -1998,11 +2040,13 @@ mod tests {
             "{text}"
         );
         assert!(!other.contains("burn-up"), "{other}");
+        assert!(!win.contains("burn-up"), "{win}");
     }
 
     #[test]
-    fn the_json_gives_the_monthly_dollar_limit_a_day_series_and_no_other_limit() {
+    fn the_json_gives_every_limit_a_series_by_its_unit() {
         let s = Sources {
+            snapshot: Some(window_snapshot(3600)),
             budgets: vec![(LimitPeriod::Monthly, 100.0), (LimitPeriod::Weekly, 40.0)],
             ..Sources::default()
         };
@@ -2011,11 +2055,30 @@ mod tests {
         let v = report_json(&s, &events, NOW, WeekStart::Monday);
 
         let limits = v["limits"].as_array().unwrap();
-        let monthly = limits.iter().find(|l| l["period"] == "monthly").unwrap();
-        let weekly = limits.iter().find(|l| l["period"] == "weekly").unwrap();
+        let by = |period: &str| limits.iter().find(|l| l["period"] == period).unwrap();
+        let monthly = by("monthly");
+        assert_eq!(monthly["series"]["basis"], "daily");
         assert_eq!(monthly["series"]["days"][0]["day"], "2027-01-01");
         assert_eq!(monthly["series"]["days"][0]["cumulative_usd"], 25.0);
         assert!(monthly["series"]["projected_end_usd"].is_number());
-        assert!(weekly.get("series").is_none());
+        assert!(by("weekly")["series"]["days"].is_array());
+        let window = by("five_hour");
+        assert_eq!(window["series"]["basis"], "line");
+        assert_eq!(window["series"]["points"].as_array().unwrap().len(), 2);
+        assert!(window["series"]["projected_end_percent"].is_number());
+    }
+
+    #[test]
+    fn a_cached_dollar_limit_gets_the_billed_anchor_from_the_cache() {
+        let mut account = cache(60, spend(500.0, Some(120.0)), None);
+        account.cache.as_mut().unwrap().billed =
+            SpendFigure::from_usd(Some(500.0), Some(120.0), NOW - 60);
+        let s = Sources {
+            account,
+            ..Sources::default()
+        };
+
+        assert_eq!(billed_anchor(&s, NOW), Some((NOW - 60, 120.0)));
+        assert_eq!(billed_anchor(&Sources::default(), NOW), None);
     }
 }

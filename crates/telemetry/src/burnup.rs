@@ -1,42 +1,75 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The data of the burn-up chart: cumulative spend over the billing period,
-//! a straight projection to the period end at the average pace, and where the
-//! limit's 50, 80 and 100 percent are crossed. Pure: the period, the events
-//! and the clock come in as arguments. The chart is drawn in `tui::burnup`
-//! and the plain table here serves `--summary`, a pipe and a narrow panel.
+//! The data of the burn-up chart for one limit: how much of it is used over
+//! its period, a straight projection to the period end at the average pace,
+//! and the lines where 50, 80 and 100 percent of the limit are crossed. A
+//! dollar limit follows the local cost per day. A percent window follows the
+//! readings Claude Code gave, or a straight line from the window start to the
+//! latest reading when there are none: local cost is never scaled into a
+//! percent, and no curve is invented. Pure: the limit, the events, the
+//! readings and the clock come in as arguments. The chart is drawn in
+//! `tui::burnup` and the plain table here serves `--summary`, a pipe and a
+//! narrow panel.
 
-use super::limits::{Crossing, Limit, LimitPeriod, Origin, MIN_PROJECTION_SECONDS};
+use super::limits::{Crossing, Limit, Origin, Unit, MIN_PROJECTION_SECONDS};
 use super::limits_source::{self, Sources};
-use super::query::WeekStart;
-use super::spend::dollars;
 use super::tz::Zone;
 use super::UsageEvent;
 use serde_json::{json, Value};
 
 const PERCENT: f64 = 100.0;
 
-/// Cumulative spend over one billing period.
+/// The shares of the limit that get a cutoff line.
+pub const CUTOFF_PCTS: [f64; 3] = [50.0, 80.0, 100.0];
+
+/// Where the points of a series came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Basis {
+    /// The local cost, summed per day.
+    Daily,
+    /// Readings Claude Code gave, in time order.
+    Readings,
+    /// No readings: a straight line from the start to the latest reading.
+    Line,
+}
+
+impl Basis {
+    pub fn key(self) -> &'static str {
+        match self {
+            Basis::Daily => "daily",
+            Basis::Readings => "readings",
+            Basis::Line => "line",
+        }
+    }
+}
+
+/// How much of one limit is used over its period.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Burnup {
+    pub unit: Unit,
     pub start: i64,
     pub end: i64,
     pub now: i64,
-    /// The zone whose midnights split the period into days.
+    /// The zone whose midnights split a dollar period into days.
     pub zone: Zone,
-    /// Cumulative spend at the end of each day, from the first day through
-    /// today. Empty before the period starts. Never decreases.
+    pub basis: Basis,
+    /// Used over time as `(UTC second, amount)`, from the period start to
+    /// `now`. Empty before the period starts. Never decreases.
+    pub points: Vec<(i64, f64)>,
+    /// Cumulative local cost at the end of each day, from the first day
+    /// through today. Dollar limits only, empty otherwise.
     pub actual: Vec<f64>,
-    /// Spend from the start through `now`.
+    /// Used at `now`, in the unit of the limit.
     pub total: f64,
-    /// Spend at the period end at the average pace so far, once an hour of
-    /// the period has passed and the period is not over.
+    /// Used at the period end at the average pace so far, once an hour of the
+    /// period has passed and the period is not over.
     pub projected_end: Option<f64>,
-    pub limit: Option<f64>,
-    /// What the server billed and when it was fetched.
+    /// The limit in the unit, always above zero.
+    pub limit: f64,
+    /// What Claude reported as used and when it read that, for a dollar limit.
     pub billed: Option<(i64, f64)>,
-    /// 50, 80 and 100 percent of the limit, empty without one.
+    /// 50, 80 and 100 percent of the limit.
     pub crossings: Vec<Crossing>,
 }
 
@@ -59,6 +92,14 @@ impl Burnup {
         Some(self.total + (end - self.total) * share)
     }
 
+    /// The cutoff lines as `(percent, amount in the unit)`.
+    pub fn cutoffs(&self) -> Vec<(f64, f64)> {
+        CUTOFF_PCTS
+            .iter()
+            .map(|p| (*p, self.limit * p / PERCENT))
+            .collect()
+    }
+
     /// The date of day `i` of the period, `YYYY-MM-DD` in its zone.
     fn day_text(&self, i: usize) -> String {
         self.zone
@@ -66,44 +107,75 @@ impl Burnup {
             .to_string()
     }
 
-    /// The share of the limit spent at the end of day `i`, in percent.
-    pub fn percent_of_limit(&self, cumulative: f64) -> Option<f64> {
-        self.limit
-            .filter(|l| *l > 0.0)
-            .map(|l| cumulative / l * PERCENT)
+    /// The share of the limit that `amount` is, in percent.
+    pub fn percent_of_limit(&self, amount: f64) -> f64 {
+        amount / self.limit * PERCENT
     }
 
-    /// The series for `--json`: one entry per day through today.
+    /// The series for `--json`. A dollar limit lists one entry per day through
+    /// today. A percent window lists its points.
     pub fn series_json(&self) -> Value {
-        json!({
-            "days": self.actual.iter().enumerate().map(|(i, c)| json!({
-                "day": self.day_text(i),
-                "cumulative_usd": c,
-                "percent_of_limit": self.percent_of_limit(*c),
-            })).collect::<Vec<_>>(),
-            "projected_end_usd": self.projected_end,
-        })
+        match self.unit {
+            Unit::Dollars => json!({
+                "basis": self.basis.key(),
+                "days": self.actual.iter().enumerate().map(|(i, c)| json!({
+                    "day": self.day_text(i),
+                    "cumulative_usd": c,
+                    "percent_of_limit": self.percent_of_limit(*c),
+                })).collect::<Vec<_>>(),
+                "projected_end_usd": self.projected_end,
+            }),
+            Unit::Percent => json!({
+                "basis": self.basis.key(),
+                "points": self.points.iter()
+                    .map(|(at, p)| json!({"at": at, "percent": p}))
+                    .collect::<Vec<_>>(),
+                "projected_end_percent": self.projected_end,
+            }),
+        }
     }
 
-    /// A plain table, ASCII only, one row per day through today. `rows`
-    /// keeps the last rows when the room is short.
+    /// A plain table, ASCII only. A dollar limit gets one row per day through
+    /// today, a percent window one row per point. `rows` keeps the last rows
+    /// when the room is short.
     pub fn table(&self, rows: usize) -> Vec<String> {
+        match self.unit {
+            Unit::Dollars => self.day_table(rows),
+            Unit::Percent => self.point_table(rows),
+        }
+    }
+
+    fn day_table(&self, rows: usize) -> Vec<String> {
         let skip = self.actual.len().saturating_sub(rows);
         let mut out = vec![format!(
             "{:<10}  {:>12}  {:>8}",
             "date", "cumulative", "of limit"
         )];
         for (i, c) in self.actual.iter().enumerate().skip(skip) {
-            let share = self
-                .percent_of_limit(*c)
-                .map_or("n/a".to_string(), |p| format!("{p:.1}%"));
             out.push(format!(
-                "{:<10}  {:>12}  {share:>8}",
+                "{:<10}  {:>12}  {:>8}",
                 self.day_text(i),
-                dollars(*c)
+                limits_source::amount(Unit::Dollars, *c),
+                format!("{:.1}%", self.percent_of_limit(*c))
             ));
         }
         if self.actual.is_empty() {
+            out.push("the period has not started".to_string());
+        }
+        out
+    }
+
+    fn point_table(&self, rows: usize) -> Vec<String> {
+        let skip = self.points.len().saturating_sub(rows);
+        let mut out = vec![format!("{:<16}  {:>8}", "time", "of limit")];
+        for (at, p) in self.points.iter().skip(skip) {
+            let time = self.zone.iso(*at)[..16].replace('T', " ");
+            out.push(format!(
+                "{time:<16}  {:>8}",
+                format!("{:.1}%", self.percent_of_limit(*p))
+            ));
+        }
+        if self.points.is_empty() {
             out.push("the period has not started".to_string());
         }
         out
@@ -118,103 +190,149 @@ impl Burnup {
     }
 }
 
-/// The burn-up of the period `[start, end)` at `now`.
-pub fn burnup(
-    events: &[UsageEvent],
-    (start, end): (i64, i64),
-    zone: Zone,
-    now: i64,
-    limit: Option<f64>,
-    billed: Option<(i64, f64)>,
-    crossings: Vec<Crossing>,
-) -> Burnup {
+/// What a burn-up reads besides the limit.
+#[derive(Debug, Clone, Copy)]
+pub struct Inputs<'a> {
+    pub events: &'a [UsageEvent],
+    /// Percent readings `(UTC second, percent)` of a window, any order.
+    pub readings: &'a [(i64, f64)],
+    pub billed: Option<(i64, f64)>,
+    pub now: i64,
+}
+
+/// The burn-up of `limit` at `inputs.now`, or `None` when the limit is not
+/// above zero or is not a finite number.
+pub fn burnup(limit: &Limit, zone: Zone, inputs: Inputs<'_>) -> Option<Burnup> {
+    if !(limit.limit.is_finite() && limit.limit > 0.0) || limit.end <= limit.start {
+        return None;
+    }
     let mut b = Burnup {
-        start,
-        end,
-        now,
+        unit: limit.unit,
+        start: limit.start,
+        end: limit.end,
+        now: inputs.now,
         zone,
+        basis: match limit.unit {
+            Unit::Dollars => Basis::Daily,
+            Unit::Percent => Basis::Line,
+        },
+        points: Vec::new(),
         actual: Vec::new(),
         total: 0.0,
         projected_end: None,
-        limit,
-        billed,
-        crossings,
+        limit: limit.limit,
+        billed: inputs.billed.filter(|_| limit.unit == Unit::Dollars),
+        crossings: limit
+            .thresholds(inputs.now)
+            .map_or_else(Vec::new, |c| c.to_vec()),
     };
-    if now < start || end <= start {
-        return b;
+    if inputs.now < limit.start {
+        return Some(b);
     }
-    let first = b.first_day();
-    let today = ((zone.day_of(now) - first).max(0) as usize).min(b.days().saturating_sub(1));
-    let mut per_day = vec![0.0; today + 1];
-    for e in events
-        .iter()
-        .filter(|e| e.timestamp >= start && e.timestamp <= now)
-    {
-        let day = ((zone.day_of(e.timestamp) - first).max(0) as usize).min(today);
-        per_day[day] += e.cost_usd;
+    match limit.unit {
+        Unit::Dollars => b.fill_days(inputs.events),
+        Unit::Percent => b.fill_readings(limit.used, inputs.readings),
     }
-    let mut cumulative = 0.0;
-    b.actual = per_day
-        .into_iter()
-        .map(|d| {
-            cumulative += d;
-            cumulative
-        })
-        .collect();
-    b.total = cumulative;
-    let elapsed = now - start;
-    if elapsed >= MIN_PROJECTION_SECONDS && now < end {
-        b.projected_end = Some(b.total + b.total / elapsed as f64 * (end - now) as f64);
+    let elapsed = inputs.now - limit.start;
+    if elapsed >= MIN_PROJECTION_SECONDS && inputs.now < limit.end {
+        b.projected_end =
+            Some(b.total + b.total / elapsed as f64 * (limit.end - inputs.now) as f64);
     }
-    b
+    Some(b)
 }
 
-/// The burn-up for the monthly dollar limit if there is one, else for the
-/// month that holds `now`, from the sources and the limits already built. A
-/// period the server's reset time gave starts at a UTC midnight, so its days
-/// are UTC days.
-pub fn burnup_for(s: &Sources, limits: &[Limit], events: &[UsageEvent], now: i64) -> Burnup {
-    let monthly = limits.iter().find(|l| limits_source::is_monthly_dollars(l));
-    let (period, zone) = match monthly {
-        Some(l) => {
-            let from_server = l.origin == Origin::Server
-                && s.server
-                    .as_ref()
-                    .and_then(|f| f.resets_at)
-                    .is_some_and(|r| r > now);
-            let zone = if from_server {
-                Zone::Utc
-            } else {
-                crate::tz::current()
-            };
-            ((l.start, l.end), zone)
+impl Burnup {
+    fn fill_days(&mut self, events: &[UsageEvent]) {
+        let first = self.first_day();
+        let last_day = self.days().saturating_sub(1);
+        let today = ((self.zone.day_of(self.now) - first).max(0) as usize).min(last_day);
+        let mut per_day = vec![0.0; today + 1];
+        for e in events
+            .iter()
+            .filter(|e| e.timestamp >= self.start && e.timestamp <= self.now)
+        {
+            let day = ((self.zone.day_of(e.timestamp) - first).max(0) as usize).min(today);
+            per_day[day] += e.cost_usd;
         }
-        None => (
-            LimitPeriod::Monthly.containing(now, WeekStart::default()),
-            crate::tz::current(),
-        ),
-    };
-    let billed = limits_source::server_in_use(s, now)
-        .and_then(|f| f.used_usd().map(|used| (f.fetched_at, used)));
-    let crossings = monthly
-        .and_then(|l| l.thresholds(now))
-        .map_or_else(Vec::new, |c| c.to_vec());
-    burnup(
-        events,
-        period,
-        zone,
-        now,
-        monthly.map(|l| l.limit),
-        billed,
-        crossings,
-    )
+        let mut cumulative = 0.0;
+        self.actual = per_day
+            .into_iter()
+            .map(|d| {
+                cumulative += d;
+                cumulative
+            })
+            .collect();
+        self.total = cumulative;
+        self.points = vec![(self.start, 0.0)];
+        for (i, c) in self.actual.iter().enumerate() {
+            let day_end = self.zone.day_start(first + i as i64 + 1);
+            let at = day_end.min(self.now).max(self.start);
+            self.points.push((at, *c));
+        }
+    }
+
+    fn fill_readings(&mut self, used: f64, readings: &[(i64, f64)]) {
+        let used = used.max(0.0);
+        let mut held: Vec<(i64, f64)> = readings
+            .iter()
+            .copied()
+            .filter(|(at, p)| *at > self.start && *at < self.now && p.is_finite() && *p >= 0.0)
+            .collect();
+        held.sort_by_key(|(at, _)| *at);
+        self.basis = if held.is_empty() {
+            Basis::Line
+        } else {
+            Basis::Readings
+        };
+        self.points = vec![(self.start, 0.0)];
+        let mut top = 0.0_f64;
+        for (at, p) in held {
+            // A window only fills up, so a lower reading is an older value
+            // for the same window and the line stays where it was.
+            top = top.max(p).min(used);
+            self.points.push((at, top));
+        }
+        self.points.push((self.now.min(self.end), used.max(top)));
+        self.total = used.max(top);
+    }
+}
+
+/// The burn-ups for the limits shown: every limit above zero, in the order
+/// given. The local cost feeds dollar limits and the readings feed windows.
+pub fn burnups_for(
+    s: &Sources,
+    limits: &[Limit],
+    events: &[UsageEvent],
+    readings: &[(i64, f64)],
+    now: i64,
+) -> Vec<Option<Burnup>> {
+    let billed = limits_source::billed_anchor(s, now);
+    limits
+        .iter()
+        .map(|l| {
+            // A period the server's reset time gave starts at a UTC midnight,
+            // so its days are UTC days. A manual budget uses the chosen zone.
+            let zone = if l.origin == Origin::Manual {
+                crate::tz::current()
+            } else {
+                Zone::Utc
+            };
+            let inputs = Inputs {
+                events,
+                readings,
+                billed: billed.filter(|_| limits_source::is_monthly_dollars(l)),
+                now,
+            };
+            burnup(l, zone, inputs)
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::aggregate::SECONDS_PER_DAY;
-    use crate::limits::{thresholds, CrossState};
+    use crate::limits::{CrossState, LimitPeriod};
 
     const D: i64 = SECONDS_PER_DAY;
     /// 2027-01-01 00:00 UTC.
@@ -228,16 +346,57 @@ mod tests {
         }
     }
 
+    fn dollars_limit(days: i64, used: f64, limit: f64) -> Limit {
+        Limit {
+            unit: Unit::Dollars,
+            period: LimitPeriod::Monthly,
+            origin: Origin::Manual,
+            used,
+            limit,
+            start: JAN,
+            end: JAN + days * D,
+        }
+    }
+
+    fn window(start: i64, used: f64) -> Limit {
+        Limit {
+            unit: Unit::Percent,
+            period: LimitPeriod::FiveHour,
+            origin: Origin::Measured,
+            used,
+            limit: 100.0,
+            start,
+            end: start + 5 * 3600,
+        }
+    }
+
     fn month(days: i64, now: i64, events: &[UsageEvent]) -> Burnup {
+        let l = dollars_limit(days, 0.0, 100.0);
         burnup(
-            events,
-            (JAN, JAN + days * D),
+            &l,
             Zone::Utc,
-            now,
-            None,
-            None,
-            Vec::new(),
+            Inputs {
+                events,
+                readings: &[],
+                billed: None,
+                now,
+            },
         )
+        .unwrap()
+    }
+
+    fn percent(l: &Limit, now: i64, readings: &[(i64, f64)]) -> Burnup {
+        burnup(
+            l,
+            Zone::Utc,
+            Inputs {
+                events: &[],
+                readings,
+                billed: None,
+                now,
+            },
+        )
+        .unwrap()
     }
 
     #[test]
@@ -249,6 +408,8 @@ mod tests {
         assert_eq!(b.actual, [5.0, 5.0, 5.0, 7.5, 7.5, 7.5]);
         assert!(b.actual.windows(2).all(|w| w[1] >= w[0]));
         assert_eq!(b.total, 7.5);
+        assert_eq!(b.points.first(), Some(&(JAN, 0.0)));
+        assert_eq!(b.points.last(), Some(&(JAN + 5 * D + 100, 7.5)));
     }
 
     #[test]
@@ -281,7 +442,7 @@ mod tests {
     fn a_period_that_has_not_started_has_no_series_and_no_projection() {
         let b = month(31, JAN - 1, &[cost(JAN + 5, 3.0)]);
 
-        assert!(b.actual.is_empty() && b.projected_end.is_none());
+        assert!(b.actual.is_empty() && b.points.is_empty() && b.projected_end.is_none());
         assert_eq!(b.total, 0.0);
         assert!(b.table(5).iter().any(|l| l.contains("has not started")));
     }
@@ -311,20 +472,188 @@ mod tests {
     }
 
     #[test]
-    fn the_table_has_a_row_per_day_with_the_share_of_the_limit_and_the_crossings() {
-        let crossings = thresholds(JAN, JAN + 30 * D, JAN + 2 * D, 50.0, 100.0)
-            .unwrap()
-            .to_vec();
-        crate::tz::set(crate::tz::Zone::Utc);
+    fn nothing_used_at_an_hour_is_a_zero_pace_with_every_threshold_beyond() {
+        let l = dollars_limit(30, 0.0, 100.0);
         let b = burnup(
-            &[cost(JAN + 10, 30.0), cost(JAN + D + 10, 20.0)],
-            (JAN, JAN + 30 * D),
+            &l,
             Zone::Utc,
-            JAN + 2 * D,
-            Some(100.0),
-            None,
-            crossings,
+            Inputs {
+                events: &[],
+                readings: &[],
+                billed: None,
+                now: JAN + MIN_PROJECTION_SECONDS,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(b.projected_end, Some(0.0));
+        assert!(b.crossings.iter().all(|c| c.state
+            == CrossState::Beyond {
+                period_end: JAN + 30 * D
+            }));
+    }
+
+    #[test]
+    fn a_limit_of_zero_or_less_or_not_a_number_has_no_chart() {
+        for limit in [0.0, -5.0, f64::NAN, f64::INFINITY] {
+            let l = dollars_limit(30, 1.0, limit);
+            let b = burnup(
+                &l,
+                Zone::Utc,
+                Inputs {
+                    events: &[],
+                    readings: &[],
+                    billed: None,
+                    now: JAN + D,
+                },
+            );
+
+            assert!(b.is_none(), "{limit}");
+        }
+    }
+
+    #[test]
+    fn a_monthly_budget_of_200_with_50_spent_has_cutoffs_at_100_160_and_200() {
+        let l = dollars_limit(30, 50.0, 200.0);
+        let b = burnup(
+            &l,
+            Zone::Utc,
+            Inputs {
+                events: &[cost(JAN + 5, 50.0)],
+                readings: &[],
+                billed: None,
+                now: JAN + 10 * D,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(b.cutoffs(), [(50.0, 100.0), (80.0, 160.0), (100.0, 200.0)]);
+        assert_eq!(b.total, 50.0);
+    }
+
+    #[test]
+    fn a_five_hour_window_at_12_percent_after_4320_seconds_projects_50_percent() {
+        let l = window(1000, 12.0);
+
+        let b = percent(&l, 1000 + 4320, &[]);
+
+        assert_eq!(b.basis, Basis::Line);
+        assert_eq!(b.points, [(1000, 0.0), (5320, 12.0)]);
+        assert!((b.projected_end.unwrap() - 50.0).abs() < 1e-9);
+        // 12 percent in 4320 s reaches 50 exactly at the window end, which is
+        // beyond the half open window.
+        assert_eq!(
+            b.crossings[0].state,
+            CrossState::Beyond { period_end: 19_000 }
         );
+        assert_eq!(b.cutoffs(), [(50.0, 50.0), (80.0, 80.0), (100.0, 100.0)]);
+    }
+
+    #[test]
+    fn readings_make_the_series_and_a_lower_reading_never_pulls_it_down() {
+        let l = window(1000, 30.0);
+        let readings = [(5000, 20.0), (3000, 10.0), (7000, 15.0), (9000, 25.0)];
+
+        let b = percent(&l, 10_000, &readings);
+
+        assert_eq!(b.basis, Basis::Readings);
+        assert_eq!(
+            b.points,
+            [
+                (1000, 0.0),
+                (3000, 10.0),
+                (5000, 20.0),
+                (7000, 20.0),
+                (9000, 25.0),
+                (10_000, 30.0)
+            ]
+        );
+        assert!(b
+            .points
+            .windows(2)
+            .all(|w| w[1].1 >= w[0].1 && w[1].0 >= w[0].0));
+    }
+
+    #[test]
+    fn readings_outside_the_window_or_not_numbers_are_ignored() {
+        let l = window(1000, 10.0);
+        let readings = [
+            (999, 90.0),
+            (1000, 50.0),
+            (6000, f64::NAN),
+            (6000, -1.0),
+            (20_000, 99.0),
+        ];
+
+        let b = percent(&l, 10_000, &readings);
+
+        assert_eq!(b.basis, Basis::Line);
+        assert_eq!(b.points, [(1000, 0.0), (10_000, 10.0)]);
+    }
+
+    #[test]
+    fn a_reading_above_the_latest_used_amount_is_capped_by_it() {
+        let l = window(1000, 10.0);
+
+        let b = percent(&l, 10_000, &[(5000, 40.0)]);
+
+        assert_eq!(b.points.last(), Some(&(10_000, 10.0)));
+        assert!(b.points.iter().all(|(_, p)| *p <= 10.0));
+    }
+
+    #[test]
+    fn a_window_that_has_not_started_has_no_points() {
+        let b = percent(&window(5000, 10.0), 4000, &[]);
+
+        assert!(b.points.is_empty() && b.projected_end.is_none());
+    }
+
+    #[test]
+    fn the_series_is_non_decreasing_for_generated_inputs() {
+        // A small deterministic generator in place of a property test crate.
+        let mut seed = 12_345_u64;
+        let mut next = move |modulo: u64| {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            (seed >> 33) % modulo
+        };
+        for _ in 0..200 {
+            let events: Vec<UsageEvent> = (0..next(40))
+                .map(|_| cost(JAN + next(31 * D as u64) as i64, next(1000) as f64 / 10.0))
+                .collect();
+            let readings: Vec<(i64, f64)> = (0..next(30))
+                .map(|_| (1000 + next(18_000) as i64, next(120) as f64))
+                .collect();
+            let now = JAN + next(32 * D as u64) as i64;
+
+            let d = month(31, now, &events);
+            let p = percent(
+                &window(1000, next(100) as f64),
+                1000 + next(18_000) as i64,
+                &readings,
+            );
+
+            for b in [d, p] {
+                assert!(b.points.windows(2).all(|w| w[1].1 >= w[0].1));
+                assert!(b.actual.windows(2).all(|w| w[1] >= w[0]));
+            }
+        }
+    }
+
+    #[test]
+    fn the_table_has_a_row_per_day_with_the_share_of_the_limit_and_the_crossings() {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let l = dollars_limit(30, 50.0, 100.0);
+        let b = burnup(
+            &l,
+            Zone::Utc,
+            Inputs {
+                events: &[cost(JAN + 10, 30.0), cost(JAN + D + 10, 20.0)],
+                readings: &[],
+                billed: None,
+                now: JAN + 2 * D,
+            },
+        )
+        .unwrap();
 
         let t = b.table(31);
 
@@ -339,137 +668,44 @@ mod tests {
     }
 
     #[test]
-    fn a_short_table_keeps_the_latest_days_and_no_limit_says_n_a() {
+    fn a_short_table_keeps_the_latest_days_and_a_percent_table_lists_its_points() {
         let b = month(30, JAN + 4 * D, &[cost(JAN, 1.0)]);
+        let w = percent(&window(JAN, 10.0), JAN + 3600, &[]);
 
         let t = b.table(2);
+        let p = w.table(5);
 
         assert_eq!(t.len(), 3);
         assert!(t[1].starts_with("2027-01-04") && t[2].starts_with("2027-01-05"));
-        assert!(t[1].ends_with("n/a"));
+        assert_eq!(p[0], "time              of limit");
+        assert_eq!(p[1], "2027-01-01 00:00      0.0%");
+        assert_eq!(p[2], "2027-01-01 01:00     10.0%");
     }
 
     #[test]
-    fn the_json_series_lists_each_day() {
-        let b = burnup(
-            &[cost(JAN + 10, 25.0)],
-            (JAN, JAN + 30 * D),
+    fn the_json_series_lists_each_day_or_each_point() {
+        let l = dollars_limit(30, 25.0, 100.0);
+        let d = burnup(
+            &l,
             Zone::Utc,
-            JAN + D,
-            Some(100.0),
-            None,
-            Vec::new(),
-        );
+            Inputs {
+                events: &[cost(JAN + 10, 25.0)],
+                readings: &[],
+                billed: None,
+                now: JAN + D,
+            },
+        )
+        .unwrap()
+        .series_json();
+        let p = percent(&window(1000, 12.0), 5320, &[]).series_json();
 
-        let v = b.series_json();
-
-        assert_eq!(v["days"].as_array().unwrap().len(), 2);
-        assert_eq!(v["days"][1]["cumulative_usd"], 25.0);
-        assert_eq!(v["days"][1]["percent_of_limit"], 25.0);
-        assert!(v["projected_end_usd"].is_number());
-    }
-
-    fn server_limit(resets_at: Option<i64>) -> (Sources, Vec<Limit>) {
-        let s = Sources {
-            server: Some(crate::spend::SpendFigure {
-                limit: Some(crate::spend::Money {
-                    minor: 10_000,
-                    decimals: 2,
-                    currency: Some("USD".to_string()),
-                }),
-                used: Some(crate::spend::Money {
-                    minor: 2_500,
-                    decimals: 2,
-                    currency: Some("USD".to_string()),
-                }),
-                percent: None,
-                severity: None,
-                resets_at,
-                limit_reached: None,
-                scope: crate::spend::Scope::Unspecified,
-                windows: Vec::new(),
-                fetched_at: JAN + 3 * D - 600,
-                origin: Origin::Server,
-            }),
-            ..Sources::default()
-        };
-        let limits = limits_source::all_limits(&s, &[], JAN + 3 * D, WeekStart::Monday);
-        (s, limits)
-    }
-
-    #[test]
-    fn the_period_follows_the_monthly_limit_and_carries_the_billed_anchor() {
-        crate::tz::set(crate::tz::Zone::Utc);
-        let (s, limits) = server_limit(None);
-
-        let b = burnup_for(&s, &limits, &[cost(JAN + 5, 20.0)], JAN + 3 * D);
-
-        assert_eq!((b.start, b.end), (JAN, JAN + 31 * D));
-        assert_eq!(b.limit, Some(100.0));
-        assert_eq!(b.billed, Some((JAN + 3 * D - 600, 25.0)));
-        assert_eq!(b.crossings.len(), 3);
-        assert!(matches!(b.crossings[0].state, CrossState::Projected { .. }));
-    }
-
-    #[test]
-    fn a_reset_time_from_the_server_sets_the_period_end() {
-        crate::tz::set(crate::tz::Zone::Utc);
-        let reset = JAN + 28 * D;
-        let (s, limits) = server_limit(Some(reset));
-
-        let b = burnup_for(&s, &limits, &[], JAN + 3 * D);
-
-        assert_eq!(b.end, reset);
-    }
-
-    #[test]
-    fn with_no_limit_the_month_that_holds_now_is_used_and_there_are_no_crossings() {
-        crate::tz::set(crate::tz::Zone::Utc);
-
-        let b = burnup_for(&Sources::default(), &[], &[cost(JAN + 5, 2.0)], JAN + 3 * D);
-
-        assert_eq!((b.start, b.end), (JAN, JAN + 31 * D));
-        assert!(b.limit.is_none() && b.crossings.is_empty() && b.billed.is_none());
-        assert_eq!(b.total, 2.0);
-    }
-
-    #[test]
-    fn a_period_from_the_server_labels_its_days_in_utc_whatever_the_machine_zone() {
-        crate::tz::set(Zone::Fixed(-3 * 3600));
-        let reset = JAN + 31 * D;
-        let (s, limits) = server_limit(Some(reset));
-
-        let b = burnup_for(&s, &limits, &[cost(JAN + 5, 20.0)], JAN + 3 * D);
-
-        assert_eq!(b.zone, Zone::Utc);
-        assert_eq!(b.table(31)[1].split_whitespace().next(), Some("2027-01-01"));
-        assert_eq!(b.series_json()["days"][0]["day"], "2027-01-01");
-        assert_eq!(b.days(), 31);
-    }
-
-    #[test]
-    fn a_local_period_splits_days_at_local_midnights() {
-        let east = Zone::Fixed(10 * 3600);
-        crate::tz::set(east);
-        let start = east.day_start(east.day_of(JAN) + 1);
-        let events = [
-            cost(start + 10, 1.0),
-            cost(start + D - 10, 2.0),
-            cost(start + D + 10, 4.0),
-        ];
-
-        let b = burnup(
-            &events,
-            (start, start + 3 * D),
-            east,
-            start + D + 100,
-            None,
-            None,
-            Vec::new(),
-        );
-
-        assert_eq!(b.actual, [3.0, 7.0]);
-        assert_eq!(b.table(31)[1].split_whitespace().next(), Some("2027-01-02"));
-        assert_eq!(b.days(), 3);
+        assert_eq!(d["basis"], "daily");
+        assert_eq!(d["days"].as_array().unwrap().len(), 2);
+        assert_eq!(d["days"][1]["cumulative_usd"], 25.0);
+        assert_eq!(d["days"][1]["percent_of_limit"], 25.0);
+        assert!(d["projected_end_usd"].is_number());
+        assert_eq!(p["basis"], "line");
+        assert_eq!(p["points"][1]["percent"], 12.0);
+        assert_eq!(p["points"][1]["at"], 5320);
     }
 }
