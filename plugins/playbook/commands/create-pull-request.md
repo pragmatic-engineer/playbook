@@ -47,7 +47,7 @@ There is no confirmation flag or gate: the command always runs end to end.
 
 ## Worktree guard (first)
 
-Before anything else, run the worktree guard in the `playbook:writing-style` skill's `references/worktree-guard.md` (invoke the skill and read the file from the skill base directory it shows). The caller gives the worktree root and expected branch in this command's prompt. On a mismatch stop with its `WRONG_DIRECTORY` line and open nothing.
+Before anything else, run the worktree guard in the `playbook:writing-style` skill's `references/worktree-guard.md` (invoke the skill and read the file from the skill base directory it shows). The caller gives "Worktree root: <path>, branch: <name>" in this command's prompt. On a mismatch stop with its `WRONG_DIRECTORY` line and open nothing.
 
 ## Step 0: Read the run mode and load the skill rules (MUST run before drafting title or body)
 
