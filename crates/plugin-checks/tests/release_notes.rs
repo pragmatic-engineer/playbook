@@ -520,6 +520,20 @@ fn the_release_commit_of_a_version_is_left_out() {
     assert_eq!(r.query(&notes, "[.sections[].items[].pr]"), "[41,42]");
 }
 
+#[test]
+fn the_nix_flake_commit_that_follows_a_release_is_left_out() {
+    // Arrange
+    let r = Repo::new();
+    r.change("Cargo.toml", "chore(release): nix flake 0.1.0 (#40)");
+    r.change("crates/cli/src/lib.rs", "chore(deps): bump a crate (#41)");
+
+    // Act
+    let notes = r.notes("playbook", "0.1.1");
+
+    // Assert
+    assert_eq!(r.query(&notes, "[.sections[].items[].pr]"), "[41]");
+}
+
 /// The full message of 6989495b, "feat(setup)!: retire the aliases and
 /// claude-override parts (#1119)", as it is on main.
 const PR_1119: &str = r#"feat(setup)!: retire the aliases and claude-override parts (#1119)
