@@ -77,10 +77,9 @@ impl Env {
     }
 }
 
-const PRE_GUARDS: [&str; 6] = [
+const PRE_GUARDS: [&str; 5] = [
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
     "policy-guard",
@@ -112,14 +111,14 @@ const PROBES: [Probe; 19] = [
     atlassian_rows,
     old_launcher_rows,
     |env| {
-        old_agent_row(&env.home)
+        leftover_service_row(&env.home)
             .into_iter()
             .chain(telemetry_rows(env))
             .collect()
     },
     |env| vec![attribution_row(env)],
     update_rows,
-    |env| vec![disk_row(env)],
+    |env| vec![policy_guard_row(env)],
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -708,48 +707,6 @@ fn config_rows(env: &Env) -> Vec<Row> {
     .collect()
 }
 
-/// Free disk space against `disk.warnFreeGb` and `disk.blockFreeGb`, on
-/// the volume with the least room.
-fn disk_row(env: &Env) -> Row {
-    use crate::disk::{ballast, policy};
-    let policy = policy::load(&env.home);
-    let paths = policy::measured_paths(&policy, &env.home, env.repo_root.as_deref());
-    let volumes = policy::volumes(&paths);
-    let Some(tight) = policy::tightest(&volumes) else {
-        return Row::new("-", Level::Info, "disk: could not read free space");
-    };
-    disk_row_for(&policy, tight, ballast::size(&env.home))
-}
-
-fn disk_row_for(
-    policy: &crate::disk::Policy,
-    tight: &crate::disk::policy::Volume,
-    ballast: Option<u64>,
-) -> Row {
-    use crate::disk::{size::gb, Level as Disk};
-    let level = match policy.level(tight.space.free) {
-        Disk::Ok => Level::Pass,
-        Disk::Low => Level::Warn,
-        Disk::Critical => Level::Fail,
-    };
-    let mut message = format!(
-        "disk: {} free on {} (warn below {} GB, block builds below {} GB)",
-        gb(tight.space.free),
-        tight.path.display(),
-        policy.warn_free_gb,
-        policy.block_free_gb
-    );
-    if let Some(bytes) = ballast {
-        message.push_str(&format!(", ballast {} reserved", gb(bytes)));
-    }
-    let row = Row::new("-", level, message);
-    if level == Level::Pass {
-        row
-    } else {
-        row.hint("run: playbook disk status to see what uses the space")
-    }
-}
-
 fn worktree_rows(env: &Env) -> Vec<Row> {
     let Some(root) = &env.repo_root else {
         return vec![Row::new(
@@ -788,6 +745,43 @@ fn marker_endpoint(home: &Path) -> Option<String> {
 }
 
 const TELEMETRY_SETUP_FIX: &str = "run: playbook setup --only telemetry";
+
+/// The policy guard is optional and off by default, so off is an Info row.
+fn policy_guard_row(env: &Env) -> Row {
+    use crate::hooks::policy_guard::{enabled_for, env_override, ENABLED_KEY};
+    if let Some(on) = env_override() {
+        let (level, state) = if on {
+            (Level::Pass, "on")
+        } else {
+            (Level::Info, "off")
+        };
+        return Row::new(
+            "-",
+            level,
+            format!("policy guard is {state}: POLICY_GUARD in the environment decides, whatever {ENABLED_KEY} holds"),
+        )
+        .hint("unset POLICY_GUARD to follow the stored key");
+    }
+    if enabled_for(&env.home) {
+        Row::new(
+            "-",
+            Level::Pass,
+            "policy guard is on: it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes, settings.json edits and protected config changes",
+        )
+        .hint(format!(
+            "to turn it off, run: playbook config set --global {ENABLED_KEY} false"
+        ))
+    } else {
+        Row::new(
+            "-",
+            Level::Info,
+            "policy guard is off (optional, off by default)",
+        )
+        .hint(format!(
+            "to turn it on, run: playbook config set --global {ENABLED_KEY} true"
+        ))
+    }
+}
 
 /// The `attribution` key in the user's settings.json (ADR 0042). With
 /// attribution OFF, the default: ok when every key holds the off value, a
@@ -874,88 +868,29 @@ fn attribution_on_row(state: &crate::init::attribution::State, held: &[&str]) ->
     }
 }
 
-/// A collector agent left under the label 0.37.0 used (ADR 0043, 2026-10-18
-/// amendment). Shown whatever telemetry says, since launchd loads it at the
-/// next login.
-fn old_agent_row(home: &Path) -> Option<Row> {
-    let old = crate::usage::service::find_old(home)?;
-    Some(if old.ours {
+/// What doctor says while a file of the retired collector service remains.
+const LEFTOVER_SERVICE: &str = "a collector service file is still installed";
+
+/// A service file of the retired collector service (ADR 0043) under either
+/// label, or the systemd unit. Shown whatever telemetry says, since the
+/// service manager loads it at the next login; `playbook migrate` removes
+/// playbook's and names the commands for a file playbook did not write.
+fn leftover_service_row(home: &Path) -> Option<Row> {
+    let foreign = crate::usage::service::find_old(home)
+        .filter(|old| !old.ours)
+        .map(|old| old.file.display().to_string());
+    let names: Vec<String> = crate::init::collector_service::installed_names(home)
+        .into_iter()
+        .chain(foreign)
+        .collect();
+    (!names.is_empty()).then(|| {
         Row::new(
             "-",
             Level::Warn,
-            format!(
-                "the collector service still uses the old label: {}",
-                old.describe()
-            ),
+            format!("{LEFTOVER_SERVICE}: {}", names.join(", ")),
         )
         .hint("run: playbook migrate")
-    } else {
-        Row::new(
-            "-",
-            Level::Warn,
-            format!(
-                "{} uses the old collector label but playbook did not write it",
-                old.file.display()
-            ),
-        )
-        .hint(format!(
-            "to remove it, run: {}",
-            crate::init::collector_service::foreign_old_agent_fix(&old.file)
-        ))
     })
-}
-
-/// The background service that keeps the collector running (ADR 0043), for
-/// a user whose telemetry points at the collector.
-fn service_row(home: &Path) -> Row {
-    use crate::init::collector_service::{declined, COMMAND};
-    use crate::usage::service;
-    match service::find(home) {
-        Some(found) if found.program_exists() => Row::new(
-            "-",
-            Level::Pass,
-            format!("collector service installed: {}", found.describe()),
-        ),
-        Some(found) => Row::new(
-            "-",
-            Level::Warn,
-            format!(
-                "the collector service starts a program that is gone: {}",
-                found
-                    .program
-                    .as_deref()
-                    .map_or_else(|| "unreadable".to_string(), |p| p.display().to_string())
-            ),
-        )
-        .hint(format!("run: {COMMAND}")),
-        None if service::Kind::current().is_none() => Row::new(
-            "-",
-            Level::Info,
-            "no collector service on this system (no launchd or systemd)",
-        )
-        .hint(format!(
-            "keep this running yourself: {}",
-            service::manual_command("playbook")
-        )),
-        None if service::find_old(home).is_some_and(|o| o.ours) => Row::new(
-            "-",
-            Level::Info,
-            "the collector service still uses the old label (see the row above)",
-        )
-        .hint("run: playbook migrate"),
-        None if declined(home) => Row::new(
-            "-",
-            Level::Info,
-            "no collector service (you said no)",
-        )
-        .hint(format!("to add it, run: {COMMAND}")),
-        None => Row::new(
-            "-",
-            Level::Info,
-            "no collector service, so the collector runs only while cc or the session hook starts it",
-        )
-        .hint(format!("run: {COMMAND}")),
-    }
 }
 
 /// The telemetry rows: Claude Code's settings point at the playbook
@@ -1038,10 +973,10 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
             .hint("run: playbook usage status")];
         }
     }
-    rows.push(service_row(&env.home));
     let Some(state) = state else {
         return rows;
     };
+    rows.push(daemon_row(&paths, state.port));
     let up = running(&state) && probe(state.port) == Reply::Collector;
     if up {
         rows.push(Row::new(
@@ -1082,7 +1017,7 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
                 Level::Warn,
                 "collector not running, so telemetry sent now is lost",
             )
-            .hint(crate::init::collector_service::collector_fix(&env.home)),
+            .hint(crate::usage::daemon::START_HINT),
         );
     }
     let last =
@@ -1100,6 +1035,53 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
             .hint("restart Claude Code so it reads the new settings, then start a session"),
     });
     rows
+}
+
+/// Who holds the collector's lifetime lock, or why none does. Read only: it
+/// opens the lock file without creating it and connects nowhere.
+fn daemon_row(paths: &crate::usage::run::Paths, port: u16) -> Row {
+    use crate::usage::daemon::{lock_path, lock_state, stamp_reason, LockState};
+    let ours = env!("CARGO_PKG_VERSION");
+    match lock_state(paths) {
+        LockState::Held(holder) => match (holder.pid, holder.version) {
+            (Some(pid), Some(version)) if version == ours => Row::new(
+                "-",
+                Level::Pass,
+                format!("collector daemon: pid {pid}, version {version}, lock held"),
+            ),
+            (Some(pid), Some(version)) => Row::new(
+                "-",
+                Level::Warn,
+                format!(
+                    "collector daemon: version {version} (pid {pid}) differs from this binary ({ours})"
+                ),
+            )
+            .hint("run: playbook usage stop, then any playbook command"),
+            // No whole holder line yet: it is still starting.
+            _ => Row::new("-", Level::Info, "collector daemon: starting, lock held"),
+        },
+        LockState::Free => match stamp_reason(paths) {
+            Some(reason) => Row::new(
+                "-",
+                Level::Warn,
+                format!("collector daemon: lock free, {reason}"),
+            )
+            .hint(format!(
+                "free port {port}, or move with playbook usage collect --port <N> and playbook setup --only telemetry"
+            )),
+            None => Row::new("-", Level::Warn, "collector daemon: lock free")
+                .hint(crate::usage::daemon::START_HINT),
+        },
+        LockState::Unavailable => Row::new(
+            "-",
+            Level::Warn,
+            format!(
+                "collector daemon: cannot read {}",
+                lock_path(paths).display()
+            ),
+        )
+        .hint("check the permissions of the playbook data folder"),
+    }
 }
 
 /// One row for the data folder: path, files, sizes and any `*.migrated`
@@ -1131,31 +1113,7 @@ fn data_rows(env: &Env) -> Vec<Row> {
     }
     let mut rows = vec![Row::new("-", Level::Info, msg)];
     rows.extend(orphan_rows(env, &dir));
-    rows.extend(backup_row(env));
     rows
-}
-
-/// One row when old migration backups sit in the playbook folder.
-fn backup_row(env: &Env) -> Option<Row> {
-    let found: Vec<_> = crate::disk::backups::leftovers(&env.home)
-        .into_iter()
-        .filter(|l| !l.junk)
-        .collect();
-    if found.is_empty() {
-        return None;
-    }
-    Some(
-        Row::new(
-            "-",
-            Level::Info,
-            format!(
-                "disk: {} old migration backup file(s), {} KB",
-                found.len(),
-                crate::disk::backups::total_bytes(&found) / 1024
-            ),
-        )
-        .hint("`playbook disk clean` removes those older than 7 days once data/config.db and data/memory.db hold their data, and keeps the newest"),
-    )
 }
 
 /// Databases in the data folder with no worktree of this clone. They belong
@@ -1272,13 +1230,18 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
         ));
     }
     for cmd in &found.stale {
+        let hint = if crate::init::retired_hooks::is_retired_command(cmd) {
+            "run: playbook setup --hooks"
+        } else {
+            "delete the entry from ~/.claude/settings.json by hand"
+        };
         rows.push(
             Row::new(
                 "-",
                 Level::Warn,
                 format!("settings.json has a hook the binary no longer writes: {cmd}"),
             )
-            .hint("delete the entry from ~/.claude/settings.json by hand"),
+            .hint(hint),
         );
     }
     let cwd = env.repo_root.clone().unwrap_or_else(|| env.home.clone());
@@ -1457,35 +1420,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_backup_row_counts_old_migration_copies_and_not_junk() {
-        let home =
-            std::env::temp_dir().join(format!("pb-doctor-backups-{}", crate::testing::run_id()));
-        let root = home.join(".config/playbook");
-        std::fs::create_dir_all(&root).unwrap();
-        let env = Env {
-            home: home.clone(),
-            claude_home: home.join(".claude"),
-            plugin_root: None,
-            shell: String::new(),
-            path_var: OsString::new(),
-            repo_root: None,
-            repo_slug: None,
-        };
-        std::fs::write(root.join(".DS_Store"), b"x").unwrap();
-        assert!(backup_row(&env).is_none(), "junk alone is not a backup");
-        std::fs::write(root.join("playbook.db.migrated"), vec![0u8; 2048]).unwrap();
-        std::fs::write(root.join("playbook.db.migrated-wal"), b"").unwrap();
-        let row = backup_row(&env).expect("row");
-        assert!(
-            row.message
-                .starts_with("disk: 2 old migration backup file(s), 2 KB"),
-            "{}",
-            row.message
-        );
-        std::fs::remove_dir_all(&home).unwrap();
-    }
-
-    #[test]
     fn a_paused_plugin_downgrades_only_the_hook_and_status_line_passes() {
         let rows = vec![
             Row::new("1", Level::Pass, "plugin enabled"),
@@ -1540,44 +1474,5 @@ mod tests {
         assert_eq!(without[1].level, Level::Fail);
         assert_eq!(failing.len(), 1);
         assert_eq!(failing[0].level, Level::Fail);
-    }
-
-    #[test]
-    fn the_disk_row_follows_the_thresholds() {
-        use crate::disk::policy::Volume;
-        use crate::disk::probe::{Space, GIB};
-        let volume = |gb: f64| Volume {
-            path: PathBuf::from("/Users/me"),
-            space: Space {
-                free: (gb * GIB as f64) as u64,
-                total: 460 * GIB,
-                device: 1,
-            },
-        };
-        let policy = crate::disk::Policy::default();
-        let cases = [
-            (0.0, Level::Fail),
-            (5.9, Level::Fail),
-            (6.0, Level::Warn),
-            (14.9, Level::Warn),
-            (15.0, Level::Pass),
-        ];
-        for (gb, want) in cases {
-            let row = disk_row_for(&policy, &volume(gb), None);
-            assert_eq!(row.level, want, "{gb} GB");
-            assert_eq!(row.hint.is_some(), want != Level::Pass, "{gb} GB");
-            assert!(
-                row.message
-                    .contains("warn below 15 GB, block builds below 6 GB"),
-                "{}",
-                row.message
-            );
-        }
-        let row = disk_row_for(&policy, &volume(20.0), Some(GIB));
-        assert!(
-            row.message.ends_with("ballast 1.0 GB reserved"),
-            "{}",
-            row.message
-        );
     }
 }

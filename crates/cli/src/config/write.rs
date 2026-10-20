@@ -33,27 +33,7 @@ pub fn set(
     require_global_for_user_key(key, tier == Tier::Global)?;
     check_cap_order(tier, key, &value, home, repo_slug)?;
     let root = crate::common::paths::playbook_root_from(home);
-    super::store::put(&root, tier, repo_slug, key, &normalize(key, value))
-}
-
-/// `value` in the form it is stored: a root list loses each trailing `/**`
-/// or `/*`, so an older binary that refuses globs still reads it.
-pub fn normalize(key: &str, value: Value) -> Value {
-    if key != "hooks.rmGuard.allowedRoots" {
-        return value;
-    }
-    match value {
-        Value::Array(items) => Value::Array(
-            items
-                .into_iter()
-                .map(|item| match item {
-                    Value::String(text) => Value::String(strip_root_glob(&text).to_string()),
-                    other => other,
-                })
-                .collect(),
-        ),
-        other => other,
-    }
+    super::store::put(&root, tier, repo_slug, key, &value)
 }
 
 /// Reject a per-user key bound for the org or repo tier.
@@ -144,68 +124,7 @@ pub(crate) fn validate_key_and_value(key: &str, value: &Value) -> Result<(), Con
             });
         }
     }
-    if key == "hooks.rmGuard.allowedRoots" {
-        validate_root_list(key, value)?;
-    }
-    if key == "disk.paths" {
-        if let Some(constraint) = crate::disk::policy::path_list_error(value) {
-            return Err(ConfigError::OutOfRange {
-                key: key.to_string(),
-                value: value.to_string(),
-                constraint,
-            });
-        }
-    }
     Ok(())
-}
-
-/// `hooks.rmGuard.allowedRoots` takes strings that are an absolute path or a
-/// `~/` path, with no `..` segment and no glob or quote characters, naming a
-/// directory at least two levels deep. A root such as `/`, `~` or `/Users` would
-/// hand the guard's allowance to far more than a scratch tree. A trailing `/**`
-/// or `/*` is accepted and means the same as the plain path, since a root
-/// always covers everything under it.
-fn validate_root_list(key: &str, value: &Value) -> Result<(), ConfigError> {
-    const CONSTRAINT: &str = "directories given as absolute or ~/ paths, at least two levels deep (one under ~/), with no .., quote or glob characters. A root covers everything under it, so a trailing /** is optional. Example: playbook config set --global hooks.rmGuard.allowedRoots '[\"~/code/acme/.worktrees\",\"/opt/scratch\"]'";
-    let bad = || ConfigError::OutOfRange {
-        key: key.to_string(),
-        value: value.to_string(),
-        constraint: CONSTRAINT,
-    };
-    let Some(items) = value.as_array() else {
-        return Err(bad());
-    };
-    for item in items {
-        let text = strip_root_glob(item.as_str().ok_or_else(bad)?);
-        let rest = match text.strip_prefix("~/") {
-            Some(rest) if rest.starts_with('/') => return Err(bad()),
-            Some(rest) => rest,
-            None if text.starts_with('/') => text,
-            None => return Err(bad()),
-        };
-        let segments: Vec<&str> = rest
-            .split('/')
-            .filter(|s| !s.is_empty() && *s != ".")
-            .collect();
-        let depth_ok = if text.starts_with('~') {
-            !segments.is_empty()
-        } else {
-            segments.len() >= 2
-        };
-        let clean = !text.contains(['*', '?', '[', '{', '$', '`', '"', '\'', '\\'])
-            && segments.iter().all(|s| *s != "..");
-        if !depth_ok || !clean {
-            return Err(bad());
-        }
-    }
-    Ok(())
-}
-
-/// `root` without a trailing `/**` or `/*`, which a root implies anyway.
-pub(crate) fn strip_root_glob(root: &str) -> &str {
-    root.strip_suffix("/**")
-        .or_else(|| root.strip_suffix("/*"))
-        .unwrap_or(root)
 }
 
 const CEILING_KEY: &str = "auto.sessionCeilingUsd";
@@ -290,7 +209,6 @@ fn usd(cents: i64) -> String {
 /// `auto.budgetUsd` and `auto.agentBudgetUsd` take any number of at least one cent, since the spend cap
 /// is held in whole cents, so a fractional budget works.
 /// `usage.budget.*Usd` takes any number from 0 (no budget).
-/// `usage.spend.cacheSeconds` takes a whole number within 30 to 600.
 /// `auto.warnPct` takes a whole number within 1 to 100, `usage.refreshSeconds` one within 1 to
 /// 3600, `hygiene.thresholdTokens` one of at least 10000, the `fix.` and `review.stack` limits a whole number of at least 1, and every other
 /// numeric key 0 or more.
@@ -320,20 +238,6 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         "usage.refreshSeconds" => (
             whole.is_some_and(|n| (1..=3600).contains(&n)),
             "a whole number between 1 and 3600",
-        ),
-        "usage.spend.cacheSeconds" => (
-            whole.is_some_and(|n| playbook_telemetry::config::SPEND_CACHE_SECONDS.contains(&n)),
-            "a whole number between 30 and 600",
-        ),
-        "disk.warnFreeGb" | "disk.blockFreeGb" => (
-            whole.is_some_and(|n| (0..=crate::disk::policy::MAX_THRESHOLD_GB).contains(&n)),
-            "a whole number of GB between 0 and 10000",
-        ),
-        "disk.maxTargetDirs" => (
-            value
-                .as_u64()
-                .is_some_and(|n| (1..=crate::disk::policy::MAX_TARGET_DIRS).contains(&n)),
-            "a whole number between 1 and 1000",
         ),
         "sessions.staleAfterDays" | "sessions.recentDays" => {
             (whole.is_some_and(|n| n >= 1), "a positive integer")
@@ -375,45 +279,4 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
         value: value.to_string(),
         constraint,
     })
-}
-
-#[cfg(test)]
-mod root_list_tests {
-    use super::validate_root_list;
-    use serde_json::json;
-
-    #[test]
-    fn the_root_list_accepts_only_deep_clean_absolute_or_home_paths() {
-        for good in [
-            json!([]),
-            json!(["~/a"]),
-            json!(["~/a/b/"]),
-            json!(["/opt/data"]),
-            json!(["/private/tmp"]),
-            json!(["/a/b/*", "/a/b/**", "~/w/.worktrees/**"]),
-        ] {
-            assert!(validate_root_list("k", &good).is_ok(), "{good}");
-        }
-        for bad in [
-            json!("~/a"),
-            json!([1]),
-            json!(["/"]),
-            json!(["/tmp"]),
-            json!(["~"]),
-            json!(["~/"]),
-            json!(["~/."]),
-            json!(["~//etc"]),
-            json!(["rel/dir"]),
-            json!(["/a/b/../c"]),
-            json!(["/tmp/**"]),
-            json!(["~/**"]),
-            json!(["/a/*/b"]),
-            json!(["/a/b/***"]),
-            json!(["/a/it's"]),
-            json!(["/a/b\\c"]),
-            json!(["/a/$X"]),
-        ] {
-            assert!(validate_root_list("k", &bad).is_err(), "{bad}");
-        }
-    }
 }

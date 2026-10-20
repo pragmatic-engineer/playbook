@@ -25,6 +25,11 @@ impl Host for Playbook {
         format!("playbook setup --only {part}")
     }
 
+    /// Every playbook command and the session hook start the collector.
+    fn start_hint(&self) -> String {
+        crate::usage::daemon::START_HINT.to_string()
+    }
+
     fn launch_args(&self) -> Vec<String> {
         vec!["usage".to_string()]
     }

@@ -112,6 +112,10 @@ impl Home {
         if let Some(root) = plugin_root {
             command.env("CLAUDE_PLUGIN_ROOT", root);
         }
+        // These tests check the pending list, not the hook's own plugin update.
+        if args.first() == Some(&"hook") {
+            command.env("PLAYBOOK_SKIP_PLUGIN_UPDATE", "1");
+        }
         let mut child = command.spawn().unwrap();
         use std::io::Write;
         child

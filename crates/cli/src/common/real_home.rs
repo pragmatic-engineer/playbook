@@ -43,7 +43,7 @@ fn account_home() -> Option<PathBuf> {
     if let Some(home) = PRETEND.with(|p| p.borrow().clone()) {
         return Some(home);
     }
-    crate::service_manager::account_home()
+    crate::common::account::account_home()
 }
 
 /// Whether `home` is the home the account database lists for this user. A
@@ -56,7 +56,7 @@ pub fn is_account_home(home: &Path) -> bool {
 /// Whether cargo or nextest started this process or one of its parents.
 /// cargo sets `CARGO_MANIFEST_DIR` for the tests it runs and nextest sets
 /// `NEXTEST_RUN_ID`, and a child inherits either.
-fn started_by_cargo() -> bool {
+pub(crate) fn started_by_cargo() -> bool {
     ["CARGO_MANIFEST_DIR", "NEXTEST_RUN_ID"]
         .iter()
         .any(|k| std::env::var_os(k).is_some())

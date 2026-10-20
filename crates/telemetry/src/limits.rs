@@ -12,7 +12,7 @@
 //! and `used` is the percent consumed.
 
 use super::aggregate::SECONDS_PER_DAY;
-use super::query::{day_of, month_first_day, week_first_day, WeekStart};
+use super::query::{day_of, month_first_day, utc_month_bounds, week_first_day, WeekStart};
 use super::UsageEvent;
 use serde_json::{json, Value};
 
@@ -77,8 +77,7 @@ impl LimitPeriod {
             LimitPeriod::Monthly => {
                 // `end` is a reset time chosen by the server, not a local
                 // calendar boundary, so its month is found in UTC.
-                let utc = crate::tz::Zone::Utc;
-                utc.day_start(month_first_day(utc.day_of(end - 1)))
+                utc_month_bounds(end - 1).0
             }
         };
         (start, end)
@@ -119,9 +118,6 @@ pub enum Origin {
     /// Read from the usage numbers Claude Code caches in its config file.
     /// The age of that cache is shown next to it.
     Cached,
-    /// The amount the server billed, fetched by playbook with the user's
-    /// consent.
-    Server,
 }
 
 impl Origin {
@@ -130,7 +126,6 @@ impl Origin {
             Origin::Measured => "measured",
             Origin::Manual => "manual",
             Origin::Cached => "cached",
-            Origin::Server => "server",
         }
     }
 }

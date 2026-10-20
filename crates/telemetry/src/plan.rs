@@ -18,6 +18,7 @@ use crate::claude_code::parse_iso8601_utc;
 use crate::limits::{LimitPeriod, Unit};
 use crate::limits_source::{self, Window};
 use crate::period::elapsed_text;
+use crate::spend::SpendFigure;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -35,7 +36,7 @@ const PLAN_FIELDS: [&str; 6] = [
 ];
 
 /// How far ahead of this clock a fetch time may be before it is not believed.
-pub(crate) const CLOCK_SKEW_SECONDS: i64 = 300;
+const CLOCK_SKEW_SECONDS: i64 = 300;
 
 /// What the account looks like from the tier names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,118 +83,6 @@ impl Plan {
     }
 }
 
-/// The `usage.plan` setting: a label for the plan, set by the user. It changes
-/// the wording and, for `api` and `cloud`, says there is no server figure to
-/// ask for. It never changes a limit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PlanChoice {
-    #[default]
-    Auto,
-    Pro,
-    Max5x,
-    Max20x,
-    Team,
-    Enterprise,
-    Api,
-    Cloud,
-}
-
-impl PlanChoice {
-    pub fn parse(value: &str) -> Option<PlanChoice> {
-        Some(match value {
-            "auto" => PlanChoice::Auto,
-            "pro" => PlanChoice::Pro,
-            "max5x" => PlanChoice::Max5x,
-            "max20x" => PlanChoice::Max20x,
-            "team" => PlanChoice::Team,
-            "enterprise" => PlanChoice::Enterprise,
-            "api" => PlanChoice::Api,
-            "cloud" => PlanChoice::Cloud,
-            _ => return None,
-        })
-    }
-
-    /// The name of the plan class, `None` for `auto`.
-    pub fn label(self) -> Option<&'static str> {
-        Some(match self {
-            PlanChoice::Auto => return None,
-            PlanChoice::Pro => "Pro",
-            PlanChoice::Max5x => "Max 5x",
-            PlanChoice::Max20x => "Max 20x",
-            PlanChoice::Team => "Team",
-            PlanChoice::Enterprise => "Enterprise",
-            PlanChoice::Api => "API key",
-            PlanChoice::Cloud => "Bedrock, Vertex or Foundry",
-        })
-    }
-
-    /// Whether the user says there is no Claude.ai login to ask the server
-    /// through.
-    pub fn is_local_only(self) -> bool {
-        matches!(self, PlanChoice::Api | PlanChoice::Cloud)
-    }
-}
-
-/// The plan name for output. `auto` keeps the name read from the tiers; any
-/// other choice is shown as the user's own.
-pub fn plan_label(detected: Plan, choice: PlanChoice) -> String {
-    match choice.label() {
-        Some(label) => format!("{label} (set by you)"),
-        None => detected.label().to_string(),
-    }
-}
-
-/// How the user signs in to Claude Code. Only an OAuth login has a token the
-/// server figure could be asked with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LoginKind {
-    OAuth,
-    ApiKey,
-    /// Bedrock, Vertex or Foundry.
-    Cloud,
-    Unknown,
-}
-
-/// The variables that switch Claude Code to a cloud provider.
-const CLOUD_ENV: [&str; 3] = [
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_VERTEX",
-    "CLAUDE_CODE_USE_FOUNDRY",
-];
-
-/// The variable that holds an API key.
-const API_KEY_ENV: &str = "ANTHROPIC_API_KEY";
-
-impl LoginKind {
-    /// The login from whether the config file names an OAuth account and from
-    /// the environment (`env` returns a variable's value). A cloud provider
-    /// variable wins, then an API key variable, which Claude Code prefers over
-    /// a subscription login, then an OAuth account. A set API key variable
-    /// means no token is read, so a doubt leans to skipping the read. The
-    /// names of the cloud variables are not all documented, so a missing one
-    /// shows as `OAuth` or `Unknown`, which only costs a skipped optimization.
-    pub fn detect(has_oauth_account: bool, env: &dyn Fn(&str) -> Option<String>) -> LoginKind {
-        let on = |name: &str| {
-            env(name).is_some_and(|v| {
-                let v = v.trim();
-                !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false")
-            })
-        };
-        if CLOUD_ENV.iter().any(|n| on(n)) {
-            LoginKind::Cloud
-        } else if on(API_KEY_ENV) {
-            LoginKind::ApiKey
-        } else if has_oauth_account {
-            LoginKind::OAuth
-        } else {
-            LoginKind::Unknown
-        }
-    }
-}
-
-/// Whose spend a figure counts, for the label.
-pub use crate::spend::Scope;
-
 /// One line a view draws.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DisplayLine {
@@ -204,18 +93,14 @@ pub enum DisplayLine {
     LocalEstimate,
 }
 
-/// The plan shown when nothing identifies it and no source has data.
-pub const PLAN_LIMITS_UNAVAILABLE: &str = "plan limits unavailable";
-
-/// What a source actually carries. The lines a view draws follow this set and
-/// never the plan name: only one response shape has been observed, so no
+/// What the sources carry. The lines a view draws follow this set and never
+/// the plan name, since only some response shapes have been observed and no
 /// table of plans and limits exists.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Capabilities {
     pub rolling_windows: Vec<(String, Window)>,
     pub monthly_cap: Option<crate::spend::Money>,
-    pub scope: Scope,
-    /// Nothing server side is known, so only the local estimate is shown.
+    /// Nothing from Claude is known, so only the local estimate is shown.
     pub local_only: bool,
 }
 
@@ -223,33 +108,29 @@ impl Capabilities {
     fn build(
         rolling_windows: Vec<(String, Window)>,
         monthly_cap: Option<crate::spend::Money>,
-        scope: Scope,
     ) -> Capabilities {
         let local_only = rolling_windows.is_empty() && monthly_cap.is_none();
         Capabilities {
             rolling_windows,
             monthly_cap,
-            scope,
             local_only,
         }
     }
 
-    /// From a figure fetched from the server. A null window is not there.
-    pub fn from_figure(f: &crate::spend::SpendFigure) -> Capabilities {
-        Capabilities::build(f.windows.clone(), f.limit.clone(), f.scope)
-    }
-
-    /// From the usage numbers Claude Code cached.
+    /// From the usage numbers Claude Code cached. A null window is not there.
     pub fn from_cache(c: &UsageCache) -> Capabilities {
-        let windows = [("five_hour", &c.five_hour), ("seven_day", &c.seven_day)]
-            .into_iter()
-            .filter_map(|(name, w)| w.clone().map(|w| (name.to_string(), w)))
-            .collect();
-        Capabilities::build(
-            windows,
-            c.spend.map(|s| dollars(s.limit_usd)),
-            Scope::Unspecified,
-        )
+        let mut windows: Vec<(String, Window)> =
+            [("five_hour", &c.five_hour), ("seven_day", &c.seven_day)]
+                .into_iter()
+                .filter_map(|(name, w)| w.clone().map(|w| (name.to_string(), w)))
+                .collect();
+        windows.extend(c.extra_windows.iter().cloned());
+        let cap = c
+            .billed
+            .as_ref()
+            .and_then(|b| b.limit.clone())
+            .filter(|m| m.minor > 0);
+        Capabilities::build(windows, cap)
     }
 
     /// From the statusline reading.
@@ -262,17 +143,27 @@ impl Capabilities {
             .spend_limit
             .as_ref()
             .and_then(|l| l.limit_usd)
-            .map(dollars);
-        Capabilities::build(windows, cap, Scope::Unspecified)
+            .filter(|n| *n > 0.0)
+            .and_then(crate::spend::Money::from_usd);
+        Capabilities::build(windows, cap)
     }
 
-    /// Applies the login and the `usage.plan` choice. An API key or a cloud
-    /// provider has no server figure, so only the local estimate remains.
-    pub fn for_login(self, login: LoginKind, choice: PlanChoice) -> Capabilities {
-        if choice.is_local_only() || matches!(login, LoginKind::ApiKey | LoginKind::Cloud) {
-            return Capabilities::build(Vec::new(), None, Scope::Unspecified);
+    /// Both sources together: a window or cap the statusline has wins, the
+    /// cache fills in what it lacks.
+    pub fn from_sources(s: &limits_source::Sources) -> Capabilities {
+        let snap = s.snapshot.as_ref().map(Capabilities::from_snapshot);
+        let cache = s.account.cache.as_ref().map(Capabilities::from_cache);
+        let (mut windows, mut cap) =
+            snap.map_or((Vec::new(), None), |c| (c.rolling_windows, c.monthly_cap));
+        if let Some(c) = cache {
+            for (name, w) in c.rolling_windows {
+                if !windows.iter().any(|(n, _)| *n == name) {
+                    windows.push((name, w));
+                }
+            }
+            cap = cap.or(c.monthly_cap);
         }
-        self
+        Capabilities::build(windows, cap)
     }
 
     /// The lines to draw, in order: the windows, the monthly cap, then the
@@ -289,25 +180,7 @@ impl Capabilities {
         out.push(DisplayLine::LocalEstimate);
         out
     }
-
-    /// The one neutral line for a plan that is not identified and has no data.
-    pub fn note(&self, plan: Plan, choice: PlanChoice) -> Option<&'static str> {
-        (self.local_only && plan == Plan::EnterpriseOrUnknown && choice == PlanChoice::Auto)
-            .then_some(PLAN_LIMITS_UNAVAILABLE)
-    }
 }
-
-/// A dollar amount as USD in cents.
-fn dollars(usd: f64) -> crate::spend::Money {
-    crate::spend::Money {
-        minor: (usd * USD_MINOR_PER_UNIT).round() as i64,
-        decimals: USD_DECIMALS,
-        currency: Some(crate::spend::USD.to_string()),
-    }
-}
-
-const USD_DECIMALS: u8 = 2;
-const USD_MINOR_PER_UNIT: f64 = 100.0;
 
 /// The monthly spend limit of an account, in dollars.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -324,6 +197,12 @@ pub struct UsageCache {
     pub five_hour: Option<Window>,
     pub seven_day: Option<Window>,
     pub spend: Option<SpendLimit>,
+    /// The same `spend` block in any currency, for the comparison with the
+    /// local estimate. `spend` above keeps only a usable dollar limit.
+    pub billed: Option<SpendFigure>,
+    /// Every other usage window the cache carries, by its own name, sorted by
+    /// it. Only plain names are kept, since a name reaches a label.
+    pub extra_windows: Vec<(String, Window)>,
 }
 
 impl UsageCache {
@@ -366,7 +245,7 @@ fn load(path: &Path) -> Option<Value> {
 /// An ISO 8601 time with an optional fraction and an optional `Z` or
 /// `+hh:mm` / `-hh:mm` offset, as UTC seconds. Claude Code writes
 /// `2026-09-03T05:00:00.123456+00:00`.
-pub(crate) fn parse_time(text: &str) -> Option<i64> {
+fn parse_time(text: &str) -> Option<i64> {
     let (date, time) = text.split_once('T')?;
     let cut = time.find(['.', 'Z', '+', '-']).unwrap_or(time.len());
     let base = parse_iso8601_utc(&format!("{date}T{}Z", &time[..cut]))?;
@@ -382,7 +261,7 @@ pub(crate) fn parse_time(text: &str) -> Option<i64> {
     Some(base - offset)
 }
 
-pub(crate) fn window(v: Option<&Value>) -> Option<Window> {
+fn window(v: Option<&Value>) -> Option<Window> {
     let v = v?;
     let pct = v.get("utilization")?.as_f64()?;
     let at = parse_time(v.get("resets_at")?.as_str()?)?;
@@ -392,36 +271,49 @@ pub(crate) fn window(v: Option<&Value>) -> Option<Window> {
     })
 }
 
-/// `{amount_minor, currency, exponent}` as dollars, only for USD.
-fn usd(v: Option<&Value>) -> Option<f64> {
-    let v = v?;
-    let currency = v.get("currency")?.as_str()?;
-    let minor = v.get("amount_minor")?.as_f64()?;
-    let exponent = v.get("exponent")?.as_i64()?;
-    ((0..=6).contains(&exponent) && currency.eq_ignore_ascii_case("USD") && minor >= 0.0)
-        .then(|| minor / 10f64.powi(exponent as i32))
+/// The usable dollar spend limit of a figure: USD, and a limit above zero.
+fn spend(billed: Option<&SpendFigure>) -> Option<SpendLimit> {
+    let billed = billed?;
+    Some(SpendLimit {
+        limit_usd: billed.limit_usd()?,
+        used_usd: billed.used_usd(),
+    })
 }
 
-fn spend(v: Option<&Value>) -> Option<SpendLimit> {
-    let v = v?;
-    if v.get("enabled").and_then(Value::as_bool) == Some(false) {
-        return None;
-    }
-    let limit_usd = usd(v.get("limit")).filter(|n| *n > 0.0)?;
-    Some(SpendLimit {
-        limit_usd,
-        used_usd: usd(v.get("used")),
-    })
+/// Keys of the cached usage object that are not extra windows.
+const KNOWN_KEYS: [&str; 3] = ["five_hour", "seven_day", "spend"];
+
+/// The longest window name that is kept.
+const MAX_NAME_LEN: usize = 32;
+
+/// A window name made of letters, digits and underscores only.
+fn plain_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_NAME_LEN
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn cache(root: &Value) -> Option<UsageCache> {
     let c = root.get("cachedUsageUtilization")?;
     let u = c.get("utilization")?;
+    let fetched_at = c.get("fetchedAtMs")?.as_i64()? / 1000;
+    let billed = u
+        .get("spend")
+        .and_then(|s| SpendFigure::from_cache(s, fetched_at));
+    let mut extra_windows: Vec<(String, Window)> = u
+        .as_object()?
+        .iter()
+        .filter(|(name, _)| !KNOWN_KEYS.contains(&name.as_str()) && plain_name(name))
+        .filter_map(|(name, v)| window(Some(v)).map(|w| (name.clone(), w)))
+        .collect();
+    extra_windows.sort_by(|a, b| a.0.cmp(&b.0));
     Some(UsageCache {
-        fetched_at: c.get("fetchedAtMs")?.as_i64()? / 1000,
+        fetched_at,
         five_hour: window(u.get("five_hour")),
         seven_day: window(u.get("seven_day")),
-        spend: spend(u.get("spend")),
+        spend: spend(billed.as_ref()),
+        billed,
+        extra_windows,
     })
 }
 
@@ -660,17 +552,6 @@ fn verdict_lines(s: &limits_source::Sources, now: i64) -> Vec<String> {
             "  monthly limit: from the statusline reading (a manual budget is shown beside it)"
                 .to_string()
         }
-        limits_source::Monthly::Server {
-            limit_usd,
-            age,
-            fresh,
-            ..
-        } => format!(
-            "  monthly limit: {} billed by the server, fetched {} ago{}",
-            limits_source::amount(Unit::Dollars, limit_usd),
-            elapsed_text(age),
-            if fresh { "" } else { " (stale)" }
-        ),
         limits_source::Monthly::Cached {
             limit_usd,
             age,
@@ -854,6 +735,32 @@ mod tests {
     }
 
     #[test]
+    fn a_figure_in_another_currency_is_kept_as_billed_but_is_no_dollar_limit() {
+        let eur = r#"{"enabled":true,"limit":{"amount_minor":50000,"currency":"EUR","exponent":2},"used":{"amount_minor":1234,"currency":"EUR","exponent":2}}"#;
+        let home = Home::new("billed-eur", &cache_body(NOW * 1000, eur));
+
+        let c = read(&home.json()).cache.unwrap();
+
+        assert!(c.spend.is_none());
+        let used = c.billed.unwrap().used.unwrap();
+        assert_eq!(used.currency.as_deref(), Some("EUR"));
+        assert_eq!(used.minor, 1234);
+    }
+
+    #[test]
+    fn a_dollar_figure_is_kept_as_billed_too() {
+        let usd = r#"{"enabled":true,"limit":{"amount_minor":50000,"currency":"USD","exponent":2},"used":{"amount_minor":1234,"currency":"USD","exponent":2}}"#;
+        let home = Home::new("billed-usd", &cache_body(NOW * 1000, usd));
+
+        let c = read(&home.json()).cache.unwrap();
+
+        assert_eq!(
+            c.billed,
+            crate::spend::SpendFigure::from_usd(Some(500.0), Some(12.34), NOW)
+        );
+    }
+
+    #[test]
     fn a_spend_limit_that_is_off_or_not_in_dollars_is_ignored() {
         let off =
             r#"{"enabled":false,"limit":{"amount_minor":50000,"currency":"USD","exponent":2}}"#;
@@ -905,7 +812,10 @@ mod tests {
             );
         }
         for a in amounts {
-            assert!(usd(serde_json::from_str(a).ok().as_ref()).is_none(), "{a}");
+            assert!(
+                crate::spend::Money::from_json(serde_json::from_str(a).ok().as_ref()).is_none(),
+                "{a}"
+            );
         }
     }
 
@@ -1246,274 +1156,123 @@ mod tests {
         assert_eq!(read_cached(&missing), Account::default());
     }
 
-    #[test]
-    fn a_server_figure_is_named_in_the_verdict_with_its_age_and_staleness() {
-        let figure = |age: i64| crate::spend::SpendFigure {
-            limit: Some(crate::spend::Money {
-                minor: 150_000,
-                decimals: 2,
-                currency: Some("USD".to_string()),
-            }),
-            used: None,
-            percent: None,
-            severity: None,
-            resets_at: None,
-            limit_reached: None,
-            scope: crate::spend::Scope::Unspecified,
-            windows: Vec::new(),
-            fetched_at: NOW - age,
-            origin: crate::limits::Origin::Server,
-        };
-        let sources = |age| limits_source::Sources {
-            server: Some(figure(age)),
-            ..limits_source::Sources::default()
-        };
-
-        let fresh = verdict_lines(&sources(600), NOW).join("\n");
-        let stale = verdict_lines(&sources(7 * 3600), NOW).join("\n");
-
-        assert!(
-            fresh.contains("monthly limit: $1500.00 billed by the server, fetched 10m ago\n")
-                || fresh.ends_with("fetched 10m ago"),
-            "{fresh}"
-        );
-        assert!(stale.contains("(stale)"), "{stale}");
-    }
-
-    use crate::spend::{self, Parsed};
-
-    fn synthetic(name: &str) -> Capabilities {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    fn fixture(name: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/spend")
             .join(format!("synthetic-unverified-{name}.json"));
-        let body = std::fs::read_to_string(path).unwrap();
-        match spend::parse(&body, NOW) {
-            Ok(Parsed::Figure(f)) => Capabilities::from_figure(&f),
-            Ok(Parsed::Empty) => Capabilities::build(Vec::new(), None, Scope::Unspecified),
-            Err(e) => panic!("{name}: {e:?}"),
-        }
+        std::fs::read_to_string(path).unwrap()
     }
 
-    fn window_names(c: &Capabilities) -> Vec<&str> {
-        c.rolling_windows.iter().map(|(n, _)| n.as_str()).collect()
+    fn lines_of(name: &str) -> Vec<DisplayLine> {
+        let home = Home::new(&format!("caps-{name}"), &fixture(name));
+        Capabilities::from_cache(&read(&home.json()).cache.unwrap()).lines()
+    }
+
+    fn win(name: &str) -> DisplayLine {
+        DisplayLine::Window(name.to_string())
     }
 
     #[test]
-    fn the_capability_set_follows_the_fields_present_in_each_synthetic_shape() {
-        use DisplayLine::{LocalEstimate, MonthlyCap, Window};
-        let w = |n: &str| Window(n.to_string());
+    fn the_lines_follow_what_the_cache_carries_not_the_plan_name() {
+        use DisplayLine::{LocalEstimate, MonthlyCap};
         let table = [
             (
-                "max20x-extra-usage",
-                Scope::Unspecified,
-                vec![MonthlyCap, LocalEstimate],
-            ),
-            (
                 "windows-only",
-                Scope::Unspecified,
-                vec![w("five_hour"), w("seven_day"), LocalEstimate],
-            ),
-            (
-                "monthly-cap-only",
-                Scope::Unspecified,
-                vec![MonthlyCap, LocalEstimate],
+                vec![win("five_hour"), win("seven_day"), LocalEstimate],
             ),
             (
                 "windows-and-cap",
-                Scope::Unspecified,
-                vec![w("five_hour"), w("seven_day"), MonthlyCap, LocalEstimate],
+                vec![
+                    win("five_hour"),
+                    win("seven_day"),
+                    MonthlyCap,
+                    LocalEstimate,
+                ],
             ),
-            ("org-scope", Scope::Org, vec![MonthlyCap, LocalEstimate]),
-            (
-                "member-scope",
-                Scope::Member,
-                vec![MonthlyCap, LocalEstimate],
-            ),
+            ("cap-only", vec![MonthlyCap, LocalEstimate]),
+            ("empty", vec![LocalEstimate]),
             (
                 "unknown-extra-window",
-                Scope::Unspecified,
-                vec![w("thirty_day"), MonthlyCap, LocalEstimate],
+                vec![win("five_hour"), win("seven_day_opus"), LocalEstimate],
             ),
-            ("empty", Scope::Unspecified, vec![LocalEstimate]),
-            ("free-or-unknown", Scope::Unspecified, vec![LocalEstimate]),
         ];
 
-        for (name, scope, lines) in table {
-            let c = synthetic(name);
-
-            assert_eq!(c.scope, scope, "{name}");
-            assert_eq!(c.lines(), lines, "{name}");
-            assert_eq!(c.local_only, lines == [LocalEstimate], "{name}");
+        for (name, want) in table {
+            assert_eq!(lines_of(name), want, "{name}");
         }
     }
 
     #[test]
-    fn an_unknown_window_is_shown_under_its_own_name() {
-        assert_eq!(
-            window_names(&synthetic("unknown-extra-window")),
-            ["thirty_day"]
-        );
-    }
-
-    #[test]
-    fn an_api_key_or_cloud_login_is_local_only_whatever_the_server_said() {
-        let rich = synthetic("windows-and-cap");
-
-        for login in [LoginKind::ApiKey, LoginKind::Cloud] {
-            let c = rich.clone().for_login(login, PlanChoice::Auto);
-
-            assert!(c.local_only, "{login:?}");
-            assert_eq!(c.lines(), [DisplayLine::LocalEstimate]);
-        }
-        for name in ["api-key-login", "cloud-login"] {
-            let c = synthetic(name).for_login(LoginKind::OAuth, PlanChoice::Auto);
-
-            assert_eq!(c.lines(), [DisplayLine::LocalEstimate], "{name}");
-        }
-        assert!(
-            !rich
-                .clone()
-                .for_login(LoginKind::OAuth, PlanChoice::Auto)
-                .local_only
-        );
-        assert!(
-            !rich
-                .for_login(LoginKind::Unknown, PlanChoice::Auto)
-                .local_only
-        );
-    }
-
-    #[test]
-    fn the_api_and_cloud_choices_force_local_only_and_the_others_change_nothing() {
-        let rich = synthetic("windows-and-cap");
-
-        for choice in [PlanChoice::Api, PlanChoice::Cloud] {
-            assert!(rich.clone().for_login(LoginKind::OAuth, choice).local_only);
-        }
-        for choice in [
-            PlanChoice::Auto,
-            PlanChoice::Pro,
-            PlanChoice::Max5x,
-            PlanChoice::Max20x,
-            PlanChoice::Team,
-            PlanChoice::Enterprise,
-        ] {
-            assert_eq!(rich.clone().for_login(LoginKind::OAuth, choice), rich);
-        }
-    }
-
-    #[test]
-    fn the_choice_changes_only_the_label() {
-        let a = plan_label(Plan::Max20x, PlanChoice::Max5x);
-        let b = plan_label(Plan::Max20x, PlanChoice::Max20x);
-
-        assert_eq!(a, "Max 5x (set by you)");
-        assert_eq!(b, "Max 20x (set by you)");
-        assert_eq!(plan_label(Plan::Max20x, PlanChoice::Auto), "Max 20x");
-        assert_eq!(
-            plan_label(Plan::EnterpriseOrUnknown, PlanChoice::Auto),
-            "Enterprise or unknown plan"
-        );
-        assert_eq!(
-            plan_label(Plan::EnterpriseOrUnknown, PlanChoice::Team),
-            "Team (set by you)"
-        );
-    }
-
-    #[test]
-    fn the_choice_parses_every_documented_value_and_nothing_else() {
-        for key in [
-            "auto",
-            "pro",
-            "max5x",
-            "max20x",
-            "team",
-            "enterprise",
-            "api",
-            "cloud",
-        ] {
-            assert!(PlanChoice::parse(key).is_some(), "{key}");
-        }
-        assert!(PlanChoice::parse("free").is_none());
-        assert!(PlanChoice::parse("").is_none());
-        assert_eq!(PlanChoice::default(), PlanChoice::Auto);
-    }
-
-    #[test]
-    fn every_value_the_config_accepts_for_usage_plan_parses() {
-        for value in crate::config::allowed_values("usage.plan").unwrap() {
-            assert!(PlanChoice::parse(value).is_some(), "{value}");
-        }
-    }
-
-    #[test]
-    fn an_unknown_plan_with_no_data_gets_one_neutral_line() {
-        let none = synthetic("empty");
-        let rich = synthetic("windows-only");
-
-        assert_eq!(
-            none.note(Plan::EnterpriseOrUnknown, PlanChoice::Auto),
-            Some("plan limits unavailable")
-        );
-        assert_eq!(none.note(Plan::Max20x, PlanChoice::Auto), None);
-        assert_eq!(none.note(Plan::EnterpriseOrUnknown, PlanChoice::Team), None);
-        assert_eq!(rich.note(Plan::EnterpriseOrUnknown, PlanChoice::Auto), None);
-    }
-
-    #[test]
-    fn the_cache_and_the_statusline_give_the_same_kind_of_set() {
-        let win = Window {
-            used_percentage: 1.0,
-            resets_at: NOW + 60,
+    fn a_cache_with_nothing_is_local_only_and_a_window_or_cap_is_not() {
+        let caps = |name: &str| {
+            let home = Home::new(&format!("local-{name}"), &fixture(name));
+            Capabilities::from_cache(&read(&home.json()).cache.unwrap())
         };
-        let cache = UsageCache {
-            fetched_at: NOW,
-            five_hour: Some(win.clone()),
-            seven_day: None,
-            spend: Some(SpendLimit {
-                limit_usd: 500.0,
-                used_usd: None,
+
+        assert!(caps("empty").local_only);
+        assert!(!caps("cap-only").local_only);
+        assert!(!caps("windows-only").local_only);
+        assert_eq!(
+            caps("windows-and-cap").monthly_cap.unwrap().format(),
+            "500.00"
+        );
+    }
+
+    #[test]
+    fn an_extra_window_needs_a_plain_name_and_a_readable_window() {
+        let body = |name: &str| {
+            format!(
+                r#"{{"cachedUsageUtilization":{{"fetchedAtMs":{},"utilization":{{"{name}":{{"utilization":3,"resets_at":"{RESET}"}}}}}}}}"#,
+                NOW * 1000
+            )
+        };
+
+        for (name, kept) in [
+            ("seven_day_opus", true),
+            ("bad name", false),
+            ("x\\u001b[31m", false),
+        ] {
+            let home = Home::new(&format!("extra-{}", name.len()), &body(name));
+
+            let c = read(&home.json()).cache.unwrap();
+
+            assert_eq!(!c.extra_windows.is_empty(), kept, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_statusline_wins_and_the_cache_fills_in_what_it_lacks() {
+        let w = |used| Window {
+            used_percentage: used,
+            resets_at: NOW + 3600,
+        };
+        let sources = limits_source::Sources {
+            snapshot: Some(limits_source::Snapshot {
+                captured_at: NOW,
+                five_hour: Some(w(10.0)),
+                ..limits_source::Snapshot::default()
             }),
-        };
-        let snap = Snapshot {
-            captured_at: NOW,
-            seven_day: Some(win),
-            ..Snapshot::default()
-        };
-
-        let from_cache = Capabilities::from_cache(&cache);
-        let from_snap = Capabilities::from_snapshot(&snap);
-
-        assert_eq!(window_names(&from_cache), ["five_hour"]);
-        assert_eq!(from_cache.monthly_cap.as_ref().unwrap().format(), "500.00");
-        assert_eq!(window_names(&from_snap), ["seven_day"]);
-        assert!(from_snap.monthly_cap.is_none());
-        assert!(Capabilities::from_cache(&UsageCache::default()).local_only);
-    }
-
-    #[test]
-    fn the_login_follows_the_environment_and_the_account() {
-        let env = |pairs: &'static [(&'static str, &'static str)]| {
-            move |name: &str| {
-                pairs
-                    .iter()
-                    .find(|(k, _)| *k == name)
-                    .map(|(_, v)| v.to_string())
-            }
+            account: Account {
+                plan: Plan::EnterpriseOrUnknown,
+                cache: Some(UsageCache {
+                    fetched_at: NOW,
+                    five_hour: Some(w(99.0)),
+                    seven_day: Some(w(50.0)),
+                    ..UsageCache::default()
+                }),
+            },
+            ..limits_source::Sources::default()
         };
 
-        let cloud = LoginKind::detect(true, &env(&[("CLAUDE_CODE_USE_BEDROCK", "1")]));
-        let off = LoginKind::detect(true, &env(&[("CLAUDE_CODE_USE_VERTEX", "0")]));
-        let key = LoginKind::detect(false, &env(&[("ANTHROPIC_API_KEY", "set")]));
-        let key_and_account = LoginKind::detect(true, &env(&[("ANTHROPIC_API_KEY", "set")]));
-        let empty_key = LoginKind::detect(true, &env(&[("ANTHROPIC_API_KEY", " ")]));
-        let none = LoginKind::detect(false, &env(&[]));
+        let caps = Capabilities::from_sources(&sources);
 
-        assert_eq!(cloud, LoginKind::Cloud);
-        assert_eq!(off, LoginKind::OAuth);
-        assert_eq!(key, LoginKind::ApiKey);
-        assert_eq!(key_and_account, LoginKind::ApiKey);
-        assert_eq!(empty_key, LoginKind::OAuth);
-        assert_eq!(none, LoginKind::Unknown);
+        assert_eq!(
+            caps.rolling_windows,
+            vec![
+                ("five_hour".to_string(), w(10.0)),
+                ("seven_day".to_string(), w(50.0))
+            ]
+        );
+        assert!(Capabilities::from_sources(&limits_source::Sources::default()).local_only);
     }
 }
