@@ -82,3 +82,23 @@ fn each_reason_word_comes_out_of_the_binary_with_exit_zero() {
         }
     }
 }
+
+#[test]
+fn a_429_in_the_store_is_named_and_listed_by_the_binary() {
+    let t = now();
+    let home = home("429", Some(format!("{{{MAX_5X}}}")), None);
+    let conn = playbook_telemetry::db::open_db(&playbook_telemetry::data::usage_db(&home))
+        .expect("open the store");
+    let err = playbook_telemetry::telemetry_db::TelemetryError {
+        session_id: "s1".into(),
+        sequence: 1,
+        timestamp: t - 60,
+        status_code: 429,
+        attempt: 1,
+        ..Default::default()
+    };
+    playbook_telemetry::telemetry_db::insert_error(&conn, &err).expect("store the 429");
+    drop(conn);
+
+    assert_eq!(reason_of(&home), "rate-limited-seen");
+}

@@ -1352,6 +1352,40 @@ fn a_percent_window_is_charted_from_its_readings_with_percent_labels() {
 }
 
 #[test]
+fn a_rate_limit_is_marked_on_the_chart_with_its_line_and_legend_entry() {
+    crate::tz::set(crate::tz::Zone::Utc);
+    let (b, limits) = window_case();
+    let pal = Theme::Mono.palette(ColorDepth::True);
+    let plain = draw_with(100, 30, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+    })
+    .0;
+    let end = b.end;
+    let b = b.with_rate_limits(&[
+        BURN_NOW - 3_600,
+        BURN_NOW - 4 * 3_600,
+        BURN_NOW + 3_600,
+        end,
+    ]);
+
+    let (text, _) = draw_with(100, 30, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+    });
+
+    assert!(!plain.contains('\u{00d7}'), "{plain}");
+    assert_eq!(
+        text.matches('\u{00d7}').count(),
+        3,
+        "two marks, one legend: {text}"
+    );
+    assert!(text.contains("\u{00d7} rate limited"), "{text}");
+    assert!(
+        text.contains("Claude Code was rate limited at 2026-"),
+        "{text}"
+    );
+}
+
+#[test]
 fn the_charted_burnup_is_the_most_used_limit_else_the_spend_alone() {
     let (low, _) = burn_case("limit");
     let (high, _) = burn_case("exceeded");
