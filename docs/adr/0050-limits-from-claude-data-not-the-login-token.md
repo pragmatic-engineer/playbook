@@ -63,7 +63,7 @@ Why each alternative was rejected:
 
 ## Consequences
 
-- Max and Pro users see their windows only after a session with the playbook statusline, and the dashboard says so in one line per missing case (`no-reading`, `stale`, `cap-unknown`, `windows-reset`).
+- Max and Pro users see their windows only after a session with the playbook statusline, and the dashboard says so in one line per missing case (`no-reading`, `stale`, `cap-unknown`, `windows-reset`, and `rate-limited-seen` when a 429 was seen and a window plan has no reading).
 - An enterprise dollar plan shows its limit only if a source carries it. Until that is checked, the row says the cap is not reported and the local spend and burn are still shown. This gap is accepted, not hidden.
 - The undocumented cache fields can change. Parsing is tolerant and absent means unknown.
 - No new dependency, key, command, hook or migration. The only new file in the data folder is `rate_limits.jsonl`, which can be removed without losing anything else.

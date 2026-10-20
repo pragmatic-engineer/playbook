@@ -42,6 +42,7 @@ const NEAR_LINE: char = '\u{2508}';
 const LIMIT_LINE: char = '\u{2501}';
 const BILLED: char = '\u{25c6}';
 const MARKER: char = '\u{25b2}';
+const RATE_LIMITED: char = '\u{00d7}';
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Role {
@@ -53,6 +54,7 @@ enum Role {
     Limit,
     Billed,
     Marker,
+    RateLimited,
 }
 
 impl Role {
@@ -66,6 +68,7 @@ impl Role {
             Role::Limit => LIMIT_LINE,
             Role::Billed => BILLED,
             Role::Marker => MARKER,
+            Role::RateLimited => RATE_LIMITED,
         }
     }
 
@@ -74,7 +77,7 @@ impl Role {
             Role::Empty | Role::Half | Role::Near => pal.inactive,
             Role::Actual => pal.live,
             Role::Projection => pal.warn,
-            Role::Limit => pal.error,
+            Role::Limit | Role::RateLimited => pal.error,
             Role::Billed => pal.hi,
             Role::Marker => pal.title,
         }
@@ -185,6 +188,10 @@ fn cells(b: &Burnup, plot: &Plot) -> Vec<Vec<Role>> {
     if let Some((at, usd)) = b.billed {
         grid[plot.row(usd)][plot.col(b, at)] = Role::Billed;
     }
+    for at in &b.rate_limited {
+        let used = value_at(b, *at).unwrap_or(0.0);
+        grid[plot.row(used)][plot.col(b, *at)] = Role::RateLimited;
+    }
     grid
 }
 
@@ -253,6 +260,9 @@ fn legend(b: &Burnup) -> String {
     }
     if b.billed.is_some() {
         parts.push(format!("{BILLED} reported by Claude"));
+    }
+    if !b.rate_limited.is_empty() {
+        parts.push(format!("{RATE_LIMITED} rate limited"));
     }
     parts.join("  ")
 }
@@ -362,7 +372,10 @@ pub(super) fn render_burnup(
         );
     let inner = block.inner(area);
     let (width, rows) = (usize::from(inner.width), usize::from(inner.height));
-    let windows = windows_line(limits);
+    let windows = [windows_line(limits), b.and_then(Burnup::rate_limited_line)]
+        .into_iter()
+        .flatten()
+        .reduce(|a, line| format!("{a}  {line}"));
     let lines = match b {
         None => vec![Line::styled("no burn-up yet", style(pal, pal.inactive))],
         Some(b) if b.points.is_empty() => {

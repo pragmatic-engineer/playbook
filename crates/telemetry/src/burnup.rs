@@ -73,6 +73,10 @@ pub struct Burnup {
     pub billed: Option<(i64, f64)>,
     /// 50, 80 and 100 percent of the limit.
     pub crossings: Vec<Crossing>,
+    /// When Claude Code logged an HTTP 429 inside `[start, end)`, oldest
+    /// first, one entry per second. The only token-free proof that a cap was
+    /// hit.
+    pub rate_limited: Vec<i64>,
 }
 
 impl Burnup {
@@ -102,6 +106,27 @@ impl Burnup {
                 .map(|p| (*p, limit * p / PERCENT))
                 .collect()
         })
+    }
+
+    /// Keeps the rate limit times that fall inside `[start, end)`: a second
+    /// before the start or at the end is not part of this chart.
+    pub fn with_rate_limits(mut self, hits: &[i64]) -> Burnup {
+        let mut inside: Vec<i64> = hits
+            .iter()
+            .copied()
+            .filter(|t| *t >= self.start && *t < self.end)
+            .collect();
+        inside.sort_unstable();
+        inside.dedup();
+        self.rate_limited = inside;
+        self
+    }
+
+    /// The line that says Claude Code was rate limited, for the newest time,
+    /// or `None` when it was not.
+    pub fn rate_limited_line(&self) -> Option<String> {
+        let last = *self.rate_limited.iter().max()?;
+        Some(limits_source::rate_limited_text(last))
     }
 
     /// The date of day `i` of the period, `YYYY-MM-DD` in its zone.
@@ -134,6 +159,7 @@ impl Burnup {
                     "percent_of_limit": self.percent_of_limit(*c),
                 })).collect::<Vec<_>>(),
                 "projected_end_usd": self.projected_end,
+                "rate_limited_at": self.rate_limited,
             }),
             Unit::Percent => json!({
                 "basis": self.basis.key(),
@@ -141,6 +167,7 @@ impl Burnup {
                     .map(|(at, p)| json!({"at": at, "percent": p}))
                     .collect::<Vec<_>>(),
                 "projected_end_percent": self.projected_end,
+                "rate_limited_at": self.rate_limited,
             }),
         }
     }
@@ -188,11 +215,13 @@ impl Burnup {
         out
     }
 
-    /// One line for each of the 50, 80 and 100 percent crossings.
+    /// One line for each of the 50, 80 and 100 percent crossings, then the
+    /// newest 429 of the period when there is one.
     pub fn crossing_lines(&self) -> Vec<String> {
         self.crossings
             .iter()
             .map(limits_source::crossing_text)
+            .chain(self.rate_limited_line())
             .collect()
     }
 }
@@ -233,6 +262,7 @@ pub fn burnup(limit: &Limit, zone: Zone, inputs: Inputs<'_>) -> Option<Burnup> {
         crossings: limit
             .thresholds(inputs.now)
             .map_or_else(Vec::new, |c| c.to_vec()),
+        rate_limited: Vec::new(),
     };
     if inputs.now < limit.start {
         return Some(b);
@@ -272,6 +302,7 @@ pub fn spend_only(
         limit: None,
         billed: None,
         crossings: Vec::new(),
+        rate_limited: Vec::new(),
     };
     if now >= start {
         b.fill_days(events);
@@ -385,7 +416,7 @@ pub fn burnups_for(
                 billed: billed.filter(|_| limits_source::is_monthly_dollars(l)),
                 now,
             };
-            burnup(l, zone, inputs)
+            burnup(l, zone, inputs).map(|b| b.with_rate_limits(&s.rate_limited))
         })
         .collect()
 }
@@ -459,6 +490,30 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn only_rate_limit_times_inside_the_period_are_kept_oldest_first() {
+        let l = window(JAN, 40.0);
+        let end = l.end;
+        let b = percent(&l, JAN + 4_000, &[]);
+
+        let b = b.with_rate_limits(&[end, end - 1, JAN + 9, JAN, JAN - 1, JAN + 9]);
+
+        assert_eq!(b.rate_limited, vec![JAN, JAN + 9, end - 1]);
+        assert_eq!(
+            b.series_json()["rate_limited_at"],
+            json!([JAN, JAN + 9, end - 1])
+        );
+        assert_eq!(
+            b.rate_limited_line(),
+            Some(limits_source::rate_limited_text(end - 1))
+        );
+        let none = percent(&l, JAN + 4_000, &[]).with_rate_limits(&[]);
+        assert!(none.rate_limited.is_empty());
+        assert_eq!(none.rate_limited_line(), None);
+        assert_eq!(none.crossing_lines().len(), 3);
+        assert_eq!(b.crossing_lines().len(), 4);
     }
 
     #[test]
