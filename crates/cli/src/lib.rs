@@ -395,6 +395,10 @@ pub enum Command {
         /// Refresh the cached release check and exit (started in the background)
         #[arg(long, hide = true)]
         refresh_check: bool,
+        /// Update the plugin and store the outcome line for the next session
+        /// (started in the background)
+        #[arg(long, hide = true)]
+        refresh_plugin: bool,
         /// Print the release notes of this binary from a release-notes.json
         /// the install script checked, record them as shown, and exit
         #[arg(long, hide = true, value_name = "FILE")]
