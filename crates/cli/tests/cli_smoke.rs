@@ -122,6 +122,9 @@ impl Env {
             .env("LANG", "C.UTF-8")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
+            // Plenty of free space, so the disk guard and the doctor's disk
+            // row do not depend on the machine and start no cleanup.
+            .env("PLAYBOOK_TEST_DISK_FREE_GB", "500")
             .env("NO_PROXY", "")
             .env("no_proxy", "");
         for k in [
@@ -582,6 +585,11 @@ fn table() -> Vec<Case> {
         case( "pr land-wait", &["pr", "land-wait", "1", "--timeout", "1", "--interval", "1"], ).out("LAND_VERDICT=TIMEOUT"),
         case("pr merge", &["pr", "merge", "1"]).out("merge_rc=-1"),
         // worktrees and memory
+        case("disk status", &["disk", "status"]).out("Thresholds"),
+        case("disk reserve", &["disk", "reserve"]).pre(&["config", "set", "disk.warnFreeGb", "10000"]).code(1).err("refused"),
+        case("disk release", &["disk", "release"]).out("no ballast"),
+        case("disk clean", &["disk", "clean", "--dry-run"]).out("disk clean: would remove"),
+        case("disk target-dir", &["disk", "target-dir"]).out("cargo-"),
         case("worktree sweep", &["worktree", "sweep"]),
         case("worktree remove", &["worktree", "remove", "{ROOT}/none"]).code(1).err("not a registered git worktree"),
         case( "worktree review setup", &["worktree", "review", "setup", "1", "abc123"], ).code(1).err("failed to resolve repo URL"),

@@ -12,8 +12,8 @@
 //!   (`~/.claude/projects/*/memory/`) or the retired `~/.claude/memory/`.
 //!
 //! - changing the `rm` guard's own allowance: `playbook config set` on a
-//!   `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`
-//!   or `pr.ticketPatterns` key, `config import`, `config unset` or `config edit`,
+//!   `hooks.rmGuard.*`, `hooks.proseLint.*`, `pr.rules.*`, `pr.bodyMaxChars`,
+//!   `pr.ticketPatterns` or `disk.*` key, `config import`, `config unset` or `config edit`,
 //!   a write to the config database or a config file (a redirect into it, a
 //!   writer program, an interpreter, `sed -i`, or `sqlite3` with anything but
 //!   a read), or an inline `WORKTREE_BASE_DIR=` or `PLAYBOOK_SAFE_ROOTS=`
@@ -130,7 +130,7 @@ macro_rules! protected_reason {
         concat!(
             "Matched rule: ",
             $rule,
-            ". The rm guard's allowed roots, the prose lint mode and the pull request rules are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Reading the config store is fine. Until then, work within the current setting and say so."
+            ". The rm guard's allowed roots, the prose lint mode, the pull request rules and the disk guard's thresholds are the user's to change, not the model's. Ask the user to run the command themselves in the prompt with `!`, for example `! playbook config set --global hooks.rmGuard.allowedRoots '[\"~/scratch/builds\"]'`. Reading the config store is fine. Until then, work within the current setting and say so."
         )
     };
 }
@@ -204,14 +204,15 @@ fn is_fact_file(path: &str, memory_dir: &Path) -> bool {
 }
 
 /// The config keys the model may not change: the `rm` guard's roots, the
-/// prose lint mode and the pull request rules.
+/// prose lint mode, the pull request rules and the disk guard's thresholds.
 /// Matched on lowercase prefixes.
-const PROTECTED_KEY_PREFIXES: [&str; 5] = [
+const PROTECTED_KEY_PREFIXES: [&str; 6] = [
     "hooks.rmguard",
     "hooks.proselint",
     "pr.rules.",
     "pr.bodymaxchars",
     "pr.ticketpatterns",
+    "disk.",
 ];
 
 fn is_protected_config_key(word: &str) -> bool {
@@ -719,6 +720,8 @@ mod tests {
             "playbook config set --global pr.rules.prose off",
             "playbook config set pr.bodyMaxChars 100000",
             "playbook config set --org acme pr.ticketPatterns '[\"X-1\"]'",
+            "playbook config set disk.blockFreeGb 0",
+            "playbook config set --global disk.warnFreeGb 1",
             "playbook config unset pr.rules.length",
             "/usr/local/bin/playbook config import cfg.json",
             "playbook config unset hooks.rmGuard.allowedRoots",
@@ -768,7 +771,6 @@ mod tests {
             "playbook config get hooks.proseLint.mode",
             "playbook config set --global pr.draft false",
             "playbook config set pr.rulesX true",
-            "playbook config set disk.blockFreeGb 0",
             "playbook config get pr.rules.prose",
             "echo \"playbook config set hooks.proseLint.mode off\"",
             "playbook config list",
