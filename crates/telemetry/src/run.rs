@@ -113,7 +113,12 @@ pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<Stri
     };
     if !usage.is_empty() {
         text.push_str(&limits_source::summary_section(
-            &limit_sources(paths, &conn, now),
+            &limit_sources(
+                paths,
+                &conn,
+                limits_source::events_since(now, super::entry::configured_week_start()),
+                now,
+            ),
             &usage,
             now,
             super::entry::configured_week_start(),
@@ -124,17 +129,23 @@ pub fn run_summary(paths: &Paths, range: Option<Range>, now: i64) -> Result<Stri
 
 /// The stored plan limits, the manual budgets from the config and what
 /// Claude Code caches in its config file.
-pub fn limit_sources(paths: &Paths, conn: &Connection, now: i64) -> limits_source::Sources {
-    limits_source::Sources::load(
+///
+/// The 429 times from `since` through `now` come from the usage store and are
+/// left empty when it cannot be read: the marker is a hint, never an error.
+pub fn limit_sources(
+    paths: &Paths,
+    conn: &Connection,
+    since: i64,
+    now: i64,
+) -> limits_source::Sources {
+    let mut sources = limits_source::Sources::load(
         paths.db.parent(),
         &paths.claude_json,
         &super::host::home_dir(),
-    )
-    .with_rate_limited(
-        conn,
-        limits_source::events_since(now, super::entry::configured_week_start()),
-        now,
-    )
+    );
+    sources.rate_limited = super::telemetry_db::rate_limited_at(conn, since, now.saturating_add(1))
+        .unwrap_or_default();
+    sources
 }
 
 /// The `limits` object of `--json`. `events` must reach back to
@@ -146,7 +157,12 @@ pub fn limits_json(
     now: i64,
 ) -> serde_json::Value {
     limits_source::report_json(
-        &limit_sources(paths, conn, now),
+        &limit_sources(
+            paths,
+            conn,
+            limits_source::events_since(now, super::entry::configured_week_start()),
+            now,
+        ),
         events,
         now,
         super::entry::configured_week_start(),

@@ -125,12 +125,8 @@ impl Burnup {
     /// The line that says Claude Code was rate limited, for the newest time,
     /// or `None` when it was not.
     pub fn rate_limited_line(&self) -> Option<String> {
-        let last = *self.rate_limited.last()?;
-        let at = self.zone.iso(last).replace('T', " ");
-        Some(format!(
-            "Claude Code was rate limited at {} (HTTP 429)",
-            &at[..16]
-        ))
+        let last = *self.rate_limited.iter().max()?;
+        Some(limits_source::rate_limited_text(last))
     }
 
     /// The date of day `i` of the period, `YYYY-MM-DD` in its zone.
@@ -219,7 +215,8 @@ impl Burnup {
         out
     }
 
-    /// One line for each of the 50, 80 and 100 percent crossings.
+    /// One line for each of the 50, 80 and 100 percent crossings, then the
+    /// newest 429 of the period when there is one.
     pub fn crossing_lines(&self) -> Vec<String> {
         self.crossings
             .iter()
@@ -508,7 +505,10 @@ mod tests {
             b.series_json()["rate_limited_at"],
             json!([JAN, JAN + 9, end - 1])
         );
-        assert!(b.rate_limited_line().unwrap().ends_with("(HTTP 429)"));
+        assert_eq!(
+            b.rate_limited_line(),
+            Some(limits_source::rate_limited_text(end - 1))
+        );
         let none = percent(&l, JAN + 4_000, &[]).with_rate_limits(&[]);
         assert!(none.rate_limited.is_empty());
         assert_eq!(none.rate_limited_line(), None);

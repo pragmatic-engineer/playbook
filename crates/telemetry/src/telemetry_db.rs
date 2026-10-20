@@ -309,13 +309,14 @@ pub fn insert_error(conn: &Connection, e: &TelemetryError) -> Result<usize, Stri
 }
 
 /// When Claude Code logged an HTTP 429 in `[since, until)`, oldest first. One
-/// entry per `(session, sequence)`, so a retried call counts once.
+/// entry per `(session, sequence)`, the key of the table, so one failed attempt
+/// counts once however often its row is sent again.
 pub fn rate_limited_at(conn: &Connection, since: i64, until: i64) -> Result<Vec<i64>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT MIN(timestamp) FROM telemetry_errors
+            "SELECT timestamp FROM telemetry_errors
              WHERE status_code = 429 AND timestamp >= ?1 AND timestamp < ?2
-             GROUP BY session_id, sequence ORDER BY 1",
+             ORDER BY timestamp",
         )
         .map_err(|e| format!("failed to read rate limit errors: {e}"))?;
     let rows = stmt
@@ -946,8 +947,11 @@ mod tests {
             throttled("s1", 2, 1, start, 429),
             throttled("s1", 3, 1, end - 1, 429),
             throttled("s1", 4, 1, end, 429),
-            // the same call again as a later attempt, and a 529 in the window
+            // the same row sent again with another attempt is ignored, and a
+            // 529 in the window is not a rate limit
             throttled("s1", 3, 2, end - 1, 429),
+            // a later row of a retried call has its own sequence and time
+            throttled("s1", 6, 2, start + 3, 429),
             throttled("s1", 5, 1, start + 5, 529),
             // another session may reuse a sequence number
             throttled("s2", 2, 1, start + 7, 429),
@@ -958,7 +962,7 @@ mod tests {
 
         let got = rate_limited_at(&conn, start, end).unwrap();
 
-        assert_eq!(got, vec![start, start + 7, end - 1]);
+        assert_eq!(got, vec![start, start + 3, start + 7, end - 1]);
         assert!(rate_limited_at(&conn, 5_000, 6_000).unwrap().is_empty());
     }
 

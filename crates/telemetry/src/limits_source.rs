@@ -26,6 +26,10 @@ use std::path::{Path, PathBuf};
 /// The most days the plain burn-up table prints: a month is at most 31.
 const BURNUP_TABLE_ROWS: usize = 31;
 
+/// A 429 older than this no longer changes the reason or adds a summary
+/// line. The chart still marks every 429 inside the period it shows.
+pub const RATE_LIMIT_RECENT_SECONDS: i64 = 7 * 24 * 3600;
+
 /// A snapshot older than this is shown as stale rather than hidden.
 pub const STALE_SECONDS: i64 = 6 * 3600;
 
@@ -335,7 +339,8 @@ pub struct Sources {
     pub budgets: Vec<(LimitPeriod, f64)>,
     pub account: Account,
     /// When Claude Code logged an HTTP 429, in UTC seconds, from the usage
-    /// store. Read by the caller that holds the connection; empty until then.
+    /// store. Set by the caller that holds the connection (`run::limit_sources`);
+    /// empty until then.
     pub rate_limited: Vec<i64>,
 }
 
@@ -364,20 +369,6 @@ impl Sources {
             },
             rate_limited: Vec::new(),
         }
-    }
-
-    /// The sources with the times of the HTTP 429 replies in `[since, now]`.
-    /// A read failure leaves them empty: the marker is a hint, never an error.
-    pub fn with_rate_limited(
-        mut self,
-        conn: &rusqlite::Connection,
-        since: i64,
-        now: i64,
-    ) -> Sources {
-        self.rate_limited =
-            super::telemetry_db::rate_limited_at(conn, since, now.saturating_add(1))
-                .unwrap_or_default();
-        self
     }
 
     /// The plan limits were read over six hours ago.
@@ -741,17 +732,36 @@ pub fn reason(s: &Sources, now: i64) -> Option<Reason> {
     let held = s.snapshot.as_ref().is_some_and(|sn| {
         sn.five_hour.is_some() || sn.seven_day.is_some() || sn.spend_limit.is_some()
     });
-    Some(if !s.rate_limited.is_empty() {
-        Reason::RateLimitedSeen
-    } else if held {
+    Some(if held {
         Reason::WindowsReset
     } else if s.account.cache.as_ref().is_some_and(|c| !c.is_fresh(now)) {
         Reason::Stale
     } else if s.account.plan.has_windows() {
-        Reason::NoReading
+        if newest_rate_limit(s, now).is_some() {
+            Reason::RateLimitedSeen
+        } else {
+            Reason::NoReading
+        }
     } else {
         Reason::CapUnknown
     })
+}
+
+/// The newest 429 within [`RATE_LIMIT_RECENT_SECONDS`] of `now`.
+fn newest_rate_limit(s: &Sources, now: i64) -> Option<i64> {
+    s.rate_limited
+        .iter()
+        .copied()
+        .filter(|t| *t <= now && now - *t <= RATE_LIMIT_RECENT_SECONDS)
+        .max()
+}
+
+/// The sentence for a 429 at `at`, in the chosen zone like the crossings.
+pub(crate) fn rate_limited_text(at: i64) -> String {
+    format!(
+        "Claude Code was rate limited at {} (HTTP 429)",
+        &stamp(at)[..16]
+    )
 }
 
 /// How old a reading is, with the stale marker once it is over six hours old.
@@ -803,8 +813,8 @@ pub(crate) fn crossing_text(c: &Crossing) -> String {
 
 /// The lines about what Claude reports for `--summary`: the amount used
 /// beside the local estimate, with its age, when 50, 80 and 100 percent are
-/// crossed for each limit, and the one line saying why there is no limit from
-/// Claude when there is none.
+/// crossed for each limit, the newest HTTP 429 of the last seven days, and the
+/// one line saying why there is no limit from Claude when there is none.
 pub fn limit_lines(s: &Sources, limits: &[Limit], events: &[UsageEvent], now: i64) -> Vec<String> {
     let mut out = Vec::new();
     match compare_billed(s, events, now) {
@@ -826,12 +836,7 @@ pub fn limit_lines(s: &Sources, limits: &[Limit], events: &[UsageEvent], now: i6
             ));
         }
     }
-    if let Some(at) = s.rate_limited.iter().max() {
-        out.push(format!(
-            "Claude Code was rate limited at {} (HTTP 429)",
-            &stamp(*at)[..16]
-        ));
-    }
+    out.extend(newest_rate_limit(s, now).map(rate_limited_text));
     out.extend(reason(s, now).map(|r| r.line().to_string()));
     out
 }
@@ -1856,7 +1861,7 @@ mod tests {
             fetched_at: NOW - 7 * HOUR,
             ..crate::plan::UsageCache::default()
         };
-        let cases: [(Sources, Option<Reason>, &str); 7] = [
+        let cases: [(Sources, Option<Reason>, &str); 11] = [
             (
                 Sources { account: max_plan(None), ..Sources::default() },
                 Some(Reason::NoReading),
@@ -1878,9 +1883,36 @@ mod tests {
                 "the windows of the last reading have reset: run a session with the playbook statusline for a new one",
             ),
             (
-                Sources { rate_limited: vec![NOW - 60], ..Sources::default() },
+                Sources { account: max_plan(None), rate_limited: vec![NOW - 60], ..Sources::default() },
                 Some(Reason::RateLimitedSeen),
                 "Claude Code was rate limited, yet it reports no limit: run a session with the playbook statusline",
+            ),
+            (
+                Sources { rate_limited: vec![NOW - 60], ..Sources::default() },
+                Some(Reason::CapUnknown),
+                "cap not reported by Claude Code on this login",
+            ),
+            (
+                Sources { snapshot: Some(window_snapshot(0)), rate_limited: vec![NOW - 60], ..Sources::default() },
+                Some(Reason::WindowsReset),
+                "the windows of the last reading have reset: run a session with the playbook statusline for a new one",
+            ),
+            (
+                Sources {
+                    account: max_plan(Some(crate::plan::UsageCache {
+                        fetched_at: NOW - 7 * HOUR,
+                        ..crate::plan::UsageCache::default()
+                    })),
+                    rate_limited: vec![NOW - 60],
+                    ..Sources::default()
+                },
+                Some(Reason::Stale),
+                "the last limit reading is over 6 hours old and is not used: run a session with the playbook statusline",
+            ),
+            (
+                Sources { account: max_plan(None), rate_limited: vec![NOW - RATE_LIMIT_RECENT_SECONDS - 1], ..Sources::default() },
+                Some(Reason::NoReading),
+                "no limit reading yet: run a session with the playbook statusline",
             ),
             (
                 Sources { snapshot: Some(window_snapshot(3600)), ..Sources::default() },
@@ -1946,6 +1978,20 @@ mod tests {
             &stamp(NOW - 60)[..16]
         );
         assert!(lines.contains(&want), "{lines:?}");
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|l| l.contains("rate limited at"))
+                .count(),
+            1
+        );
+        let old = Sources {
+            rate_limited: vec![NOW - RATE_LIMIT_RECENT_SECONDS - 1],
+            ..Sources::default()
+        };
+        assert!(limit_lines(&old, &[], &[], NOW)
+            .iter()
+            .all(|l| !l.contains("rate limited at")));
         assert_eq!(reason(&s, NOW), None);
         assert!(limit_lines(&Sources::default(), &[], &[], NOW)
             .iter()

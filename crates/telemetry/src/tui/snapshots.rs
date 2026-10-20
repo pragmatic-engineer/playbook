@@ -1360,7 +1360,13 @@ fn a_rate_limit_is_marked_on_the_chart_with_its_line_and_legend_entry() {
         crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
     })
     .0;
-    let b = b.with_rate_limits(&[BURN_NOW - 3_600, BURN_NOW - 4 * 3_600, BURN_NOW + 3_600]);
+    let end = b.end;
+    let b = b.with_rate_limits(&[
+        BURN_NOW - 3_600,
+        BURN_NOW - 4 * 3_600,
+        BURN_NOW + 3_600,
+        end,
+    ]);
 
     let (text, _) = draw_with(100, 30, |f| {
         crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);

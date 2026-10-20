@@ -436,8 +436,9 @@ pub fn load_limits(
     now: i64,
 ) -> Result<LimitsView, String> {
     let week = crate::entry::configured_week_start();
-    let events = db::load_usage_events_since(conn, limits_source::events_since(now, week))?;
-    let sources = crate::run::limit_sources(paths, conn, now);
+    let since = limits_source::events_since(now, week);
+    let events = db::load_usage_events_since(conn, since)?;
+    let sources = crate::run::limit_sources(paths, conn, since, now);
     Ok(LimitsView::build(&sources, &events, now, week, range))
 }
 
