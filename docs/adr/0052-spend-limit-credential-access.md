@@ -1,6 +1,6 @@
 # ADR-0052: Read the Claude Code Login Token to Fetch the Server Spend Limit
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR 0053](0053-limits-from-claude-data-not-the-login-token.md)
 - **Date created:** 2026-10-20
 - **Date modified:** 2026-10-20
 - **Builds on:** [ADR 0018](0018-tls-platform-verifier-not-adopted.md), which kept the binary small and recorded that the only network calls were to GitHub. [ADR 0020](0020-usage-terminal-ui.md), which set the template for reporting a binary size change.
