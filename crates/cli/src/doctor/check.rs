@@ -877,20 +877,33 @@ const LEFTOVER_SERVICE: &str = "a collector service file is still installed";
 /// playbook's and names the commands for a file playbook did not write.
 /// Such a file is named the same way, with that said.
 fn leftover_service_row(home: &Path) -> Option<Row> {
-    let foreign = crate::init::collector_service::foreign_files(home)
-        .into_iter()
-        .map(|f| f.sentence());
-    let names: Vec<String> = crate::init::collector_service::installed_names(home)
-        .into_iter()
-        .chain(foreign)
+    let ours = crate::init::collector_service::installed_names(home);
+    let foreign = crate::init::collector_service::foreign_files(home);
+    let names: Vec<String> = ours
+        .iter()
+        .cloned()
+        .chain(foreign.iter().map(|f| f.sentence()))
         .collect();
+    // Migrate removes only playbook's files; for a file it did not write, the
+    // hint is the commands that remove it.
+    let hint = match (&ours, foreign.is_empty()) {
+        (None, false) => format!(
+            "run: {}",
+            foreign
+                .iter()
+                .map(|f| f.fix.as_str())
+                .collect::<Vec<_>>()
+                .join("; ")
+        ),
+        _ => "run: playbook migrate".to_string(),
+    };
     (!names.is_empty()).then(|| {
         Row::new(
             "-",
             Level::Warn,
             format!("{LEFTOVER_SERVICE}: {}", names.join("; ")),
         )
-        .hint("run: playbook migrate")
+        .hint(hint)
     })
 }
 

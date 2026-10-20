@@ -25,5 +25,4 @@ Before 2026-10-19 the guard judged every target against a set of safe roots, fol
 
 With `defaultMode` set to `auto` in the seed settings, the guard no longer catches a deletion of a project folder, your `~/.ssh`, your memory store or `config.db`. Only Claude Code's own permission handling and your deny rules in settings.json stand between the model and those paths. To keep a path safe, add a deny or ask rule that names that path in your Claude Code settings.
 
-
 See also: [Hooks reference](../reference/hooks.md), [Docs index](../README.md).

@@ -260,15 +260,15 @@ fn is_protected_config_key(word: &str) -> bool {
 
 /// The reason to deny this simple command because it changes a protected
 /// setting or the config store, or `None`.
-fn changes_rm_guard_config(
+fn changes_protected_config(
     words: &[String],
     program_at: usize,
     home: &str,
 ) -> Option<&'static str> {
-    changes_rm_guard_config_at(words, program_at, home, 0)
+    changes_protected_config_at(words, program_at, home, 0)
 }
 
-fn changes_rm_guard_config_at(
+fn changes_protected_config_at(
     words: &[String],
     program_at: usize,
     home: &str,
@@ -294,7 +294,7 @@ fn changes_rm_guard_config_at(
                 if let Some(script) = rest.get(at) {
                     return simple_commands(script).iter().find_map(|inner| {
                         program_index(inner)
-                            .and_then(|i| changes_rm_guard_config_at(inner, i, home, depth + 1))
+                            .and_then(|i| changes_protected_config_at(inner, i, home, depth + 1))
                     });
                 }
             }
@@ -302,7 +302,7 @@ fn changes_rm_guard_config_at(
         if let Some(takes_value) = runner_value_options(&program) {
             let inner = &rest[skip_options(rest, 0, takes_value)..];
             return program_index(inner)
-                .and_then(|i| changes_rm_guard_config_at(inner, i, home, depth + 1));
+                .and_then(|i| changes_protected_config_at(inner, i, home, depth + 1));
         }
     }
     let mut args = rest;
@@ -528,7 +528,7 @@ fn check_command(command: &str, home: &str) -> Option<&'static str> {
             continue;
         };
         let args = &words[at + 1..];
-        if let Some(reason) = changes_rm_guard_config(&words, at, home) {
+        if let Some(reason) = changes_protected_config(&words, at, home) {
             return Some(reason);
         }
         if uninstalls_playbook(&words, at, 0) {

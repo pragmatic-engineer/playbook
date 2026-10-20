@@ -543,7 +543,7 @@ fn remove_collector_service(
         .iter()
         .map(|f| format!("{}; to remove it, run: {}", f.sentence(), f.fix))
         .collect();
-    let foreign = (!notes.is_empty()).then(|| notes.join("; "));
+    let foreign = (!notes.is_empty()).then(|| notes.join("\n"));
     match (removed, foreign) {
         (Some(done), foreign) => {
             start();
@@ -2836,6 +2836,14 @@ mod tests {
         use crate::service_manager::fake::Launchd;
         use crate::usage::service::{Kind, LABEL};
         use std::os::unix::fs::PermissionsExt;
+        // Root ignores folder permissions, so the delete cannot be made to fail.
+        if std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .is_ok_and(|o| o.stdout == b"0\n")
+        {
+            return;
+        }
         let h = service_home("remove-fails");
         let unit = Kind::Systemd.file(&h);
         let folder = unit.parent().unwrap().to_path_buf();
@@ -2854,6 +2862,40 @@ mod tests {
         assert!(step.detail.contains("playbook migrate"), "{}", step.detail);
         assert!(!fake.has(LABEL), "{:?}", fake.calls.borrow());
         assert_eq!(starts.get(), 1, "the stopped collector is started again");
+    }
+
+    #[test]
+    fn removal_keeps_a_foreign_unit_next_to_playbooks_own_agent_and_names_the_commands() {
+        // Arrange: playbook's agent, and a unit that is not text.
+        use crate::service_manager::fake::Launchd;
+        use crate::usage::service::{log_path, render, Kind, LABEL};
+        let h = home("remove-foreign-unit");
+        let agent = Kind::Launchd.file(&h);
+        fs::create_dir_all(agent.parent().unwrap()).unwrap();
+        fs::write(
+            &agent,
+            render(Kind::Launchd, Path::new("/p"), &log_path(&h)),
+        )
+        .unwrap();
+        let unit = Kind::Systemd.file(&h);
+        fs::create_dir_all(unit.parent().unwrap()).unwrap();
+        fs::write(&unit, [0xff_u8, 0xfe, 0x00]).unwrap();
+        let fake = Launchd::with(&[LABEL]);
+
+        // Act
+        let out = remove_collector_service(&ctx(&h), &fake, &|| {});
+
+        // Assert
+        let Outcome::Repeat(step) = out else {
+            panic!("a removal is reported and runs again next time");
+        };
+        assert!(
+            step.detail.contains("was not written by playbook"),
+            "{}",
+            step.detail
+        );
+        assert!(step.detail.contains("disable --now"), "{}", step.detail);
+        assert!(unit.is_file() && !agent.exists());
     }
 
     #[test]

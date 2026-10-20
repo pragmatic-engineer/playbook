@@ -27,6 +27,8 @@ pub const LABEL: &str = collector_label!();
 /// The launchd label that 0.37.0 shipped. The `collector-service-removed`
 /// migration and `playbook uninstall` remove an agent installed under it.
 pub const OLD_LABEL: &str = "io.github.pragmatic-engineer.playbook.collector";
+/// The description line of the systemd unit playbook writes.
+const DESCRIPTION: &str = "Description=playbook usage collector";
 /// The comment every service file playbook writes carries.
 const MARKER: &str = "The playbook usage collector. `playbook uninstall` removes this file.";
 /// The systemd user unit.
@@ -177,7 +179,7 @@ fn render_labeled(kind: Kind, label: &str, program: &Path, log: &Path) -> String
             format!(
                 "# {MARKER}\n\
                  [Unit]\n\
-                 Description=playbook usage collector\n\
+                 {DESCRIPTION}\n\
                  \n\
                  [Service]\n\
                  ExecStart={}\n\
@@ -226,16 +228,17 @@ pub fn find_kind(kind: Kind, home: &Path) -> Option<Found> {
         return None;
     }
     let ours = fs::read_to_string(&file).is_ok_and(|text| match kind {
-        Kind::Launchd => {
-            text.contains(&format!("<!-- {MARKER} -->"))
-                && text.contains(&format!("<key>Label</key>\n\t<string>{LABEL}</string>"))
-        }
-        Kind::Systemd => {
-            text.contains(&format!("# {MARKER}"))
-                && text.contains("Description=playbook usage collector")
-        }
+        Kind::Launchd => launchd_ours(&text, LABEL),
+        Kind::Systemd => text.contains(&format!("# {MARKER}")) && text.contains(DESCRIPTION),
     });
     Some(Found { kind, file, ours })
+}
+
+/// Whether `text` is a launchd agent file playbook wrote for `label`: it
+/// carries playbook's comment and the label.
+fn launchd_ours(text: &str, label: &str) -> bool {
+    text.contains(&format!("<!-- {MARKER} -->"))
+        && text.contains(&format!("<key>Label</key>\n\t<string>{label}</string>"))
 }
 
 /// A launchd agent file under [`OLD_LABEL`], found by [`find_old`].
@@ -259,13 +262,15 @@ pub fn old_file(home: &Path) -> PathBuf {
     agent_file(home, OLD_LABEL)
 }
 
-/// The agent file under [`OLD_LABEL`] in `home`, if one exists. It reads
-/// only the file and runs nothing, on any system.
+/// The agent file under [`OLD_LABEL`] in `home`, if one exists. A file that
+/// is not UTF-8 is reported with `ours` false. It reads only the file and
+/// runs nothing, on any system.
 pub fn find_old(home: &Path) -> Option<OldAgent> {
     let file = old_file(home);
-    let contents = fs::read_to_string(&file).ok()?;
-    let ours = contents.contains(&format!("<!-- {MARKER} -->"))
-        && contents.contains(&format!("<key>Label</key>\n\t<string>{OLD_LABEL}</string>"));
+    if !file.is_file() {
+        return None;
+    }
+    let ours = fs::read_to_string(&file).is_ok_and(|text| launchd_ours(&text, OLD_LABEL));
     Some(OldAgent { ours, file })
 }
 
@@ -305,6 +310,35 @@ mod tests {
             "{}",
             found.describe()
         );
+    }
+
+    #[test]
+    fn the_marker_alone_does_not_make_a_file_ours() {
+        for kind in [Kind::Launchd, Kind::Systemd] {
+            let home = scratch_dir("service-marker-only");
+            let file = kind.file(&home);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            let ours = render(kind, Path::new(PROGRAM), &log_path(&home));
+            let edited = ours
+                .replace(LABEL, "com.example.other")
+                .replace("Description=playbook usage collector", "Description=mine");
+            fs::write(&file, edited).unwrap();
+
+            assert!(!find_kind(kind, &home).unwrap().ours, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn a_non_utf8_old_label_file_is_found_but_not_ours() {
+        let home = scratch_dir("service-old-binary");
+        let file = old_file(&home);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, [0xff_u8, 0xfe, 0x00]).unwrap();
+
+        let old = find_old(&home).unwrap();
+
+        assert!(!old.ours);
+        assert_eq!(old.file, file);
     }
 
     #[test]
