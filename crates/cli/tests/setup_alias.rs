@@ -346,3 +346,24 @@ fn init_warns_once_on_a_terminal_and_only_on_stderr() {
     assert_eq!(init.stderr, format!("{line}{}", setup.stderr));
     assert!(!setup.stderr.contains("deprecated"), "{}", setup.stderr);
 }
+
+#[test]
+fn each_retired_collector_service_flag_prints_the_notice_on_a_terminal() {
+    let runs: [&[&str]; 3] = [
+        &["--only", "collector-service"],
+        &["--collector-service", "--only", "hooks"],
+        &["--no-collector-service", "--only", "hooks"],
+    ];
+    let notice = format!(
+        "playbook setup: {}\n",
+        playbook::init::choices::COLLECTOR_SERVICE_RETIRED
+    );
+
+    for args in runs {
+        let run = run_with("setup", args, true);
+
+        assert_eq!(run.code, Some(0), "{args:?}: {}", run.stderr);
+        assert_eq!(run.stderr.matches(&notice).count(), 1, "{}", run.stderr);
+        assert!(!run.stdout.contains("collector-service"), "{}", run.stdout);
+    }
+}

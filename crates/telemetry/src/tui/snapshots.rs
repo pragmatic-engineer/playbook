@@ -886,10 +886,7 @@ fn the_tools_view_tells_a_stopped_collector_from_telemetry_off_and_from_no_rows(
         text.lines()
             .any(|l| l.trim_matches(|c: char| c == '│' || c.is_whitespace()) == command)
     };
-    assert!(
-        alone(&down, &crate::host::setup_command("collector-service")),
-        "{down}"
-    );
+    assert!(alone(&down, crate::daemon::START_HINT), "{down}");
     assert!(quiet.contains("collector runs"), "{quiet}");
     check("tools_collector_down_100x40", &down);
 }

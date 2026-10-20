@@ -111,7 +111,7 @@ const PROBES: [Probe; 19] = [
     atlassian_rows,
     old_launcher_rows,
     |env| {
-        old_agent_row(&env.home)
+        leftover_service_row(&env.home)
             .into_iter()
             .chain(telemetry_rows(env))
             .collect()
@@ -868,88 +868,29 @@ fn attribution_on_row(state: &crate::init::attribution::State, held: &[&str]) ->
     }
 }
 
-/// A collector agent left under the label 0.37.0 used (ADR 0043, 2026-10-18
-/// amendment). Shown whatever telemetry says, since launchd loads it at the
-/// next login.
-fn old_agent_row(home: &Path) -> Option<Row> {
-    let old = crate::usage::service::find_old(home)?;
-    Some(if old.ours {
+/// What doctor says while a file of the retired collector service remains.
+const LEFTOVER_SERVICE: &str = "a collector service file is still installed";
+
+/// A service file of the retired collector service (ADR 0043) under either
+/// label, or the systemd unit. Shown whatever telemetry says, since the
+/// service manager loads it at the next login; `playbook migrate` removes
+/// playbook's and names the commands for a file playbook did not write.
+fn leftover_service_row(home: &Path) -> Option<Row> {
+    let foreign = crate::usage::service::find_old(home)
+        .filter(|old| !old.ours)
+        .map(|old| old.file.display().to_string());
+    let names: Vec<String> = crate::init::collector_service::installed_names(home)
+        .into_iter()
+        .chain(foreign)
+        .collect();
+    (!names.is_empty()).then(|| {
         Row::new(
             "-",
             Level::Warn,
-            format!(
-                "the collector service still uses the old label: {}",
-                old.describe()
-            ),
+            format!("{LEFTOVER_SERVICE}: {}", names.join(", ")),
         )
         .hint("run: playbook migrate")
-    } else {
-        Row::new(
-            "-",
-            Level::Warn,
-            format!(
-                "{} uses the old collector label but playbook did not write it",
-                old.file.display()
-            ),
-        )
-        .hint(format!(
-            "to remove it, run: {}",
-            crate::init::collector_service::foreign_old_agent_fix(&old.file)
-        ))
     })
-}
-
-/// The background service that keeps the collector running (ADR 0043), for
-/// a user whose telemetry points at the collector.
-fn service_row(home: &Path) -> Row {
-    use crate::init::collector_service::{declined, COMMAND};
-    use crate::usage::service;
-    match service::find(home) {
-        Some(found) if found.program_exists() => Row::new(
-            "-",
-            Level::Pass,
-            format!("collector service installed: {}", found.describe()),
-        ),
-        Some(found) => Row::new(
-            "-",
-            Level::Warn,
-            format!(
-                "the collector service starts a program that is gone: {}",
-                found
-                    .program
-                    .as_deref()
-                    .map_or_else(|| "unreadable".to_string(), |p| p.display().to_string())
-            ),
-        )
-        .hint(format!("run: {COMMAND}")),
-        None if service::Kind::current().is_none() => Row::new(
-            "-",
-            Level::Info,
-            "no collector service on this system (no launchd or systemd)",
-        )
-        .hint(format!(
-            "keep this running yourself: {}",
-            service::manual_command("playbook")
-        )),
-        None if service::find_old(home).is_some_and(|o| o.ours) => Row::new(
-            "-",
-            Level::Info,
-            "the collector service still uses the old label (see the row above)",
-        )
-        .hint("run: playbook migrate"),
-        None if declined(home) => Row::new(
-            "-",
-            Level::Info,
-            "no collector service (you said no)",
-        )
-        .hint(format!("to add it, run: {COMMAND}")),
-        None => Row::new(
-            "-",
-            Level::Info,
-            "no collector service, so the collector runs only while cc or the session hook starts it",
-        )
-        .hint(format!("run: {COMMAND}")),
-    }
 }
 
 /// The telemetry rows: Claude Code's settings point at the playbook
@@ -1032,7 +973,6 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
             .hint("run: playbook usage status")];
         }
     }
-    rows.push(service_row(&env.home));
     let Some(state) = state else {
         return rows;
     };
@@ -1077,7 +1017,7 @@ fn telemetry_rows(env: &Env) -> Vec<Row> {
                 Level::Warn,
                 "collector not running, so telemetry sent now is lost",
             )
-            .hint(crate::init::collector_service::collector_fix(&env.home)),
+            .hint(crate::usage::daemon::START_HINT),
         );
     }
     let last =
@@ -1130,7 +1070,7 @@ fn daemon_row(paths: &crate::usage::run::Paths, port: u16) -> Row {
                 "free port {port}, or move with playbook usage collect --port <N> and playbook setup --only telemetry"
             )),
             None => Row::new("-", Level::Warn, "collector daemon: lock free")
-                .hint("run any playbook command or start a session"),
+                .hint(crate::usage::daemon::START_HINT),
         },
         LockState::Unavailable => Row::new(
             "-",

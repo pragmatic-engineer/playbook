@@ -282,27 +282,6 @@ impl Found {
     }
 }
 
-/// What to do when telemetry points at the collector and none runs, in one
-/// line: start it by hand, and either check the installed service's log or
-/// install the service.
-pub fn collector_fix(home: &Path) -> String {
-    let collect = crate::host::command("usage collect");
-    match find(home) {
-        Some(found) => format!(
-            "start it with `{collect}`; the {} is installed but the collector is not up, see {}",
-            found.kind.name(),
-            log_path(home).display()
-        ),
-        None if find_old(home).is_some_and(|o| o.ours) => format!(
-            "start it with `{collect}`; the launchd agent still uses the old label {OLD_LABEL}, so move it with `playbook migrate`"
-        ),
-        None => format!(
-            "start it with `{collect}`, or keep it running in the background with `{}`",
-            crate::host::setup_command("collector-service")
-        ),
-    }
-}
-
 /// The service file under `home` for this system, if one exists.
 pub fn find(home: &Path) -> Option<Found> {
     let kind = Kind::current()?;
@@ -336,20 +315,6 @@ impl OldAgent {
     pub fn describe(&self) -> String {
         format!("launchd agent {OLD_LABEL} ({})", self.file.display())
     }
-}
-
-/// The installed service in words for `usage status`: the current one, else
-/// the agent playbook wrote under [`OLD_LABEL`] with the command that moves
-/// it. `None` when there is neither.
-pub fn installed(home: &Path) -> Option<String> {
-    find(home).map(|f| f.describe()).or_else(|| {
-        find_old(home).filter(|o| o.ours).map(|o| {
-            format!(
-                "{}, the old label; run `playbook migrate` to move it",
-                o.describe()
-            )
-        })
-    })
 }
 
 /// The agent file 0.37.0 wrote, under `home`.
@@ -566,33 +531,5 @@ mod tests {
         assert_eq!(ours.file, file);
         assert!(!no_marker.ours);
         assert!(!other_label.ours);
-    }
-
-    #[test]
-    fn installed_names_the_current_agent_else_playbooks_old_one_with_the_fix() {
-        let current = scratch_dir("service-installed-new");
-        let old = scratch_dir("service-installed-old");
-        let foreign = scratch_dir("service-installed-foreign");
-        let Some(kind) = Kind::current() else {
-            return;
-        };
-        let file = kind.file(&current);
-        fs::create_dir_all(file.parent().unwrap()).unwrap();
-        fs::write(&file, render(kind, Path::new(PROGRAM), Path::new("/l"))).unwrap();
-        for (home, body) in [(&old, OLD_PLIST), (&foreign, "<plist/>")] {
-            let file = old_file(home);
-            fs::create_dir_all(file.parent().unwrap()).unwrap();
-            fs::write(&file, body).unwrap();
-        }
-
-        let now = installed(&current).unwrap();
-        let left = installed(&old).unwrap();
-
-        assert!(now.contains(kind.id()), "{now}");
-        assert!(
-            left.contains(OLD_LABEL) && left.contains("playbook migrate"),
-            "{left}"
-        );
-        assert_eq!(installed(&foreign), None);
     }
 }
