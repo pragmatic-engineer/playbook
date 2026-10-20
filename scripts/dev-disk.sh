@@ -21,6 +21,12 @@ set -euo pipefail
 
 WARN_FREE_GB="${DEV_DISK_WARN_FREE_GB:-15}"
 IDLE_MINUTES="${DEV_DISK_IDLE_MINUTES:-30}"
+case "$IDLE_MINUTES" in
+  "" | *[!0-9]*)
+    echo "dev-disk: DEV_DISK_IDLE_MINUTES must be a whole number of minutes, got '$IDLE_MINUTES'" >&2
+    exit 2
+    ;;
+esac
 KIB_PER_GIB=1048576
 TARGET_NAME="target"
 HASH_LENGTH=8
@@ -74,9 +80,15 @@ named_by_a_process() {
 remove_if_idle() {
   local dry_run="$1" target="$2"
   [ -d "$target" ] || return 0
+  local recent
+  # A find that fails reads as "nothing recent", so keep the folder instead.
+  if ! recent="$(find "$target" -mmin "-$IDLE_MINUTES" -print -quit 2>/dev/null)"; then
+    echo "kept $target: could not read it to check its age"
+    return 0
+  fi
   if [ -L "$target" ] || [ ! -f "$target/CACHEDIR.TAG" ]; then
     echo "kept $target: not a cargo target folder"
-  elif [ -n "$(find "$target" -mmin "-$IDLE_MINUTES" -print -quit)" ]; then
+  elif [ -n "$recent" ]; then
     echo "kept $target: changed in the last $IDLE_MINUTES minutes"
   elif build_running "$target"; then
     echo "kept $target: a cargo build holds its lock"
@@ -97,7 +109,11 @@ clean_targets() {
   local dry_run="$1" main here path
   main="$(git worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')"
   here="$(git rev-parse --show-toplevel)"
+  main="$(cd "$main" && pwd -P)"
+  here="$(cd "$here" && pwd -P)"
   while IFS= read -r path; do
+    [ -d "$path" ] || continue
+    path="$(cd "$path" && pwd -P)"
     if [ "$path" = "$main" ] || [ "$path" = "$here" ]; then
       continue
     fi
