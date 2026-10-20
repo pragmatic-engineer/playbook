@@ -172,7 +172,7 @@ fn plugin_update_lines(home: &str) -> Vec<String> {
         let mut lines: Vec<String> = crate::notices::take_notice(&root).into_iter().collect();
         let running = env!("CARGO_PKG_VERSION");
         let seen_before = seen(&root);
-        match due(home) {
+        match due(home, seen_before.as_deref()) {
             Due::Run(Mode::Auto)
                 if claim(&root, seen_before.as_deref(), running, now())
                     && settle_spawn(&root, running, spawn_refresh_plugin(), now()) =>

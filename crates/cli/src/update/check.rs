@@ -236,11 +236,16 @@ pub fn applies(command: &Command, args: &[OsString]) -> bool {
                     ..
                 }
         );
-    !skipped
-        && !args.iter().any(|a| {
-            a.to_str()
-                .is_some_and(|s| s == "--json" || s.starts_with("--json="))
-        })
+    !skipped && !has_json_arg(args)
+}
+
+/// Whether the arguments ask for `--json` output, which no on-start step
+/// may add a line to.
+pub fn has_json_arg(args: &[OsString]) -> bool {
+    args.iter().any(|a| {
+        a.to_str()
+            .is_some_and(|s| s == "--json" || s.starts_with("--json="))
+    })
 }
 
 /// CI vendor variables. `CI` and `PLAYBOOK_HEADLESS` go through

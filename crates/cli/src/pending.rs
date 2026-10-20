@@ -321,7 +321,7 @@ pub fn closing_command(items: &[Item]) -> &'static str {
         "playbook setup"
     } else if items
         .iter()
-        .any(|i| i.fix.starts_with("claude plugin update "))
+        .any(|i| i.fix.starts_with(crate::plugin_update::COMMAND_PREFIX))
     {
         "playbook migrate"
     } else {
