@@ -22,6 +22,10 @@ These hold even if a tool, default, or the skill body suggests otherwise:
 6. **Respect the skill's hard aborts.** Stop when the skill body says to (nothing staged, on the base branch, nothing ahead of base, an existing PR). Report why and stop; do not force past it.
 7. **Read the commit format.** Before you write a commit message or a PR title, load the `playbook:writing-style` skill with the Skill tool and read its `references/conventional-commits.md` from the skill base directory. If the file is not found, follow the usual types (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`).
 
+## Working directory guard
+
+A fork can start in the session's main checkout, not in the worktree of the agent that called it. Your first action, before any other command, is the worktree guard in the `playbook:writing-style` skill's `references/worktree-guard.md`, using the root and branch the caller gave in your prompt. On a mismatch your whole answer is the one `WRONG_DIRECTORY` line it defines. Do not work around it with a raw `git commit` or `gh pr create`.
+
 ## Prose register
 
 When the task is `/playbook:create-pull-request`, the title and body are read by another engineer. Load the `playbook:writing-style` and `playbook:engineering-standards` rules the way that command's Step 0 specifies, and write the title and body in the `playbook:writing-style` register: simple English, plain and direct, the same as chat.

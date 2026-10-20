@@ -68,7 +68,7 @@ To escalate, stop making changes. Hand off to `/playbook:plan` and say which rul
 
 ## Step 5: Commit
 
-If you are on the default branch, create a branch named `fix/<short-slug>` first. Then invoke the `/playbook:commit-and-push` skill with the Skill tool. `/playbook:commit-and-push` drafts the message from the diff; the branch name `fix/<short-slug>` carries the intent.
+If you are on the default branch, create a branch named `fix/<short-slug>` first. Then invoke the `/playbook:commit-and-push` skill with the Skill tool, with the worktree root and branch in its prompt ("Worktree root: <path>, branch: <name>") when you work in a git worktree. `/playbook:commit-and-push` drafts the message from the diff; the branch name `fix/<short-slug>` carries the intent.
 
 In auto mode never force-push. If the push is rejected, stop and report it in the final output.
 
@@ -76,7 +76,7 @@ In auto mode never force-push. If the push is rejected, stop and report it in th
 
 ## Step 6: Open the pull request
 
-Invoke the `/playbook:create-pull-request` skill with the Skill tool. Do not run `gh pr create` yourself. Open one pull request for the fix. Link the issue when there is one.
+Invoke the `/playbook:create-pull-request` skill with the Skill tool. When you work in a git worktree, put its absolute root (`git rev-parse --show-toplevel`) and branch (`git branch --show-current`) in the prompt of this and of every `/playbook:commit-and-push` call, as "Worktree root: <path>, branch: <name>". Do not run `gh pr create` yourself. Open one pull request for the fix. Link the issue when there is one.
 
 When it returns the PR URL, invoke the `playbook:finish-pull-request` skill with the Skill tool for that PR. It runs the self-review the `autoReview.*` settings select, fixes findings, promotes the draft, and merges only when `autoMerge.enabled` allows it. The create-pull-request command runs in a fork that cannot do this itself. In auto mode no self-review runs for a fix PR and it is not merged; say so in the report.
 
