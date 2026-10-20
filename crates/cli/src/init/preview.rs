@@ -198,6 +198,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         short_name: paths.short_name,
         // Previewed below, so the dry run writes no ballast.
         disk_ballast: false,
+        policy_guard: false,
         pb_target: paths.pb_target.clone(),
         attribution: paths.attribution,
         path_setup: paths.path_setup.as_ref().map(|s| path::Setup {
@@ -239,6 +240,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("collector-service", choices.collector_service),
         ("short-name", choices.short_name),
         ("disk-ballast", choices.disk_ballast),
+        ("policy-guard", choices.policy_guard),
         ("attribution", paths.attribution != Attribution::Skip),
     ];
     for (id, enabled) in flags {
@@ -297,6 +299,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
             )],
             "short-name" => vec![format!("pb: {short_line}")],
             "disk-ballast" => vec![ballast_line(&paths.home)],
+            "policy-guard" => vec![policy_guard_line(&paths.home)],
             "path" => file_lines(&before_rc, &after_path, &path_step),
             _ => vec![system_prompt_line(paths)],
         };
@@ -320,6 +323,15 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         );
     }
     out
+}
+
+/// What the policy-guard part would do. Writes nothing.
+fn policy_guard_line(home: &Path) -> String {
+    use crate::hooks::policy_guard::{stored_enabled, ENABLED_KEY};
+    match stored_enabled(home) {
+        true => format!("{ENABLED_KEY} is already true"),
+        false => format!("stores {ENABLED_KEY} true in ~/.config/playbook"),
+    }
 }
 
 /// What the disk-ballast part would do. Writes nothing.
