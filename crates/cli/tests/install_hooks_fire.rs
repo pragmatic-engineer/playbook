@@ -418,14 +418,6 @@ fn fires(f: &Fire, name: &str) -> bool {
             .1
             .contains("\"permissionDecision\":\"deny\"")
         }
-        "no-slop-guard" => {
-            let home = f.home.clone();
-            let cmd = "git commit -m \"x \u{2014} y\"";
-            let payload = format!("{{\"tool_input\":{{\"command\":{}}}}}", json_str(cmd));
-            run_hook(&f.playbook, name, &payload, &home, &home, &[], &[])
-                .1
-                .contains("\"permissionDecision\":\"deny\"")
-        }
         "policy-guard" => {
             let home = f.home.clone();
             run_hook(

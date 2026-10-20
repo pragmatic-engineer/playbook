@@ -51,6 +51,9 @@ pub const RC_LINE_MIGRATION: &str = "retired-launcher-rc-line";
 pub const PROMPT_DEFAULT_MIGRATION: &str = "system-prompt-default-on";
 /// The `Consent` item that adds the disk guard hook (ADR 0047 decision 8).
 pub const DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
+/// The `Consent` removal of the retired `no-slop-guard` and `no-dash-guard`
+/// hook entries setup used to write.
+pub const NO_SLOP_GUARD_MIGRATION: &str = "no-slop-guard-entry";
 /// The `Owned` move of a stored `update.plugin` boolean to `auto` or `off`.
 pub const PLUGIN_UPDATE_MODE_MIGRATION: &str = "plugin-update-mode";
 /// The `Owned` notice that the rm guard is now a short fixed rule (ADR 0045,
@@ -376,6 +379,16 @@ pub fn registry() -> Vec<Migration> {
             run: disk_guard_hook_by_setup,
         },
         Migration {
+            id: NO_SLOP_GUARD_MIGRATION,
+            since: "next",
+            kind: Kind::Idempotent,
+            scope: Scope::Consent {
+                check: retired_hooks_pending,
+                command: "playbook setup --hooks",
+            },
+            run: no_slop_guard_entry,
+        },
+        Migration {
             id: PLUGIN_UPDATE_MODE_MIGRATION,
             since: "next",
             kind: Kind::Auto,
@@ -437,6 +450,27 @@ fn disk_guard_hook_pending(ctx: &Ctx) -> Option<String> {
 /// Setup's hooks part wires the disk guard with the other guards.
 fn disk_guard_hook_by_setup(_: &Ctx) -> Outcome {
     Outcome::Quiet
+}
+
+/// Removes the retired `no-slop-guard` and `no-dash-guard` entries older
+/// setups wrote. The hook is gone; the subcommand stays a no-op for one
+/// release. It writes settings.json, so only `init` does it.
+fn no_slop_guard_entry(ctx: &Ctx) -> Outcome {
+    let settings = ctx.claude_home.join("settings.json");
+    match crate::init::retired_hooks::remove(&settings, ctx.epoch) {
+        Ok(0) => Outcome::Quiet,
+        Ok(n) => Outcome::Repeat(StepReport::wired(
+            "retired-hooks",
+            format!(
+                "removed {n} retired hook entries (no-slop-guard, no-dash-guard); their rules live in the prompt and skills"
+            ),
+        )),
+        Err(err) => Outcome::Failed(StepReport::failed("retired-hooks", err.to_string())),
+    }
+}
+
+fn retired_hooks_pending(ctx: &Ctx) -> Option<String> {
+    crate::init::retired_hooks::pending(&ctx.claude_home.join("settings.json"))
 }
 
 /// Stops and deletes every collector service file playbook wrote: the
@@ -1447,14 +1481,15 @@ pub fn run_pending(ctx: &Ctx) -> Report {
 
 /// Runs the shipped registry. With `statusline` false the migration that
 /// rewrites `statusLine.command` stays pending, so init leaves that key alone.
-/// With `hooks` false the dead hook migration stays pending, so init leaves
+/// With `hooks` false the dead and retired hook migrations stay pending, so init leaves
 /// the hook entries alone.
 pub fn run_pending_for(ctx: &Ctx, statusline: bool, hooks: bool) -> Report {
     let root = playbook_root_from(&ctx.home);
     let pending = crate::state::pending_legacy(&root);
     let mut migrations = active();
     migrations.retain(|m| {
-        (statusline || m.id != STATUSLINE_MIGRATION) && (hooks || m.id != DEAD_HOOKS_MIGRATION)
+        (statusline || m.id != STATUSLINE_MIGRATION)
+            && (hooks || (m.id != DEAD_HOOKS_MIGRATION && m.id != NO_SLOP_GUARD_MIGRATION))
     });
     let mut report = run_with(&migrations, ctx);
     if pending > 0 && crate::state::pending_legacy(&root) == 0 {
@@ -2317,6 +2352,30 @@ mod tests {
             disk_guard_hook_pending(&ctx).is_some(),
             "wired for agents only leaves builds unguarded"
         );
+    }
+
+    #[test]
+    fn the_no_slop_guard_entry_is_removed_once_and_other_entries_stay() {
+        // Arrange
+        let h = home("no-slop-entry");
+        let ctx = ctx(&h);
+        let settings = ctx.claude_home.join("settings.json");
+        std::fs::create_dir_all(&ctx.claude_home).unwrap();
+        let doc = serde_json::json!({"hooks": {"PreToolUse": [
+            {"matcher": "Edit|Write", "hooks": [
+                {"type": "command", "command": "playbook hook no-slop-guard"},
+                {"type": "command", "command": "playbook hook policy-guard"}]}]}});
+        std::fs::write(&settings, doc.to_string()).unwrap();
+
+        // Act
+        let first = no_slop_guard_entry(&ctx);
+        let second = no_slop_guard_entry(&ctx);
+
+        // Assert
+        assert!(matches!(first, Outcome::Repeat(_)));
+        assert!(matches!(second, Outcome::Quiet));
+        let text = std::fs::read_to_string(&settings).unwrap();
+        assert!(!text.contains("no-slop-guard") && text.contains("policy-guard"));
     }
 
     #[test]

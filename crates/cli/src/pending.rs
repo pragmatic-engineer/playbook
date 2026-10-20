@@ -76,6 +76,9 @@ fn reason(slug: &str) -> Option<&'static str> {
         migrate::DEAD_HOOKS_MIGRATION => {
             "Claude Code runs these hooks on every event and each one fails"
         }
+        migrate::NO_SLOP_GUARD_MIGRATION => {
+            "Claude Code runs a hook entry for a hook playbook no longer has, on every tool call"
+        }
         migrate::PROMPT_DEFAULT_MIGRATION => {
             "pb cc sessions start without the playbook system prompt until it is installed or turned off"
         }
@@ -318,7 +321,7 @@ pub fn closing_command(items: &[Item]) -> &'static str {
         "playbook setup"
     } else if items
         .iter()
-        .any(|i| i.fix.starts_with("claude plugin update "))
+        .any(|i| i.fix.starts_with(crate::plugin_update::COMMAND_PREFIX))
     {
         "playbook migrate"
     } else {
