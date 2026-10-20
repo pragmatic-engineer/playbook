@@ -470,7 +470,7 @@ fn compact_line(window: Option<&str>) -> String {
     let s = Scratch::new();
     let body = payload(
         &s.0,
-        r#""context_window":{"used_percentage":60,"context_window_size":1000000}"#,
+        r#""context_window":{"used_percentage":80,"context_window_size":1000000}"#,
     );
     let mut pairs = vec![
         ("HOME", s.0.to_str().unwrap()),
@@ -485,21 +485,22 @@ fn compact_line(window: Option<&str>) -> String {
 
 #[test]
 fn a_configured_compact_window_sets_the_gap_from_the_model_window() {
-    let out = compact_line(Some("700000"));
-    assert!(out.contains("10%"), "{out:?}");
+    let out = compact_line(Some("850000"));
+    assert!(out.contains("5%\x1b"), "{out:?}");
+    assert!(!out.contains("10%\x1b"), "{out:?}");
     assert!(out.contains("to compact"), "{out:?}");
 }
 
 #[test]
 fn a_usage_past_the_configured_compact_window_says_compacting_next_turn() {
-    let out = compact_line(Some("500000"));
+    let out = compact_line(Some("800000"));
     assert!(out.contains("COMPACTING NEXT TURN"), "{out:?}");
 }
 
 #[test]
 fn an_unset_compact_window_keeps_the_ninety_percent_default() {
     let out = compact_line(None);
-    assert!(out.contains("30%"), "{out:?}");
+    assert!(out.contains("10%\x1b"), "{out:?}");
 }
 
 #[test]
