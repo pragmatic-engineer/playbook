@@ -135,6 +135,10 @@ pub enum SkillsCommand {
         /// Print the report lines as a JSON array
         #[arg(long)]
         json: bool,
+        /// Refresh the agents already synced and store a summary for the
+        /// next session (started in the background)
+        #[arg(long, hide = true)]
+        refresh: bool,
     },
 }
 
@@ -2307,6 +2311,13 @@ pub enum HookName {
     ContextHygiene,
     DocReadHint,
     UsageWarm,
+    /// Retired with the disk guard. A `settings.json` entry written by
+    /// 0.38.0 still runs it until `playbook setup --hooks` removes the
+    /// entry, so it exits 0 and does nothing.
+    // Keep this variant while RETIRED_HOOKS in init/dead_hooks.rs lists the
+    // entry; without it clap rejects the stale command with a non-zero exit
+    // on every call. A plain comment, because doc text becomes help text.
+    #[value(hide = true)]
     DiskGuard,
     /// Kept so a playbook-hooks plugin cached on disk from an older release
     /// still exits 0 on SessionStart. Does nothing. Remove it once those
