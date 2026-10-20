@@ -77,10 +77,9 @@ impl Env {
     }
 }
 
-const PRE_GUARDS: [&str; 6] = [
+const PRE_GUARDS: [&str; 5] = [
     "rm-workspace-guard",
     "bg-await-guard",
-    "no-slop-guard",
     "precommit-check",
     "commit-message-sanitizer",
     "policy-guard",
@@ -1320,13 +1319,18 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
         ));
     }
     for cmd in &found.stale {
+        let hint = if crate::init::retired_hooks::is_retired_command(cmd) {
+            "run: playbook setup --hooks"
+        } else {
+            "delete the entry from ~/.claude/settings.json by hand"
+        };
         rows.push(
             Row::new(
                 "-",
                 Level::Warn,
                 format!("settings.json has a hook the binary no longer writes: {cmd}"),
             )
-            .hint("delete the entry from ~/.claude/settings.json by hand"),
+            .hint(hint),
         );
     }
     let cwd = env.repo_root.clone().unwrap_or_else(|| env.home.clone());

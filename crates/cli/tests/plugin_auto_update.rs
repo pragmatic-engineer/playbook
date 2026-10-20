@@ -36,6 +36,19 @@ const HOUR_SECS: u64 = 60 * 60;
 const SKIP_ENV: &str = "PLAYBOOK_SKIP_PLUGIN_UPDATE";
 const ASSUME_TTY_ENV: &str = "PLAYBOOK_TEST_ASSUME_TTY";
 const MINUTE_SECS: u64 = 60;
+const NOTICE_KEY: &str = "notices/plugin-update";
+const SESSION_PAYLOAD: &str = r#"{"source":"startup"}"#;
+const CHILD_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+const POLL_EVERY: std::time::Duration = std::time::Duration::from_millis(50);
+const BACKGROUND_LINE: &str = concat!(
+    "playbook: updating the playbook plugin to ",
+    env!("CARGO_PKG_VERSION"),
+    " in the background. Start Claude Code again to load it."
+);
+const UPDATED_LINE: &str = "plugin: updated playbook@pragmatic-engineer from";
+const HEADLESS_ENV: &str = "PLAYBOOK_HEADLESS";
+const NO_SPAWN_ENV: &str = "PLAYBOOK_TEST_NO_SPAWN";
+const STILL_OLDER_NOTICE: &str = "plugin: the playbook plugin is still older than this playbook";
 
 struct Fixture {
     home: PathBuf,
@@ -131,6 +144,17 @@ impl Fixture {
     /// terminal seam for both streams; `env` adds variables after the CI ones
     /// are removed.
     fn run(&self, args: &[&str], tty: bool, stdin: &str, env: &[(&str, &str)]) -> Output {
+        let mut child = self.command(args, tty, env).spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin.as_bytes())
+            .unwrap();
+        child.wait_with_output().unwrap()
+    }
+
+    fn command(&self, args: &[&str], tty: bool, env: &[(&str, &str)]) -> std::process::Command {
         let mut cmd = isolated::playbook_in(&self.home);
         cmd.args(args)
             .current_dir(&self.home)
@@ -145,7 +169,12 @@ impl Fixture {
         for var in CI_VARS {
             cmd.env_remove(var);
         }
-        if (tty || env.iter().any(|(k, _)| *k == ASSUME_TTY_ENV)) && !cfg!(debug_assertions) {
+        if (tty
+            || env
+                .iter()
+                .any(|(k, _)| *k == ASSUME_TTY_ENV || *k == NO_SPAWN_ENV))
+            && !cfg!(debug_assertions)
+        {
             panic!(
                 "the terminal seam exists only in debug builds; run these tests without --release"
             );
@@ -156,14 +185,28 @@ impl Fixture {
         for (k, v) in env {
             cmd.env(k, v);
         }
-        let mut child = cmd.spawn().unwrap();
-        child
-            .stdin
-            .take()
+        cmd
+    }
+
+    /// A session start as the harness sends it.
+    fn session(&self, env: &[(&str, &str)]) -> Output {
+        self.run(&["hook", "session-init"], false, SESSION_PAYLOAD, env)
+    }
+
+    /// Waits for the detached child to end: it stores its notice last.
+    fn wait_for_child(&self) {
+        let deadline = std::time::Instant::now() + CHILD_WAIT;
+        while playbook::state::get(&self.root(), NOTICE_KEY)
             .unwrap()
-            .write_all(stdin.as_bytes())
-            .unwrap();
-        child.wait_with_output().unwrap()
+            .is_none()
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the update child did not finish; claude log: {:?}",
+                self.calls()
+            );
+            std::thread::sleep(POLL_EVERY);
+        }
     }
 
     fn config_list(&self, tty: bool, env: &[(&str, &str)]) -> Output {
@@ -479,4 +522,249 @@ fn a_json_command_never_calls_claude() {
     assert_eq!(f.calls(), "");
     assert_eq!(f.marker(), None);
     assert!(!stderr(&out).contains(START_LINE));
+}
+
+#[test]
+fn the_detached_refresh_stores_the_updated_line_and_prints_nothing() {
+    // Arrange
+    let f = Fixture::new(true, 0);
+
+    f.set_marker(&format!("{VERSION} running {}", now()));
+
+    // Act
+    let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "");
+    assert_eq!(stderr(&out), "");
+    assert_eq!(f.calls(), EXPECTED_CALL);
+    assert_eq!(
+        f.claude_env(),
+        "1\n",
+        "the claude child gets the skip variable"
+    );
+    let notice = playbook::state::get(&f.root(), NOTICE_KEY)
+        .unwrap()
+        .unwrap();
+    assert!(
+        notice.starts_with(&format!("plugin: updated {PLUGIN_ID} from ")),
+        "{notice}"
+    );
+    assert!(f.marker().unwrap().starts_with(&format!("{VERSION} done ")));
+}
+
+#[test]
+fn a_refresh_started_by_hand_without_a_claim_runs_nothing() {
+    let f = Fixture::new(true, 0);
+
+    let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(f.calls(), "");
+    assert_eq!(f.marker(), None);
+}
+
+#[test]
+fn a_failed_detached_refresh_stores_the_failure_line_and_marks_failed() {
+    // Arrange
+    let f = Fixture::new(false, 1);
+
+    f.set_marker(&format!("{VERSION} running {}", now()));
+
+    // Act
+    let out = f.run(&["update", "--refresh-plugin"], false, "", &[]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "");
+    assert_eq!(stderr(&out), "");
+    let notice = playbook::state::get(&f.root(), NOTICE_KEY)
+        .unwrap()
+        .unwrap();
+    assert!(
+        notice.starts_with("plugin: the update failed (network is down)"),
+        "{notice}"
+    );
+    assert!(f
+        .marker()
+        .unwrap()
+        .starts_with(&format!("{VERSION} failed ")));
+
+    // Act: a session right after the failed refresh
+    let session = f.session(&[]);
+
+    // Assert: it neither announces an update nor retries before the wait
+    assert!(
+        !stdout(&session).contains(BACKGROUND_LINE),
+        "{}",
+        stdout(&session)
+    );
+    assert!(f
+        .marker()
+        .unwrap()
+        .starts_with(&format!("{VERSION} failed ")));
+}
+
+#[test]
+fn a_refresh_that_leaves_the_plugin_older_stores_the_still_older_notice() {
+    // Arrange: claude exits 0 and leaves the old plugin in place
+    let f = Fixture::new(false, 0);
+
+    f.set_marker(&format!("{VERSION} running {}", now()));
+
+    // Act
+    f.run(&["update", "--refresh-plugin"], false, "", &[]);
+
+    // Assert
+    let notice = playbook::state::get(&f.root(), NOTICE_KEY)
+        .unwrap()
+        .unwrap();
+    assert!(notice.starts_with(STILL_OLDER_NOTICE), "{notice}");
+    assert!(notice.ends_with(MANUAL_COMMAND), "{notice}");
+    assert!(!notice.contains("up to date"), "{notice}");
+}
+
+#[test]
+fn a_hook_with_the_plugin_already_current_records_done_and_adds_no_line() {
+    // Arrange
+    let f = Fixture::new(false, 0);
+    f.write_installed(&f.plugin_dir(VERSION));
+
+    // Act
+    let out = f.session(&[]);
+
+    // Assert
+    assert!(!stdout(&out).contains(BACKGROUND_LINE), "{}", stdout(&out));
+    assert_eq!(f.calls(), "");
+    assert!(f.marker().unwrap().starts_with(&format!("{VERSION} done ")));
+}
+
+#[test]
+fn the_no_spawn_seam_keeps_the_hook_from_starting_a_child_but_it_still_claims() {
+    // Arrange
+    let f = Fixture::new(true, 0);
+
+    // Act
+    let out = f.session(&[(NO_SPAWN_ENV, "1")]);
+    std::thread::sleep(POLL_EVERY * 10);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(f.calls(), "", "no child ran");
+    assert!(f
+        .marker()
+        .unwrap()
+        .starts_with(&format!("{VERSION} running ")));
+}
+
+#[test]
+fn a_stale_plugin_session_gives_one_coherent_message_set() {
+    // Arrange: stale plugin, no skip variable, so the hook claims and spawns
+    let f = Fixture::new(true, 0);
+
+    // Act
+    let out = f.session(&[]);
+    f.wait_for_child();
+
+    // Assert: the manual Fix line and the background line must not both show
+    let text = stdout(&out);
+    let says_updating = text.contains(BACKGROUND_LINE);
+    let says_run_by_hand = text.contains(MANUAL_COMMAND);
+    assert!(says_updating, "{text}");
+    assert!(!says_run_by_hand, "contradicts the background line: {text}");
+}
+
+#[test]
+fn the_hook_starts_the_update_and_the_next_session_shows_it_once() {
+    // Arrange
+    let f = Fixture::new(true, 0);
+
+    // Act
+    let first = f.session(&[]);
+    f.wait_for_child();
+    let after_child = f.calls();
+    let second = f.session(&[]);
+    let notice_after_second = playbook::state::get(&f.root(), NOTICE_KEY).unwrap();
+    let third = f.session(&[]);
+
+    // Assert
+    assert!(
+        stdout(&first).contains(BACKGROUND_LINE),
+        "{}",
+        stdout(&first)
+    );
+    assert!(!stdout(&first).contains(UPDATED_LINE));
+    assert_eq!(after_child, EXPECTED_CALL);
+    assert!(
+        stdout(&second).contains(UPDATED_LINE),
+        "{}",
+        stdout(&second)
+    );
+    assert!(!stdout(&second).contains(BACKGROUND_LINE));
+    assert_eq!(notice_after_second, None, "showing the line deletes it");
+    assert!(!stdout(&third).contains(UPDATED_LINE));
+    assert!(!stdout(&third).contains(BACKGROUND_LINE));
+    assert_eq!(f.calls(), EXPECTED_CALL, "later sessions do not call");
+}
+
+#[test]
+fn ask_mode_adds_no_background_line_and_starts_nothing() {
+    // Arrange
+    let f = Fixture::new(true, 0);
+    f.set_config("update.plugin", "ask");
+
+    // Act
+    let out = f.session(&[]);
+
+    // Assert
+    assert!(!stdout(&out).contains(BACKGROUND_LINE), "{}", stdout(&out));
+    assert_eq!(f.calls(), "");
+    assert_eq!(f.marker(), None, "ask does not claim the version");
+}
+
+#[test]
+fn a_headless_session_adds_nothing_and_starts_nothing() {
+    // Arrange
+    let f = Fixture::new(true, 0);
+
+    // Act
+    let out = f.session(&[(HEADLESS_ENV, "1")]);
+
+    // Assert
+    assert!(!stdout(&out).contains(BACKGROUND_LINE), "{}", stdout(&out));
+    assert_eq!(f.calls(), "");
+    assert_eq!(f.marker(), None);
+}
+
+#[test]
+fn two_hooks_started_together_start_one_update() {
+    // Arrange
+    let f = Fixture::new(true, 0);
+    let spawn = || {
+        let mut child = f
+            .command(&["hook", "session-init"], false, &[])
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(SESSION_PAYLOAD.as_bytes())
+            .unwrap();
+        child
+    };
+
+    // Act
+    let (a, b) = (spawn(), spawn());
+    let (a, b) = (a.wait_with_output().unwrap(), b.wait_with_output().unwrap());
+    f.wait_for_child();
+
+    // Assert
+    let shown = [a, b]
+        .iter()
+        .filter(|o| stdout(o).contains(BACKGROUND_LINE))
+        .count();
+    assert_eq!(shown, 1, "only the hook that claimed the version says so");
+    assert_eq!(f.calls(), EXPECTED_CALL);
 }
