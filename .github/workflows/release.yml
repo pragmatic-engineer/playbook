@@ -798,6 +798,9 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+    outputs:
+      # true only when the tap and the marketplace releases are published.
+      moved: ${{ steps.move.outputs.moved }}
     env:
       TAP: pragmatic-engineer/homebrew-tap
       MARKETPLACE: pragmatic-engineer/marketplace
@@ -930,6 +933,7 @@ jobs:
           GH_TOKEN="$MARKETPLACE_TOKEN" scripts/release-gh.sh find "$MARKETPLACE" "release/$TAG"
 
       - name: Open the pull requests and wait for the releases
+        id: move
         if: steps.bot.outputs.configured == 'true' && needs.plan.outputs.dry_run != 'true'
         env:
           TAP_TOKEN: ${{ steps.tap-app.outputs.token }}
@@ -1047,6 +1051,7 @@ jobs:
             report "The playbook release $TAG is published. Only the downstream step failed."
             exit 1
           fi
+          echo "moved=true" >> "$GITHUB_OUTPUT"
 
   # Installs the release from the tap on Linux, the way a user does, once the
   # downstream job has published the tap release. It is a leaf job: it blocks
@@ -1061,7 +1066,8 @@ jobs:
       && github.event_name == 'workflow_dispatch'
       && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
       && needs.plan.outputs.dry_run != 'true'
-      && needs.downstream.result == 'success' }}
+      && needs.downstream.result == 'success'
+      && needs.downstream.outputs.moved == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
