@@ -22,10 +22,10 @@
 ╰──────────────────────────┤cost low ■■■■■ high├─╯╰────────────────────────┤tokens low ■■■■■ high├─╯
 ╭─┤³Models├───────────────────────┤vs yesterday├─╮╭─┤⁴Tools├─┤v view: tools├───────────────────────╮
 │name             cost▼     prev   change       %││No rows: the collector is not running.          │
-│■opus-5          $1.25    $0.00   +$1.25     new││Start it with:                                  │
-│                                                ││playbook usage collect                          │
-│                                                ││Keep it running in the background with:         │
-│                                                ││playbook setup --only collector-service         │
+│■opus-5          $1.25    $0.00   +$1.25     new││To start it:                                    │
+│                                                ││run any playbook command or start a session     │
+│                                                ││                                                │
+│                                                ││                                                │
 ╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 ╭─┤⁵Live sessions├─────┤hour $1.25  today $1.25├─╮╭─┤⁶Sessions per day├──────────────────────┤UTC├─╮
 │state project     model       msgs     cost ago▲││day   session  project      model          cost▼│
