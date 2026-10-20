@@ -65,6 +65,12 @@ pub struct Flags {
     /// Retired with `--claude-override`
     #[arg(long, hide = true, overrides_with = "claude_override")]
     pub no_claude_override: bool,
+    /// Retired: the disk feature is gone. Accepted and ignored until 1.0
+    #[arg(long, hide = true, overrides_with = "no_disk_ballast")]
+    pub disk_ballast: bool,
+    /// Retired with `--disk-ballast`
+    #[arg(long, hide = true, overrides_with = "disk_ballast")]
+    pub no_disk_ballast: bool,
     /// Add `pb` as a short name for `playbook`: a `pb -> playbook` symlink in the install folder, only when `pb` is free
     #[arg(long, overrides_with = "no_short_name")]
     pub short_name: bool,
@@ -149,22 +155,27 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
 }
 
 /// The part names setup took before ADR 0044 and now ignores.
-pub const RETIRED_PARTS: [&str; 2] = ["aliases", "claude-override"];
+pub const RETIRED_PARTS: [&str; 3] = ["aliases", "claude-override", "disk-ballast"];
 
 /// One stderr line per retired flag or `--only` name in use, for a terminal.
 pub fn retired_notes(flags: &Flags) -> Vec<String> {
     let set_by_flag = [
         flags.aliases || flags.no_aliases,
         flags.claude_override || flags.no_claude_override,
+        flags.disk_ballast || flags.no_disk_ballast,
     ];
     RETIRED_PARTS
         .iter()
         .zip(set_by_flag)
         .filter(|(id, flag)| *flag || flags.only.iter().any(|n| n == *id))
         .map(|(id, _)| {
-            format!(
-                "playbook setup: `{id}` is retired and does nothing; `playbook cc` and `pb cc` need no shell line (ADR 0044)"
-            )
+            if *id == "disk-ballast" {
+                format!("playbook setup: `{id}` is retired and does nothing; the disk feature was removed")
+            } else {
+                format!(
+                    "playbook setup: `{id}` is retired and does nothing; `playbook cc` and `pb cc` need no shell line (ADR 0044)"
+                )
+            }
         })
         .collect()
 }
@@ -1000,6 +1011,25 @@ mod tests {
             only: vec!["aliases".into(), "hooks".into()],
             ..Flags::default()
         }));
+    }
+
+    #[test]
+    fn the_retired_disk_ballast_flags_and_part_are_accepted_and_noted() {
+        for flags in [
+            Flags {
+                no_disk_ballast: true,
+                ..Flags::default()
+            },
+            Flags {
+                only: vec!["disk-ballast".into()],
+                ..Flags::default()
+            },
+        ] {
+            assert!(only_choices(&flags).is_ok(), "{flags:?}");
+            let notes = retired_notes(&flags);
+            assert_eq!(notes.len(), 1, "{notes:?}");
+            assert!(notes[0].contains("`disk-ballast` is retired"));
+        }
     }
 
     #[test]
