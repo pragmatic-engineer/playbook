@@ -1,14 +1,14 @@
-# ADR-0053: Derive Usage Limits From Claude Code's Own Data, Not the Login Token
+# ADR-0050: Derive Usage Limits From Claude Code's Own Data, Not the Login Token
 
 - **Status:** Accepted
 - **Date created:** 2026-10-20
 - **Date modified:** 2026-10-20
-- **Supersedes:** [ADR 0052](0052-spend-limit-credential-access.md), which chose to read the Claude Code login token and call the usage endpoint.
+- **Supersedes:** [ADR 0049](0049-spend-limit-credential-access.md), which chose to read the Claude Code login token and call the usage endpoint.
 - **Builds on:** [ADR 0018](0018-tls-platform-verifier-not-adopted.md), which kept GitHub as the only network host.
 
 ## Context
 
-`playbook usage` estimates cost from session transcripts and wants to show the limit that applies to the account, how fast it is being used, and when 50, 80 and 100 percent are or will be crossed. ADR 0052 chose to get the server figure by reading the OAuth token of Claude Code and calling `GET /api/oauth/usage`. None of that shipped: the code lived in open pull requests, and only the record itself reached `main` (#1238).
+`playbook usage` estimates cost from session transcripts and wants to show the limit that applies to the account, how fast it is being used, and when 50, 80 and 100 percent are or will be crossed. ADR 0049 chose to get the server figure by reading the OAuth token of Claude Code and calling `GET /api/oauth/usage`. None of that shipped: the code lived in open pull requests, and only the record itself reached `main` (#1238).
 
 The maintainer changed the requirement on 2026-10-20. Every account has a limit: Pro, Max 5x and Max 20x have caps on 5 hour and 7 day windows, and an enterprise plan has a dollar limit. So the dashboard must not need a setting to define the plan or the limit. It must use what Claude Code and its telemetry already show and do the calculations itself.
 
@@ -30,7 +30,7 @@ The one number found in no token free source is the enterprise dollar cap and th
 
 ## Considered Alternatives
 
-### Keep the token fetch of ADR 0052 (effort: L)
+### Keep the token fetch of ADR 0049 (effort: L)
 - Read the token, call the endpoint, cache the answer, add `usage spend enable`, `usage.spend.*` keys and a consent state.
 - Trade-offs: gives the server billed figure for every plan. It adds a credential path, a terms of service risk, a second network host, a consent flow and about 2,400 lines that the data sources above make unnecessary for window plans.
 
@@ -57,7 +57,7 @@ The one number found in no token free source is the enterprise dollar cap and th
 
 Why each alternative was rejected:
 
-- The fetch of ADR 0052: it carries a credential path, a terms of service risk and a consent flow that the free sources make unnecessary for the window plans, and its endpoint reply is undocumented.
+- The fetch of ADR 0049: it carries a credential path, a terms of service risk and a consent flow that the free sources make unnecessary for the window plans, and its endpoint reply is undocumented.
 - The enterprise only fetch: it keeps the same credential risk to cover one gap that nobody has measured yet. The check in decision 6 comes first.
 - The user set plan and limit: it breaks the requirement that the user does not set the limit, and a wrong value draws a wrong chart.
 
