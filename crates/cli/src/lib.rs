@@ -117,6 +117,26 @@ pub struct Cli {
     pub command: Command,
 }
 
+/// `playbook skills` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum SkillsCommand {
+    /// Copy the playbook skills into another agent's skill folder
+    ///
+    /// Without `--agent`, every agent found on this machine is synced. A
+    /// second run with nothing new changes nothing.
+    Sync {
+        /// Sync only this agent
+        #[arg(long, value_parser = ["codex"])]
+        agent: Option<String>,
+        /// Show what would change and write nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Print the report lines as a JSON array
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 /// `playbook state` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum StateCommand {
@@ -314,7 +334,7 @@ pub enum Command {
         #[command(flatten)]
         flags: init::choices::Flags,
     },
-    /// List the hooks that `playbook setup` wires into Claude Code, or explain a guard verdict
+    /// List the hooks that `playbook setup` wires into Claude Code
     Hooks {
         #[command(subcommand)]
         sub: HooksCommand,
@@ -374,6 +394,10 @@ pub enum Command {
         /// Refresh the cached release check and exit (started in the background)
         #[arg(long, hide = true)]
         refresh_check: bool,
+        /// Update the plugin and store the outcome line for the next session
+        /// (started in the background)
+        #[arg(long, hide = true)]
+        refresh_plugin: bool,
         /// Print the release notes of this binary from a release-notes.json
         /// the install script checked, record them as shown, and exit
         #[arg(long, hide = true, value_name = "FILE")]
@@ -516,6 +540,17 @@ pub enum Command {
     State {
         #[command(subcommand)]
         sub: StateCommand,
+    },
+    /// Share the playbook skills with other agents
+    ///
+    /// `sync` copies the plugin's skills and commands into the folder that
+    /// Codex reads, `~/.agents/skills`, as `playbook-*` folders. It never
+    /// touches folders you made yourself or edited.
+    ///
+    /// Example: `playbook skills sync --dry-run`
+    Skills {
+        #[command(subcommand)]
+        sub: SkillsCommand,
     },
     /// Set playbook's own ceiling on effort, or inspect one component's
     ///
@@ -2196,6 +2231,8 @@ pub enum HookName {
     MemoryCapture,
     RmWorkspaceGuard,
     BgAwaitGuard,
+    /// Retired: kept as a no-op for one release so old settings entries still run.
+    #[value(hide = true)]
     NoSlopGuard,
     CommitMessageSanitizer,
     PolicyGuard,
@@ -2345,7 +2382,6 @@ mod tests {
             "usage-warm",
             "rm-workspace-guard",
             "bg-await-guard",
-            "no-slop-guard",
             "precommit-check",
             "commit-message-sanitizer",
             "policy-guard",
@@ -2360,6 +2396,10 @@ mod tests {
         for name in names {
             assert!(help.contains(name), "hook --help is missing '{name}'");
         }
+        assert!(
+            !help.contains("no-slop-guard"),
+            "retired hook shows in help"
+        );
     }
 
     #[test]

@@ -15,7 +15,7 @@ Task-oriented workflows.
 - [Auto mode](guides/04-auto-mode.md): run commands without questions, with a spend cap.
 - [What setup installs](guides/05-what-setup-installs.md): every change `playbook setup` makes, what stays on your machine, and how to undo each part.
 - [Reading documents](guides/06-reading-documents.md): read a PDF or Office file as cheaper text with the optional anydoc converter.
-- [The rm guard](guides/07-rm-guard.md): what the guard reads as a deletion, the roots it allows per OS, what stays blocked and how to add a root.
+- [The rm guard](guides/07-rm-guard.md): the short rule that denies `rm` of `/` or your home folder, and what it leaves to you.
 
 ## Reference
 
@@ -103,7 +103,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0042](adr/0042-attribution-off-in-setup.md) | Turn off Claude Code attribution in setup | Accepted, amended by 0044 and on 2026-10-19 | 2026-10-17 |
 | [0043](adr/0043-collector-service-in-setup.md) | Keep the usage collector running with a per-user service | Accepted, amended by 0044 and on 2026-10-18 (launchd label) | 2026-10-17 |
 | [0044](adr/0044-drop-the-shell-launcher.md) | Drop the shell launcher and turn every setup part on with `--yes` | Accepted, amended on 2026-10-19 | 2026-10-18 |
-| [0045](adr/0045-rm-guard-roots-and-parser.md) | Read rm commands as real words and build in the safe roots | Accepted | 2026-10-18 |
+| [0045](adr/0045-rm-guard-roots-and-parser.md) | Read rm commands as real words and build in the safe roots (cut down 2026-10-19) | Accepted | 2026-10-18 |
 | [0046](adr/0046-migrations-by-release-version.md) | Attach each migration to the release that introduced it | Accepted, amended on 2026-10-19 | 2026-10-18 |
 | [0048](adr/0048-repo-tidy.md) | Tidy the repo root, the settings seed and the leftovers | Accepted | 2026-10-19 |
 | [0052](adr/0052-spend-limit-credential-access.md) | Read the Claude Code login token to fetch the server spend limit | Accepted | 2026-10-20 |
