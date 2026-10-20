@@ -134,9 +134,7 @@ fn current_uid() -> Option<u32> {
     cfg!(unix).then(crate::service_manager::uid)
 }
 
-/// The playbook data that is never removed. It is the list the rm guard
-/// protects (ADR 0045, `rm_workspace_guard::roots::protected`), kept here
-/// as a copy because the rm guard keeps its list private: the memory store,
+/// The playbook data that is never removed: the memory store,
 /// the databases, plans and handoffs, legacy org config, session state, the
 /// effort ledger, the system prompt and the config file. The ballast is
 /// added, and each path is listed as given and with links resolved.
