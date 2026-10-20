@@ -25,6 +25,15 @@ fn is_retired_entry(entry: &Value) -> bool {
         .is_some_and(is_retired_command)
 }
 
+/// A line naming the retired entries still in `settings_path`, or `None`.
+pub fn pending(settings_path: &Path) -> Option<String> {
+    let mut settings = super::dead_hooks::read_settings(settings_path)?;
+    let n = super::dead_hooks::drop_entries(&mut settings, is_retired_entry);
+    (n > 0).then(|| {
+        format!("{n} hook entries run a retired playbook hook (no-slop-guard or no-dash-guard); setup removes them")
+    })
+}
+
 /// Removes the retired entries after a backup under `epoch`. Returns how many
 /// went. A missing or invalid file is left alone.
 pub fn remove(settings_path: &Path, epoch: u64) -> std::io::Result<usize> {
@@ -78,6 +87,26 @@ mod tests {
         assert!(!text.contains("hook no-dash-guard"));
         assert_eq!(after["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
         assert!(dir.join("settings.json.bak.100").is_file());
+    }
+
+    #[test]
+    fn pending_counts_retired_entries_and_leaves_the_file_alone() {
+        // Arrange
+        let dir = scratch_dir("retired-hooks-pending");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        let settings = json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "playbook hook no-slop-guard"}]}]}});
+        let text = format!("{settings:#}\n");
+        fs::write(&path, &text).unwrap();
+
+        // Act
+        let line = pending(&path);
+
+        // Assert
+        assert!(line.unwrap().starts_with("1 hook entries"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+        assert_eq!(pending(&dir.join("none.json")), None);
     }
 
     #[test]

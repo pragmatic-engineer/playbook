@@ -1272,7 +1272,7 @@ fn hooks_rows(env: &Env) -> Vec<Row> {
     }
     for cmd in &found.stale {
         let hint = if crate::init::retired_hooks::is_retired_command(cmd) {
-            "run: playbook doctor --fix"
+            "run: playbook setup --hooks"
         } else {
             "delete the entry from ~/.claude/settings.json by hand"
         };

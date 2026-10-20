@@ -965,6 +965,30 @@ fn an_entry_for_a_hook_the_binary_no_longer_writes_is_stale() {
 }
 
 #[test]
+fn a_retired_hook_entry_points_at_setup_and_another_stale_entry_at_a_hand_edit() {
+    let b = Box::new("hooks-stale-retired");
+    let path = wire_all(&b);
+    let mut v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    for cmd in [
+        "playbook hook no-slop-guard",
+        "playbook hook migration-check",
+    ] {
+        v["hooks"]["SessionStart"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"hooks":[{"type":"command","command":cmd}]}));
+    }
+    fs::write(&path, v.to_string()).unwrap();
+
+    let rows = hook_rows(&b.run(&[], "/bin/sh", None));
+
+    let row = |cmd: &str| rows.iter().find(|r| r.contains(cmd)).expect("row").clone();
+    assert!(row("hook no-slop-guard").ends_with("-- run: playbook setup --hooks"));
+    assert!(row("hook migration-check")
+        .ends_with("-- delete the entry from ~/.claude/settings.json by hand"));
+}
+
+#[test]
 fn a_binary_that_does_not_know_a_wired_hook_is_reported() {
     let b = Box::new("hooks-old-binary");
     wire_all(&b);

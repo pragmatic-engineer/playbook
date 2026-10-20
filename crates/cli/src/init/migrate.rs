@@ -43,7 +43,8 @@ pub const PROMPT_DEFAULT_MIGRATION: &str = "system-prompt-default-on";
 pub const COLLECTOR_LABEL_MIGRATION: &str = "collector-service-label";
 /// The `Consent` item that adds the disk guard hook (ADR 0047 decision 8).
 pub const DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
-/// The `Owned` removal of the `no-slop-guard` hook entry setup used to write.
+/// The `Consent` removal of the retired `no-slop-guard` and `no-dash-guard`
+/// hook entries setup used to write.
 pub const NO_SLOP_GUARD_MIGRATION: &str = "no-slop-guard-entry";
 /// The `Owned` move of a stored `update.plugin` boolean to `auto` or `off`.
 pub const PLUGIN_UPDATE_MODE_MIGRATION: &str = "plugin-update-mode";
@@ -385,7 +386,10 @@ pub fn registry() -> Vec<Migration> {
             id: NO_SLOP_GUARD_MIGRATION,
             since: "next",
             kind: Kind::Idempotent,
-            scope: Scope::Owned,
+            scope: Scope::Consent {
+                check: retired_hooks_pending,
+                command: "playbook setup --hooks",
+            },
             run: no_slop_guard_entry,
         },
         Migration {
@@ -417,8 +421,9 @@ fn disk_guard_hook_by_setup(_: &Ctx) -> Outcome {
     Outcome::Quiet
 }
 
-/// Removes the `playbook hook no-slop-guard` entry older setups wrote. The
-/// hook is gone; the subcommand stays a no-op for one release.
+/// Removes the retired `no-slop-guard` and `no-dash-guard` entries older
+/// setups wrote. The hook is gone; the subcommand stays a no-op for one
+/// release. It writes settings.json, so only `init` does it.
 fn no_slop_guard_entry(ctx: &Ctx) -> Outcome {
     let settings = ctx.claude_home.join("settings.json");
     match crate::init::retired_hooks::remove(&settings, ctx.epoch) {
@@ -431,6 +436,10 @@ fn no_slop_guard_entry(ctx: &Ctx) -> Outcome {
         )),
         Err(err) => Outcome::Failed(StepReport::failed("retired-hooks", err.to_string())),
     }
+}
+
+fn retired_hooks_pending(ctx: &Ctx) -> Option<String> {
+    crate::init::retired_hooks::pending(&ctx.claude_home.join("settings.json"))
 }
 
 /// Moves the collector agent playbook 0.37.0 installed under the old label
@@ -1435,14 +1444,15 @@ pub fn run_pending(ctx: &Ctx) -> Report {
 
 /// Runs the shipped registry. With `statusline` false the migration that
 /// rewrites `statusLine.command` stays pending, so init leaves that key alone.
-/// With `hooks` false the dead hook migration stays pending, so init leaves
+/// With `hooks` false the dead and retired hook migrations stay pending, so init leaves
 /// the hook entries alone.
 pub fn run_pending_for(ctx: &Ctx, statusline: bool, hooks: bool) -> Report {
     let root = playbook_root_from(&ctx.home);
     let pending = crate::state::pending_legacy(&root);
     let mut migrations = active();
     migrations.retain(|m| {
-        (statusline || m.id != STATUSLINE_MIGRATION) && (hooks || m.id != DEAD_HOOKS_MIGRATION)
+        (statusline || m.id != STATUSLINE_MIGRATION)
+            && (hooks || (m.id != DEAD_HOOKS_MIGRATION && m.id != NO_SLOP_GUARD_MIGRATION))
     });
     let mut report = run_with(&migrations, ctx);
     if pending > 0 && crate::state::pending_legacy(&root) == 0 {
