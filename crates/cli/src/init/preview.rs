@@ -192,8 +192,6 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         security: paths.security,
         telemetry: paths.telemetry,
         telemetry_replace_off: paths.telemetry_replace_off,
-        // Previewed from the files below, so the dry run installs nothing.
-        collector_service: crate::init::collector_service::Choice::Skip,
         only: paths.only,
         short_name: paths.short_name,
         policy_guard: false,
@@ -235,7 +233,6 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("path", choices.path),
         ("system-prompt", choices.system_prompt),
         ("telemetry", choices.telemetry),
-        ("collector-service", choices.collector_service),
         ("short-name", choices.short_name),
         ("policy-guard", choices.policy_guard),
         ("attribution", paths.attribution != Attribution::Skip),
@@ -286,14 +283,6 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
             }
             "telemetry" => own_key_lines(&changes, id, &settings_file, &telemetry_step),
             "attribution" => own_key_lines(&changes, id, &settings_file, &attribution_step),
-            "collector-service" => vec![crate::init::collector_service::preview(
-                &paths.home,
-                // The scratch copy has the telemetry this run writes; the
-                // real home has the collector state the copy lacks.
-                crate::cc::telemetry::telemetry_points_here(&sh)
-                    || crate::cc::telemetry::telemetry_points_here(&paths.home),
-                &crate::init::collector_service::program(),
-            )],
             "short-name" => vec![format!("pb: {short_line}")],
             "policy-guard" => vec![policy_guard_line(&paths.home)],
             "path" => file_lines(&before_rc, &after_path, &path_step),
