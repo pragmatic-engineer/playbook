@@ -14,7 +14,7 @@ Task-oriented workflows.
 - [Decisions and memory](guides/03-decisions-and-memory.md): record choices with `/playbook:adr`, build project knowledge with `/playbook:learn-project`.
 - [Auto mode](guides/04-auto-mode.md): run commands without questions, with a spend cap.
 - [What setup installs](guides/05-what-setup-installs.md): every change `playbook setup` makes, what stays on your machine, and how to undo each part.
-- [Reading documents](guides/06-reading-documents.md): read a PDF or Office file as cheaper text with the optional anydoc converter.
+- [Reading documents](guides/06-reading-documents.md): read a PDF or Office file as cheaper text with the bundled converter.
 - [The rm guard](guides/07-rm-guard.md): the short rule that denies `rm` of `/` or your home folder, and what it leaves to you.
 - [The policy guard](guides/08-policy-guard.md): the optional guard that is off by default, exactly what it denies, how to turn it on and off and its pitfalls.
 - [The launcher](guides/09-launcher.md): `playbook cc`, `playbook ccd`, the `pb` alias and worktrees.

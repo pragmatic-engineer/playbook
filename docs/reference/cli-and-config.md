@@ -471,9 +471,9 @@ Keep each tool on PATH and install only the missing ones with Homebrew, from the
 
 ### `playbook doc`
 
-Read a PDF or Office file as text with the optional anydoc converter
+Read a PDF or Office file as text with the bundled converter
 
-Conversion is local, bounded in size, time, memory and output, and never uses OCR or a hosted service. The text is printed as untrusted document content and nothing is kept on disk afterwards.
+Conversion is local, bounded in size, time, memory and output, and never uses OCR or a hosted service. The text is printed as untrusted document content. A long document is printed in slices, and the full text is kept in a private cache for a day.
 
 Example: `playbook doc read report.docx`
 
@@ -493,7 +493,7 @@ Supports pdf, docx, doc, odt, rtf, epub, pptx, ppt, odp, xlsx, ods and csv. A sc
 
 ### `playbook doc status`
 
-Say whether the anydoc converter is installed and how to get it
+Say which document converter is in use, or that none was found
 
 ### `playbook doctor`
 

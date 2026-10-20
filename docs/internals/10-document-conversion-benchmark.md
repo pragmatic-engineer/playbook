@@ -1,6 +1,6 @@
 # Document conversion benchmark
 
-This page records the measurement behind the `docs.convert` default. Design: [ADR-0027](../adr/0027-anydoc-as-optional-local-tool.md). Command and safeguards: [Reading documents](../guides/06-reading-documents.md).
+This page records the measurement behind the `docs.convert` default. Design: [ADR-0027](../adr/0027-anydoc-as-optional-local-tool.md), replaced by [ADR-0051](../adr/0051-bundle-anydoc-as-pbdoc-helper.md), which bundles the converter. The token measurements below used the npm `anydoc` 0.2.4, the same engine `pbdoc` is built from. Command and safeguards: [Reading documents](../guides/06-reading-documents.md).
 
 ## Question
 
@@ -58,3 +58,23 @@ The PDF bar is met (41 percent fewer tokens, no loss of correctness), and Office
 - Synthetic documents and one small model. Real scanned or multi column documents were not tested, and scanned PDFs need OCR, which playbook never runs.
 - 3 runs per cell, so small differences are noise.
 - The machine that ran this had no PDF or Office reads in its transcripts, so this test says nothing about how often they happen elsewhere. Savings per document are what was measured.
+
+## The bundled helper
+
+[ADR-0051](../adr/0051-bundle-anydoc-as-pbdoc-helper.md) ships the converter as `pbdoc`, built from the `anydoc` 0.2.4 crate. Measured on 2026-10-19 on aarch64-apple-darwin with the release profile of this repo:
+
+| Measure | Value |
+| :- | :- |
+| Stripped binary | 7,233,008 bytes (6.9 MiB) |
+| Gzip -9 | 3,695,855 bytes (3.5 MiB) |
+| Crates in the closure | 103 on macOS and Linux musl, 105 on Windows |
+| New lock file entries | 72 |
+| Network crates in the closure | none |
+| Licences | all permissive (MIT, Apache-2.0, BSD-3-Clause, Zlib, Unicode-3.0, Unlicense, BSL-1.0). The one LGPL-2.1 crate is also offered under MIT and Apache-2.0. |
+| Smoke run on a csv | correct table, 4.2 MB peak memory |
+
+The release build fails when the binary passes 8 MiB or the tarball passes 4.5 MiB.
+
+## TODO: re-run with pbdoc
+
+The token and correctness table above has not been re-run with `pbdoc` in place of the npm package. The engine is the same, so no change is expected, but nothing here proves it. Owner: the playbook maintainer, before the next `anydoc` version bump. There is no benchmark harness in the repo yet, so the run is manual with the method above.

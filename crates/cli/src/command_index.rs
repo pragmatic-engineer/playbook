@@ -129,7 +129,7 @@ pub(crate) const META: &[Meta] = &[
     free("deliver"),
     user("deps"),
     user("deps ensure").purpose("Install the missing tools of a Brewfile with Homebrew"),
-    ro("doc").purpose("Read a PDF or Office file as text with anydoc"),
+    ro("doc").purpose("Read a PDF or Office file as text with the bundled converter"),
     ro("doc read"),
     ro("doc status"),
     user("doctor").purpose("Check the playbook setup, or read one fact the check uses"),
