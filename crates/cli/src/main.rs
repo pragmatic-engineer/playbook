@@ -101,6 +101,7 @@ fn main() {
     // The first-run step (ADR 0034 decision 13): heal once after an upgrade,
     // before most commands. Hot paths returned above or skip it.
     playbook::heal::on_start(&cli.command);
+    playbook::plugin_update::on_start(&cli.command, &args);
     // Starts the collector daemon for most commands, `cc` included.
     playbook::cc::telemetry::on_start(&cli.command);
 
