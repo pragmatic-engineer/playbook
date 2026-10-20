@@ -1,8 +1,8 @@
 # ADR-0025: A Self Improving Playbook Proposes Config Patches Behind a Staged Trust Ladder
 
-- **Status:** Proposed
+- **Status:** Proposed. Amended 2026-10-21 after the #532 spike: paths follow the crates layout, `auto` is deferred, the 2 session and edit link conditions are dropped, and the expiry by dead anchor rule is withdrawn. See [the Amendment section](#amendment-2026-10-21-what-the-532-spike-measured).
 - **Date created:** 2026-10-11
-- **Date modified:** 2026-10-11
+- **Date modified:** 2026-10-21
 
 ## Context
 
@@ -12,16 +12,16 @@ Issue #532 asks whether playbook can get better at its own job without someone d
 
 | Piece | Where | What it does | Gap for learning |
 | --- | --- | --- | --- |
-| Memory signals | `src/hooks/memory_signals.rs` | Per node hit count, a node is `promoted` at 3 hits inside 7 days, a cached `stale` flag with a verified hash, a consolidation cursor. Ranking reads `ranking_signals`. | Promotion only flags a node. Nothing expires, supersedes or adds a fact from the counters. A hit is a read, so a fact is reinforced by being shown. |
-| Capture and anchors hooks | `src/hooks/memory_capture.rs`, `src/hooks/memory_anchors.rs` | Capture blocks the Stop turn up to a bounded re-block count and asks the model to write durable facts. Anchors warn on edits to anchored files, capped at 600 characters and once per file per session. | No record of whether a captured fact was later used, corrected or ignored. |
-| Staged learning | `commands/learn-project.md` (`--stage`, `--from-staged`) | Collects candidates without a human, writes them to a staging area, a human confirms later. Auto mode behaves as `--stage`. | Promotion out of staging is always a human step. |
-| Usage store | `src/usage/db.rs`, `src/usage/query.rs` | `usage_events` (one row per assistant message: model, effort, repo, branch, session, tokens, cost) and `tool_invocation_events` (one row per Skill or Agent call). | A row has no component, so cost per agent comes only from telemetry. Linked PRs are counted, merged PRs are not. |
-| Telemetry | `src/usage/otlp.rs`, `src/usage/telemetry_db.rs`, #787 to #794 | A local OTLP receiver keeps only an allowlist of keys (event name, session, request id, model, effort, agent name, token counts, cost) in `telemetry_requests`, reconciled per session against transcripts. | Prompts, tool content and paths are dropped by design. Claude Code also emits hook, tool result and retry events, and the allowlist drops them, so denials and retries are not stored. |
-| Gate database | `src/gate/db.rs` | `gate_phases` keeps one verdict per plan and phase (`PASS`, `FAIL`, `WARN`, `INCONCLUSIVE`) with evidence. | Per finding outcomes (kept or dropped by verification) are not recorded. |
-| Effort tuning | `src/effort/floor.rs`, `suggest.rs`, `patch.rs`, `auto.rs`, ADR-0022 | `playbook effort suggest` reports, `--patch` and `apply` write ledgered config keys with a backup, `reset` undoes them, `effort.auto` (`off`, `suggest`, `on`) picks a variant per dispatch. A floor table is the only thing that can grant a lower effort. | Covers effort only. Every floor equals the shipped effort today, so the honest output is often "no change". |
-| Benches | `src/eval/bench.rs`, `src/eval/wu_bench.rs`, `playbook eval review-triage` | Single turn benches per agent (pass rate, cost, seeded finding recall), a Work Unit bench, a triage regression eval. | Single turn and no tools for most roles. The reviewer rests on 7 seeded bugs. Commands, the auditor and skill text have no bench. |
-| Config store | `src/config/keys.rs` | Known keys with defaults and allowed values, for example `effort.auto`. | No `learn.*` key exists. |
-| Hook denials | the guard hooks under `src/hooks/` | Print a deny or advisory message. | No durable count of denials, retries or overrides exists in `src/usage` or `src/gate`. |
+| Memory signals | `crates/cli/src/hooks/memory_signals.rs` | Per node hit count, a node is `promoted` at 3 hits inside 7 days, a cached `stale` flag with a verified hash, a consolidation cursor. Ranking reads `ranking_signals`. | Promotion only flags a node. Nothing expires, supersedes or adds a fact from the counters. A hit is a read, so a fact is reinforced by being shown. |
+| Capture and anchors hooks | `crates/cli/src/hooks/memory_capture.rs`, `crates/cli/src/hooks/memory_anchors.rs` | Capture blocks the Stop turn up to a bounded re-block count and asks the model to write durable facts. Anchors warn on edits to anchored files, capped at 600 characters and once per file per session. | No record of whether a captured fact was later used, corrected or ignored. |
+| Staged learning | `plugins/playbook/commands/learn-project.md` (`--stage`, `--from-staged`) | Collects candidates without a human, writes them to a staging area, a human confirms later. Auto mode behaves as `--stage`. | Promotion out of staging is always a human step. |
+| Usage store | `crates/telemetry/src/db.rs`, `crates/telemetry/src/query.rs` | `usage_events` (one row per assistant message: model, effort, repo, branch, session, tokens, cost) and `tool_invocation_events` (one row per Skill or Agent call). | A row has no component, so cost per agent comes only from telemetry. Linked PRs are counted, merged PRs are not. |
+| Telemetry | `crates/telemetry/src/otlp.rs`, `crates/telemetry/src/telemetry_db.rs`, #787 to #794 | A local OTLP receiver keeps only an allowlist of keys (event name, session, request id, model, effort, agent name, token counts, cost) in `telemetry_requests`, reconciled per session against transcripts. | Prompts, tool content and paths are dropped by design. Claude Code also emits hook, tool result and retry events, and the allowlist drops them, so denials and retries are not stored. |
+| Gate database | `crates/cli/src/gate/db.rs` | `gate_phases` keeps one verdict per plan and phase (`PASS`, `FAIL`, `WARN`, `INCONCLUSIVE`) with evidence. | Per finding outcomes (kept or dropped by verification) are not recorded. |
+| Effort tuning | `crates/cli/src/effort/floor.rs`, `suggest.rs`, `patch.rs`, `auto.rs`, ADR-0022 | `playbook effort suggest` reports, `--patch` and `apply` write ledgered config keys with a backup, `reset` undoes them, `effort.auto` (`off`, `suggest`, `on`) picks a variant per dispatch. A floor table is the only thing that can grant a lower effort. | Covers effort only. Every floor equals the shipped effort today, so the honest output is often "no change". |
+| Benches | `crates/cli/src/eval/bench.rs`, `crates/cli/src/eval/wu_bench.rs`, `playbook eval review-triage` | Single turn benches per agent (pass rate, cost, seeded finding recall), a Work Unit bench, a triage regression eval. | Single turn and no tools for most roles. The reviewer rests on 7 seeded bugs. Commands, the auditor and skill text have no bench. |
+| Config store | `crates/cli/src/config/keys.rs` | Known keys with defaults and allowed values, for example `effort.auto`. | No `learn.*` key exists. |
+| Hook denials | the guard hooks under `crates/cli/src/hooks/` | Print a deny or advisory message. | No durable count of denials, retries or overrides exists in `crates/telemetry` or `crates/cli/src/gate`. |
 
 ADR-0022 already set the pattern for one surface: rules and thresholds, permission from a benchmark floor, trigger from usage, a ledger, one command to reset, three stages. It also says that if #532 adds a shared autonomy key, effort tuning reads it. This record generalises that pattern and does not replace it.
 
@@ -41,26 +41,26 @@ The same reports name what cannot be measured today: cost per merged PR (the sto
 
 ## Decision
 
-### 1. One loop, one change surface, three autonomy levels
+### 1. One loop, one change surface, two accepted autonomy levels and one reserved
 
 The loop is: observe, propose, evaluate, approve, apply, measure, roll back. It runs on demand and from a scheduled routine. It never runs inside a session hook, because a hook adds latency to every turn and must never fail a session.
 
 The change surface is playbook's own config and its own local stores. In scope:
 
-1. Memory metadata: promote a staged fact, mark a fact stale, expire or supersede a fact whose anchor is gone, change its rank weight.
+1. Memory metadata: promote a staged fact, mark a fact stale, list a fact whose anchors are gone as a review candidate or supersede one, change its rank weight.
 2. Effort and tier choices, through the existing ADR-0022 stages.
 3. Thresholds with a named constant (recall thresholds, hygiene threshold, Read size limit), as config keys where a key exists.
 4. Guard message wording and skill description wording, as a proposal only (see 3).
 
 Out of scope for any automatic change: hook code, agent and command prompt bodies, skill bodies, Claude Code settings and Claude Code memory. A learned change never edits these silently. At most it opens a draft pull request with a diff for a human to review like any other change.
 
-The autonomy key is `learn.autonomy` with values `off`, `propose` and `auto`, default `off`. It is a ceiling shared by every learner. `effort.auto` keeps its own values (`off`, `suggest`, `on`) because it shipped, and the lower of the two decides: `learn.autonomy=off` forces `effort.auto` to behave as `off`, and `propose` caps it at `suggest`. A per surface key (`learn.memory.autonomy`, `learn.effort.autonomy`) may lower the ceiling further and never raise it.
+The autonomy key is `learn.autonomy` with accepted values `off` and `propose`, default `off`. `auto` is a reserved level name, not accepted in this release (see the Amendment section). It is a ceiling shared by every learner. `effort.auto` keeps its own values (`off`, `suggest`, `on`) because it shipped, and the lower of the two decides: `learn.autonomy=off` forces `effort.auto` to behave as `off`, and `propose` caps it at `suggest`. A per surface key (`learn.memory.autonomy`, `learn.effort.autonomy`) may lower the ceiling further and never raise it.
 
 | Level | Behaviour |
 | --- | --- |
 | `off` | Observe and report only. Nothing is written except local counters that already exist. |
 | `propose` | Write a proposal file (and for repo-tracked changes, a draft pull request). Nothing applies until a human runs `playbook learn apply <id>` or merges the pull request. |
-| `auto` | Apply a proposal without asking, only if it is in the allowed class for that surface (4) and passes every gate (5). Everything else stays a proposal. |
+| `auto` | Reserved and not accepted in this release. Enabling it needs a new record after a track record at `propose`. |
 
 ### 2. Signals
 
@@ -78,7 +78,7 @@ Safe means local, content free, and already allowed by the privacy design of the
 | Hook denial and retry counts | hook outcome | Not recorded | Guard message tuning | Needs a counter with no content, only guard name and a count |
 | User override of a choice | a dispatch variant or a config edit differing from the proposal | Partly (variant names) | Veto signal | Cannot tell a user from the orchestrator |
 | Corrections typed in chat | transcripts | Rejected | None | Free text, can hold secrets and names. Not read. |
-| Memory fact later contradicted | a newer fact on the same anchor | Not collected | Memory expiry | Needs the contradiction check from consolidation |
+| Memory fact later contradicted | a newer fact on the same anchor | Not collected | Memory expiry candidates | Needs the contradiction check from consolidation |
 
 Two rules bind every signal:
 
@@ -89,10 +89,10 @@ Two rules bind every signal:
 
 | Surface | Learned how | Permission comes from | Max autonomy |
 | --- | --- | --- | --- |
-| Memory: promote staged fact | Rule: at least 3 hits across at least 2 sessions, anchor still verifies, no contradicting fact | The deterministic anchor check | `auto` |
-| Memory: expire a fact | Rule: every anchor is gone and the fact has not been read in 60 days. It is moved to an archive, never deleted | The deterministic anchor check | `auto` |
+| Memory: promote staged fact | Rule: at least 3 hits, anchor still verifies, no contradicting fact. Not discriminating when measured (see the Amendment section) | The deterministic anchor check, plus a human | `propose` |
+| Memory: expiry candidates | Dead anchors only list a fact for review. A candidate has no renamed anchor (git follow), no same stem port under `crates/`, is not a decision record, and was not read in 60 days. These filters are hypotheses to measure. Nothing is archived or deleted without a human yes | A human | `propose` only, never `auto` |
 | Memory: supersede | A newer fact on the same anchor with a different claim | A human, because it needs judgment | `propose` |
-| Memory ranking weights | Boost facts followed by a kept edit, decay unread ones | Replay on stored sessions, ranking must not lose a fact that was used | `propose` |
+| Memory ranking weights | Decay unread facts. Boosting facts followed by a kept edit is blocked: the store has no edit link | Replay on stored sessions, ranking must not lose a fact that was used | `propose` |
 | Effort and tier | ADR-0022 stages 1 to 3 | The floor table | Stage 3 of ADR-0022 |
 | Recall and hygiene thresholds | Choose from the measured distribution, as the Read size limit was | Replay over local history shows the new value catches at least as many of the cases it exists for | `propose` |
 | Guard message wording | Candidates from denial counts: a guard denied often and followed by a retry of the same call | A human | `propose` only |
@@ -105,19 +105,19 @@ A tier of Haiku, Sonnet or Opus is part of effort and model routing and follows 
 1. **Observe.** `playbook learn observe` reads the stores listed above and writes one local summary per window. It makes no network call. The `gh` reads are opt in.
 2. **Propose.** Each learner emits zero or more proposals. A proposal file holds an id, the surface, the exact change (a config key and value, or a memory operation on a fact id), the evidence counts, the gate results and the rollback command. Cold start (under the ADR-0022 minimums) emits nothing.
 3. **Evaluate.** The proposal must pass the gates for its surface (5) before it is shown as applicable. Effort uses the quality floor and the existing benches. Skill text uses the routing eval. Memory uses a replay.
-4. **Approve.** At `propose` a human applies it. At `auto` the loop applies it only for the classes marked `auto` above. Anything touching a costly to miss component, a protected path, or code and prompt text always needs a human.
+4. **Approve.** At `propose` a human applies it. The loop applies nothing without a human, because `auto` is not accepted. Anything touching a costly to miss component, a protected path, or code and prompt text always needs a human.
 5. **Apply.** The same mechanism as `playbook effort apply`: a backup of the previous values, a ledger entry per key or fact id, a line in a local append only change log.
 6. **Measure.** After a change, the next two windows are compared with the window before it on the success metric and the veto signals (8). The result is appended to the change log.
-7. **Roll back.** `playbook learn reset` undoes every ledgered change in one command, `playbook learn reset <id>` undoes one. A watchdog rolls back by itself, and says so in the next session start block, when a veto signal fires after a change (a rise in reruns or overrides for the touched component, a rise in rework, or cost above the weekly budget).
+7. **Roll back.** `playbook learn reset` undoes every ledgered change in one command, `playbook learn reset <id>` undoes one. A watchdog rolls back by itself (the only unattended action, because it restores a prior state and applies no new change), and says so in the next session start block, when a veto signal fires after a change (a rise in reruns or overrides for the touched component, a rise in rework, or cost above the weekly budget).
 
 Where it runs: on demand (`playbook learn run`) and from a scheduled routine the user opts into. A SessionEnd hook may only append counters that exist already. A learner is never launched from a hook.
 
 ### 5. Guardrails
 
 1. **Quality floor.** Any change that could lower quality needs a benchmark entry that allows it. Memory and threshold changes need the replay described above. No floor is lowered by this ADR.
-2. **Never lower effort where a miss is costly.** The reviewer, the auditor and anything marked costly in `src/effort/floor.rs` are raise only. Protected paths (auth, secrets, crypto, migrations, permissions, CI, hooks) never get a lower effort.
-3. **Human approval by default.** `learn.autonomy` defaults to `off`. Moving to `propose` and then to `auto` is a user config change, per surface.
-4. **Staged trust ladder.** A surface moves up one level only after a track record: at `propose`, at least 10 applied proposals over at least 4 weeks with no rollback and no veto signal. The check prints the record. It never raises the level itself. The user does.
+2. **Never lower effort where a miss is costly.** The reviewer, the auditor and anything marked costly in `crates/cli/src/effort/floor.rs` are raise only. Protected paths (auth, secrets, crypto, migrations, permissions, CI, hooks) never get a lower effort.
+3. **Human approval by default.** `learn.autonomy` defaults to `off`. Moving from `off` to `propose` is a user config change, per surface. `auto` is not accepted.
+4. **Staged trust ladder.** Raising a surface above `propose` needs a new record after a track record: at `propose`, at least 10 applied proposals over at least 4 weeks with no rollback and no veto signal. The check prints the record. It never raises the level itself. The user does.
 5. **Every change is logged and reversible.** An append only change log, a ledger, a backup of what was replaced. A key the user later edits by hand leaves the ledger and is not touched by reset.
 6. **A budget and a kill switch.** A weekly cap on learning spend (benchmark and routing evals call a model) with a default of zero, so nothing runs a model unless the user sets a cap. `learn.autonomy=off` stops everything at the next run.
 7. **Local only.** No network call from the loop apart from the opt in `gh` read of the user's own PRs. Nothing is sent anywhere. A learning record holds counters and ids only, so a record holds no PII.
@@ -126,8 +126,8 @@ Where it runs: on demand (`playbook learn run`) and from a scheduled routine the
 
 ### 6. Avoiding overfitting and feedback loops
 
-- **Reinforcement by display.** A hit counts only when the fact was injected and a later edit touched one of its anchored files in the same session. A fact shown and ignored decays. Hits caused by the loop's own proposals (a test run, a replay) are tagged and excluded.
-- **Self confirmation.** A fact written by capture is not allowed to count its own capture session as a hit. Promotion needs at least 2 distinct sessions.
+- **Reinforcement by display.** A hit counts only when the fact was injected. Counting only hits followed by an edit to an anchored file is blocked until the store links edits to facts. A fact shown and ignored decays. Hits caused by the loop's own proposals (a test run, a replay) are tagged and excluded.
+- **Self confirmation.** A fact written by capture should not count its own capture session as a hit. This is a goal that needs a session id in `NodeSignals`, which it lacks today, so it cannot be checked yet.
 - **Small windows.** Minimum evidence before any proposal (ADR-0022: 20 dispatches, 5 sessions, 7 days). A single heavy session cannot move a threshold.
 - **Held out check.** A threshold or ranking change is tuned on the older 70% of the window and must hold on the newest 30%.
 - **One change at a time per surface.** A second change waits until the measurement window of the first closes, so effects can be attributed.
@@ -138,7 +138,7 @@ Where it runs: on demand (`playbook learn run`) and from a scheduled routine the
 
 | Failure | Effect | Response |
 | --- | --- | --- |
-| Memory poisoning (a wrong fact captured, then promoted) | A bad fact steers later sessions | Promotion needs a passing anchor check and 2 sessions. Facts carry their evidence. `reset` archives, never deletes. |
+| Memory poisoning (a wrong fact captured, then promoted) | A bad fact steers later sessions | Promotion needs a passing anchor check and a human at `propose`. Facts carry their evidence. `reset` restores the prior state. A fact is archived only on a human yes, never deleted. |
 | Stale signals | A change made on old data | Windows are bounded and each record carries its window |
 | Prompt drift | Wording changes slowly lose behavior | Text is never changed automatically. A routing eval gates the proposal. |
 | Cost creep | A loop that spends to save | Weekly budget defaults to zero. The change log shows spend against savings. |
@@ -155,7 +155,7 @@ The primary metric is **cost per merged PR at equal review quality**, measured p
 - Cost: the sum of `usage_events` cost for sessions whose branch ended in a merged PR (merge state from local git history, or `gh` when the user opts in).
 - Equal review quality: review rounds per PR (count of review passes before merge) and fix after merge within 14 days must not rise by more than 5 percentage points against the 30 days before the change, and the seeded bench recall on touched components must hold within 3 points.
 
-Secondary: stale facts in the active set, share of promoted facts that a later session used, hook denials per 100 sessions, rollbacks per applied change.
+Secondary: stale facts in the active set, share of promoted facts that a later session used (computed only once session data exists), hook denials per 100 sessions, rollbacks per applied change.
 
 Today this metric cannot be computed. The store counts only linked PRs, so a first slice must add merge state to the store or read it from git before any claim of improvement. Until then the loop reports "no baseline". A change that cannot be measured stays at `propose`.
 
@@ -164,11 +164,11 @@ Today this metric cannot be computed. The store counts only linked PRs, so a fir
 Each stage ships on its own and is judged on its own record. Stage 0 is the smallest and needs no model call.
 
 0. **Observe and baseline.** `playbook learn observe` reports the signals that exist today, lists which are missing, and prints cost per merged PR as "no baseline" until merge state is read. Adds `learn.autonomy` (default `off`) to the known keys. Writes nothing else. This is the first slice.
-1. **Close the loop for memory (issue #532 step 2).** Rule based promotion, expiry by dead anchors into an archive, ledger, change log, `learn reset`. Behind `learn.autonomy`. At `propose` it writes proposals, at `auto` it applies promotion and expiry only. No model call.
+1. **Close the loop for memory (issue #532 step 2).** Gated: no stage 1 build until a revised rule clears the bar in the Amendment section. Until then the manual quarterly prune is the baseline.
 2. **Signals that are missing.** Record kept or dropped findings in `deep-review`, a content free hook denial counter, merge state for the metric.
 3. **Share the key with effort.** Make `effort.auto` obey the `learn.autonomy` ceiling, and add the `playbook learn` entry that lists effort proposals from ADR-0022.
 4. **Thresholds and routing proposals.** Replay based proposals for recall and hygiene thresholds, guard and description wording as draft pull requests.
-5. **Raise autonomy per surface** after a recorded track record (guardrail 4). The default stays `off` for new installs.
+5. **Raise autonomy per surface.** A user moves a surface from `off` to `propose` by a config change (guardrail 3). Going above `propose` needs the track record in guardrail 4 and a new ADR. The default stays `off` for new installs.
 
 ## Alternatives considered
 
@@ -182,15 +182,44 @@ Each stage ships on its own and is judged on its own record. Stage 0 is the smal
 ## Consequences
 
 - The first two stages add no model calls and no new cost. The loop is a small amount of Rust over stores that exist.
-- Most of this month's savings fall in classes the loop will not change by itself. Expect the loop to mainly keep memory tidy and to flag candidates, and expect the larger savings to keep coming from reviewed changes.
+- Most of this month's savings fall in classes the loop will not change by itself. Expect the loop to mainly list candidates for a human, and expect the larger savings to keep coming from reviewed changes.
 - Cost per merged PR needs new data. Stage 0 states the gap and stage 2 closes it.
-- Memory expiry moves facts to an archive, so a wrong expiry is recoverable.
+- A proposal never deletes. Moving a fact to an archive happens only on a human yes, so a wrong expiry is recoverable.
 - Every learner shares the `learn.autonomy` vocabulary. A change to a level name later is a breaking change, so the names are fixed here.
+
+## Amendment 2026-10-21: what the #532 spike measured
+
+The spike (a local plan file, `plans/gh-532-spike-report.md`, not committed; results are in the #532 issue comment of 2026-10-21; origin/main `75010eb6`, no model calls) tested the memory rules above against the live store. Its bars were fixed before the data was read.
+
+| Measure | Result |
+| --- | --- |
+| Nodes in `memory_signals` | 394 |
+| Promoted | 378 (95.9%) |
+| Nodes with 3 or more hits | 282, all promoted |
+| Fact files with anchors | 171 |
+| Distinct anchors | 250 |
+| Anchors live / deleted or ported / renamed / never in history / non repo | 84 / 141 / 8 / 16 / 1 |
+| Facts the old expiry rule would archive | 81 of 171 (47.4%), against a bar of under 10% |
+| Facts rescued only by rename follow | 17 |
+
+What changed in this record, and why:
+
+- **Paths.** The cited `src/...` paths no longer exist. They now point at the crates layout.
+- **Promotion by hits does not discriminate.** Nearly every node is already promoted and `staging/` does not exist, so the staged promotion rule has no inputs. The row stays at `propose` with no claim of benefit.
+- **Missing data.** `NodeSignals` has no session id and no edit link. The old "at least 2 distinct sessions" and "later edit touched an anchored file" conditions cannot be computed and are dropped.
+- **`auto` is deferred.** Nothing showed it safe. The name stays reserved so a later key change adds a value and never renames one.
+- **Expiry by dead anchor is withdrawn.** The old rule read: "every anchor is gone and the fact has not been read in 60 days. It is moved to an archive, never deleted", at `auto`. It fails the 10% bar by a wide margin. Anchor death is a signal to review, never permission to archive.
+
+Caveat: this is one store on one machine and one repo. Many dead anchors are `src/` to `crates/` moves and Python to Rust ports, so the share is probably inflated. The 15 id sample review by the maintainer is still pending. It is not an input to the withdrawal, because the rule fails the bar without it.
+
+Bar for any replacement expiry rule before stage 1 may build it at `propose` (and before any later record may raise it above `propose`), measured on a store and not asserted: it would archive under 10% of anchored facts, and the maintainer keeps at most 1 of a 15 id sample (seeded, ids only), re-measured after the anchors are re-pointed to current paths. The baseline to beat is the manual quarterly prune.
+
+This amendment builds nothing: no subcommand, config key, hook, migration, doctor row or setup part.
 
 ## Follow up issues this implies (not created)
 
 1. `feat(learn): add learn.autonomy key and playbook learn observe report` (stage 0).
-2. `feat(memory): rule based promotion and expiry by dead anchors with ledger and reset` (stage 1, issue #532 step 2).
+2. `feat(memory): rule based promotion and expiry candidates with ledger and reset` (stage 1, issue #532 step 2). Blocked on the revised rule.
 3. `feat(gate): record kept and dropped findings in deep-review` (needed for reviewer precision).
 4. `feat(hooks): content free denial and retry counters per guard` (needed for guard tuning).
 5. `feat(usage): store merge state per branch to compute cost per merged PR` (needed for the metric).
