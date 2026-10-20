@@ -29,7 +29,7 @@ pub const RETIRED_ATTRIBUTION_MIGRATION: &str = "attribution-off";
 /// Slugs taken out of the registry. A record row or pending id under one
 /// loads and is ignored. A retired slug is never given to a new migration,
 /// because old applied rows would mark that one as already run.
-pub const RETIRED_IDS: [&str; 1] = [RETIRED_ATTRIBUTION_MIGRATION];
+pub const RETIRED_IDS: [&str; 2] = [RETIRED_ATTRIBUTION_MIGRATION, RETIRED_DISK_GUARD_MIGRATION];
 /// The `Consent` item for the collector-service part (ADR 0043).
 pub const COLLECTOR_SERVICE_MIGRATION: &str = "collector-service";
 /// The `Owned` move of stored auto budgets off the old $5 default (ADR 0028).
@@ -41,8 +41,13 @@ pub const PROMPT_DEFAULT_MIGRATION: &str = "system-prompt-default-on";
 /// The `Owned` move of the collector agent to its new launchd label (ADR
 /// 0043, 2026-10-18 amendment).
 pub const COLLECTOR_LABEL_MIGRATION: &str = "collector-service-label";
-/// The `Consent` item that adds the disk guard hook (ADR 0047 decision 8).
-pub const DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
+/// The `Consent` item 0.38.0 shipped to wire the disk guard hook, retired
+/// when the disk guard was removed. A record that names it still
+/// loads, and the id is ignored.
+pub const RETIRED_DISK_GUARD_MIGRATION: &str = "disk-guard-hook";
+/// The `Consent` removal of the retired `no-slop-guard` and `no-dash-guard`
+/// hook entries setup used to write.
+pub const NO_SLOP_GUARD_MIGRATION: &str = "no-slop-guard-entry";
 /// The `Owned` move of a stored `update.plugin` boolean to `auto` or `off`.
 pub const PLUGIN_UPDATE_MODE_MIGRATION: &str = "plugin-update-mode";
 /// The `Owned` notice that the rm guard is now a short fixed rule (ADR 0045,
@@ -377,14 +382,14 @@ pub fn registry() -> Vec<Migration> {
             run: collector_service_label,
         },
         Migration {
-            id: DISK_GUARD_MIGRATION,
-            since: "0.38.0",
+            id: NO_SLOP_GUARD_MIGRATION,
+            since: "next",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
-                check: disk_guard_hook_pending,
+                check: retired_hooks_pending,
                 command: "playbook setup --hooks",
             },
-            run: disk_guard_hook_by_setup,
+            run: no_slop_guard_entry,
         },
         Migration {
             id: PLUGIN_UPDATE_MODE_MIGRATION,
@@ -424,23 +429,25 @@ fn rm_guard_simplified_notice(ctx: &Ctx) -> Outcome {
     Outcome::Done(StepReport::wired(RM_GUARD_NOTICE_STEP, RM_GUARD_NOTICE))
 }
 
-/// An install with the policy guard wired and no disk guard on Bash (ADR
-/// 0047 decision 8). One without the policy guard declined the hooks, so it
-/// stays quiet.
-fn disk_guard_hook_pending(ctx: &Ctx) -> Option<String> {
+/// Removes the retired `no-slop-guard` and `no-dash-guard` entries older
+/// setups wrote. The hook is gone; the subcommand stays a no-op for one
+/// release. It writes settings.json, so only `init` does it.
+fn no_slop_guard_entry(ctx: &Ctx) -> Outcome {
     let settings = ctx.claude_home.join("settings.json");
-    let policy_guard =
-        crate::doctor::field::hook_commands_for_event(&settings, "PreToolUse", &["policy-guard"])
-            .iter()
-            .any(|(_, n)| *n > 0);
-    (policy_guard && !crate::hooks::disk_guard::wired(&ctx.claude_home)).then(|| {
-        "the disk guard hook, which stops builds when the disk is nearly full, is not wired; setup adds it".to_string()
-    })
+    match crate::init::retired_hooks::remove(&settings, ctx.epoch) {
+        Ok(0) => Outcome::Quiet,
+        Ok(n) => Outcome::Repeat(StepReport::wired(
+            "retired-hooks",
+            format!(
+                "removed {n} retired hook entries (no-slop-guard, no-dash-guard); their rules live in the prompt and skills"
+            ),
+        )),
+        Err(err) => Outcome::Failed(StepReport::failed("retired-hooks", err.to_string())),
+    }
 }
 
-/// Setup's hooks part wires the disk guard with the other guards.
-fn disk_guard_hook_by_setup(_: &Ctx) -> Outcome {
-    Outcome::Quiet
+fn retired_hooks_pending(ctx: &Ctx) -> Option<String> {
+    crate::init::retired_hooks::pending(&ctx.claude_home.join("settings.json"))
 }
 
 /// Moves the collector agent playbook 0.37.0 installed under the old label
@@ -741,7 +748,7 @@ fn dead_hook_scripts(ctx: &Ctx) -> Outcome {
         Ok(removed) => Outcome::Repeat(StepReport::wired(
             "dead-hooks",
             format!(
-                "removed {} hook(s) whose script is gone: {}",
+                "removed {} hook(s) that no longer exist: {}",
                 removed.len(),
                 removed.join(", ")
             ),
@@ -1002,7 +1009,7 @@ fn skills_edited(ctx: &Ctx) -> Outcome {
 }
 
 /// FNV-1a 64: stable across builds, which a persisted hash needs.
-fn content_hash(bytes: &[u8]) -> String {
+pub(crate) fn content_hash(bytes: &[u8]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {
         h ^= u64::from(*b);
@@ -1445,14 +1452,15 @@ pub fn run_pending(ctx: &Ctx) -> Report {
 
 /// Runs the shipped registry. With `statusline` false the migration that
 /// rewrites `statusLine.command` stays pending, so init leaves that key alone.
-/// With `hooks` false the dead hook migration stays pending, so init leaves
+/// With `hooks` false the dead and retired hook migrations stay pending, so init leaves
 /// the hook entries alone.
 pub fn run_pending_for(ctx: &Ctx, statusline: bool, hooks: bool) -> Report {
     let root = playbook_root_from(&ctx.home);
     let pending = crate::state::pending_legacy(&root);
     let mut migrations = active();
     migrations.retain(|m| {
-        (statusline || m.id != STATUSLINE_MIGRATION) && (hooks || m.id != DEAD_HOOKS_MIGRATION)
+        (statusline || m.id != STATUSLINE_MIGRATION)
+            && (hooks || (m.id != DEAD_HOOKS_MIGRATION && m.id != NO_SLOP_GUARD_MIGRATION))
     });
     let mut report = run_with(&migrations, ctx);
     if pending > 0 && crate::state::pending_legacy(&root) == 0 {
@@ -2285,37 +2293,27 @@ mod tests {
     }
 
     #[test]
-    fn the_disk_guard_check_is_open_only_when_the_other_guards_are_wired() {
-        let h = home("disk-guard-pending");
+    fn the_no_slop_guard_entry_is_removed_once_and_other_entries_stay() {
+        // Arrange
+        let h = home("no-slop-entry");
         let ctx = ctx(&h);
-        assert_eq!(disk_guard_hook_pending(&ctx), None, "no settings");
         let settings = ctx.claude_home.join("settings.json");
-        let write = |commands: &[&str]| {
-            let hooks: Vec<_> = commands
-                .iter()
-                .map(|c| serde_json::json!({"type": "command", "command": c}))
-                .collect();
-            let doc =
-                serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": hooks}]}});
-            std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
-            std::fs::write(&settings, doc.to_string()).unwrap();
-        };
-        write(&["playbook hook policy-guard"]);
-        let open = disk_guard_hook_pending(&ctx).expect("open");
-        assert!(open.contains("disk guard"), "{open}");
-        write(&["playbook hook policy-guard", "playbook hook disk-guard"]);
-        assert_eq!(disk_guard_hook_pending(&ctx), None);
-        write(&["my-own-hook"]);
-        assert_eq!(disk_guard_hook_pending(&ctx), None, "hooks declined");
+        std::fs::create_dir_all(&ctx.claude_home).unwrap();
         let doc = serde_json::json!({"hooks": {"PreToolUse": [
-            {"matcher": "Bash", "hooks": [{"type": "command", "command": "playbook hook policy-guard"}]},
-            {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "playbook hook disk-guard"}]},
-        ]}});
+            {"matcher": "Edit|Write", "hooks": [
+                {"type": "command", "command": "playbook hook no-slop-guard"},
+                {"type": "command", "command": "playbook hook policy-guard"}]}]}});
         std::fs::write(&settings, doc.to_string()).unwrap();
-        assert!(
-            disk_guard_hook_pending(&ctx).is_some(),
-            "wired for agents only leaves builds unguarded"
-        );
+
+        // Act
+        let first = no_slop_guard_entry(&ctx);
+        let second = no_slop_guard_entry(&ctx);
+
+        // Assert
+        assert!(matches!(first, Outcome::Repeat(_)));
+        assert!(matches!(second, Outcome::Quiet));
+        let text = std::fs::read_to_string(&settings).unwrap();
+        assert!(!text.contains("no-slop-guard") && text.contains("policy-guard"));
     }
 
     #[test]
