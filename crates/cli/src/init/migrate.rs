@@ -29,18 +29,27 @@ pub const RETIRED_ATTRIBUTION_MIGRATION: &str = "attribution-off";
 /// Slugs taken out of the registry. A record row or pending id under one
 /// loads and is ignored. A retired slug is never given to a new migration,
 /// because old applied rows would mark that one as already run.
-pub const RETIRED_IDS: [&str; 2] = [RETIRED_ATTRIBUTION_MIGRATION, RETIRED_DISK_GUARD_MIGRATION];
-/// The `Consent` item for the collector-service part (ADR 0043).
-pub const COLLECTOR_SERVICE_MIGRATION: &str = "collector-service";
+pub const RETIRED_IDS: [&str; 4] = [
+    RETIRED_ATTRIBUTION_MIGRATION,
+    RETIRED_DISK_GUARD_MIGRATION,
+    RETIRED_COLLECTOR_SERVICE_MIGRATION,
+    RETIRED_COLLECTOR_LABEL_MIGRATION,
+];
+/// The `Consent` reminder for the collector-service part, shipped from
+/// 0.36.0 as `0016-collector-service` and retired with the service.
+pub const RETIRED_COLLECTOR_SERVICE_MIGRATION: &str = "collector-service";
+/// The `Owned` move of the collector agent to its new launchd label,
+/// shipped in 0.38.0 and retired with the service.
+pub const RETIRED_COLLECTOR_LABEL_MIGRATION: &str = "collector-service-label";
+/// The `Owned` removal of the collector service, now that playbook starts
+/// the collector itself.
+pub const COLLECTOR_REMOVAL_MIGRATION: &str = "collector-service-removed";
 /// The `Owned` move of stored auto budgets off the old $5 default (ADR 0028).
 pub const AUTO_BUDGET_MIGRATION: &str = "auto-budget-defaults";
 /// The `Consent` removal of the retired launcher rc lines (ADR 0044).
 pub const RC_LINE_MIGRATION: &str = "retired-launcher-rc-line";
 /// The `Consent` question about the system prompt now on by default (ADR 0044).
 pub const PROMPT_DEFAULT_MIGRATION: &str = "system-prompt-default-on";
-/// The `Owned` move of the collector agent to its new launchd label (ADR
-/// 0043, 2026-10-18 amendment).
-pub const COLLECTOR_LABEL_MIGRATION: &str = "collector-service-label";
 /// The `Consent` item 0.38.0 shipped to wire the disk guard hook, retired
 /// when the disk guard was removed. A record that names it still
 /// loads, and the id is ignored.
@@ -64,8 +73,6 @@ pub const RM_GUARD_NOTICE_MIGRATION: &str = "rm-guard-simplified";
 pub const RM_GUARD_NOTICE_STEP: &str = "rm guard";
 /// What the notice says (docs/guides/07-rm-guard.md).
 const RM_GUARD_NOTICE: &str = "the rm guard now denies only rm of / or your home folder, and hooks.rmGuard.allowedRoots is no longer used; see docs/guides/07-rm-guard.md";
-/// How long `collector-service-label` waits for the moved collector to run.
-const COLLECTOR_LABEL_WAIT: Duration = Duration::from_secs(3);
 
 /// What a migration needs to find the state it moves.
 pub struct Ctx {
@@ -345,16 +352,6 @@ pub fn registry() -> Vec<Migration> {
             run: orphaned_plugin_caches,
         },
         Migration {
-            id: COLLECTOR_SERVICE_MIGRATION,
-            since: "0.36.0",
-            kind: Kind::Idempotent,
-            scope: Scope::Consent {
-                check: collector_service_pending,
-                command: crate::init::collector_service::COMMAND,
-            },
-            run: collector_service_by_setup,
-        },
-        Migration {
             id: AUTO_BUDGET_MIGRATION,
             since: "0.36.0",
             kind: Kind::Auto,
@@ -382,13 +379,6 @@ pub fn registry() -> Vec<Migration> {
             run: system_prompt_default_by_setup,
         },
         Migration {
-            id: COLLECTOR_LABEL_MIGRATION,
-            since: "0.38.0",
-            kind: Kind::Idempotent,
-            scope: Scope::Owned,
-            run: collector_service_label,
-        },
-        Migration {
             id: NO_SLOP_GUARD_MIGRATION,
             since: "next",
             kind: Kind::Idempotent,
@@ -404,6 +394,13 @@ pub fn registry() -> Vec<Migration> {
             kind: Kind::Auto,
             scope: Scope::Owned,
             run: plugin_update_mode,
+        },
+        Migration {
+            id: COLLECTOR_REMOVAL_MIGRATION,
+            since: "next",
+            kind: Kind::Idempotent,
+            scope: Scope::Owned,
+            run: collector_service_removed,
         },
         Migration {
             id: POLICY_GUARD_NOTICE_MIGRATION,
@@ -490,61 +487,78 @@ fn retired_hooks_pending(ctx: &Ctx) -> Option<String> {
     crate::init::retired_hooks::pending(&ctx.claude_home.join("settings.json"))
 }
 
-/// Moves the collector agent playbook 0.37.0 installed under the old label
-/// to the current one, with the same program and log (ADR 0043, 2026-10-18
-/// amendment). `Owned`: it touches only the agent file playbook wrote, which
-/// carries playbook's comment, and runs launchctl only where
-/// `service_manager::refusal` allows it. Idempotent: with no old file it reads one path and runs nothing.
-fn collector_service_label(ctx: &Ctx) -> Outcome {
-    use crate::usage::service::Kind;
-    if Kind::current() != Some(Kind::Launchd) {
-        return Outcome::Quiet;
-    }
+/// Stops and deletes every collector service file playbook wrote: the
+/// agent under the current label, the one under the 0.37.0 label and the
+/// systemd unit. Then it deletes the answers the retired setup part stored
+/// and starts a collector, because `bootout` stopped the one the service ran
+/// and open sessions still send to it, also when a removal fails part way.
+/// `Owned`: the agent under the current label and the unit are matched by
+/// path only, so whatever file sits there goes; the old-label agent goes
+/// only when playbook wrote it. The service manager runs only where
+/// `service_manager::refusal` allows it. Idempotent: with no file left it
+/// reads a few paths and runs nothing, so a run the heal's start budget cut
+/// short finishes on the next one.
+fn collector_service_removed(ctx: &Ctx) -> Outcome {
     if let Some(why) = crate::service_manager::refusal(&ctx.home) {
-        return match crate::usage::service::find_old(&ctx.home) {
-            Some(old) if old.ours => Outcome::Warn(format!(
-                "the {} uses the old label; playbook did not move it, because {why}",
-                old.describe()
+        return match crate::init::collector_service::installed_names(&ctx.home) {
+            Some(names) => Outcome::Warn(format!(
+                "the {names} is still installed; playbook did not remove it, because {why}"
             )),
-            _ => Outcome::Quiet,
+            None => Outcome::Quiet,
         };
     }
     let manager = crate::service_manager::manager_for(&ctx.home);
-    move_collector_label(ctx, manager.as_ref())
+    remove_collector_service(ctx, manager.as_ref(), &start_collector)
 }
 
-/// [`collector_service_label`] with the service manager passed in, so tests
-/// use a fake one.
-fn move_collector_label(ctx: &Ctx, manager: &dyn crate::service_manager::Manager) -> Outcome {
-    use crate::service_manager::{move_old_agent, uid, Moved};
-    use crate::usage::service::{log_path, LABEL, OLD_LABEL};
-    const STEP: &str = "collector-label";
+/// Asks for a collector the way a command does, with no wait, so the heal
+/// that runs this migration is not held up. A headless heal asks too.
+fn start_collector() {
+    let _ = crate::cc::telemetry::ensure_after_removal();
+}
+
+/// [`collector_service_removed`] with the service manager and the collector
+/// start passed in, so tests use a fake launchd and count the starts.
+fn remove_collector_service(
+    ctx: &Ctx,
+    manager: &dyn crate::service_manager::Manager,
+    start: &dyn Fn(),
+) -> Outcome {
+    use crate::init::collector_service::{foreign_old_agent_fix, forget_answers, remove_with};
+    const STEP: &str = "collector service";
     let home = &ctx.home;
-    let up = || crate::init::collector_service::collector_running(home);
-    let program = crate::init::collector_service::program();
-    match move_old_agent(home, &program, manager, uid(), &up, COLLECTOR_LABEL_WAIT) {
-        Ok(Moved::Nothing) => Outcome::Quiet,
-        Ok(Moved::NotOurs(file)) => Outcome::Warn(format!(
-            "{} uses the old collector label but playbook did not write it, so it stays; to remove it, run: {}",
-            file.display(),
-            crate::init::collector_service::foreign_old_agent_fix(&file)
-        )),
-        Ok(Moved::Done { up: true }) => Outcome::Repeat(StepReport::wired(
-            STEP,
-            format!("moved the collector service from {OLD_LABEL} to {LABEL}"),
-        )),
-        Ok(Moved::Done { up: false }) => Outcome::Failed(StepReport::failed(
-            STEP,
+    let removed = match remove_with(home, manager) {
+        Ok(removed) => removed,
+        Err(why) => {
+            // An earlier bootout may have stopped the collector already.
+            start();
+            return Outcome::Failed(StepReport::failed(
+                STEP,
+                format!("{why}; to try again, run: playbook migrate"),
+            ));
+        }
+    };
+    forget_answers(home);
+    let foreign = crate::usage::service::find_old(home)
+        .filter(|old| !old.ours)
+        .map(|old| {
             format!(
-                "moved the collector service to {LABEL}, but the collector is not running (see {}); to start it, run: launchctl kickstart -k gui/{}/{LABEL}",
-                log_path(home).display(),
-                uid()
-            ),
-        )),
-        Err(why) => Outcome::Failed(StepReport::failed(
-            STEP,
-            format!("{why}; to try again, run: playbook migrate"),
-        )),
+                "{} uses the old collector label but playbook did not write it, so it stays; to remove it, run: {}",
+                old.file.display(),
+                foreign_old_agent_fix(&old.file)
+            )
+        });
+    match (removed, foreign) {
+        (Some(done), foreign) => {
+            start();
+            let detail = match foreign {
+                Some(note) => format!("{done}; {note}"),
+                None => done,
+            };
+            Outcome::Repeat(StepReport::wired(STEP, detail))
+        }
+        (None, Some(note)) => Outcome::Warn(note),
+        (None, None) => Outcome::Quiet,
     }
 }
 
@@ -676,17 +690,6 @@ fn retired_rc_line(ctx: &Ctx) -> Outcome {
         Some(done) => Outcome::Repeat(StepReport::wired("rc-line", done)),
         None => Outcome::Quiet,
     }
-}
-
-/// Telemetry points at the collector and no service keeps it running (ADR
-/// 0043). Reported once, and never after the user said no.
-fn collector_service_pending(ctx: &Ctx) -> Option<String> {
-    crate::init::collector_service::pending(&ctx.home)
-}
-
-/// Setup's collector-service part installs the service after its question.
-fn collector_service_by_setup(_: &Ctx) -> Outcome {
-    Outcome::Quiet
 }
 
 /// The default both auto budgets had before the 2026-10-17 amendment to ADR
@@ -1758,7 +1761,6 @@ mod tests {
         );
         assert_eq!(rows(&h), after_first, "the conversion runs once");
         assert_eq!(budget(&h), "5.0", "an applied migration does not run again");
-        assert!(!applied(&read_state(&h)).contains(&COLLECTOR_LABEL_MIGRATION.to_string()));
     }
 
     #[test]
@@ -2538,7 +2540,7 @@ mod tests {
 
         // Assert
         assert_eq!(at_034.len(), 14, "{at_034:?}");
-        assert!(!at_034.contains(&COLLECTOR_SERVICE_MIGRATION));
+        assert!(!at_034.contains(&AUTO_BUDGET_MIGRATION));
         assert!(at_037.contains(&PROMPT_DEFAULT_MIGRATION));
         let unreleased: Vec<&str> = registry()
             .iter()
@@ -2685,78 +2687,68 @@ mod tests {
         h
     }
 
+    /// [`old_agent_home`] with the agent under the current label and the
+    /// systemd unit too, every file a collector service ever left.
+    fn service_home(tag: &str) -> PathBuf {
+        use crate::usage::service::{log_path, render, Kind};
+        let h = old_agent_home(tag);
+        for kind in [Kind::Launchd, Kind::Systemd] {
+            let file = kind.file(&h);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(
+                &file,
+                render(kind, Path::new("/opt/homebrew/bin/playbook"), &log_path(&h)),
+            )
+            .unwrap();
+        }
+        h
+    }
+
+    /// Every service file [`service_home`] writes.
+    fn service_files(h: &Path) -> [PathBuf; 3] {
+        use crate::usage::service::{old_file, Kind};
+        [Kind::Launchd.file(h), old_file(h), Kind::Systemd.file(h)]
+    }
+
     #[test]
-    fn migration_0020_moves_the_old_agent_once_and_then_stays_quiet() {
+    fn removal_stops_and_deletes_both_agents_and_the_unit_and_names_them() {
         // Arrange
         use crate::service_manager::fake::Launchd;
-        use crate::usage::service::{old_file, Kind, LABEL, OLD_LABEL};
-        let h = old_agent_home("label-move");
-        let fake = Launchd::with(&[OLD_LABEL]);
+        use crate::usage::service::{LABEL, OLD_LABEL, UNIT};
+        let h = service_home("remove-all");
+        let fake = Launchd::with(&[LABEL, OLD_LABEL]);
 
         // Act
-        let first = move_collector_label(&ctx(&h), &fake);
-        let second = move_collector_label(&ctx(&h), &fake);
+        let out = remove_collector_service(&ctx(&h), &fake, &|| {});
 
         // Assert
-        let Outcome::Repeat(step) = first else {
-            panic!("the first run moves the agent");
+        let Outcome::Repeat(step) = out else {
+            panic!("a removal is reported and runs again next time");
         };
         assert_eq!(step.status, StepStatus::Wired);
-        assert!(
-            step.detail.contains(OLD_LABEL) && step.detail.contains(LABEL),
-            "{}",
-            step.detail
-        );
-        assert!(matches!(second, Outcome::Quiet));
-        assert!(!old_file(&h).exists());
-        assert!(Kind::Launchd.file(&h).is_file());
-        assert!(fake.has(LABEL) && !fake.has(OLD_LABEL));
+        for name in [LABEL, OLD_LABEL, UNIT] {
+            assert!(step.detail.contains(name), "{name}: {}", step.detail);
+        }
+        assert!(service_files(&h).iter().all(|f| !f.exists()));
+        assert!(fake.loaded.borrow().is_empty(), "{:?}", fake.calls.borrow());
     }
 
     #[test]
-    fn migration_0020_reports_a_failed_start_with_the_fix_and_retries_later() {
+    fn removal_leaves_an_old_label_file_playbook_did_not_write_and_names_the_commands() {
         // Arrange
         use crate::service_manager::fake::Launchd;
-        use crate::usage::service::{old_file, LABEL, OLD_LABEL};
-        let h = old_agent_home("label-fail");
-        let refuses = Launchd {
-            fail: Some(LABEL),
-            ..Launchd::with(&[OLD_LABEL])
-        };
-
-        // Act
-        let failed = move_collector_label(&ctx(&h), &refuses);
-        let kept = old_file(&h).is_file();
-        let rolled_back = !crate::usage::service::Kind::Launchd.file(&h).exists()
-            && refuses.has(OLD_LABEL)
-            && !refuses.has(LABEL);
-        let retried = move_collector_label(&ctx(&h), &Launchd::with(&[OLD_LABEL]));
-
-        // Assert
-        let Outcome::Failed(step) = failed else {
-            panic!("a start that fails is a failed migration");
-        };
-        assert!(
-            step.detail.ends_with("to try again, run: playbook migrate"),
-            "{}",
-            step.detail
-        );
-        assert!(kept, "the old agent stays until the new one runs");
-        assert!(rolled_back, "{:?}", refuses.loaded.borrow());
-        assert!(matches!(retried, Outcome::Repeat(_)));
-        assert!(!old_file(&h).exists());
-    }
-
-    #[test]
-    fn migration_0020_names_the_commands_for_a_file_playbook_did_not_write() {
-        use crate::service_manager::fake::Launchd;
-        let h = home("label-foreign");
+        let h = home("remove-foreign");
         let file = crate::usage::service::old_file(&h);
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, "<plist/>").unwrap();
+        let starts = std::cell::Cell::new(0);
 
-        let out = move_collector_label(&ctx(&h), &Launchd::default());
+        // Act
+        let out = remove_collector_service(&ctx(&h), &Launchd::default(), &|| {
+            starts.set(starts.get() + 1)
+        });
 
+        // Assert
         let Outcome::Warn(msg) = out else {
             panic!("a file playbook did not write is only reported");
         };
@@ -2765,88 +2757,160 @@ mod tests {
             "{msg}"
         );
         assert!(file.is_file());
+        assert_eq!(starts.get(), 0, "nothing was stopped, so nothing starts");
     }
 
     #[test]
-    fn migration_0020_in_a_scratch_home_runs_no_launchctl_and_moves_nothing() {
-        use crate::usage::service::{old_file, Kind};
-        if Kind::current() != Some(Kind::Launchd) {
-            return;
+    fn removal_in_a_home_that_is_not_the_account_home_touches_nothing() {
+        // Arrange
+        let h = service_home("remove-refused");
+        let root = playbook_root_from(&h);
+        crate::state::set(&root, crate::init::collector_service::DECLINED_KEY, "1").unwrap();
+
+        // Act
+        let out = collector_service_removed(&ctx(&h));
+
+        // Assert
+        let Outcome::Warn(msg) = out else {
+            panic!("a refused removal is reported");
+        };
+        assert!(
+            msg.contains("did not remove it") && msg.contains("HOME is not the home"),
+            "{msg}"
+        );
+        assert!(service_files(&h).iter().all(|f| f.is_file()));
+        assert!(crate::init::collector_service::declined(&h));
+    }
+
+    #[test]
+    fn removal_deletes_the_answers_the_setup_part_stored() {
+        // Arrange
+        use crate::init::collector_service::{DECLINED_KEY, REMINDED_KEY};
+        use crate::service_manager::fake::Launchd;
+        let h = service_home("remove-keys");
+        let root = playbook_root_from(&h);
+        for key in [DECLINED_KEY, REMINDED_KEY] {
+            crate::state::set(&root, key, "1").unwrap();
         }
-        let h = old_agent_home("label-scratch");
-        // Until its release fills in `since`, the heal skips this entry, so
-        // run it on its own the way a heal would.
-        let entry: Vec<Migration> = registry()
-            .into_iter()
-            .filter(|m| m.id == COLLECTOR_LABEL_MIGRATION)
-            .collect();
 
-        let report = run_with(&entry, &ctx(&h));
+        // Act
+        remove_collector_service(&ctx(&h), &Launchd::default(), &|| {});
 
-        assert!(
-            !report.failed,
-            "{:?}",
-            report.steps.iter().map(|s| &s.detail).collect::<Vec<_>>()
-        );
-        assert!(
-            report
-                .warnings
-                .iter()
-                .any(|w| w.starts_with(COLLECTOR_LABEL_MIGRATION) && w.contains("did not move it")),
-            "{:?}",
-            report.warnings
-        );
-        assert!(old_file(&h).is_file());
-        assert!(!Kind::Launchd.file(&h).exists());
+        // Assert
+        for key in [DECLINED_KEY, REMINDED_KEY] {
+            let rows = crate::state::list_read_only(&root, key).unwrap();
+            assert!(rows.is_empty(), "{key}: {rows:?}");
+        }
     }
 
     #[test]
-    fn migration_0020_leaves_a_machine_that_already_has_the_new_label_alone() {
+    fn removal_starts_a_collector_once_and_a_second_run_finds_nothing() {
+        // Arrange: the heal can cut a run short, so the next one reruns it.
         use crate::service_manager::fake::Launchd;
-        use crate::usage::service::{log_path, render, Kind, LABEL};
-        let h = home("label-new-only");
-        let file = Kind::Launchd.file(&h);
-        fs::create_dir_all(file.parent().unwrap()).unwrap();
-        let body = render(
-            Kind::Launchd,
-            Path::new("/opt/homebrew/bin/playbook"),
-            &log_path(&h),
+        use crate::usage::service::{LABEL, OLD_LABEL};
+        let h = service_home("remove-twice");
+        let fake = Launchd::with(&[LABEL, OLD_LABEL]);
+        let starts = std::cell::Cell::new(0);
+        let start = || starts.set(starts.get() + 1);
+
+        // Act
+        let first = remove_collector_service(&ctx(&h), &fake, &start);
+        let calls_after_first = fake.calls.borrow().len();
+        let second = remove_collector_service(&ctx(&h), &fake, &start);
+
+        // Assert
+        assert!(matches!(first, Outcome::Repeat(_)));
+        assert!(matches!(second, Outcome::Quiet));
+        assert_eq!(starts.get(), 1);
+        assert_eq!(
+            fake.calls.borrow().len(),
+            calls_after_first,
+            "the second run runs nothing"
         );
-        fs::write(&file, &body).unwrap();
+        assert!(service_files(&h).iter().all(|f| !f.exists()));
+    }
+
+    /// The number 0.37.0 gave the retired service reminder.
+    const RETIRED_COLLECTOR_SERVICE_LEGACY_ID: &str = "0016-collector-service";
+
+    #[test]
+    fn removal_that_fails_part_way_still_starts_a_collector() {
+        // Arrange: a directory where the unit file is, so its delete fails
+        // after the launchd agent was booted out.
+        use crate::service_manager::fake::Launchd;
+        use crate::usage::service::{Kind, LABEL};
+        let h = service_home("remove-fails");
+        let unit = Kind::Systemd.file(&h);
+        fs::remove_file(&unit).unwrap();
+        fs::create_dir(&unit).unwrap();
         let fake = Launchd::with(&[LABEL]);
+        let starts = std::cell::Cell::new(0);
 
-        let out = move_collector_label(&ctx(&h), &fake);
+        // Act
+        let out = remove_collector_service(&ctx(&h), &fake, &|| starts.set(starts.get() + 1));
 
-        assert!(matches!(out, Outcome::Quiet));
-        assert!(fake.calls.borrow().is_empty(), "nothing runs");
-        assert_eq!(fs::read_to_string(&file).unwrap(), body);
-        assert!(fake.has(LABEL));
+        // Assert
+        let Outcome::Failed(step) = out else {
+            panic!("a failed delete is reported as a failure");
+        };
+        assert!(step.detail.contains("playbook migrate"), "{}", step.detail);
+        assert!(!fake.has(LABEL), "{:?}", fake.calls.borrow());
+        assert_eq!(starts.get(), 1, "the stopped collector is started again");
     }
 
     #[test]
-    fn migration_0020_names_the_log_and_kickstart_when_the_collector_is_not_up() {
+    fn removal_with_a_foreign_old_label_file_removes_the_rest_and_keeps_it() {
+        // Arrange: every service file, with an old-label agent playbook did
+        // not write.
         use crate::service_manager::fake::Launchd;
-        use crate::usage::service::{log_path, LABEL, OLD_LABEL};
-        let h = old_agent_home("label-down");
-        let waits = Launchd {
-            waiting: vec![LABEL],
-            ..Launchd::with(&[OLD_LABEL])
-        };
+        use crate::usage::service::{old_file, Kind, LABEL};
+        let h = service_home("remove-mixed");
+        let foreign = old_file(&h);
+        fs::write(&foreign, "<plist/>").unwrap();
+        let fake = Launchd::with(&[LABEL]);
+        let starts = std::cell::Cell::new(0);
 
-        let out = move_collector_label(&ctx(&h), &waits);
+        // Act
+        let out = remove_collector_service(&ctx(&h), &fake, &|| starts.set(starts.get() + 1));
 
-        let Outcome::Failed(step) = out else {
-            panic!("a collector that is not up is a failed migration");
+        // Assert
+        let Outcome::Repeat(step) = out else {
+            panic!("a removal is reported and runs again next time");
         };
         assert!(
-            step.detail.contains(&log_path(&h).display().to_string()),
+            step.detail.contains("launchctl bootout gui/") && step.detail.contains("rm "),
             "{}",
             step.detail
         );
-        assert!(
-            step.detail.contains("launchctl kickstart -k gui/") && step.detail.contains(LABEL),
-            "{}",
-            step.detail
-        );
+        assert_eq!(starts.get(), 1);
+        assert!(foreign.is_file());
+        assert!(!Kind::Launchd.file(&h).exists() && !Kind::Systemd.file(&h).exists());
+    }
+
+    #[test]
+    fn a_record_with_rows_under_both_retired_collector_slugs_still_loads() {
+        // Arrange: a 0.38.0 record with both retired items applied, the
+        // service reminder under its 0.37.0 number too.
+        let h = home("retired-collector");
+        let retired = [
+            RETIRED_COLLECTOR_SERVICE_MIGRATION,
+            RETIRED_COLLECTOR_LABEL_MIGRATION,
+        ];
+        let mut rows: Vec<String> = retired.iter().map(|id| format!("applied {id}")).collect();
+        rows.push(format!("applied {RETIRED_COLLECTOR_SERVICE_LEGACY_ID}"));
+        write_state(&h, &rows).unwrap();
+
+        // Act
+        let report = run_owned(&ctx(&h), 0, None);
+        let plan = plan(&ctx(&h)).expect("the record reads");
+        let open = open_items(&ctx(&h), None);
+
+        // Assert
+        assert!(!report.failed, "{:?}", report.warnings);
+        assert!(registry().iter().all(|m| !RETIRED_IDS.contains(&m.id)));
+        for id in retired {
+            assert!(plan.iter().all(|p| p.id != id), "{id} is planned");
+            assert!(open.iter().all(|i| i.id != id), "{id} is open");
+        }
     }
 }
