@@ -804,6 +804,18 @@ mod precompact_warn {
     }
 
     #[test]
+    fn a_session_id_of_only_control_characters_does_not_log() {
+        // Arrange
+        let home = scratch_home("pcw-blank-sid");
+
+        // Act
+        run_hook("precompact-warn", &home, r#"{"session_id":"\n\t"}"#);
+
+        // Assert
+        assert!(!compactions_log(&home).exists());
+    }
+
+    #[test]
     fn two_sessions_in_the_same_second_both_log() {
         // Arrange
         let home = scratch_home("pcw-two-sessions");
@@ -821,8 +833,8 @@ mod precompact_warn {
     fn log_is_capped_at_2000_lines() {
         // Arrange: 2100 distinguishable, numbered lines, so the surviving
         // window can be checked for content, not just count. A mutation
-        // that kept the oldest 500 lines instead of the newest 500 would
-        // still pass a bare `line_count <= 500` check, so this also pins
+        // that kept the oldest 2000 lines instead of the newest 2000 would
+        // still pass a bare `line_count <= 2000` check, so this also pins
         // which lines survive and in what order.
         let home = scratch_home("pcw-cap");
         let log = compactions_log(&home);

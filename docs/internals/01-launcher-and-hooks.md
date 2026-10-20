@@ -106,7 +106,7 @@ Set `PLAYBOOK_IGNORE_PLUGIN_DISABLED=1` to run hooks and the status line anyway.
 
 | Hook | Purpose |
 |---|---|
-| `precompact-warn` | Fires when Claude Code is about to auto-compact. Emits a user-visible warning and logs the event to `~/.config/playbook/runtime/compactions.log` (time, session, trigger, project, model, context tokens; see `docs/reference/hooks.md`), since `PreCompact` has no `additionalContext` channel to speak to Claude directly. |
+| `precompact-warn` | Fires when Claude Code is about to compact, auto or manual. Emits a user-visible warning and logs the event to `~/.config/playbook/runtime/compactions.log` (time, session, trigger, project, model, context tokens; see `docs/reference/hooks.md`), since `PreCompact` has no `additionalContext` channel to speak to Claude directly. |
 
 ### Stop / SessionEnd
 

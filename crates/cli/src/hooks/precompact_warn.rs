@@ -50,7 +50,7 @@ const LOCK_RETRY_PAUSE: Duration = Duration::from_millis(10);
 /// not log.
 pub fn run(payload: &Payload) {
     let trigger = payload.field(".trigger");
-    let sid = session_id(payload);
+    let sid = clean_field(&session_id(payload));
 
     if !sid.is_empty() {
         log_compaction(payload, &sid, &trigger);
@@ -123,7 +123,7 @@ fn log_compaction(payload: &Payload, sid: &str, trigger: &str) {
     } else {
         clean_field(trigger)
     };
-    let key = line_key(&ts, &clean_field(sid), &log_trigger);
+    let key = line_key(&ts, sid, &log_trigger);
     let line = build_line(payload, &key);
 
     let log_path = crate::common::paths::runtime_root().join("compactions.log");
@@ -146,7 +146,9 @@ fn log_compaction(payload: &Payload, sid: &str, trigger: &str) {
         }
         let lock_path = PathBuf::from(format!("{log_path_str}.lock"));
         let (acquired, ()) = with_dir_lock(&lock_path, LOCK_ATTEMPTS, LOCK_RETRY_PAUSE, || {
-            if !last_line_starts_with(&log_path, &key) {
+            // Without a timestamp the key cannot tell two events apart.
+            let repeat = !ts.is_empty() && last_line_starts_with(&log_path, &key);
+            if !repeat {
                 append_line_unlocked(&log_path, &line);
             }
             cap_lines(&log_path, LOG_LINE_CAP);
@@ -202,7 +204,13 @@ fn append_line_unlocked(path: &Path, line: &str) {
 fn last_line_starts_with(path: &Path, key: &str) -> bool {
     fs::read_to_string(path)
         .ok()
-        .and_then(|contents| contents.lines().next_back().map(|l| l.starts_with(key)))
+        .and_then(|contents| {
+            contents
+                .lines()
+                .next_back()
+                .and_then(|l| l.strip_prefix(key))
+                .map(|rest| rest.starts_with('\t'))
+        })
         .unwrap_or(false)
 }
 
