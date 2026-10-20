@@ -113,6 +113,13 @@ stopped. When `BOT_APP_CLIENT_ID` or `BOT_APP_PRIVATE_KEY` is not set, the job
 skips the downstream step with a notice, and the summary says to move the tap
 and the marketplace by hand or to run again once the secrets are set.
 
+When `downstream` succeeds, `verify-homebrew-linux` runs `brew tap` and
+`brew install` for `playbook` and `pbtop` on an Ubuntu runner, checks that
+both report the release version, and runs `playbook doctor check` in an empty
+`HOME`. It blocks no other job. A red result fails the run, and running again
+with `version=X.Y.Z` starts it again. A dry run skips it, because nothing is
+published to install.
+
 A dry run plans, shows the diff of the release pull request in the run
 summary, and builds the five targets from `main`. It also shows the tap and
 marketplace diffs, with placeholder checksums for the formulas, and checks the
