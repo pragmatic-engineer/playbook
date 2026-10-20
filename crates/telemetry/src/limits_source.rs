@@ -12,6 +12,7 @@
 //!
 //! Manual limits come from the `usage.budget.*` config keys.
 
+use super::burnup::burnups_for;
 use super::limits::{Burn, CrossState, Crossing, Limit, LimitPeriod, Origin, State, Unit};
 use super::period::Period;
 use super::plan::Account;
@@ -21,6 +22,9 @@ use super::UsageEvent;
 use crate::util::atomic::write_atomic_private;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+
+/// The most days the plain burn-up table prints: a month is at most 31.
+const BURNUP_TABLE_ROWS: usize = 31;
 
 /// A snapshot older than this is shown as stale rather than hidden.
 pub const STALE_SECONDS: i64 = 6 * 3600;
@@ -501,21 +505,13 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
     out
 }
 
-/// The amount Claude Code reports as used next to this machine's estimate for
-/// the UTC month that holds `now`. The figure is the statusline gateway
-/// `spend_limit` when there is one, else the `spend` block of the usage cache.
-/// `None` when neither carries an amount used this month, or the cache is dated
-/// in the future. The inner error says why the two were not compared, so a
-/// figure in another currency or without one is reported and never dropped.
-pub fn compare_billed(
-    s: &Sources,
-    events: &[UsageEvent],
-    now: i64,
-) -> Option<Result<BilledComparison, NotCompared>> {
+/// The figure Claude reports for this UTC month with an amount used: the
+/// statusline gateway amount when it is monthly, else the usage cache. A
+/// gateway figure counts its own period, so only a monthly one is comparable
+/// with the local spend of the month.
+fn billed_figure(s: &Sources, now: i64) -> Option<SpendFigure> {
     let month_start = utc_month_bounds(now).0;
     let usable = |f: &SpendFigure| f.used.is_some() && f.fetched_at >= month_start;
-    // A gateway figure counts its own period, so only a monthly one is
-    // comparable with the local spend of the month.
     let statusline = s
         .snapshot
         .as_ref()
@@ -531,14 +527,41 @@ pub fn compare_billed(
             )
         })
         .filter(usable);
-    let figure = statusline.or_else(|| {
+    statusline.or_else(|| {
         s.account
             .cache
             .as_ref()
             .filter(|c| !c.is_from_the_future(now))
             .and_then(|c| c.billed.clone())
             .filter(usable)
-    })?;
+    })
+}
+
+/// When Claude read the amount used this month and what it was, in dollars,
+/// for the burn-up chart.
+pub fn billed_anchor(s: &Sources, now: i64) -> Option<(i64, f64)> {
+    let f = billed_figure(s, now)?;
+    f.used_usd().map(|used| (f.fetched_at, used))
+}
+
+/// Whether this is the monthly dollar limit the burn-up table follows.
+pub(crate) fn is_monthly_dollars(l: &Limit) -> bool {
+    l.period == LimitPeriod::Monthly && l.unit == Unit::Dollars
+}
+
+/// The amount Claude Code reports as used next to this machine's estimate for
+/// the UTC month that holds `now`. The figure is the statusline gateway
+/// `spend_limit` when there is one, else the `spend` block of the usage cache.
+/// `None` when neither carries an amount used this month, or the cache is dated
+/// in the future. The inner error says why the two were not compared, so a
+/// figure in another currency or without one is reported and never dropped.
+pub fn compare_billed(
+    s: &Sources,
+    events: &[UsageEvent],
+    now: i64,
+) -> Option<Result<BilledComparison, NotCompared>> {
+    let month_start = utc_month_bounds(now).0;
+    let figure = billed_figure(s, now)?;
     // Claude reported the amount at `fetched_at`, so only the local spend up
     // to then is comparable.
     let until = now.min(figure.fetched_at);
@@ -603,6 +626,7 @@ pub fn burn_pair(events: &[UsageEvent], period: Period, now: i64) -> (Burn, Burn
 pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart) -> Value {
     let snapshot = s.snapshot.as_ref();
     let limits = all_limits(s, events, now, week);
+    let burnups = burnups_for(s, &limits, events, &[], now);
     let burn: serde_json::Map<String, Value> = [Period::Today, Period::Week(week), Period::Month]
         .into_iter()
         .map(|p| {
@@ -628,7 +652,13 @@ pub fn report_json(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart
             "age_seconds": c.age(now),
             "fresh": c.is_fresh(now),
         })),
-        "limits": limits.iter().map(|l| l.to_json(now)).collect::<Vec<_>>(),
+        "limits": limits.iter().zip(burnups).map(|(l, b)| {
+            let mut v = l.to_json(now);
+            if let (Some(map), Some(b)) = (v.as_object_mut(), b) {
+                map.insert("series".into(), b.series_json());
+            }
+            v
+        }).collect::<Vec<_>>(),
         "burn": burn,
     })
 }
@@ -733,7 +763,7 @@ fn stamp(at: i64) -> String {
 }
 
 /// One threshold as a phrase.
-fn crossing_text(c: &Crossing) -> String {
+pub(crate) fn crossing_text(c: &Crossing) -> String {
     let pct = c.pct;
     match c.state {
         CrossState::Crossed { at } => format!("{pct}% crossed about {}", stamp(at)),
@@ -856,6 +886,17 @@ pub fn summary_section(s: &Sources, events: &[UsageEvent], now: i64, week: WeekS
     }
     for line in limit_lines(s, &limits, events, now) {
         out.push_str(&format!("  {line}\n"));
+    }
+    let burnups = burnups_for(s, &limits, events, &[], now);
+    if let Some(b) = limits
+        .iter()
+        .zip(burnups)
+        .find_map(|(l, b)| b.filter(|_| is_monthly_dollars(l)))
+    {
+        out.push_str("  burn-up, cumulative spend this period\n");
+        for line in b.table(BURNUP_TABLE_ROWS) {
+            out.push_str(&format!("    {line}\n"));
+        }
     }
     for p in [Period::Today, Period::Week(week), Period::Month] {
         let (c, v) = burn_pair(events, p, now);
@@ -1957,5 +1998,88 @@ mod tests {
         for l in limits {
             assert_eq!(l["thresholds"].as_array().unwrap().len(), 3);
         }
+    }
+
+    /// 2027-01-01 00:00 UTC, the month that holds NOW.
+    const MONTH_START: i64 = 1_798_761_600;
+
+    #[test]
+    fn the_summary_prints_the_burn_up_table_for_a_monthly_dollar_limit_only() {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let with = Sources {
+            budgets: vec![(LimitPeriod::Monthly, 100.0)],
+            ..Sources::default()
+        };
+        let weekly = Sources {
+            budgets: vec![(LimitPeriod::Weekly, 100.0)],
+            ..Sources::default()
+        };
+        let window = Sources {
+            snapshot: Some(window_snapshot(3600)),
+            ..Sources::default()
+        };
+        let events = [
+            cost(MONTH_START + 10, 25.0),
+            cost(MONTH_START + 3 * 86_400, 25.0),
+        ];
+
+        let text = summary_section(&with, &events, NOW, WeekStart::Monday);
+        let other = summary_section(&weekly, &events, NOW, WeekStart::Monday);
+        let win = summary_section(&window, &events, NOW, WeekStart::Monday);
+
+        assert!(
+            text.contains("  burn-up, cumulative spend this period\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("    2027-01-01        $25.00     25.0%\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("    2027-01-04        $50.00     50.0%\n"),
+            "{text}"
+        );
+        assert!(!other.contains("burn-up"), "{other}");
+        assert!(!win.contains("burn-up"), "{win}");
+    }
+
+    #[test]
+    fn the_json_gives_every_limit_a_series_by_its_unit() {
+        crate::tz::set(crate::tz::Zone::Utc);
+        let s = Sources {
+            snapshot: Some(window_snapshot(3600)),
+            budgets: vec![(LimitPeriod::Monthly, 100.0), (LimitPeriod::Weekly, 40.0)],
+            ..Sources::default()
+        };
+        let events = [cost(MONTH_START + 10, 25.0)];
+
+        let v = report_json(&s, &events, NOW, WeekStart::Monday);
+
+        let limits = v["limits"].as_array().unwrap();
+        let by = |period: &str| limits.iter().find(|l| l["period"] == period).unwrap();
+        let monthly = by("monthly");
+        assert_eq!(monthly["series"]["basis"], "daily");
+        assert_eq!(monthly["series"]["days"][0]["day"], "2027-01-01");
+        assert_eq!(monthly["series"]["days"][0]["cumulative_usd"], 25.0);
+        assert!(monthly["series"]["projected_end_usd"].is_number());
+        assert!(by("weekly")["series"]["days"].is_array());
+        let window = by("five_hour");
+        assert_eq!(window["series"]["basis"], "line");
+        assert_eq!(window["series"]["points"].as_array().unwrap().len(), 2);
+        assert!(window["series"]["projected_end_percent"].is_number());
+    }
+
+    #[test]
+    fn a_cached_dollar_limit_gets_the_billed_anchor_from_the_cache() {
+        let mut account = cache(60, spend(500.0, Some(120.0)), None);
+        account.cache.as_mut().unwrap().billed =
+            SpendFigure::from_usd(Some(500.0), Some(120.0), NOW - 60);
+        let s = Sources {
+            account,
+            ..Sources::default()
+        };
+
+        assert_eq!(billed_anchor(&s, NOW), Some((NOW - 60, 120.0)));
+        assert_eq!(billed_anchor(&Sources::default(), NOW), None);
     }
 }
