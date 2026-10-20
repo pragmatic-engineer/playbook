@@ -59,6 +59,17 @@ The same formulas work on Linux (x86_64 and arm64, Homebrew on Linux), where the
 
 A Homebrew install updates with `brew upgrade playbook`. On a brew-managed install, `playbook update` stops and tells you to run `brew upgrade playbook`.
 
+### cargo binstall and mise
+
+Both download the release binary, with no compile step:
+
+```bash
+cargo binstall --git https://github.com/pragmatic-engineer/playbook playbook
+mise use github:pragmatic-engineer/playbook
+```
+
+Use `--git`. A plain `cargo binstall playbook` installs a different project, because that name on crates.io is not ours. Each release installs itself both ways in a clean environment and checks the file against `SHA256SUMS` and its build attestation.
+
 ### Telemetry
 
 `playbook setup` asks whether to send Claude Code telemetry to a collector on your own machine, and the answer defaults to yes. It writes eight OpenTelemetry variables into the `env` block of `~/.claude/settings.json`, so plain `claude`, the IDE and the desktop app feed `playbook usage`. Prompt text and tool content are never sent. Nothing leaves your machine: the collector listens on 127.0.0.1 only, and playbook's `session-init` hook (part of the hooks you install with setup) starts it when a session begins. Without those hooks, start it with `playbook usage collect`, or let `playbook cc` do it.

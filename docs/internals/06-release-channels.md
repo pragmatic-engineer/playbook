@@ -205,3 +205,19 @@ no release of its own. `playbook-telemetry` uses the workspace version, and its
 | pbtop | `pbtop-<version>-<target>.tar.gz` holding `pbtop` alone |
 
 Every release also carries `release-notes.json` and `SHA256SUMS`. The Homebrew tap maps each formula to its asset.
+
+`cargo binstall` and mise install the raw `playbook-<version>-<target>` binary
+and depend on that name. `[package.metadata.binstall]` in `crates/cli/Cargo.toml`
+holds the URL template, and mise needs nothing, since it matches the operating
+system and architecture words in the asset name. `scripts/asset-names.test.sh`
+expands the template for every target of the build matrix and fails when it
+differs from the name `release.yml` gives the asset. After `verify`, the
+`verify-installers` job runs `scripts/verify-installers.sh`: pinned cargo-binstall
+and mise install the published release in an empty `HOME`, `cargo binstall` may
+not compile, and the installed file must report the version, match its
+`SHA256SUMS` line and verify against its attestation. It blocks no other
+channel, a red result fails the run, and a run with the same version starts it
+again. A dry run installs the last released version instead, which checks the
+job and its egress list without publishing anything. The crates.io name
+`playbook` belongs to another project, so the documented command uses `--git`
+and the metadata disables the quick-install strategy.

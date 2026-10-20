@@ -7,6 +7,17 @@ version.workspace = true
 edition.workspace = true
 description = "Claude Code plugin toolkit: hooks, launcher and installer in one binary"
 license.workspace = true
+repository = "https://github.com/pragmatic-engineer/playbook"
+
+# cargo binstall downloads the raw release binary. The name must match the
+# asset that release.yml uploads, and scripts/asset-names.test.sh fails when
+# they differ. { target } is the Rust target triple of the leg that built it.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/playbook-{ version }-{ target }{ binary-ext }"
+pkg-fmt = "bin"
+# The name `playbook` on crates.io belongs to another project, so a download
+# from the quick-install service by crate name could be that project's binary.
+disabled-strategies = ["quick-install"]
 
 [dependencies]
 clap = { version = "=4.6.7", features = ["derive"] }
