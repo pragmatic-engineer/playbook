@@ -92,7 +92,7 @@ pub fn run(payload: &Payload) {
         clear_auto_state(&dir);
     }
     clear_statusline_cache();
-    ensure_telemetry_collector(&home);
+    ensure_telemetry_collector();
     // Headless runs (CI, `claude -p`) have no stale worktrees, no person to nudge,
     // and no handoff to consume: they get the tool map and the auto mode note,
     // and memory only when it is opted in.
@@ -142,14 +142,12 @@ fn heal_line(home: &str) -> Option<String> {
 }
 
 /// Starts the telemetry collector when Claude Code's settings point at it and
-/// it is not running, so plain `claude` sessions reach it. It waits a short,
-/// fixed time at most and never fails the hook: any panic or error is dropped,
-/// and the collector writes its own messages to `collector.log`.
-fn ensure_telemetry_collector(home: &str) {
-    let home = std::path::PathBuf::from(home);
-    let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
+/// none runs at this version, so plain `claude` sessions reach it. It waits a
+/// short, fixed time at most and never fails the hook: any panic or error is
+/// dropped, and the collector writes its own messages to `collector.log`.
+fn ensure_telemetry_collector() {
     let _ = std::panic::catch_unwind(|| {
-        crate::cc::telemetry::ensure_collector_for_session(&home, &cwd)
+        crate::cc::telemetry::ensure_for(crate::cc::telemetry::Trigger::SessionStart)
     });
 }
 
