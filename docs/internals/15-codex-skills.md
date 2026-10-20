@@ -2,7 +2,7 @@
 
 `playbook skills sync` copies the playbook skills and commands into the skill folder Codex reads. The code is in `crates/cli/src/skills_sync/`. The reasoning for multi-agent support is in [ADR 0015](../adr/0015-multi-agent-support.md).
 
-Status: this change ships only the planner and the renderer. The apply step and the `playbook skills sync` command come in later changes.
+Status: shipped for Codex. The planner and renderer, the apply step, the `playbook skills sync` command, the refresh at upgrade time and the uninstall step all exist.
 
 ## Where the copies go
 

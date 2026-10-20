@@ -18,7 +18,10 @@ use std::path::Path;
 const BINARY_KEY: &str = "notices/binary";
 
 /// The line the detached plugin refresh leaves for the next session.
-const PLUGIN_UPDATE_KEY: &str = "notices/plugin-update";
+pub const PLUGIN_UPDATE_KEY: &str = "notices/plugin-update";
+
+/// The summary the detached skills refresh leaves for the next session.
+pub const SKILLS_SYNC_KEY: &str = "notices/skills-sync";
 
 /// The key of ADR 0035 plugin notices, which nothing reads now. The first
 /// move clears it.
@@ -103,27 +106,24 @@ pub fn record(root: &Path, version: &str) {
     let _ = crate::state::set(root, BINARY_KEY, version);
 }
 
-/// Keeps the outcome line of a detached plugin refresh until a session
+/// Keeps the outcome line of a detached refresh under `key` until a session
 /// shows it. Best effort.
-pub fn store_notice(root: &Path, line: &str) {
-    let _ = crate::state::set(root, PLUGIN_UPDATE_KEY, line);
+pub fn store_notice(root: &Path, key: &str, line: &str) {
+    let _ = crate::state::set(root, key, line);
 }
 
-/// Reads and deletes the stored plugin line in one transaction, so two
+/// Reads and deletes the line stored under `key` in one transaction, so two
 /// sessions show it once between them.
-pub fn take_notice(root: &Path) -> Option<String> {
+pub fn take_notice(root: &Path, key: &str) -> Option<String> {
     // Most sessions have none, so look first without taking the write lock.
-    let stored = crate::state::list_read_only(root, PLUGIN_UPDATE_KEY).ok()?;
-    if !stored
-        .iter()
-        .any(|(k, v)| k == PLUGIN_UPDATE_KEY && !v.is_empty())
-    {
+    let stored = crate::state::list_read_only(root, key).ok()?;
+    if !stored.iter().any(|(k, v)| k == key && !v.is_empty()) {
         return None;
     }
     crate::state::transaction(root, |tx| {
-        let line = tx.get(PLUGIN_UPDATE_KEY)?.filter(|v| !v.is_empty());
+        let line = tx.get(key)?.filter(|v| !v.is_empty());
         if line.is_some() {
-            tx.delete(PLUGIN_UPDATE_KEY)?;
+            tx.delete(key)?;
         }
         Ok(line)
     })
@@ -176,11 +176,11 @@ mod tests {
     fn a_stored_notice_is_taken_once() {
         // Arrange
         let root = root("notices-take");
-        store_notice(&root, "plugin: updated x");
+        store_notice(&root, PLUGIN_UPDATE_KEY, "plugin: updated x");
 
         // Act
-        let first = take_notice(&root);
-        let second = take_notice(&root);
+        let first = take_notice(&root, PLUGIN_UPDATE_KEY);
+        let second = take_notice(&root, PLUGIN_UPDATE_KEY);
 
         // Assert
         assert_eq!(first.as_deref(), Some("plugin: updated x"));
