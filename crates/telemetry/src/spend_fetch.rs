@@ -5,7 +5,8 @@
 //! embeds usage supplies the fetcher through the host; this module never
 //! touches a credential or the network itself. It keeps the answer for a short
 //! time in a small file of numbers, so the terminal view and a one-shot report
-//! share one request per window, and a failure is remembered for longer so a
+//! share one request per window (two programs that find the cache out of date
+//! at the same moment may each ask once), and a failure is remembered for longer so a
 //! bad token cannot cause a retry storm.
 
 use super::config::{DEFAULT_SPEND_CACHE_SECONDS, SPEND_CACHE_SECONDS};
@@ -235,9 +236,7 @@ impl<F: SpendFetcher> CachedFetcher<F> {
         }
         let outcome = catch_unwind(AssertUnwindSafe(|| self.inner.fetch(now)))
             .unwrap_or(Err(Reason::Internal));
-        if outcome != Err(Reason::Internal) {
-            self.store(now, &outcome);
-        }
+        self.store(now, &outcome);
         outcome
     }
 
@@ -359,7 +358,8 @@ mod tests {
 
     const NOW: i64 = 1_788_400_000;
     const TTL: i64 = 60;
-    const FAKE_SECRET: &str = "TEST-SECRET-NOT-A-REAL-TOKEN";
+    const MIN_TTL: i64 = *SPEND_CACHE_SECONDS.start();
+    const MAX_TTL: i64 = *SPEND_CACHE_SECONDS.end();
 
     struct Counting {
         calls: Arc<AtomicUsize>,
@@ -487,7 +487,7 @@ mod tests {
 
         let text = std::fs::read_to_string(dir.join(CACHE_FILE)).unwrap();
 
-        for needle in ["token", "Bearer", "authorization", FAKE_SECRET] {
+        for needle in ["token", "Bearer", "authorization"] {
             assert!(
                 !text.to_lowercase().contains(&needle.to_lowercase()),
                 "{needle}"
@@ -509,10 +509,22 @@ mod tests {
             )
         };
         let cases = [
-            ("future", doc(NOW + 100_000, money(1, 2), "1", "null")),
+            (
+                "future",
+                doc(NOW + CLOCK_SKEW_SECONDS + 1, money(1, 2), "1", "null"),
+            ),
             (
                 "last month",
-                doc(NOW - 40 * 86_400, money(1, 2), "1", "null"),
+                doc(utc_month_start(NOW) - 1, money(1, 2), "1", "null"),
+            ),
+            (
+                "currency",
+                doc(
+                    NOW,
+                    r#"{"minor":1,"decimals":2,"currency":"a b"}"#.to_string(),
+                    "1",
+                    "null",
+                ),
             ),
             ("decimals", doc(NOW, money(1, 99), "1", "null")),
             ("negative", doc(NOW, money(-5, 2), "1", "null")),
@@ -522,6 +534,26 @@ mod tests {
                 doc(NOW, money(1, 2), "1", r#""has spaces and <b>""#),
             ),
             ("garbage", "{not json".to_string()),
+            (
+                "fetching",
+                format!(r#"{{"fetched_at":{NOW},"error":"fetching","figure":null}}"#),
+            ),
+            (
+                "unknown error",
+                format!(r#"{{"fetched_at":{NOW},"error":"nope","figure":null}}"#),
+            ),
+            (
+                "both",
+                doc(NOW, money(1, 2), "1", "null")
+                    .replace(r#""error":null"#, r#""error":"network""#),
+            ),
+            (
+                "window name",
+                doc(NOW, money(1, 2), "1", "null").replace(
+                    r#""windows":[]"#,
+                    r#""windows":[{"name":"a b","used_percentage":1,"resets_at":1}]"#,
+                ),
+            ),
         ];
         for (name, body) in cases {
             std::fs::write(dir.join(CACHE_FILE), body).unwrap();
@@ -536,13 +568,13 @@ mod tests {
     }
 
     #[test]
-    fn a_panicking_fetcher_becomes_internal_and_the_next_call_still_works() {
+    fn a_panicking_fetcher_becomes_internal_and_is_not_asked_again_within_the_window() {
         let dir = scratch("panic");
         let cache = CachedFetcher::new(Panicking, &dir, TTL);
 
         assert_eq!(cache.get(NOW), Err(Reason::Internal));
-        assert_eq!(cache.get(NOW + 1), Err(Reason::Internal));
-        assert!(!dir.join(CACHE_FILE).exists(), "a panic is not remembered");
+        assert_eq!(cache.cached(NOW + 1), Some(Err(Reason::Internal)));
+        assert_eq!(cache.cached(NOW + NEGATIVE_SECONDS), None);
     }
 
     #[test]
@@ -728,7 +760,13 @@ mod tests {
         let v = views(&host, &dir, true, &[]);
         views(&host, &dir, true, &[]);
 
-        assert!(v.figure.is_some() && v.unavailable.is_none());
+        assert_eq!(
+            v,
+            Views {
+                figure: Some(figure(NOW)),
+                unavailable: None
+            }
+        );
         assert_eq!(host.calls.load(Ordering::SeqCst), 1);
     }
 
@@ -768,6 +806,85 @@ mod tests {
         let later = views(&host, &dir, false, &[]);
         assert!(later.figure.is_some());
         assert_eq!(host.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_first_screen_shows_an_expired_figure_without_asking() {
+        let dir = scratch("expired");
+        let host = FakeHost::on(Ok(Some(figure(NOW))));
+        views(&host, &dir, true, &[]);
+
+        let later = for_views(
+            &host,
+            &dir,
+            &dir.join(".claude.json"),
+            NOW + 2 * TTL,
+            false,
+            &|_| None,
+        );
+
+        assert!(later.figure.is_some());
+        assert_eq!(host.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn the_cache_seconds_setting_is_used_in_range_and_ignored_out_of_range() {
+        let ask_again_after = |setting: i64| {
+            let dir = scratch(&format!("ttl-{setting}"));
+            let mut host = FakeHost::on(Ok(None));
+            host.config = serde_json::json!({
+                "usage.spend.enabled": true,
+                "usage.spend.cacheSeconds": setting,
+            });
+            let claude = dir.join(".claude.json");
+            let calls = |at: i64| {
+                for_views(&host, &dir, &claude, at, true, &|_| None);
+                host.calls.load(Ordering::SeqCst)
+            };
+            calls(NOW);
+            (1..=MAX_TTL).find(|s| calls(NOW + s) > 1).unwrap_or(0)
+        };
+
+        assert_eq!(ask_again_after(MIN_TTL), MIN_TTL);
+        assert_eq!(ask_again_after(1), DEFAULT_SPEND_CACHE_SECONDS);
+    }
+
+    #[test]
+    fn every_reason_reads_back_from_its_key() {
+        for reason in [
+            Reason::Disabled,
+            Reason::NoConsent,
+            Reason::NoToken,
+            Reason::Unauthorized,
+            Reason::RateLimited,
+            Reason::Timeout,
+            Reason::Schema,
+            Reason::UnsupportedLogin,
+            Reason::Network,
+            Reason::Internal,
+            Reason::Fetching,
+        ] {
+            assert_eq!(Reason::from_key(reason.key()), Some(reason));
+        }
+        assert_eq!(Reason::from_key("nope"), None);
+    }
+
+    #[test]
+    fn an_oauth_account_in_the_config_file_is_a_claude_ai_login() {
+        let dir = scratch("oauth");
+        let write = |name: &str, body: &str| {
+            let path = dir.join(name);
+            std::fs::write(&path, body).unwrap();
+            path
+        };
+
+        assert!(plan::has_oauth_account(&write(
+            "with.json",
+            r#"{"oauthAccount":{"x":1}}"#
+        )));
+        assert!(!plan::has_oauth_account(&write("without.json", "{}")));
+        assert!(!plan::has_oauth_account(&write("bad.json", "{oops")));
+        assert!(!plan::has_oauth_account(&dir.join("absent.json")));
     }
 
     #[test]
