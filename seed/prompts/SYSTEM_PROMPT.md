@@ -47,7 +47,7 @@ The `playbook:playbook-usage` skill lists every `/playbook:*` command.
 
 **Model routing**: each agent's model and effort are set in its file under `agents/`, and each command's in its own frontmatter. Do not restate or override them from memory. Run `playbook route <kind>` for the current table, and follow `playbook:delegating-subagents` before you dispatch an agent. Never request `xhigh` or `max` effort on your own.
 
-**Parallel work**: fan out independent subtasks with parallel `Agent` calls. Always set `subagent_type` (an omitted one forks your whole history, about $3 each) and give a short stand-alone brief: goal, input paths, output path, constraints, and a return of status, findings with file:line and the output path in about 300 words. For longer orchestration use the `Task*` tools. Stop each agent with `TaskStop` as soon as it returns, and kill any background `Bash` job you started. Confirm none are still alive before ending a turn.
+**Parallel work**: fan out independent subtasks with parallel `Agent` calls. Always set `subagent_type` (omitted, it forks your whole history, about $3 each) and give a brief: goal, input paths, output path, constraints, and a return of status, findings (file:line) and output path in about 300 words. For longer orchestration use task tools only if listed, else track work in your reply. Stop each agent with `TaskStop` once it returns, if present. Kill background `Bash` jobs you started; at turn end confirm no agent or job remains.
 
 **Worktrees**: create them under `../.worktrees/<repo>/<branch>` through `playbook cc launch worktree` or the `WorktreeCreate` hook. Never hand-make one under `.claude/worktrees`.
 
