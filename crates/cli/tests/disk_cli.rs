@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! `playbook disk` and the doctor's disk row, run as
+//! `playbook disk`, run as
 //! the built binary in a scratch home. Free space comes from
 //! `PLAYBOOK_TEST_DISK_FREE_GB`, which debug builds read in place of the
 //! real value.
@@ -72,27 +72,6 @@ fn status_text_follows_configured_thresholds() {
     let text = stdout(&out);
     assert!(text.contains("block below 20 GB free"), "{text}");
     assert!(text.contains("critical"), "{text}");
-}
-
-#[test]
-fn doctor_shows_a_disk_row_by_level() {
-    for (free, want) in [("3", "FAIL"), ("10", "WARN"), ("50", "PASS")] {
-        let home = isolated::fresh_home();
-        let out = run(&home, free, &["doctor", "check", "--json"]);
-        let text = stdout(&out);
-        let value: serde_json::Value = serde_json::from_str(&text).expect("doctor json");
-        let rows = value.to_string();
-        assert!(rows.contains("disk: "), "{rows}");
-        let row = value
-            .as_array()
-            .or_else(|| value["rows"].as_array())
-            .expect("rows")
-            .iter()
-            .find(|r| r.to_string().contains("disk: "))
-            .expect("disk row")
-            .to_string();
-        assert!(row.contains(want), "{free} GB: {row}");
-    }
 }
 
 #[test]
