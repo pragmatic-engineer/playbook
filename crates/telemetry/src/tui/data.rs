@@ -7,8 +7,9 @@
 
 use super::theme::SERIES;
 use crate::aggregate::{group_usage, unpriced_models, Dimension, Group};
+use crate::burnup::{burnups_for, spend_only, Burnup};
 use crate::db;
-use crate::limits::{Burn, Limit, Origin, State};
+use crate::limits::{Burn, Limit, LimitPeriod, Origin, State};
 use crate::limits_source::{self, Sources};
 use crate::period::{Comparison, Period};
 use crate::query::{self, LiveView, Range, SessionDay, Totals, WeekStart};
@@ -121,6 +122,27 @@ pub struct LimitsView {
     pub previous: Burn,
     /// Spend of the last 24 hours, all projects, for the recent pace.
     pub recent_cost_24h: f64,
+    /// The burn-up of each limit, in the order of `limits`.
+    pub burnups: Vec<Option<Burnup>>,
+    /// This month's local spend with a projection and no limit, for the
+    /// Burn-up panel when no limit is known.
+    pub spend_only: Option<Burnup>,
+}
+
+impl LimitsView {
+    /// The burn-up the panel draws: the limit that is the most used, or the
+    /// local spend when no limit is known.
+    pub fn charted(&self) -> Option<&Burnup> {
+        self.burnups
+            .iter()
+            .flatten()
+            .filter(|b| b.limit.is_some())
+            .max_by(|a, b| {
+                let share = |x: &Burnup| x.percent_of_limit(x.total).unwrap_or(0.0);
+                share(a).total_cmp(&share(b))
+            })
+            .or(self.spend_only.as_ref())
+    }
 }
 
 impl Default for LimitsView {
@@ -134,6 +156,8 @@ impl Default for LimitsView {
             burn: Burn::new(0.0, 0),
             previous: Burn::new(0.0, 0),
             recent_cost_24h: 0.0,
+            burnups: Vec::new(),
+            spend_only: None,
         }
     }
 }
@@ -168,8 +192,17 @@ impl LimitsView {
             .map(|c| c.age(now));
         let period = Period::of_range(range).unwrap_or(Period::Week(week));
         let (burn, previous) = limits_source::burn_pair(events, period, now);
+        let burnups = burnups_for(sources, &limits, events, &[], now);
+        let spend_only = spend_only(
+            events,
+            LimitPeriod::Monthly.containing(now, week),
+            crate::tz::current(),
+            now,
+        );
         LimitsView {
             limits,
+            burnups,
+            spend_only,
             stale: sources.stale(now),
             cache_age,
             windows_note,

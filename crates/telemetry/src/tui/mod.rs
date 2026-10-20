@@ -7,6 +7,7 @@
 
 pub mod app;
 pub mod budget;
+pub mod burnup;
 pub mod chart;
 pub mod data;
 pub mod editor;

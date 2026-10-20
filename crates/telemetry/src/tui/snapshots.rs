@@ -84,8 +84,13 @@ fn app(theme: Theme) -> App {
 }
 
 fn draw(app: &App, width: u16, height: u16) -> String {
+    draw_with(width, height, |f| render(f, app)).0
+}
+
+/// Draws with `paint` and returns the text and the buffer.
+fn draw_with(width: u16, height: u16, paint: impl FnOnce(&mut ratatui::Frame)) -> (String, Buffer) {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-    terminal.draw(|f| render(f, app)).unwrap();
+    terminal.draw(paint).unwrap();
     let buffer = terminal.backend().buffer().clone();
     let rows: Vec<String> = (0..height)
         .map(|y| {
@@ -93,7 +98,7 @@ fn draw(app: &App, width: u16, height: u16) -> String {
             row.trim_end().to_string()
         })
         .collect();
-    rows.join("\n") + "\n"
+    (rows.join("\n") + "\n", buffer)
 }
 
 fn check(name: &str, actual: &str) {
@@ -947,8 +952,15 @@ fn tabbed(tab: usize) -> App {
 }
 
 #[test]
-fn the_charts_tab_stacks_the_two_charts_at_100x30() {
-    check("tab_charts_100x30", &draw(&tabbed(0), 100, 30));
+fn the_charts_tab_stacks_the_three_charts_at_100x30() {
+    let a = with_limits(
+        tabbed(0),
+        None,
+        &[(LimitPeriod::Monthly, 100.0)],
+        Range::LastDays(30),
+    );
+
+    check("tab_charts_100x30", &draw(&a, 100, 30));
 }
 
 #[test]
@@ -1053,4 +1065,307 @@ fn with_no_limit_and_no_windows_both_panels_say_what_is_missing() {
         2,
         "{text}"
     );
+}
+
+const BURN_START: i64 = 1_788_220_800;
+const BURN_NOW: i64 = BURN_START + 14 * DAY + 3 * 3_600;
+const BURN_DAILY: [f64; 7] = [4.0, 11.0, 26.0, 8.0, 19.0, 3.0, 14.0];
+/// What the server billed, a little under the local estimate.
+const BURN_BILLED: f64 = 100.0;
+
+fn burn_events() -> Vec<UsageEvent> {
+    (0..15_i64)
+        .map(|d| UsageEvent {
+            timestamp: BURN_START + d * DAY + 3_600,
+            cost_usd: BURN_DAILY[(d % 7) as usize],
+            ..UsageEvent::default()
+        })
+        .collect()
+}
+
+/// The burn-up of the fixed fortnight, for one kind of data.
+fn burn_case(kind: &str) -> (crate::burnup::Burnup, Vec<crate::limits::Limit>) {
+    use crate::burnup::{burnup, spend_only, Inputs};
+    use crate::limits::{Limit, Origin, Unit};
+    let end = BURN_START + 30 * DAY;
+    let events = burn_events();
+    let total: f64 = events.iter().map(|e| e.cost_usd).sum();
+    let limit = match kind {
+        "nolimit" => None,
+        "exceeded" => Some(120.0),
+        _ => Some(300.0),
+    };
+    let mut limits: Vec<Limit> = limit
+        .map(|l| Limit {
+            unit: Unit::Dollars,
+            period: LimitPeriod::Monthly,
+            origin: Origin::Manual,
+            used: total,
+            limit: l,
+            start: BURN_START,
+            end,
+        })
+        .into_iter()
+        .collect();
+    if kind == "windows" {
+        let window = |period, used| Limit {
+            unit: Unit::Percent,
+            period,
+            origin: Origin::Measured,
+            used,
+            limit: 100.0,
+            start: BURN_NOW - 3_600,
+            end: BURN_NOW + 3_600,
+        };
+        limits.push(window(LimitPeriod::FiveHour, 50.0));
+        limits.push(window(LimitPeriod::SevenDay, 30.0));
+    }
+    let billed = (kind == "limit").then_some((BURN_NOW - 600, BURN_BILLED));
+    let b = match limits.first() {
+        Some(l) => burnup(
+            l,
+            crate::tz::Zone::Utc,
+            Inputs {
+                events: &events,
+                readings: &[],
+                billed,
+                now: BURN_NOW,
+            },
+        )
+        .unwrap(),
+        None => spend_only(&events, (BURN_START, end), crate::tz::Zone::Utc, BURN_NOW).unwrap(),
+    };
+    (b, limits)
+}
+
+/// A five hour window at 50 percent, read twice, for the percent chart.
+fn window_case() -> (crate::burnup::Burnup, Vec<crate::limits::Limit>) {
+    use crate::burnup::{burnup, Inputs};
+    use crate::limits::{Limit, Origin, Unit};
+    let l = Limit {
+        unit: Unit::Percent,
+        period: LimitPeriod::FiveHour,
+        origin: Origin::Measured,
+        used: 50.0,
+        limit: 100.0,
+        start: BURN_NOW - 3 * 3_600,
+        end: BURN_NOW + 2 * 3_600,
+    };
+    let readings = [(BURN_NOW - 2 * 3_600, 10.0), (BURN_NOW - 3_600, 30.0)];
+    let b = burnup(
+        &l,
+        crate::tz::Zone::Utc,
+        Inputs {
+            events: &[],
+            readings: &readings,
+            billed: None,
+            now: BURN_NOW,
+        },
+    )
+    .unwrap();
+    (b, vec![l])
+}
+
+fn draw_burnup(kind: &str, theme: Theme, w: u16, h: u16) -> (String, Buffer) {
+    crate::tz::set(crate::tz::Zone::Utc);
+    let (b, limits) = burn_case(kind);
+    let pal = theme.palette(ColorDepth::True);
+    draw_with(w, h, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+    })
+}
+
+#[test]
+fn the_burnup_panel_at_three_sizes_in_both_themes_for_each_kind_of_data() {
+    for kind in ["limit", "nolimit"] {
+        for (theme, name) in [(Theme::Standard, "standard"), (Theme::Mono, "mono")] {
+            if kind != "limit" && name == "mono" {
+                continue;
+            }
+            for (w, h) in [(80, 24), (100, 30), (140, 40)] {
+                let (text, _) = draw_burnup(kind, theme, w, h);
+
+                check(&format!("burnup_{kind}_{name}_{w}x{h}"), &text);
+            }
+        }
+    }
+}
+
+#[test]
+fn the_burnup_panel_shows_the_windows_and_the_exceeded_limit() {
+    let (windows, _) = draw_burnup("windows", Theme::Standard, 140, 40);
+    let (exceeded, _) = draw_burnup("exceeded", Theme::Standard, 100, 30);
+
+    assert!(windows.contains("5 hour window 50%"), "{windows}");
+    assert!(windows.contains("weekly window 30%"), "{windows}");
+    assert!(exceeded.contains("50% 09-"), "{exceeded}");
+    check("burnup_windows_standard_140x40", &windows);
+    check("burnup_exceeded_standard_100x30", &exceeded);
+}
+
+#[test]
+fn the_burnup_chart_names_every_line_and_marks_the_crossings() {
+    let (text, _) = draw_burnup("limit", Theme::Standard, 100, 30);
+
+    let legend = text
+        .lines()
+        .find(|l| l.contains("spent"))
+        .unwrap_or_default();
+    for part in [
+        "\u{2588} spent",
+        "\u{00b7} projected",
+        "\u{2501} limit",
+        "\u{2508} 80%",
+        "\u{2504} 50%",
+        "\u{25b2} crossing",
+        "\u{25c6} reported by Claude",
+    ] {
+        assert!(legend.contains(part), "{part}\n{text}");
+    }
+    for glyph in [
+        '\u{2588}', '\u{00b7}', '\u{2501}', '\u{25c6}', '\u{25b2}', '\u{2504}', '\u{2508}',
+    ] {
+        let rows: Vec<&str> = text.lines().collect();
+        let legend_at = rows.iter().position(|l| l.contains("spent")).unwrap_or(0);
+        assert!(
+            rows[..legend_at.saturating_sub(2)]
+                .iter()
+                .any(|l| l.contains(glyph)),
+            "{glyph} is not drawn in the plot\n{text}"
+        );
+    }
+    assert!(
+        text.contains("100% beyond") || text.contains("100% ~"),
+        "{text}"
+    );
+}
+
+#[test]
+fn mono_carries_every_burnup_line_without_color() {
+    let (mono, buf) = draw_burnup("limit", Theme::Mono, 100, 30);
+    let (standard, _) = draw_burnup("limit", Theme::Standard, 100, 30);
+
+    assert_eq!(mono, standard);
+    assert!(buf.content().iter().all(|c| c.fg == Color::Reset));
+}
+
+#[test]
+fn a_panel_under_forty_columns_shows_the_table() {
+    let (text, _) = draw_burnup("limit", Theme::Mono, 30, 24);
+
+    assert!(text.contains("date"), "{text}");
+    assert!(text.contains("cumulative"), "{text}");
+    assert!(!text.contains('\u{2588}'), "{text}");
+    check("burnup_limit_mono_30x24", &text);
+}
+
+#[test]
+fn before_the_period_starts_the_panel_says_so() {
+    crate::tz::set(crate::tz::Zone::Utc);
+    let b = crate::burnup::spend_only(
+        &[],
+        (BURN_NOW + DAY, BURN_NOW + 31 * DAY),
+        crate::tz::Zone::Utc,
+        BURN_NOW,
+    )
+    .unwrap();
+    let pal = Theme::Mono.palette(ColorDepth::True);
+
+    let (text, _) = draw_with(80, 12, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &[], &pal);
+    });
+
+    assert!(text.contains("the period has not started"), "{text}");
+}
+
+#[test]
+fn the_charts_tab_draws_the_burnup_beside_the_other_charts_at_140x40() {
+    let a = with_limits(
+        tabbed(0),
+        Some(&plan_snapshot()),
+        &[(LimitPeriod::Monthly, 100.0)],
+        Range::LastDays(30),
+    );
+
+    let text = draw(&a, 140, 40);
+
+    assert!(text.contains("Burn-up"), "{text}");
+    assert!(text.contains("5 hour window"), "{text}");
+}
+
+#[test]
+fn the_charts_tab_at_the_smallest_screen_shows_the_burnup_table() {
+    let a = with_limits(
+        tabbed(0),
+        None,
+        &[(LimitPeriod::Monthly, 100.0)],
+        Range::LastDays(30),
+    );
+
+    let text = draw(&a, 80, 24);
+
+    assert!(text.contains("Burn-up"), "{text}");
+    check("tab_charts_80x24", &text);
+}
+
+#[test]
+fn the_burnup_dates_follow_the_zone_of_its_days_not_the_global_zone() {
+    crate::tz::set(crate::tz::Zone::Fixed(-3 * 3_600));
+    let (b, limits) = burn_case("limit");
+    let b = crate::burnup::Burnup {
+        zone: crate::tz::Zone::Utc,
+        ..b
+    };
+    let pal = Theme::Mono.palette(ColorDepth::True);
+
+    let (text, _) = draw_with(100, 30, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+    });
+
+    assert!(text.contains("09-01"), "{text}");
+    assert!(!text.contains("08-31"), "{text}");
+    assert!(text.contains("spend this period, UTC"), "{text}");
+}
+
+#[test]
+fn a_percent_window_is_charted_from_its_readings_with_percent_labels() {
+    crate::tz::set(crate::tz::Zone::Utc);
+    let (b, limits) = window_case();
+    let pal = Theme::Standard.palette(ColorDepth::True);
+
+    let (text, _) = draw_with(100, 30, |f| {
+        crate::tui::burnup::render_burnup(f, f.area(), Some(&b), &limits, &pal);
+    });
+
+    assert!(text.contains("5 hour window used, UTC"), "{text}");
+    assert!(text.contains("\u{2588} used"), "{text}");
+    assert!(text.contains("50% 03:00 \u{25b2}  80% ~04:48"), "{text}");
+    assert!(
+        text.lines().nth(1).is_some_and(|l| l.contains("105% ")),
+        "{text}"
+    );
+    assert!(
+        text.contains('\u{2588}') && text.contains('\u{2501}'),
+        "{text}"
+    );
+    check("burnup_window_standard_100x30", &text);
+}
+
+#[test]
+fn the_charted_burnup_is_the_most_used_limit_else_the_spend_alone() {
+    let (low, _) = burn_case("limit");
+    let (high, _) = burn_case("exceeded");
+    let (spend, _) = burn_case("nolimit");
+    let view = crate::tui::data::LimitsView {
+        burnups: vec![Some(low.clone()), Some(high.clone())],
+        spend_only: Some(spend.clone()),
+        ..Default::default()
+    };
+    let none = crate::tui::data::LimitsView {
+        spend_only: Some(spend.clone()),
+        ..Default::default()
+    };
+
+    assert_eq!(view.charted(), Some(&high));
+    assert_eq!(none.charted(), Some(&spend));
 }
