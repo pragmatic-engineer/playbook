@@ -14,6 +14,7 @@
 | `playbook usage status [--json]` | Shows whether the receiver runs, the telemetry row counts and the retention limits. Starts nothing. |
 | `playbook usage prune [--dry-run]` | Deletes telemetry rows past the retention limits. See [Checking and running the collector](#checking-and-running-the-collector). |
 | `playbook usage stop` | Stops the running collector through its authenticated shutdown route, waiting up to 3 seconds before it kills one that does not answer (only after checking the pid is the playbook collector). Prints `stopped` or `not running`. |
+| `playbook usage spend enable\|disable\|status` | Turns the [server spend limit](#server-spend-limit) on or off, or shows its state. `enable` prints a notice and asks first (`--yes` answers it). `status` never reads your login token. |
 | `playbook usage doctor [--raw]` | Lists where `pbtop` can read your limits on this machine: the plan fields and cached usage numbers in the Claude Code config file, the statusline reading and the manual budgets. It prints field names, ages, the plan label, the window percentages and the manual budget amounts, and never an email, name, id, organization or token. `--raw` adds the values of six plan fields and the cached spend limit and amount used, in dollars. Run it on another machine and share the output when the limits look wrong. |
 
 Every command that shows data reads new history first, so you never need to ingest by hand.
@@ -191,19 +192,60 @@ The Budget panel, `--summary` and `--json` (`limits`) show how much of a limit y
 | Claude Pro or Max | The 5 hour and the weekly window: percent used and reset time. | The `rate_limits` object Claude Code passes to the statusline command on stdin ([statusline docs](https://code.claude.com/docs/en/statusline)). The playbook statusline keeps the latest copy in `~/.config/playbook/data/rate_limits.json` (owner only). | `measured` |
 | Behind a Claude apps gateway | The spend limit: percent, reset time and, when the gateway and Claude Code are new enough, dollars used, the dollar limit and the period. | `rate_limits.spend_limit` in the same statusline input. | `measured` |
 | Enterprise, or Claude Code with a cache | The monthly spend limit in dollars and the dollars used, and the two windows when the plan has them. This source is not documented and can change or be missing. | The usage numbers Claude Code caches in its config file (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`): `cachedUsageUtilization.utilization.spend.limit` and `.used` (minor units, dollars only, skipped when `spend.enabled` is false), its `utilization.five_hour` and `utilization.seven_day` windows and `fetchedAtMs`, plus the two rate limit tier names under `oauthAccount` for the plan. Only these fields are read. | `cached`, with how old it is |
+| Claude.ai login, after `playbook usage spend enable` | The monthly spend limit and the amount the server billed, and the two windows when the plan has them. | One call to `https://api.anthropic.com/api/oauth/usage` with your Claude Code login token. See [Server spend limit](#server-spend-limit). | `server`, with how old it is |
 | API organization | Nothing automatic. The organization budget is set in the Console and no documented API reads it. The Admin API needs an organization admin key and returns usage and cost reports, not the limit. | `usage.budget.monthlyUsd` and `usage.budget.weeklyUsd`, set by you. | `manual` |
 | Any account | Your own estimated spend, from the session transcripts. | The usage store. | `local history` |
 
 Two things to know:
 
 - The statusline input has no limit data on an API key account, and a Pro or Max account gets it only after the first response of a session. So the plan windows show up once you have used Claude Code with the playbook statusline (`playbook statusline`) in this setup. Each window can be missing, and Claude Code drops a window after its reset time, so playbook does the same. A reading older than six hours is tagged `stale`.
-- Playbook reads only what Claude Code already passes to a local command and a few plan and usage fields of the Claude Code config file. It calls no endpoint with your login, reads no credential store, keeps no email, name, id or organization in the limits code (the account tag on each event is described under ingest), and writes nothing into Claude Code settings or memory. The stored file holds percentages, reset times and the gateway dollar limit, and no account, token or session id.
+- Playbook reads only what Claude Code already passes to a local command and a few plan and usage fields of the Claude Code config file. Unless you turn on the [server spend limit](#server-spend-limit), it calls no endpoint with your login, reads no credential store, keeps no email, name, id or organization in the limits code (the account tag on each event is described under ingest), and writes nothing into Claude Code settings or memory. The stored file holds percentages, reset times and the gateway dollar limit, and no account, token or session id.
 
-The monthly limit is picked in this order. A monthly spend limit from the statusline (behind a gateway) comes first, and the cache is not used then. Next a cached spend limit that is under six hours old, because it is what Claude Code enforces. Otherwise `usage.budget.monthlyUsd` wins when set. A cache older than six hours is used only when no budget is set, and then it is tagged `cached, stale` with its age. A cached window is used only while the cache is under six hours old and only when the statusline has no reading for that window. A fresh cached `used` replaces this machine's estimate, because it can cover every machine on the account (it is ignored when it was fetched before the month began), while the "last 24h" pace in the Projection panel always comes from this machine. The cache is read again only when the file changes, and a half written file keeps the last good reading. The period of the cached limit is assumed to be the calendar month.
+The monthly limit is picked in this order. A monthly spend limit from the statusline (behind a gateway) comes first, and the cache is not used then. Next the server figure when it is under six hours old and newer than the Claude Code cache, because it is the amount billed. A figure fetched before the UTC month began is never used. Next a cached spend limit that is under six hours old, because it is what Claude Code enforces. Otherwise `usage.budget.monthlyUsd` wins when set. A cache older than six hours is used only when no budget is set, and then it is tagged `cached, stale` with its age. A cached window is used only while the cache is under six hours old and only when the statusline has no reading for that window. A fresh cached `used` replaces this machine's estimate, because it can cover every machine on the account (it is ignored when it was fetched before the month began), while the "last 24h" pace in the Projection panel always comes from this machine. The cache is read again only when the file changes, and a half written file keeps the last good reading. The period of the cached limit is assumed to be the calendar month.
 
 The plan name comes from the rate limit tier names in the config file. Only the two tiers seen on Max accounts are recognized. Everything else is shown as "Enterprise or unknown plan". When a plan has no 5 hour and weekly windows, the Budget (when it has room) and Projection panels say "5 hour and weekly windows: not available for this plan" and add that Pro and Max get them from the playbook statusline. A plan this version cannot tell from Enterprise, such as Pro, gets the same text. On a Max plan with no reading yet they say a reading appears after a session with the playbook statusline. Run `playbook usage doctor` to see which sources exist on a machine.
 
 A manual budget is the UTC calendar month or week (the week starts on `usage.weekStart`), and the spend is the estimated cost from your local history, which is not your bill. Set it with `playbook config set --global usage.budget.monthlyUsd 200`. `0` means no budget.
+
+### Server spend limit
+
+The numbers above come from files on your machine. Your account also holds a spend limit on Anthropic's server, and the amount the server billed against it can differ from the local estimate, since other machines, other seats and unpriced models count there. Playbook can ask for it. This is off until you turn it on, and the decision is recorded in ADR 0052.
+
+**Risk, in plain words.** The call needs your Claude Code login token, which belongs to another application. The endpoint is undocumented and can change or stop without notice. Anthropic's terms ([Authentication and credential use](https://code.claude.com/docs/en/legal-and-compliance)) restrict collecting or intermediating Claude.ai credentials and make no exception for a local tool that reads its own user's token. Using the token this way may not be permitted, and an account could be restricted or closed. You decide. The feature stays off until you run the command below.
+
+| Question | Answer |
+|---|---|
+| What is called | `GET https://api.anthropic.com/api/oauth/usage` with the header `anthropic-beta: oauth-2025-04-20`. Nothing else is called. |
+| What is read | The access token and its expiry, from the macOS Keychain item `Claude Code-credentials` (through `/usr/bin/security`) or, as the fallback and on Linux, `$CLAUDE_CONFIG_DIR/.credentials.json` or `~/.claude/.credentials.json`. The plan fields of `~/.claude.json` are read as before. Windows is not supported. |
+| What is sent | The token, to that host only, over HTTPS. No redirect is followed and no proxy is used, so behind a proxy the line reads `spend limit unavailable (network)`. Nothing else leaves your machine. |
+| What is kept | The numbers and the time of the fetch, in `usage-spend.json` in the usage data folder (owner only). Never the token. The token is zeroed in memory when the call ends. Copies made by the parser or the HTTP library are freed, not zeroed. |
+| How often | At most once per `usage.spend.cacheSeconds` (60 by default, 30 to 600). A failure is remembered for 5 minutes, or 15 when the server refused the token. |
+| Where it runs | The terminal view's background thread and `--summary` and `--json`. Never hooks, the statusline, `warm`, `collect` or `pbtop`. |
+| When it fails | One line, `spend limit unavailable (<reason>)`, and the exit code stays 0. The reasons are listed under "Where it shows". |
+| macOS prompt | The first read may show a Keychain prompt. Choose Allow, not Always Allow, which may let any script that runs `security` read the item without asking. |
+
+Turn it on with `playbook usage spend enable`. It prints what is read and sent and asks. `--yes` answers for you. Setting `usage.spend.enabled` alone does nothing, so a config file from a repo or another machine cannot turn it on. `playbook usage spend disable` turns it off and removes the acknowledgement and the cached figure. `playbook usage spend status` prints the state, the age of the last result and its reason, and never reads the token.
+
+An `ANTHROPIC_API_KEY`, Bedrock, Vertex or Foundry login has no Claude.ai token, so the token is not read at all. The same holds when `usage.plan` is `api` or `cloud`. Those logins show the local estimate and your own `usage.budget.monthlyUsd`.
+
+#### What you see per plan class
+
+The display follows the fields the server sends, not the plan name. Only the Max 20x reply has been seen. Every other row is `[unverified]`: it describes what the parser accepts, tested on invented examples, not what Anthropic sends.
+
+| Class | Server data source | What is shown | Status | What to set |
+|---|---|---|---|---|
+| Max 20x | The call above | Monthly limit and used, percent, severity, the two windows when sent | observed | nothing |
+| Max 5x | The call above | The windows, and the monthly limit when sent | `[unverified]` | nothing |
+| Pro | The call above | The windows, and the monthly limit when sent | `[unverified]` | `usage.budget.monthlyUsd` if none shows |
+| Free | Probably none | The local estimate | `[unverified]` | `usage.budget.monthlyUsd` |
+| Team standard seat | The call above | Whatever is sent, labelled with its scope | `[unverified]` | `usage.budget.monthlyUsd` if none shows |
+| Team premium seat | The call above | Whatever is sent, labelled with its scope | `[unverified]` | `usage.budget.monthlyUsd` if none shows |
+| Enterprise, seat based | The call above, or the Claude Code cache | Whatever is sent | `[unverified]` | `usage.budget.monthlyUsd` if none shows |
+| Enterprise, usage based | The call above, or the Claude Code cache | Whatever is sent | `[unverified]` | `usage.budget.monthlyUsd` if none shows |
+| API key | None (no token is read) | The local estimate | by design | `usage.budget.monthlyUsd` |
+| Bedrock, Vertex, Foundry | None (no token is read) | The local estimate | by design | `usage.budget.monthlyUsd` |
+
+Set `usage.plan` only to name your plan in the output or to force the local-only view. It never changes which fields are shown. Whether the used amount counts one member or the whole organization is not known, so the output says "as reported by the server" when the reply does not say.
 
 ### The math
 
