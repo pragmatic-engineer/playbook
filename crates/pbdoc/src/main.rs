@@ -12,6 +12,18 @@ use std::{fs, io};
 
 use anydoc::{ConvertError, Format};
 
+mod alloc;
+mod limits;
+mod watchdog;
+
+#[global_allocator]
+static ALLOCATOR: alloc::CountingAllocator = alloc::CountingAllocator;
+
+const DEFAULT_MAX_MEMORY_MB: u64 = 1024;
+const MAX_MEMORY_MB_CLAMP: u64 = 4096;
+const BYTES_PER_MB: u64 = 1 << 20;
+const CONVERT_THREADS: usize = 1;
+
 const EXIT_FAILED: u8 = 1;
 const EXIT_USAGE: u8 = 2;
 const EXIT_NEEDS_OCR: u8 = 3;
@@ -30,7 +42,26 @@ const CONVERTER_VERSION: &str = "anydoc 0.2.4";
 enum Command {
     PrintVersion,
     PrintConverterVersion,
-    Convert { input: String, output: String },
+    Convert {
+        input: String,
+        output: String,
+        limits: Limits,
+    },
+}
+
+/// The per-run resource limits taken from the command line.
+struct Limits {
+    max_input_bytes: u64,
+    max_memory_mb: u64,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_input_bytes: limits::HARD_MAX_INPUT_BYTES,
+            max_memory_mb: DEFAULT_MAX_MEMORY_MB,
+        }
+    }
 }
 
 /// A failure carrying the exit code and the one stderr line to report.
@@ -51,6 +82,24 @@ impl Failure {
         Self {
             code: EXIT_FAILED,
             message: message.into(),
+        }
+    }
+}
+
+impl From<limits::AdmitError> for Failure {
+    fn from(err: limits::AdmitError) -> Self {
+        match err {
+            limits::AdmitError::Unreadable(message) => Self::failed(message),
+            limits::AdmitError::TooLarge(refusal) => refusal.into(),
+        }
+    }
+}
+
+impl From<limits::Refusal> for Failure {
+    fn from(refusal: limits::Refusal) -> Self {
+        Self {
+            code: EXIT_RESOURCE_LIMIT,
+            message: refusal.0,
         }
     }
 }
@@ -83,7 +132,11 @@ fn run(args: impl Iterator<Item = String>) -> Result<(), Failure> {
     match parse_args(args)? {
         Command::PrintVersion => println!("pbdoc {}", env!("CARGO_PKG_VERSION")),
         Command::PrintConverterVersion => println!("{CONVERTER_VERSION}"),
-        Command::Convert { input, output } => convert(&input, &output)?,
+        Command::Convert {
+            input,
+            output,
+            limits,
+        } => convert(&input, &output, &limits)?,
     }
     Ok(())
 }
@@ -91,14 +144,18 @@ fn run(args: impl Iterator<Item = String>) -> Result<(), Failure> {
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Command, Failure> {
     let mut input = None;
     let mut output = None;
+    let mut limits = Limits::default();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             FLAG_VERSION => return Ok(Command::PrintVersion),
             FLAG_CONVERTER_VERSION => return Ok(Command::PrintConverterVersion),
             FLAG_OUTPUT => output = Some(flag_value(&mut args, FLAG_OUTPUT)?),
-            // Accepted so callers can pass them now; the limits are not enforced yet.
-            FLAG_MAX_INPUT_BYTES | FLAG_MAX_MEMORY_MB => {
-                flag_value(&mut args, &arg)?;
+            FLAG_MAX_INPUT_BYTES => {
+                limits.max_input_bytes = number_flag(&mut args, FLAG_MAX_INPUT_BYTES)?;
+            }
+            FLAG_MAX_MEMORY_MB => {
+                limits.max_memory_mb =
+                    number_flag(&mut args, FLAG_MAX_MEMORY_MB)?.min(MAX_MEMORY_MB_CLAMP);
             }
             FLAG_END_OF_FLAGS => {
                 input = Some(
@@ -117,7 +174,11 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Command, Failure
         }
     }
     match (input, output) {
-        (Some(input), Some(output)) => Ok(Command::Convert { input, output }),
+        (Some(input), Some(output)) => Ok(Command::Convert {
+            input,
+            output,
+            limits,
+        }),
         (None, _) => Err(Failure::usage("missing input path")),
         (_, None) => Err(Failure::usage("missing -o output path")),
     }
@@ -128,9 +189,28 @@ fn flag_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<Str
         .ok_or_else(|| Failure::usage(format!("{flag} needs a value")))
 }
 
-fn convert(input: &str, output: &str) -> Result<(), Failure> {
-    let bytes = fs::read(input).map_err(|err| io_failure("cannot read input", &err))?;
-    let markdown = anydoc::to_markdown_bytes(&bytes, Format::from_path(Path::new(input)))?;
+fn number_flag(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<u64, Failure> {
+    flag_value(args, flag)?
+        .parse()
+        .map_err(|_| Failure::usage(format!("{flag} needs a whole number")))
+}
+
+/// Runs the safeguards of ADR 0051 in order, then converts.
+fn convert(input: &str, output: &str, limits: &Limits) -> Result<(), Failure> {
+    let cap_bytes = usize::try_from(limits.max_memory_mb * BYTES_PER_MB).unwrap_or(usize::MAX);
+    watchdog::spawn(cap_bytes).map_err(|_| Failure::failed("cannot start the memory watchdog"))?;
+    alloc::set_heap_cap(cap_bytes);
+    // lopdf parallelises through rayon's global pool, so one thread bounds PDF memory.
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(CONVERT_THREADS)
+        .build_global()
+        .map_err(|_| Failure::failed("cannot start the worker pool"))?;
+
+    let path = Path::new(input);
+    limits::admit(path, limits.max_input_bytes)?;
+    limits::prescan_zip(path)?;
+    let bytes = fs::read(path).map_err(|err| io_failure("cannot read input", &err))?;
+    let markdown = anydoc::to_markdown_bytes(&bytes, Format::from_path(path))?;
     fs::write(output, markdown).map_err(|err| io_failure("cannot write output", &err))
 }
 
