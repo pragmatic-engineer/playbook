@@ -235,7 +235,7 @@ The Projection panel says when each limit is reached if you keep going at your c
 
 ### The burn-up panel
 
-The Burn-up panel is on the Charts tab. It plots the spend of the period so far against a limit that Claude Code reported, with a dotted projection at the current pace, a cutoff line for the limit and lines for 50, 80 and 100 percent, each marked where it is crossed or when it will be. The chart uses the most used limit that has a burn-up. A monthly dollar limit is drawn from the daily cost of this machine, and a window in percent from the readings the statusline saved, with the reported figures marked. With no limit known the panel says so and charts the spend alone. Nothing here is set by hand: the limit and the used figure come from what Claude Code reports. The math is in `crates/telemetry/src/burnup.rs` and the drawing in `crates/telemetry/src/tui/burnup.rs`.
+The Burn-up panel is on the Charts tab. It plots the spend of the period so far against a limit that Claude Code reported, with a dotted projection at the current pace, a cutoff line for the limit and lines for 50, 80 and 100 percent, each marked where it is crossed or when it will be. The chart uses the most used limit that has a burn-up. A monthly dollar limit is drawn from the daily cost of this machine, and a window in percent as a straight line from the start of the window to the figure Claude Code reported. With no limit known the panel says so and charts the spend alone. Nothing here is set by hand: the limit and the used figure come from what Claude Code reports. The math is in `crates/telemetry/src/burnup.rs` and the drawing in `crates/telemetry/src/tui/burnup.rs`.
 
 ### What is not automatic
 

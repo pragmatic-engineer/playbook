@@ -61,7 +61,7 @@ impl PanelId {
             PanelId::Sessions => "every session of the period, grouped by day",
             PanelId::Budget => "limits and how fast you are using them",
             PanelId::Projection => "when each limit is reached at the current pace",
-            PanelId::Burnup => "cumulative spend over the billing period with its limit",
+            PanelId::Burnup => "how much of a limit is used over its period, with a projection",
         }
     }
 

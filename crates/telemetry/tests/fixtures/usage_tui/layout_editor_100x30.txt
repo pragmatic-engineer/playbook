@@ -16,7 +16,7 @@
 │ $0┤▁█▁  ▅│   [ ] sessions   every session of the period, grouped by day               │ ██  █  █ │
 │    5 7  9│   [ ] budget     limits and how fast you are using them                    │ 29  1  3 │
 ╰──────────│   [ ] projection when each limit is reached at the current pace            │■■■ high├─╯
-╭─┤Burn-up├│   [3] burnup     cumulative spend over the billing period with its limit   │iod, UTC├─╮
+╭─┤Burn-up├│   [3] burnup     how much of a limit is used over its period, with a projec│iod, UTC├─╮
 │no burn-up│                                                                            │          │
 │          │ Left/Right tab   j/k line   space add or remove   J/K move panel           │          │
 │          │ < > move tab   n new   x delete   r rename   w save   R reset   esc cancel │          │

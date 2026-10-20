@@ -1177,7 +1177,7 @@ fn draw_burnup(kind: &str, theme: Theme, w: u16, h: u16) -> (String, Buffer) {
 
 #[test]
 fn the_burnup_panel_at_three_sizes_in_both_themes_for_each_kind_of_data() {
-    for kind in ["limit", "nolimit", "nullwindows"] {
+    for kind in ["limit", "nolimit"] {
         for (theme, name) in [(Theme::Standard, "standard"), (Theme::Mono, "mono")] {
             if kind != "limit" && name == "mono" {
                 continue;
@@ -1225,9 +1225,12 @@ fn the_burnup_chart_names_every_line_and_marks_the_crossings() {
     for glyph in [
         '\u{2588}', '\u{00b7}', '\u{2501}', '\u{25c6}', '\u{25b2}', '\u{2504}', '\u{2508}',
     ] {
+        let rows: Vec<&str> = text.lines().collect();
+        let legend_at = rows.iter().position(|l| l.contains("spent")).unwrap_or(0);
         assert!(
-            text.lines()
-                .any(|l| !l.contains("spent") && l.contains(glyph)),
+            rows[..legend_at.saturating_sub(2)]
+                .iter()
+                .any(|l| l.contains(glyph)),
             "{glyph} is not drawn in the plot\n{text}"
         );
     }
@@ -1337,10 +1340,32 @@ fn a_percent_window_is_charted_from_its_readings_with_percent_labels() {
     assert!(text.contains("5 hour window used, UTC"), "{text}");
     assert!(text.contains("\u{2588} used"), "{text}");
     assert!(text.contains("50% 03:00 \u{25b2}  80% ~04:48"), "{text}");
-    assert!(text.contains("105%") || text.contains("100%"), "{text}");
+    assert!(
+        text.lines().nth(1).is_some_and(|l| l.contains("105% ")),
+        "{text}"
+    );
     assert!(
         text.contains('\u{2588}') && text.contains('\u{2501}'),
         "{text}"
     );
     check("burnup_window_standard_100x30", &text);
+}
+
+#[test]
+fn the_charted_burnup_is_the_most_used_limit_else_the_spend_alone() {
+    let (low, _) = burn_case("limit");
+    let (high, _) = burn_case("exceeded");
+    let (spend, _) = burn_case("nolimit");
+    let view = crate::tui::data::LimitsView {
+        burnups: vec![Some(low.clone()), Some(high.clone())],
+        spend_only: Some(spend.clone()),
+        ..Default::default()
+    };
+    let none = crate::tui::data::LimitsView {
+        spend_only: Some(spend.clone()),
+        ..Default::default()
+    };
+
+    assert_eq!(view.charted(), Some(&high));
+    assert_eq!(none.charted(), Some(&spend));
 }

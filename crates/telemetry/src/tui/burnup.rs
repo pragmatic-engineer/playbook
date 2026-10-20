@@ -207,12 +207,13 @@ fn value_at(b: &Burnup, at: i64) -> Option<f64> {
     }
 }
 
-/// `MM-DD` of a second for a period of days, `HH:MM` for a window, in the zone
-/// of the chart.
+/// `MM-DD` of a second for a period of days or a window longer than a day,
+/// `HH:MM` for a window of a day or less, in the zone of the chart.
 fn short(b: &Burnup, at: i64) -> String {
     let iso = b.zone.iso(at);
     match b.unit {
         Unit::Dollars => iso[5..10].to_string(),
+        Unit::Percent if b.end - b.start > 86_400 => iso[5..10].to_string(),
         Unit::Percent => iso[11..16].to_string(),
     }
 }
@@ -243,9 +244,13 @@ fn legend(b: &Burnup) -> String {
     let mut parts = vec![
         format!("{ACTUAL} {used}"),
         format!("{PROJECTION} projected"),
-        format!("{LIMIT_LINE} limit  {NEAR_LINE} 80%  {HALF_LINE} 50%"),
-        format!("{MARKER} crossing"),
     ];
+    if b.limit.is_some() {
+        parts.push(format!(
+            "{LIMIT_LINE} limit  {NEAR_LINE} 80%  {HALF_LINE} 50%"
+        ));
+        parts.push(format!("{MARKER} crossing"));
+    }
     if b.billed.is_some() {
         parts.push(format!("{BILLED} reported by Claude"));
     }
@@ -273,12 +278,11 @@ fn style(pal: &Palette, ink: Ink) -> Style {
 /// including the date axis and the legend.
 fn chart_lines(
     b: &Burnup,
-    limits: &[Limit],
     pal: &Palette,
     width: usize,
     rows: usize,
+    windows: Option<String>,
 ) -> Vec<Line<'static>> {
-    let windows = windows_line(limits);
     let legend_rows = 2 + usize::from(windows.is_some());
     let plot = Plot::new(b, width - GUTTER, rows - 1 - legend_rows);
     let grid = cells(b, &plot);
@@ -358,6 +362,7 @@ pub(super) fn render_burnup(
         );
     let inner = block.inner(area);
     let (width, rows) = (usize::from(inner.width), usize::from(inner.height));
+    let windows = windows_line(limits);
     let lines = match b {
         None => vec![Line::styled("no burn-up yet", style(pal, pal.inactive))],
         Some(b) if b.points.is_empty() => {
@@ -368,9 +373,9 @@ pub(super) fn render_burnup(
         }
         Some(b)
             if inner.width >= MIN_CHART_WIDTH
-                && rows >= MIN_PLOT_ROWS + 4 + usize::from(windows_line(limits).is_some()) =>
+                && rows >= MIN_PLOT_ROWS + 4 + usize::from(windows.is_some()) =>
         {
-            chart_lines(b, limits, pal, width, rows)
+            chart_lines(b, pal, width, rows, windows)
         }
         Some(b) => b
             .table(rows.saturating_sub(TABLE_CHROME).max(1))
