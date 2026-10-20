@@ -351,7 +351,7 @@ const GUARD_SPECS: &[HookSpec] = &[
         matcher: Some("Bash"),
         name: "rm-workspace-guard",
         group: Group::Safety,
-        purpose: "Stops an `rm`, `rmdir`, `unlink` or `shred` whose target is the filesystem root or your home folder, such as `rm -rf /` or `rm -rf ~`, also after `sudo`, `env` or `command` and inside a command chain. Every other path is allowed, and it does not follow `cd`, variables, subshells or `find -delete`. Runs for every Bash command.",
+        purpose: "Stops an `rm`, `rmdir`, `unlink` or `shred` whose target is the filesystem root or your home folder, such as `rm -rf /` or `rm -rf ~`, also after `sudo`, `env` or `command`, inside a command chain, a group or a `bash -c` script. Every other path is allowed, and it does not follow `cd`, variables or `find -delete`. Runs for every Bash command.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
