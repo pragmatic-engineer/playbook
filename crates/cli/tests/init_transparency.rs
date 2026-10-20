@@ -108,6 +108,21 @@ fn a_dry_run_with_the_disk_ballast_names_it_and_writes_no_file() {
 }
 
 #[test]
+fn a_dry_run_with_the_policy_guard_names_the_key_and_stores_nothing() {
+    let sb = Sandbox::new("dry-policy-guard");
+    let before = sb.snapshot();
+
+    let out = sb.run(&["setup", "--dry-run", "--policy-guard"]);
+
+    let text = stdout(&out);
+    assert!(out.status.success(), "{text}");
+    for needle in ["policy-guard (on)", "hooks.policyGuard.enabled"] {
+        assert!(text.contains(needle), "missing `{needle}` in:\n{text}");
+    }
+    assert_eq!(sb.snapshot(), before, "a dry run wrote a file");
+}
+
+#[test]
 fn a_dry_run_names_the_files_and_the_changes_for_each_part() {
     let sb = Sandbox::new("dry-text");
 

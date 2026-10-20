@@ -80,6 +80,7 @@ fn base_paths(home: &Path, system_prompt: bool) -> InitPaths {
         only: false,
         short_name: playbook::init::pb_link::Choice::Skip,
         disk_ballast: false,
+        policy_guard: false,
         pb_target: None,
         attribution: playbook::init::attribution::Choice::Skip,
         path_setup: None,
