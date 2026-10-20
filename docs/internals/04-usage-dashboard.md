@@ -194,8 +194,9 @@ The Budget panel, `--summary` and `--json` (`limits`) show how much of a limit y
 | API organization | Nothing automatic. The organization budget is set in the Console and no documented API reads it. The Admin API needs an organization admin key and returns usage and cost reports, not the limit. | `usage.budget.monthlyUsd` and `usage.budget.weeklyUsd`, set by you. | `manual` |
 | Any account | Your own estimated spend, from the session transcripts. | The usage store. | `local history` |
 
-Two things to know:
+Three things to know:
 
+- A statusline reading that carries one window keeps the other window as it was stored, with its own read time, until that window resets. A reading is stale as soon as one part held is over 6 hours old.
 - The statusline input has no limit data on an API key account, and a Pro or Max account gets it only after the first response of a session. So the plan windows show up once you have used Claude Code with the playbook statusline (`playbook statusline`) in this setup. Each window can be missing, and Claude Code drops a window after its reset time, so playbook does the same. A reading older than six hours is tagged `stale`.
 - Playbook reads only what Claude Code already passes to a local command and a few plan and usage fields of the Claude Code config file. It calls no endpoint with your login, reads no credential store, keeps no email, name, id or organization in the limits code (the account tag on each event is described under ingest), and writes nothing into Claude Code settings or memory. The stored file holds percentages, reset times and the gateway dollar limit, and no account, token or session id.
 
@@ -223,8 +224,8 @@ The panel also shows, for the period on screen (today, this week or this month, 
 ### Where it shows
 
 - Terminal view: the Budget panel sits under the header and needs 36 rows of terminal. On a shorter screen it is left out, and `--summary` and `--json` have the same numbers. It lists at most two limits, worst first, and says how many more `--json` has. With no known limit it says how to set one.
-- `--summary`: a "Limits and burn rate" section.
-- `--json`: `limits` with `known`, `hint` (when nothing is known), `snapshot_captured_at`, `snapshot_stale`, `plan` (`max_5x`, `max_20x` or `enterprise_or_unknown`), `plan_label`, `windows_note` (null when a window is known), `cache` (`fetched_at`, `age_seconds` and `fresh`, or null), `limits` (unit, period, origin (`measured`, `manual` or `cached`), used, limit, start, end, remaining, average and allowed per hour and per day, projected, state and `exceeds_at`) and `burn` for today, week and month, each with the current and previous period.
+- `--summary`: a "Limits and burn rate" section. After the limits it adds the amount Claude reports as used next to the local estimate, with its age and a stale marker once it is over 6 hours old (or why the two were not compared), one `<period> crossings` line per limit with the time each of 50, 80 and 100 percent was or will be crossed, and one line saying why no limit comes from Claude when none does.
+- `--json`: `limits` with `known`, `hint` (when nothing is known), `snapshot_captured_at`, `snapshot_stale`, `plan` (`max_5x`, `max_20x` or `enterprise_or_unknown`), `plan_label`, `windows_note` (null when a window is known), `reason` (why no limit comes from Claude: `no-reading`, `stale`, `cap-unknown` or `windows-reset`, else null), `comparison` (null, `skipped` with the reason, or the amount Claude reports and the local estimate with `delta_usd`, `delta_pct`, `disagrees`, `read_at` and `stale`), `cache` (`fetched_at`, `age_seconds` and `fresh`, or null), `limits` (unit, period, origin (`measured`, `manual` or `cached`), used, limit, start, end, remaining, average and allowed per hour and per day, projected, state, `exceeds_at` and `thresholds`: three entries for 50, 80 and 100 percent with `pct`, `state` (`crossed`, `projected`, `beyond` or `unknown`), `at` for the first two and `period_end` for `beyond`) and `burn` for today, week and month, each with the current and previous period.
 
 The Budget panel ignores the project filter: a limit belongs to the account, not to a repo.
 
