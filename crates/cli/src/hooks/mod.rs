@@ -26,7 +26,7 @@ pub mod preread_edit_check;
 pub mod preread_reread;
 pub mod preread_size_check;
 pub mod rebuild_memory_graph;
-pub mod rm_root_guard;
+pub mod rm_workspace_guard;
 pub mod search_counter;
 pub mod session_clean_exit;
 pub mod session_init;
@@ -52,7 +52,7 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::PrecompactWarn => precompact_warn::run(payload),
         HookName::SessionCleanExit => session_clean_exit::run(payload),
         HookName::MemoryCapture => memory_capture::run(payload),
-        HookName::RmWorkspaceGuard => rm_root_guard::run(payload),
+        HookName::RmWorkspaceGuard => rm_workspace_guard::run(payload),
         HookName::BgAwaitGuard => bg_await_guard::run(payload),
         // Retired: allow, so an old settings entry stays quiet.
         HookName::NoSlopGuard => {}
