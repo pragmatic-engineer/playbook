@@ -1,4 +1,4 @@
-# Dependabot version updates (ADR 0048). This file is bespoke: repo-config
+# Dependabot version updates (ADR 0047). This file is bespoke: repo-config
 # must set `manage_dependabot_config = false` for this repo, or its next
 # `terraform apply` writes its monthly template over this file.
 #

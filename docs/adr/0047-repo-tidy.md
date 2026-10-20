@@ -1,4 +1,4 @@
-# ADR-0048: Tidy the Repo Root, the Settings Seed and the Leftovers
+# ADR-0047: Tidy the Repo Root, the Settings Seed and the Leftovers
 
 - **Status:** Accepted
 - **Date created:** 2026-10-19
@@ -66,7 +66,7 @@ Each item is fixed in the pull request named in decision 6.
 | Item | Where | Fix |
 |---|---|---|
 | Comments about the retired Python generator, shell scripts and Makefile | `settings/gen.rs`, `settings/check.rs`, `manifest/check.rs`, `justfile` header | rewrite to describe the current code (6.2, 6.5) |
-| `docs/index.md` ADR table missed 0045 and 0047 | `docs/index.md` | rows added with this ADR; the table moves to `docs/adr/README.md` (6.6) |
+| `docs/index.md` ADR table missed 0045 and the disk guard ADR (since deleted) | `docs/index.md` | rows added with this ADR; the table moves to `docs/adr/README.md` (6.6) |
 | A guide named after the old `init` command | `docs/guides/06-what-init-installs.md` | rename to `05-what-setup-installs.md` and renumber the guides (6.6) |
 | Guides listed out of order, a config key reference filed as a guide | `docs/index.md`, `docs/guides/04-config-keys.md` | move to `docs/reference/` (6.6) |
 | `docs/policy-table.md` alone at the docs root | `docs/` | move to `docs/reference/` (6.6) |
