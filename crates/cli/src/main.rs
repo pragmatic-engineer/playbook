@@ -43,6 +43,7 @@ fn run_hook(name: playbook::HookName) {
     if !is_worktree && common::plugin_state::paused() {
         return;
     }
+    playbook::cc::telemetry::on_hook(name);
     let payload = Payload::parse(&raw);
     if matches!(name, playbook::HookName::WorktreeCreate) {
         std::process::exit(hooks::worktree_create::execute(&payload));
@@ -99,6 +100,8 @@ fn main() {
     // The first-run step (ADR 0034 decision 13): heal once after an upgrade,
     // before most commands. Hot paths returned above or skip it.
     playbook::heal::on_start(&cli.command);
+    // Starts the collector daemon for most commands, `cc` included.
+    playbook::cc::telemetry::on_start(&cli.command);
 
     update::check::on_start(&cli.command, &args);
 
@@ -702,14 +705,9 @@ fn main() {
         }
         Command::Hooks { sub } => match sub {
             playbook::HooksCommand::List => print!("{}", init::catalog::hooks_list()),
-            playbook::HooksCommand::ExplainRm { command, cwd, json } => {
-                match playbook::hooks::explain_rm(&command, cwd.as_deref(), json) {
-                    Ok(text) => print!("{text}"),
-                    Err(e) => {
-                        eprintln!("playbook hooks explain-rm: {e}");
-                        std::process::exit(2);
-                    }
-                }
+            playbook::HooksCommand::ExplainRm { .. } => {
+                eprintln!("playbook hooks explain-rm was removed: the rm guard now denies only rm of / or your home folder (docs/guides/07-rm-guard.md)");
+                std::process::exit(2);
             }
         },
         Command::Settings { sub } => match sub {
@@ -1409,7 +1407,7 @@ fn main() {
                             std::process::exit(1);
                         }
                     };
-                    let shown = config::write::normalize(&key, value_json.clone()).to_string();
+                    let shown = value_json.to_string();
                     match config::write::set(tier, &key, value_json, &home, repo_slug) {
                         Ok(()) => println!("config set: {key} updated to {shown}"),
                         Err(err) => {
