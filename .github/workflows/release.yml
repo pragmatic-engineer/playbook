@@ -440,13 +440,13 @@ jobs:
             auth.docker.io:443
             azure.archive.ubuntu.com:80
             crates.io:443
-            docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com:443
             fulcio.githubapp.com:443
             fulcio.sigstore.dev:443
             github.com:443
             index.crates.io:443
             objects.githubusercontent.com:443
             ports.ubuntu.com:80
+            production.cloudfront.docker.com:443
             production.cloudflare.docker.com:443
             registry-1.docker.io:443
             rekor.sigstore.dev:443
@@ -764,9 +764,9 @@ jobs:
           allowed-endpoints: >
             api.github.com:443
             auth.docker.io:443
-            docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com:443
             github.com:443
             objects.githubusercontent.com:443
+            production.cloudfront.docker.com:443
             production.cloudflare.docker.com:443
             registry-1.docker.io:443
             release-assets.githubusercontent.com:443
