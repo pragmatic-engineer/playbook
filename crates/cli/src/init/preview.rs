@@ -196,8 +196,6 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         collector_service: crate::init::collector_service::Choice::Skip,
         only: paths.only,
         short_name: paths.short_name,
-        // Previewed below, so the dry run writes no ballast.
-        disk_ballast: false,
         policy_guard: false,
         pb_target: paths.pb_target.clone(),
         attribution: paths.attribution,
@@ -239,7 +237,6 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("telemetry", choices.telemetry),
         ("collector-service", choices.collector_service),
         ("short-name", choices.short_name),
-        ("disk-ballast", choices.disk_ballast),
         ("policy-guard", choices.policy_guard),
         ("attribution", paths.attribution != Attribution::Skip),
     ];
@@ -298,7 +295,6 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
                 &crate::init::collector_service::program(),
             )],
             "short-name" => vec![format!("pb: {short_line}")],
-            "disk-ballast" => vec![ballast_line(&paths.home)],
             "policy-guard" => vec![policy_guard_line(&paths.home)],
             "path" => file_lines(&before_rc, &after_path, &path_step),
             _ => vec![system_prompt_line(paths)],
@@ -331,24 +327,6 @@ fn policy_guard_line(home: &Path) -> String {
     match stored_enabled(home) {
         true => format!("{ENABLED_KEY} is already true"),
         false => format!("stores {ENABLED_KEY} true in ~/.config/playbook"),
-    }
-}
-
-/// What the disk-ballast part would do. Writes nothing.
-fn ballast_line(home: &Path) -> String {
-    use crate::disk::{ballast, size};
-    let file = ballast::file(home);
-    match ballast::size(home) {
-        Some(bytes) => format!(
-            "{}: a {} ballast is already in place",
-            file.display(),
-            size::gb(bytes)
-        ),
-        None => format!(
-            "{}: writes {}, unless that would leave less than disk.warnFreeGb free",
-            file.display(),
-            size::gb(ballast::BALLAST_BYTES)
-        ),
     }
 }
 
