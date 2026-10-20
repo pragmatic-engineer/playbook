@@ -5,7 +5,7 @@
 use crate::command::UsageCommand;
 use crate::entry::{interactive, run, Opts};
 use crate::run::Paths;
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches, Parser};
 
 /// Show token and cost usage across your Claude Code sessions
 ///
@@ -42,8 +42,17 @@ struct Cli {
 }
 
 /// The entry point of `pbtop`.
+/// The command line of `pbtop`. `usage spend` belongs to playbook, which holds
+/// the credential code, so it is hidden here.
+fn command() -> clap::Command {
+    Cli::command().mut_subcommand("spend", |spend| spend.hide(true))
+}
+
 pub fn main() {
-    let cli = Cli::parse();
+    let cli = match Cli::from_arg_matches(&command().get_matches()) {
+        Ok(cli) => cli,
+        Err(e) => e.exit(),
+    };
     let flag = match (cli.utc, cli.local) {
         (true, _) => Some(crate::tz::Zone::Utc),
         (_, true) => Some(crate::tz::Zone::Local),
@@ -66,5 +75,18 @@ pub fn main() {
             eprintln!("pbtop: {err}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pbtop_does_not_list_the_spend_command() {
+        let help = command().render_help().to_string();
+
+        assert!(!help.contains("spend"), "{help}");
+        assert!(help.contains("doctor"));
     }
 }

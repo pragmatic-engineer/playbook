@@ -67,11 +67,19 @@ const ACK_KEY: &str = "usage/spend-ack";
 /// Bumped when the notice changes in a way that needs a new yes.
 const NOTICE_VERSION: &str = "1";
 
-/// Where the token is read from first on this machine.
+/// The first place a token is read from on this platform. The acknowledgement
+/// names it, so a build that reads from somewhere else asks again. It is a
+/// platform tag: the file is still tried when the keychain has no item.
 #[cfg(target_os = "macos")]
 const SOURCE_NAME: &str = "keychain";
 #[cfg(not(target_os = "macos"))]
 const SOURCE_NAME: &str = "file";
+
+/// The sources in the words `status` uses.
+#[cfg(target_os = "macos")]
+const SOURCE_TEXT: &str = "keychain, then the credentials file";
+#[cfg(not(target_os = "macos"))]
+const SOURCE_TEXT: &str = "credentials file";
 
 /// What the user is told before the feature turns on.
 const NOTICE: &str = "playbook will read your Claude Code login token from the macOS Keychain (item 'Claude Code-credentials') or ~/.claude/.credentials.json, and send it at most once per cache window (60 seconds by default) to https://api.anthropic.com/api/oauth/usage to read your spend limit. The token is never printed, logged, stored by playbook or passed to another program. This endpoint is undocumented and may change or stop working. Anthropic's terms may not allow using your login outside Claude Code; see docs/internals/04-usage-dashboard.md. If macOS asks for keychain access, choose Allow, not Always Allow. Turn it off with: playbook usage spend disable.";
@@ -162,6 +170,28 @@ pub trait TokenSource: Send + Sync {
     fn token(&self, now: i64) -> Result<Secret, Reason>;
 }
 
+/// How many times a busy program file is retried, and the pause between tries.
+/// A file that was just written can report ETXTBSY for a moment while a
+/// concurrent fork still holds its write handle.
+const SPAWN_TRIES: u32 = 10;
+const SPAWN_PAUSE: Duration = Duration::from_millis(50);
+
+fn spawn_retrying_busy(command: &mut Command) -> Option<std::process::Child> {
+    for attempt in 0..SPAWN_TRIES {
+        match command.spawn() {
+            Ok(child) => return Some(child),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && attempt + 1 < SPAWN_TRIES =>
+            {
+                std::thread::sleep(SPAWN_PAUSE);
+            }
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
 /// The macOS keychain, through the `security` program.
 pub struct Keychain {
     program: PathBuf,
@@ -180,14 +210,14 @@ impl Keychain {
     /// the item name and nothing else: no shell, an empty environment, no
     /// input, and its errors are discarded.
     fn read(&self) -> Result<String, Reason> {
-        let mut child = Command::new(&self.program)
+        let mut command = Command::new(&self.program);
+        command
             .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"])
             .env_clear()
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|_| Reason::NoToken)?;
+            .stderr(Stdio::null());
+        let mut child = spawn_retrying_busy(&mut command).ok_or(Reason::NoToken)?;
         let stdout = child.stdout.take().ok_or(Reason::NoToken)?;
         let reader = std::thread::spawn(move || {
             let mut bytes = Vec::new();
@@ -267,7 +297,9 @@ impl CredentialsFile {
         use std::os::unix::fs::OpenOptionsExt;
         let file = std::fs::OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
+            // Without O_NONBLOCK, opening a pipe someone put at this path would
+            // wait for a writer for ever.
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(&self.path)
             .map_err(|_| Reason::NoToken)?;
         if !file.metadata().is_ok_and(|m| m.is_file()) {
@@ -536,7 +568,7 @@ fn status(env: &Env) -> String {
         Some((age, Some(reason))) => format!("{}, {age} seconds old", reason.key()),
     };
     format!(
-        "usage.spend.enabled: {}\nacknowledged: {}\ntoken source: {SOURCE_NAME}\nlast result: {cache}",
+        "usage.spend.enabled: {}\nacknowledged: {}\ntoken source: {SOURCE_TEXT}\nlast result: {cache}",
         enabled(env.home),
         if acknowledged(env.home) { "yes" } else { "no" },
     )
@@ -719,11 +751,7 @@ mod tests {
         let seen = other.join().unwrap();
 
         assert_eq!(outcome, Err(Reason::Network));
-        assert!(
-            !seen.contains(FAKE_SECRET),
-            "the second server saw the token"
-        );
-        assert!(!seen.to_lowercase().contains("authorization"), "{seen}");
+        assert_eq!(seen, "", "the second server received bytes");
     }
 
     #[test]
@@ -759,27 +787,42 @@ mod tests {
         let outcome = fetcher.fetch(NOW);
         handle.join().unwrap();
 
-        assert!(matches!(outcome, Err(Reason::Network | Reason::Timeout)));
+        assert_eq!(outcome, Err(Reason::Network));
     }
 
     #[test]
-    fn no_token_means_no_request_and_the_production_fetcher_refuses_plain_http() {
+    fn no_token_means_no_connection() {
         let calls = Arc::new(AtomicUsize::new(0));
         let none = Box::new(Fake {
             calls: calls.clone(),
             answer: Err(Reason::NoToken),
         });
-        let (url, _handle) = serve(response("200 OK", "", OK_BODY));
-        let fetcher = UreqSpendFetcher::loopback(url.clone(), none, Duration::from_millis(500));
-        assert_eq!(fetcher.fetch(NOW), Err(Reason::NoToken));
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!(
+            "http://127.0.0.1:{}/api/oauth/usage",
+            listener.local_addr().unwrap().port()
+        );
+        let fetcher = UreqSpendFetcher::loopback(url, none, Duration::from_millis(500));
 
+        let outcome = fetcher.fetch(NOW);
+
+        assert_eq!(outcome, Err(Reason::NoToken));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let accepted = listener.accept().map(|_| ()).map_err(|e| e.kind());
+        assert_eq!(accepted, Err(std::io::ErrorKind::WouldBlock));
+    }
+
+    #[test]
+    fn the_production_fetcher_refuses_plain_http() {
+        let (url, _handle) = serve(response("200 OK", "", OK_BODY));
         let strict = UreqSpendFetcher {
             url,
             tokens: fake_token(),
             timeout: Duration::from_millis(500),
             local_http: false,
         };
+
         assert_eq!(strict.fetch(NOW), Err(Reason::Network));
     }
 
@@ -791,7 +834,7 @@ mod tests {
             Reason::Timeout,
             Reason::Schema,
         ];
-        for (status, _) in [("401 Unauthorized", 0), ("500 Internal Server Error", 0)] {
+        for status in ["401 Unauthorized", "500 Internal Server Error"] {
             let (outcome, _) = fetch_from(response(status, "", ""));
             let text = format!("{outcome:?}");
             assert!(!text.contains(FAKE_SECRET), "{text}");
@@ -955,6 +998,13 @@ mod tests {
         std::os::unix::fs::symlink(&real, &link).unwrap();
         let linked = CredentialsFile { path: link };
         assert_eq!(linked.token(NOW).err(), Some(Reason::NoToken));
+
+        let huge = dir.join("huge.json");
+        std::fs::write(&huge, vec![b' '; FILE_MAX_BYTES as usize + 1]).unwrap();
+        assert_eq!(
+            CredentialsFile { path: huge }.token(NOW).err(),
+            Some(Reason::NoToken)
+        );
 
         let folder = CredentialsFile { path: dir.clone() };
         assert_eq!(folder.token(NOW).err(), Some(Reason::NoToken));
