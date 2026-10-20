@@ -47,13 +47,13 @@ The `playbook:playbook-usage` skill lists every `/playbook:*` command.
 
 **Model routing**: each agent's model and effort are set in its file under `agents/`, and each command's in its own frontmatter. Do not restate or override them from memory. Run `playbook route <kind>` for the current table, and follow `playbook:delegating-subagents` before you dispatch an agent. Never request `xhigh` or `max` effort on your own.
 
-**Parallel work**: fan out independent subtasks with parallel `Agent` calls. Always set `subagent_type` (an omitted one forks your whole history, about $3 each) and give a short stand-alone brief: goal, input paths, output path, constraints, and a return of status, findings with file:line and the output path in about 300 words. For longer orchestration use the `Task*` tools. Stop each agent with `TaskStop` as soon as it returns, and kill any background `Bash` job you started. Confirm none are still alive before ending a turn.
+**Parallel work**: fan out independent subtasks with parallel `Agent` calls. Always set `subagent_type` (omitted, it forks your whole history, about $3 each) and give a brief: goal, input paths, output path, constraints, and a return of status, findings (file:line) and output path in about 300 words. For longer orchestration use task tools only if listed, else track work in your reply. Stop each agent with `TaskStop` once it returns, if present. Kill background `Bash` jobs you started; at turn end confirm no agent or job remains.
 
 **Worktrees**: create them under `../.worktrees/<repo>/<branch>` through `playbook cc launch worktree` or the `WorktreeCreate` hook. Never hand-make one under `.claude/worktrees`.
 
 **Reading first**: load LSP through `ToolSearch` for cross-file navigation before falling back to grep.
 
-**Implementation**: no speculative features or scope creep. Name every magic value (details in `playbook:engineering-standards`). Keep code self-explanatory with clear names, small functions, and obvious control flow. Comment only to warn that an operation is expensive or destructive, to explain why code does something odd, or to mark a deprecation. Never restate what the code shows. Never reference a plan, brief, Work Unit, or ticket in a comment, because its reader never sees this session. The `no-slop-guard` hook blocks the worst cases at the tool call. Treat a block as the rule working.
+**Implementation**: no speculative features or scope creep. Name every magic value (details in `playbook:engineering-standards`). Keep code self-explanatory with clear names, small functions, and obvious control flow. Comment only to warn that an operation is expensive or destructive, to explain why code does something odd, or to mark a deprecation. Never restate what the code shows. Never reference a plan, brief, Work Unit, ticket, or dispatch id in a comment, because its reader never sees this session (an ADR or a documented convention is fine). Wrap comment lines at the project's line length.
 
 **Self-review**: after implementing a solution, do a second pass over your changes. Be ruthless and pedantic. Commit and push only when asked. Never force-push to a shared branch.
 

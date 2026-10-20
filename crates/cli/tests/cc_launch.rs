@@ -5,14 +5,20 @@
 //! that records its argv, and for the notice the removed `shell-init` prints. They replace the shell launcher
 //! suites that covered `dispatch.sh`, `config-drift.sh` and the bash/zsh parity.
 
+#[path = "support/collector_guard.rs"]
+mod collector_guard;
 #[path = "support/isolated.rs"]
 mod isolated;
 
+use playbook::cc::telemetry::TEST_SPAWN_VAR;
+use playbook::usage::daemon::{lock_state, stamp_path, LockState};
+use playbook::usage::run::Paths;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 const SID: &str = "11111111-2222-3333-4444-555555555555";
@@ -1026,70 +1032,142 @@ fn without_an_override_the_alias_variable_is_not_set() {
     assert_eq!(logged.trim(), "unset");
 }
 
-/// Reads the pid from `collector.json` and stops that process.
-fn stop_collector(state: &Path) {
-    let text = fs::read_to_string(state).unwrap_or_default();
-    let pid = text
-        .split("\"pid\":")
-        .nth(1)
-        .and_then(|t| t.split([',', '}']).next())
-        .unwrap_or("0")
-        .trim()
-        .to_string();
-    if pid != "0" {
-        let _ = Command::new("kill").arg(&pid).status();
+/// How long a collector a test or `cc` started may take to come up.
+const UP_BOUND: Duration = Duration::from_secs(10);
+
+/// Kills any collector in `paths` when the test ends, passing or not.
+struct CollectorGuard(Paths);
+
+impl Drop for CollectorGuard {
+    fn drop(&mut self) {
+        let settled = collector_guard::kill_all(&self.0);
+        if !std::thread::panicking() {
+            assert!(settled, "a collector kept the lock after SIGKILL");
+        }
     }
 }
 
-#[test]
-fn cc_starts_the_collector_once_when_the_usage_db_exists_and_points_the_session_at_it() {
-    let e = env("collector-spawn");
-    let usage = e.home.join(".config/playbook/data");
-    fs::create_dir_all(&usage).unwrap();
-    fs::write(usage.join("usage.db"), "").unwrap();
-    make_exec(
-        &e.root.join("bin/claude"),
-        "#!/bin/sh\nprintf '%s %s\\n' \"$OTEL_EXPORTER_OTLP_ENDPOINT\" \"$OTEL_METRICS_EXPORTER\" >> \"$FAKE_LOG.otel\"\nexit 0\n",
-    );
-    let state = usage.join("collector.json");
-    let first = e.launch(&[]);
-    let second = e.launch(&[]);
-    let seen = fs::read_to_string(e.root.join("claude.log.otel")).unwrap_or_default();
-    let note = String::from_utf8_lossy(&first.stderr).to_string();
-    let again = String::from_utf8_lossy(&second.stderr).to_string();
-    stop_collector(&state);
-    let lines: Vec<&str> = seen.lines().collect();
-    assert_eq!(lines.len(), 2, "{seen}");
-    assert!(
-        lines[0].starts_with("http://127.0.0.1:") && lines[0].ends_with(" otlp"),
-        "seen={seen:?} note={note:?}"
-    );
-    assert_eq!(lines[0], lines[1], "the second session reuses the receiver");
-    assert!(note.contains("started the usage collector"), "{note}");
-    assert!(!again.contains("started the usage collector"), "{again}");
+/// Records a collector on a port that is free now, and returns the port.
+fn record_collector(e: &Env) -> u16 {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let data = e.home.join(".config/playbook/data");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(
+        data.join("collector.json"),
+        format!(r#"{{"pid":0,"port":{port},"token":"t"}}"#),
+    )
+    .unwrap();
+    port
 }
 
-#[test]
-fn cc_starts_no_collector_without_a_usage_db_or_with_telemetry_off() {
-    let e = env("collector-none");
+/// Points the user settings at the collector on `port`, as `setup` does.
+fn point_settings_here(e: &Env, port: u16) {
+    fs::create_dir_all(e.home.join(".claude")).unwrap();
+    fs::write(
+        e.home.join(".claude/settings.json"),
+        format!(r#"{{"env":{{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:{port}"}}}}"#),
+    )
+    .unwrap();
+}
+
+/// `cc launch` with no headless switch and no telemetry variable from the
+/// caller, so only the home decides.
+fn cc_not_headless(e: &Env) -> Command {
+    let mut cmd = e.playbook(&["cc", "launch", "--"]);
+    cmd.env_remove("CI").env_remove("PLAYBOOK_HEADLESS");
+    for (name, _) in std::env::vars() {
+        if name.starts_with("OTEL_") {
+            cmd.env_remove(name);
+        }
+    }
+    cmd
+}
+
+/// Writes each session's OTLP endpoint to `$FAKE_LOG.otel`.
+fn log_otel_endpoint(e: &Env) {
     make_exec(
         &e.root.join("bin/claude"),
         "#!/bin/sh\nprintf '%s\\n' \"${OTEL_EXPORTER_OTLP_ENDPOINT:-unset}\" >> \"$FAKE_LOG.otel\"\nexit 0\n",
     );
-    e.launch(&[]);
-    let usage = e.home.join(".config/playbook/data");
-    fs::create_dir_all(&usage).unwrap();
-    fs::write(usage.join("usage.db"), "").unwrap();
-    fs::create_dir_all(e.home.join(".claude")).unwrap();
-    fs::write(
-        e.home.join(".claude/settings.json"),
-        r#"{"env":{"OTEL_LOGS_EXPORTER":"none"}}"#,
-    )
-    .unwrap();
-    e.launch(&[]);
+}
+
+#[test]
+fn cc_starts_the_collector_daemon_when_the_settings_point_at_it() {
+    let e = env("collector-spawn");
+    let port = record_collector(&e);
+    point_settings_here(&e, port);
+    let paths = Paths::from_home(&e.home);
+    let _guard = CollectorGuard(paths.clone());
+    let mut cmd = cc_not_headless(&e);
+    cmd.env(TEST_SPAWN_VAR, "1");
+
+    let out = cmd.output().unwrap();
+    let up = collector_guard::within(UP_BOUND, || {
+        matches!(lock_state(&paths), LockState::Held(_))
+    });
+
+    assert!(out.status.success(), "{out:?}");
+    assert!(up, "cc started no collector");
+}
+
+#[test]
+fn cc_starts_no_collector_with_telemetry_off() {
+    let e = env("collector-off");
+    log_otel_endpoint(&e);
+    let paths = Paths::from_home(&e.home);
+    let _guard = CollectorGuard(paths.clone());
+    // Before the files that set telemetry up, so this command cannot start one.
+    let off = e
+        .playbook(&["config", "set", "--global", "usage.telemetry", "off"])
+        .output()
+        .unwrap();
+    assert!(off.status.success(), "{off:?}");
+    let port = record_collector(&e);
+    point_settings_here(&e, port);
+    let mut cmd = cc_not_headless(&e);
+    cmd.env(TEST_SPAWN_VAR, "1");
+
+    let out = cmd.output().unwrap();
+
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(lock_state(&paths), LockState::Free);
+    assert!(!stamp_path(&paths).exists(), "a spawn was attempted");
     let seen = fs::read_to_string(e.root.join("claude.log.otel")).unwrap();
-    assert_eq!(seen, "unset\nunset\n");
-    assert!(!usage.join("collector.json").exists());
+    assert_eq!(seen, "unset\n");
+}
+
+#[test]
+fn a_cc_session_with_no_telemetry_setting_is_pointed_at_the_running_collector() {
+    let e = env("collector-env");
+    log_otel_endpoint(&e);
+    let port = record_collector(&e);
+    let paths = Paths::from_home(&e.home);
+    let _guard = CollectorGuard(paths.clone());
+    let mut collect = e.playbook(&["usage", "collect", "--idle-seconds", "0"]);
+    collect
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut collector = collect.spawn().unwrap();
+    let state = playbook::usage::collector::state_path(&paths);
+    let up = collector_guard::within(UP_BOUND, || {
+        matches!(lock_state(&paths), LockState::Held(_))
+            && playbook::usage::collector::read_state(&state).is_some_and(|s| s.pid != 0)
+            && std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+    });
+
+    let out = cc_not_headless(&e).output().unwrap();
+    let _ = collector.kill();
+    let _ = collector.wait();
+
+    assert!(up, "the collector did not come up");
+    assert!(out.status.success(), "{out:?}");
+    let seen = fs::read_to_string(e.root.join("claude.log.otel")).unwrap();
+    assert_eq!(seen, format!("http://127.0.0.1:{port}\n"));
 }
 
 #[test]
