@@ -84,6 +84,11 @@ mod tests {
     /// future variant cannot escape the check.
     #[test]
     fn every_hook_survives_malformed_stdin() {
+        // The hooks write session state under `$HOME/.config/playbook`, so
+        // this runs in a child with a scratch home, never the real one.
+        if !crate::testing::in_scratch_home("hooks::tests::every_hook_survives_malformed_stdin") {
+            return;
+        }
         // Arrange
         let raw_inputs: [(&str, &str); 4] = [
             ("truncated JSON", r#"{"session_id":"abc","tool_input":{"#),
@@ -113,5 +118,24 @@ mod tests {
         }
 
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// The guard behind the scratch home: it refuses a `$HOME` that is the
+    /// account's real home. `in_scratch_home` runs it in its child, so a hook
+    /// test built on that helper fails instead of writing there.
+    #[test]
+    fn the_scratch_home_guard_refuses_the_real_home() {
+        // Arrange: whatever `$HOME` is here counts as the account's home.
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        let Some(home) = home.filter(|h| h.exists()) else {
+            return;
+        };
+        let _pretend = crate::common::real_home::pretend_account_home(&home);
+
+        // Act
+        let result = panic::catch_unwind(crate::testing::assert_home_is_scratch);
+
+        // Assert
+        assert!(result.is_err(), "the guard must refuse {}", home.display());
     }
 }
