@@ -214,18 +214,18 @@ impl Outcome {
     /// report. The items that need the user go through `crate::pending`.
     pub fn line(&self) -> Option<String> {
         let mut parts = Vec::new();
-        if !self.changed.is_empty() {
+        // The rm guard notice changes no file, so it is not counted.
+        let (notices, files): (Vec<_>, Vec<_>) = self
+            .changed
+            .iter()
+            .partition(|s| s.name == migrate::RM_GUARD_NOTICE_STEP);
+        if !files.is_empty() {
             parts.push(format!(
                 "updated {} of its own files after the upgrade",
-                self.changed.len()
+                files.len()
             ));
         }
-        parts.extend(
-            self.changed
-                .iter()
-                .filter(|s| s.name == migrate::RM_GUARD_NOTICE_STEP)
-                .map(|s| s.detail.clone()),
-        );
+        parts.extend(notices.iter().map(|s| s.detail.clone()));
         if !self.failed.is_empty() {
             parts.push(format!(
                 "{} migration(s) failed: run `playbook migrate`",
@@ -755,6 +755,20 @@ mod tests {
         // Assert
         assert!(out.line().is_none());
         assert_eq!(Record::read(&root(&home)).unwrap(), before);
+    }
+
+    #[test]
+    fn the_rm_guard_notice_is_shown_but_not_counted_as_a_file() {
+        let out = Outcome {
+            changed: vec![crate::init::run::StepReport::wired(
+                migrate::RM_GUARD_NOTICE_STEP,
+                "the rm guard changed",
+            )],
+            ..Outcome::default()
+        };
+        let line = out.line().unwrap();
+        assert!(line.contains("the rm guard changed"), "{line}");
+        assert!(!line.contains("updated"), "{line}");
     }
 
     #[test]
