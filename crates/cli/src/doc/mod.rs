@@ -8,16 +8,19 @@
 //! private cache so later slices need no new conversion.
 
 pub mod convert;
+pub mod converter;
 pub mod frame;
 pub mod slice;
 pub mod tmp;
 
 use convert::{DocError, Limits};
+use converter::{Converter, Search};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+const KB_PER_MB: u64 = 1024;
 const STALE_AFTER: Duration = Duration::from_secs(3600);
 const CACHE_STALE_AFTER: Duration = Duration::from_secs(24 * 3600);
 
@@ -43,20 +46,17 @@ pub fn settings(home: &Path) -> Settings {
     let slug = crate::common::repo_slug();
     let slug = (!slug.is_empty()).then_some(slug);
     let slug = slug.as_deref();
-    let anydoc_path = crate::config::resolve_valid("docs.anydocPath", home, slug)
-        .ok()
-        .and_then(|(v, _, _)| v.as_str().map(str::to_string))
-        .unwrap_or_default();
+    let anydoc_path = converter::configured_path(home, slug);
     let max_bytes = number(home, slug, "docs.maxBytes");
     Settings {
         limits: Limits {
-            max_input_bytes: max_bytes.min(convert::HARD_MAX_INPUT_BYTES),
+            max_input_bytes: max_bytes.min(converter::HARD_MAX_INPUT_BYTES),
             timeout: Duration::from_secs(number(home, slug, "docs.timeoutSeconds")),
             max_output_chars: number(home, slug, "docs.maxOutputChars") as usize,
-            max_rss_kb: number(home, slug, "docs.maxMemoryMb") * 1024,
+            max_rss_kb: number(home, slug, "docs.maxMemoryMb").saturating_mul(KB_PER_MB),
         },
         anydoc_path,
-        max_bytes_clamped: max_bytes > convert::HARD_MAX_INPUT_BYTES,
+        max_bytes_clamped: max_bytes > converter::HARD_MAX_INPUT_BYTES,
         display_chars: number(home, slug, "docs.displayChars") as usize,
     }
 }
@@ -121,8 +121,9 @@ pub fn read(home: &Path, file: &Path, json: bool, req: &SliceRequest) -> i32 {
     let cfg = settings(home);
     if cfg.max_bytes_clamped {
         eprintln!(
-            "doc read: note: docs.maxBytes is above the 100 MiB ceiling ({} bytes), so the ceiling applies",
-            convert::HARD_MAX_INPUT_BYTES
+            "doc read: note: docs.maxBytes is above the {} ceiling ({} bytes), so the ceiling applies",
+            converter::ceiling_label(),
+            converter::HARD_MAX_INPUT_BYTES
         );
     }
     let root = scratch_root(home);
@@ -193,10 +194,9 @@ fn run(
     req: &SliceRequest,
 ) -> Result<Shown, Failure> {
     let format = convert::format_of(file)?;
-    let path_var = std::env::var_os("PATH");
-    let exe = std::env::current_exe().ok();
-    let converter = convert::find_converter(&cfg.anydoc_path, exe.as_deref(), path_var.as_deref())
-        .ok_or(DocError::Absent)?;
+    let converter = Search::process(&cfg.anydoc_path)
+        .locate()
+        .map_err(DocError::Absent)?;
     let doc = match cached_document(cfg, cache_dir, &converter, file, req) {
         Some(doc) => doc,
         None => converted_document(cfg, root, &converter, file)?,
@@ -226,7 +226,7 @@ fn cache_name(cfg: &Settings, file: &Path, version: &str) -> Option<String> {
 fn cached_document(
     cfg: &Settings,
     cache_dir: &Path,
-    converter: &convert::Converter,
+    converter: &Converter,
     file: &Path,
     req: &SliceRequest,
 ) -> Option<Document> {
@@ -251,7 +251,7 @@ fn cached_document(
 fn converted_document(
     cfg: &Settings,
     root: &Path,
-    converter: &convert::Converter,
+    converter: &Converter,
     file: &Path,
 ) -> Result<Document, DocError> {
     let c = convert::convert(converter, file, &cfg.limits, root)?;
@@ -374,64 +374,9 @@ fn section_range_message(asked: usize, count: usize) -> String {
 /// `playbook doc status`: whether the converter is available.
 pub fn status(home: &Path) -> i32 {
     let cfg = settings(home);
-    let path_var = std::env::var_os("PATH");
-    let exe = std::env::current_exe().ok();
-    let Some(found) =
-        convert::find_converter(&cfg.anydoc_path, exe.as_deref(), path_var.as_deref())
-    else {
-        println!(
-            "{}{}",
-            convert::STATUS_NOT_FOUND_PREFIX,
-            convert::INSTALL_HINT
-        );
-        return 1;
-    };
-    let version = convert::version_of(&found.path, &std::env::temp_dir());
-    match found.kind {
-        convert::Kind::Bundled => {
-            print_bundled(&found.path, &version, path_var.as_deref());
-        }
-        convert::Kind::External => {
-            print_external(&found.path, &version, exe.as_deref());
-        }
+    let report = Search::process(&cfg.anydoc_path).status();
+    for line in &report.lines {
+        println!("{line}");
     }
-    0
-}
-
-fn print_bundled(path: &Path, version: &str, path_var: Option<&std::ffi::OsStr>) {
-    let own = convert::pbdoc_number(version);
-    println!("{}{}", convert::STATUS_BUNDLED_PREFIX, path.display());
-    println!("{}{}", convert::STATUS_VERSION_PREFIX, own);
-    println!("{}", convert::STATUS_ANYDOC_LINE);
-    if own != env!("CARGO_PKG_VERSION") {
-        println!(
-            "{}",
-            convert::version_skew_note(own, env!("CARGO_PKG_VERSION"))
-        );
-    }
-    if path_var.and_then(convert::find_on_path).is_some() {
-        println!("{}", convert::STATUS_NPM_NOTE);
-    }
-}
-
-fn print_external(path: &Path, version: &str, exe: Option<&Path>) {
-    println!("{}{}", convert::STATUS_EXTERNAL_PREFIX, path.display());
-    println!(
-        "{}{}",
-        convert::STATUS_EXTERNAL_VERSION_PREFIX,
-        if version.is_empty() {
-            "unknown"
-        } else {
-            version
-        }
-    );
-    if !version.is_empty() && !version.starts_with(convert::TESTED_VERSION) {
-        println!(
-            "note: playbook was tested with {}.x, other versions may behave differently",
-            convert::TESTED_VERSION
-        );
-    }
-    if exe.and_then(convert::find_bundled).is_some() {
-        println!("{}", convert::STATUS_OVERRIDE_NOTE);
-    }
+    report.exit_code
 }

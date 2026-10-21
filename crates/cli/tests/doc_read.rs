@@ -6,10 +6,10 @@
 //! network is needed.
 
 use playbook::config::write::{set, Tier};
-use playbook::doc::convert::{
-    version_skew_note, HARD_MAX_INPUT_BYTES, INSTALL_HINT, OUT_OF_DATE_MESSAGE, STATUS_ANYDOC_LINE,
-    STATUS_BUNDLED_PREFIX, STATUS_NOT_FOUND_PREFIX, STATUS_NPM_NOTE, STATUS_OVERRIDE_NOTE,
-    STATUS_VERSION_PREFIX,
+use playbook::doc::converter::{
+    version_skew_note, HARD_MAX_INPUT_BYTES, INSTALL_HINT, OUT_OF_DATE_MESSAGE,
+    STATUS_ANYDOC_PREFIX, STATUS_BUNDLED_PREFIX, STATUS_NOT_FOUND_PREFIX, STATUS_NPM_NOTE,
+    STATUS_OVERRIDE_NOTE, STATUS_VERSION_PREFIX,
 };
 use serde_json::Value;
 use std::fs;
@@ -65,6 +65,7 @@ impl Env {
         let script = format!(
             "#!/bin/sh\n\
              if [ \"$1\" = \"--version\" ]; then echo '{version}'; exit 0; fi\n\
+             if [ \"$1\" = \"--converter-version\" ]; then echo 'anydoc {FAKE_ANYDOC_VERSION}'; exit 0; fi\n\
              echo \"$@\" > '{argv}'\n\
              env > '{env}'\n\
              out=''; input=''\n\
@@ -172,13 +173,22 @@ impl Env {
 
     /// A fake converter that emits `md` unchanged and logs each run.
     fn fake_markdown(&self, md: &str) {
+        self.fake_markdown_as(md, "0.2.4");
+    }
+
+    /// Like `fake_markdown`, with a chosen `--version` text.
+    fn fake_markdown_as(&self, md: &str, version: &str) {
         let fixture = self.root.join("fixture.md");
         fs::write(&fixture, md).unwrap();
-        self.fake(&format!(
-            "cat '{}' > \"$out\"; echo run >> '{}'",
-            fixture.display(),
-            self.runs_log().display()
-        ));
+        self.install_script(
+            &self.bin.join("anydoc"),
+            version,
+            &format!(
+                "cat '{}' > \"$out\"; echo run >> '{}'",
+                fixture.display(),
+                self.runs_log().display()
+            ),
+        );
     }
 
     fn read_with(&self, file: &Path, extra: &[&str]) -> Output {
@@ -213,6 +223,9 @@ fn link_or_copy(from: &Path, to: &Path) {
         fs::copy(from, to).unwrap();
     }
 }
+
+/// What every fake converter reports for `--converter-version`.
+const FAKE_ANYDOC_VERSION: &str = "0.2.4";
 
 const OK: &str = "printf '# Title\\n\\nhello world\\n' > \"$out\"";
 
@@ -466,6 +479,44 @@ fn a_missing_converter_says_how_to_enable_the_feature() {
 }
 
 #[test]
+fn a_configured_path_that_is_not_executable_names_the_key_and_the_path() {
+    // Arrange
+    let env = Env::new("configured-missing");
+    let missing = env.root.join("no-such-anydoc");
+    env.config("docs.anydocPath", Value::from(missing.to_str().unwrap()));
+    let doc = env.doc("report.pdf", b"%PDF-1.4");
+
+    // Act
+    let out = env.read(&doc);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1));
+    let shown = text(&out);
+    assert!(shown.contains("docs.anydocPath"), "{shown}");
+    assert!(shown.contains(missing.to_str().unwrap()), "{shown}");
+    assert!(!shown.contains(INSTALL_HINT), "{shown}");
+}
+
+#[test]
+fn a_symlink_named_csv_is_converted_with_its_own_name() {
+    // Arrange
+    let env = Env::new("symlink-csv");
+    env.fake(OK);
+    let blob = env.doc("blob", b"a,b\n1,2\n");
+    let link = env.root.join("data.csv");
+    std::os::unix::fs::symlink(&blob, &link).unwrap();
+
+    // Act
+    let out = env.read(&link);
+
+    // Assert
+    assert!(out.status.success(), "{}", text(&out));
+    let argv = fs::read_to_string(env.argv_log()).unwrap();
+    assert!(argv.contains("data.csv"), "{argv}");
+    assert!(!argv.contains("blob"), "{argv}");
+}
+
+#[test]
 fn an_unsupported_extension_is_refused() {
     // Arrange
     let env = Env::new("ext");
@@ -672,7 +723,7 @@ fn status_reports_a_bundled_converter_at_playbooks_own_version() {
 
     // Assert
     let expected = format!(
-        "{STATUS_BUNDLED_PREFIX}{}\n{STATUS_VERSION_PREFIX}{}\n{STATUS_ANYDOC_LINE}\n",
+        "{STATUS_BUNDLED_PREFIX}{}\n{STATUS_VERSION_PREFIX}{}\n{STATUS_ANYDOC_PREFIX}{FAKE_ANYDOC_VERSION}\n",
         pbdoc.display(),
         env!("CARGO_PKG_VERSION"),
     );
@@ -691,7 +742,7 @@ fn status_warns_when_the_bundled_version_differs_from_playbook() {
 
     // Assert
     let expected = format!(
-        "{STATUS_BUNDLED_PREFIX}{}\n{STATUS_VERSION_PREFIX}0.0.1\n{STATUS_ANYDOC_LINE}\n{}\n",
+        "{STATUS_BUNDLED_PREFIX}{}\n{STATUS_VERSION_PREFIX}0.0.1\n{STATUS_ANYDOC_PREFIX}{FAKE_ANYDOC_VERSION}\n{}\n",
         pbdoc.display(),
         version_skew_note("0.0.1", env!("CARGO_PKG_VERSION")),
     );
@@ -711,7 +762,7 @@ fn status_suggests_removing_the_npm_package_when_both_converters_exist() {
 
     // Assert
     let expected = format!(
-        "{STATUS_BUNDLED_PREFIX}{}\n{STATUS_VERSION_PREFIX}{}\n{STATUS_ANYDOC_LINE}\n{STATUS_NPM_NOTE}\n",
+        "{STATUS_BUNDLED_PREFIX}{}\n{STATUS_VERSION_PREFIX}{}\n{STATUS_ANYDOC_PREFIX}{FAKE_ANYDOC_VERSION}\n{STATUS_NPM_NOTE}\n",
         pbdoc.display(),
         env!("CARGO_PKG_VERSION"),
     );
@@ -749,6 +800,27 @@ fn status_with_no_converter_says_how_to_get_one_and_exits_1() {
 }
 
 #[test]
+fn status_keeps_the_external_lines_for_an_anydoc_on_path() {
+    // Arrange
+    let env = Env::new("status-external");
+    env.fake(OK);
+
+    // Act
+    let out = env.command(&["doc", "status"]).output().unwrap();
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    let shown = stdout_of(&out);
+    assert!(
+        shown.starts_with(&format!(
+            "anydoc: found at {}\nversion: 0.2.4\n",
+            env.bin.join("anydoc").display()
+        )),
+        "{shown}"
+    );
+}
+
+#[test]
 fn status_notes_an_active_override_when_a_configured_converter_shadows_the_bundled_one() {
     // Arrange
     let env = Env::new("status-override");
@@ -782,7 +854,9 @@ const OVER_HARD_CEILING_CONFIG: u64 = 1_000_000_000;
 const OVER_HARD_CEILING_FILE: u64 = 150 * MIB;
 const CEILING_NOTE: &str = "100 MiB";
 const SAFETY_LIMIT_PREFIX: &str = "the document hit a safety limit: ";
-const EXIT_RESOURCE_LIMIT_BODY: &str = "echo 'memory limit reached' >&2; exit 4";
+const MEMORY_LIMIT_REASON: &str = "memory limit reached";
+/// The helper prints `error: <message>` on stderr, as the real one does.
+const EXIT_RESOURCE_LIMIT_BODY: &str = "echo 'error: memory limit reached' >&2; exit 4";
 const SELF_ABORT_BODY: &str = "kill -ABRT $$";
 const CRASH_REASON: &str = "memory limit or crash";
 
@@ -958,7 +1032,7 @@ fn a_bundled_converter_that_exits_4_is_reported_as_a_safety_limit() {
     // Assert
     assert_eq!(out.status.code(), Some(1), "{}", text(&out));
     assert!(
-        text(&out).contains(&format!("{SAFETY_LIMIT_PREFIX}memory limit reached")),
+        text(&out).contains(&format!("{SAFETY_LIMIT_PREFIX}{MEMORY_LIMIT_REASON}")),
         "{}",
         text(&out)
     );
@@ -1054,7 +1128,7 @@ fn the_real_converter_hitting_its_memory_cap_is_reported_as_a_safety_limit() {
     // Assert
     assert_eq!(out.status.code(), Some(1), "{}", text(&out));
     assert!(
-        text(&out).contains(&format!("{SAFETY_LIMIT_PREFIX}memory")),
+        text(&out).contains(&format!("{SAFETY_LIMIT_PREFIX}{MEMORY_LIMIT_REASON}")),
         "{}",
         text(&out)
     );
@@ -1062,6 +1136,7 @@ fn the_real_converter_hitting_its_memory_cap_is_reported_as_a_safety_limit() {
 }
 
 const DISPLAY_CHARS: usize = 24_000;
+const LOWER_OUTPUT_CAP: usize = 100_000;
 const MIN_DISPLAY_CHARS: usize = 1_000;
 const HEADINGS: usize = 12;
 const FILLER_CHARS: usize = 8_400;
@@ -1639,6 +1714,44 @@ fn a_document_holding_the_end_marker_cannot_close_a_slice_frame_early() {
 }
 
 #[test]
+fn the_cache_key_changes_with_the_document_the_converter_version_and_the_output_cap() {
+    // Arrange
+    let env = Env::new("slice-key");
+    let md = big_markdown();
+    env.fake_markdown(&md);
+    display_chars(&env, DISPLAY_CHARS);
+    let doc = env.doc("big.pdf", b"%PDF-1.4 one");
+    let slice = |env: &Env| env.read_with(&doc, &["--offset", "1"]);
+    let first = env.read(&doc);
+    assert!(first.status.success(), "{}", text(&first));
+
+    // Act and Assert: the same inputs hit the cache.
+    assert!(slice(&env).status.success());
+    assert_eq!(env.conversions(), 1);
+
+    // Another document body is a new entry, then a hit.
+    fs::write(&doc, b"%PDF-1.4 two, edited").unwrap();
+    assert!(slice(&env).status.success());
+    assert_eq!(env.conversions(), 2);
+    assert!(slice(&env).status.success());
+    assert_eq!(env.conversions(), 2);
+
+    // Another converter version is a new entry.
+    env.fake_markdown_as(&md, "0.2.5");
+    assert!(slice(&env).status.success());
+    assert_eq!(env.conversions(), 3);
+    assert!(slice(&env).status.success());
+    assert_eq!(env.conversions(), 3);
+
+    // Another output cap is a new entry.
+    env.config("docs.maxOutputChars", Value::from(LOWER_OUTPUT_CAP));
+    assert!(slice(&env).status.success());
+    assert_eq!(env.conversions(), 4);
+    assert!(slice(&env).status.success());
+    assert_eq!(env.conversions(), 4);
+}
+
+#[test]
 fn stale_cache_files_are_swept_and_symlinks_are_left_alone() {
     // Arrange
     let env = Env::new("slice-sweep");
@@ -1654,9 +1767,8 @@ fn stale_cache_files_are_swept_and_symlinks_are_left_alone() {
         .unwrap()
         .set_modified(long_ago)
         .unwrap();
-    let victim = env.root.join("victim");
-    fs::create_dir_all(&victim).unwrap();
-    fs::write(victim.join("keep.txt"), "keep").unwrap();
+    let victim = env.root.join("victim.md");
+    fs::write(&victim, "keep").unwrap();
     fs::File::open(&victim)
         .unwrap()
         .set_modified(long_ago)
@@ -1671,8 +1783,10 @@ fn stale_cache_files_are_swept_and_symlinks_are_left_alone() {
     assert!(out.status.success(), "{}", text(&out));
     assert!(!old.exists());
     assert!(fresh.exists());
-    assert!(victim.join("keep.txt").exists());
-    assert!(fs::symlink_metadata(cache.join("2222222222222222-1-1.md")).is_ok());
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+    assert!(fs::symlink_metadata(cache.join("2222222222222222-1-1.md"))
+        .unwrap()
+        .is_symlink());
 }
 
 #[test]

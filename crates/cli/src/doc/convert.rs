@@ -7,12 +7,15 @@
 //! converter is never given an OCR or hosted flag: its default is to refuse
 //! pages that need OCR, which is the behavior wanted here.
 
+use super::converter::{
+    Converter, Kind, Missing, HARD_MAX_INPUT_BYTES, INSTALL_HINT, OUT_OF_DATE_MESSAGE,
+};
 use super::tmp::TempDir;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs;
 use std::io::Read;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{Duration, Instant};
@@ -22,17 +25,12 @@ pub const FORMATS: &[&str] = &[
     "pdf", "docx", "doc", "odt", "rtf", "epub", "pptx", "ppt", "odp", "xlsx", "ods", "csv",
 ];
 
-/// The converter version these safeguards were tested with.
-pub const TESTED_VERSION: &str = "0.2";
-
-/// The largest input accepted whatever `docs.maxBytes` says. Equal to the
-/// ceiling the bundled converter enforces itself.
-pub const HARD_MAX_INPUT_BYTES: u64 = 104_857_600;
-
 /// Hard ceiling on the bytes read back from the converter's output file.
 const READ_CEILING: u64 = 32 * 1024 * 1024;
 /// Hard ceiling on any file the child may write.
 const FILE_SIZE_LIMIT: u64 = 64 * 1024 * 1024;
+/// Longest version text kept.
+const VERSION_CHARS: usize = 32;
 const POLL: Duration = Duration::from_millis(20);
 const RSS_EVERY: Duration = Duration::from_millis(100);
 
@@ -46,7 +44,7 @@ pub struct Limits {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DocError {
-    Absent,
+    Absent(Missing),
     UnsupportedExtension(String),
     NotAFile,
     TooLarge { bytes: u64, max: u64 },
@@ -64,7 +62,10 @@ impl DocError {
     /// A plain sentence for the person or model reading the result.
     pub fn message(&self) -> String {
         match self {
-            Self::Absent => format!("no document converter found. {INSTALL_HINT}"),
+            Self::Absent(Missing::NotInstalled) => {
+                format!("no document converter found. {INSTALL_HINT}")
+            }
+            Self::Absent(why) => why.message(),
             Self::UnsupportedExtension(ext) => format!(
                 "unsupported file type `{ext}`. Supported: {}",
                 FORMATS.join(", ")
@@ -97,7 +98,7 @@ impl DocError {
     /// Short stable code for `--json`.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Absent => "absent",
+            Self::Absent(_) => "absent",
             Self::UnsupportedExtension(_) => "unsupported",
             Self::NotAFile => "not_a_file",
             Self::TooLarge { .. } => "too_large",
@@ -111,40 +112,6 @@ impl DocError {
             Self::Io(_) => "io",
         }
     }
-}
-
-/// Shown when no converter is found.
-pub const INSTALL_HINT: &str = "the bundled converter pbdoc is missing next to the playbook binary. Reinstall playbook with install.sh or `brew reinstall playbook`, or run `playbook update`.";
-
-/// Shown when a bundled converter exits 2 (it rejected its arguments).
-pub const OUT_OF_DATE_MESSAGE: &str =
-    "the bundled converter pbdoc is out of date for this playbook. Run `playbook update`.";
-
-pub const STATUS_BUNDLED_PREFIX: &str = "converter: pbdoc (bundled) at ";
-pub const STATUS_EXTERNAL_PREFIX: &str = "converter: anydoc (external) at ";
-pub const STATUS_VERSION_PREFIX: &str = "version: pbdoc ";
-pub const STATUS_EXTERNAL_VERSION_PREFIX: &str = "version: ";
-pub const STATUS_ANYDOC_LINE: &str = "anydoc: 0.2.4";
-pub const STATUS_NOT_FOUND_PREFIX: &str = "converter: not found. ";
-pub const STATUS_OVERRIDE_NOTE: &str = "note: override active: the configured converter runs instead of the bundled one, and playbook does not check that it is offline";
-pub const STATUS_NPM_NOTE: &str = "note: the bundled converter is used; you can remove the npm package with npm uninstall --global @firecrawl/anydoc";
-
-pub const DOCTOR_ROW_BUNDLED: &str = "doc converter: pbdoc (bundled)";
-pub const DOCTOR_ROW_EXTERNAL: &str =
-    "doc converter: external anydoc, playbook does not check that it is offline";
-pub const DOCTOR_ROW_NONE: &str = "doc converter: not found";
-pub const DOCTOR_ROW_SKEW: &str = "doc converter: pbdoc version differs from playbook";
-
-/// The bare version in the output of `pbdoc --version` (`pbdoc 1.2.3`).
-pub fn pbdoc_number(version_output: &str) -> &str {
-    version_output
-        .strip_prefix(BUNDLED_NAME)
-        .map_or(version_output, str::trim_start)
-}
-
-/// The status note for a bundled converter whose version is not playbook's.
-pub fn version_skew_note(pbdoc: &str, playbook: &str) -> String {
-    format!("note: pbdoc {pbdoc} does not match playbook {playbook}. Run playbook update.")
 }
 
 /// How the child was kept off the network.
@@ -231,74 +198,6 @@ pub fn argv(kind: Kind, limits: &Limits, out: &Path, input: &Path) -> Vec<OsStri
         input.as_os_str().to_os_string(),
     ]);
     args
-}
-
-/// Where a converter came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Kind {
-    Bundled,
-    External,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Converter {
-    pub path: PathBuf,
-    pub kind: Kind,
-}
-
-const BUNDLED_NAME: &str = "pbdoc";
-const EXTERNAL_NAME: &str = "anydoc";
-
-/// The converter to run: the configured path when set, else `pbdoc` next to
-/// `exe`, else the first executable called `anydoc` on `path_var`.
-pub fn find_converter(
-    configured: &str,
-    exe: Option<&Path>,
-    path_var: Option<&OsStr>,
-) -> Option<Converter> {
-    if !configured.is_empty() {
-        let p = PathBuf::from(configured);
-        return is_executable(&p).then_some(Converter {
-            path: p,
-            kind: Kind::External,
-        });
-    }
-    find_bundled(exe?).or_else(|| find_on_path(path_var?))
-}
-
-/// The `pbdoc` beside `exe` as invoked, else beside its canonical location,
-/// so a symlinked `playbook` still finds the helper in the install directory.
-pub fn find_bundled(exe: &Path) -> Option<Converter> {
-    let as_invoked = exe.parent().map(Path::to_path_buf);
-    let canonical = fs::canonicalize(exe)
-        .ok()
-        .and_then(|p| p.parent().map(Path::to_path_buf));
-    as_invoked
-        .into_iter()
-        .chain(canonical)
-        .map(|dir| dir.join(BUNDLED_NAME))
-        .find(|p| is_executable(p))
-        .map(|path| Converter {
-            path,
-            kind: Kind::Bundled,
-        })
-}
-
-/// The first executable `anydoc` on `path_var`.
-pub fn find_on_path(path_var: &OsStr) -> Option<Converter> {
-    std::env::split_paths(path_var)
-        .map(|dir| dir.join(EXTERNAL_NAME))
-        .find(|p| is_executable(p))
-        .map(|path| Converter {
-            path,
-            kind: Kind::External,
-        })
-}
-
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    path.metadata()
-        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 /// The environment the child sees. Only what a Node or native program needs
@@ -389,10 +288,18 @@ fn kill_group(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
+const FLAG_VERSION: &str = "--version";
+
 /// The converter's version, or an empty string when it will not say.
 pub fn version_of(anydoc: &Path, scratch: &Path) -> String {
+    output_of(anydoc, FLAG_VERSION, scratch)
+}
+
+/// What the converter prints for `flag`, trimmed and short, or an empty
+/// string when it fails or takes too long.
+pub fn output_of(anydoc: &Path, flag: &str, scratch: &Path) -> String {
     let mut cmd = Command::new(anydoc);
-    cmd.arg("--version").env_clear().stdin(Stdio::null());
+    cmd.arg(flag).env_clear().stdin(Stdio::null());
     for (k, v) in child_env(scratch) {
         cmd.env(k, v);
     }
@@ -402,7 +309,7 @@ pub fn version_of(anydoc: &Path, scratch: &Path) -> String {
             String::from_utf8_lossy(&o.stdout)
                 .trim()
                 .chars()
-                .take(32)
+                .take(VERSION_CHARS)
                 .collect()
         })
         .unwrap_or_default()
@@ -428,7 +335,9 @@ pub fn convert(
             max: max_input,
         });
     }
-    let input = fs::canonicalize(input).map_err(|e| DocError::Io(e.kind().to_string()))?;
+    // Absolute but not resolved: the child runs in the scratch directory, and
+    // a symlink named `data.csv` must keep the extension that sets the format.
+    let input = std::path::absolute(input).map_err(|e| DocError::Io(e.kind().to_string()))?;
     let scratch = TempDir::create(scratch_root).map_err(|e| DocError::Io(e.to_string()))?;
     let out = scratch.path().join("out.md");
     let err_file = scratch.path().join("err.txt");
@@ -464,8 +373,13 @@ pub fn convert(
     // a large virtual range and would never start under one. macOS accepts
     // neither RLIMIT_AS nor RLIMIT_DATA, so there the helper's own heap cap and
     // watchdog plus the resident size watchdog below are the memory limits.
-    let address_space_cap = (cfg!(target_os = "linux") && converter.kind == Kind::Bundled)
-        .then(|| (limits.max_rss_kb * BYTES_PER_KB + ADDRESS_SPACE_HEADROOM) as libc::rlim_t);
+    let address_space_cap =
+        (cfg!(target_os = "linux") && converter.kind == Kind::Bundled).then(|| {
+            limits
+                .max_rss_kb
+                .saturating_mul(BYTES_PER_KB)
+                .saturating_add(ADDRESS_SPACE_HEADROOM) as libc::rlim_t
+        });
     // SAFETY: only `setrlimit` runs between fork and exec, which is async
     // signal safe. It caps the size of any file the child writes, turns off
     // core dumps and applies the address space cap when there is one.
@@ -523,7 +437,7 @@ pub fn convert(
                 return Err(if converter.kind == Kind::Bundled {
                     DocError::ResourceLimit(REASON_MEMORY.to_string())
                 } else {
-                    DocError::MemoryLimit(limits.max_rss_kb / 1024)
+                    DocError::MemoryLimit(limits.max_rss_kb / KB_PER_MB)
                 });
             }
         }
@@ -574,191 +488,27 @@ pub fn convert(
     })
 }
 
-/// The first line of the converter's error output, printable and short.
+/// The prefix the bundled helper puts on every error line.
+const FALLBACK_ERROR: &str = "the converter exited with an error";
+const ERROR_PREFIX: &str = "error: ";
+
+/// The first line of the converter's error output, printable and short, with
+/// the helper's own `error: ` prefix dropped so a caller can add its own.
 fn first_line(path: &Path) -> String {
     let mut buf = Vec::new();
     let _ = fs::File::open(path).and_then(|f| f.take(2048).read_to_end(&mut buf));
     let text = String::from_utf8_lossy(&buf);
-    let line: String = text
-        .lines()
-        .next()
-        .unwrap_or("the converter exited with an error")
+    let first = text.lines().next().unwrap_or(FALLBACK_ERROR);
+    let line: String = first
+        .strip_prefix(ERROR_PREFIX)
+        .unwrap_or(first)
         .chars()
         .filter(|c| !c.is_control())
         .take(200)
         .collect();
     if line.is_empty() {
-        "the converter exited with an error".to_string()
+        FALLBACK_ERROR.to_string()
     } else {
         line
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::os::unix::fs::{symlink, PermissionsExt};
-    use std::sync::atomic::AtomicU64;
-
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    /// A scratch directory removed on drop.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new() -> Self {
-            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let dir = std::env::temp_dir().join(format!(
-                "playbook-find-converter-{}-{n}",
-                std::process::id()
-            ));
-            fs::create_dir_all(&dir).unwrap();
-            // Resolve the temp dir symlink (macOS /var) so canonical paths compare equal.
-            Self(dir.canonicalize().unwrap())
-        }
-
-        fn file(&self, rel: &str, mode: u32) -> PathBuf {
-            let p = self.0.join(rel);
-            fs::create_dir_all(p.parent().unwrap()).unwrap();
-            fs::write(&p, "#!/bin/sh\n").unwrap();
-            fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
-            p
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    const EXEC: u32 = 0o755;
-    const PLAIN: u32 = 0o644;
-
-    fn bundled(path: PathBuf) -> Option<Converter> {
-        Some(Converter {
-            path,
-            kind: Kind::Bundled,
-        })
-    }
-
-    fn external(path: PathBuf) -> Option<Converter> {
-        Some(Converter {
-            path,
-            kind: Kind::External,
-        })
-    }
-
-    #[test]
-    fn a_configured_path_wins_over_a_bundled_sibling() {
-        // Arrange
-        let s = Scratch::new();
-        let exe = s.file("bin/playbook", EXEC);
-        s.file("bin/pbdoc", EXEC);
-        let configured = s.file("custom/anydoc", EXEC);
-
-        // Act
-        let found = find_converter(configured.to_str().unwrap(), Some(&exe), None);
-
-        // Assert
-        assert_eq!(found, external(configured));
-    }
-
-    #[test]
-    fn a_bundled_sibling_wins_over_anydoc_on_path() {
-        // Arrange
-        let s = Scratch::new();
-        let exe = s.file("bin/playbook", EXEC);
-        let pbdoc = s.file("bin/pbdoc", EXEC);
-        s.file("npm/anydoc", EXEC);
-        let path_var = s.0.join("npm");
-
-        // Act
-        let found = find_converter("", Some(&exe), Some(path_var.as_os_str()));
-
-        // Assert
-        assert_eq!(found, bundled(pbdoc));
-    }
-
-    #[test]
-    fn a_sibling_that_is_not_executable_falls_back_to_anydoc_on_path() {
-        // Arrange
-        let s = Scratch::new();
-        let exe = s.file("bin/playbook", EXEC);
-        s.file("bin/pbdoc", PLAIN);
-        let anydoc = s.file("npm/anydoc", EXEC);
-        let path_var = s.0.join("npm");
-
-        // Act
-        let found = find_converter("", Some(&exe), Some(path_var.as_os_str()));
-
-        // Assert
-        assert_eq!(found, external(anydoc));
-    }
-
-    #[test]
-    fn nothing_found_gives_none() {
-        // Arrange
-        let s = Scratch::new();
-        let exe = s.file("bin/playbook", EXEC);
-        let empty_path = s.0.join("empty");
-
-        // Act
-        let found = find_converter("", Some(&exe), Some(empty_path.as_os_str()));
-
-        // Assert
-        assert_eq!(found, None);
-    }
-
-    #[test]
-    fn an_absolute_symlink_to_the_binary_finds_pbdoc_in_the_canonical_dir() {
-        // Arrange
-        let s = Scratch::new();
-        let target = s.file("cellar/bin/playbook", EXEC);
-        let pbdoc = s.file("cellar/bin/pbdoc", EXEC);
-        fs::create_dir_all(s.0.join("bin")).unwrap();
-        let link = s.0.join("bin/playbook");
-        symlink(&target, &link).unwrap();
-
-        // Act
-        let found = find_converter("", Some(&link), None);
-
-        // Assert
-        assert_eq!(found, bundled(pbdoc));
-    }
-
-    #[test]
-    fn a_relative_symlink_to_the_binary_finds_pbdoc_in_the_canonical_dir() {
-        // Arrange
-        let s = Scratch::new();
-        s.file("cellar/bin/playbook", EXEC);
-        let pbdoc = s.file("cellar/bin/pbdoc", EXEC);
-        fs::create_dir_all(s.0.join("bin")).unwrap();
-        let link = s.0.join("bin/playbook");
-        symlink("../cellar/bin/playbook", &link).unwrap();
-
-        // Act
-        let found = find_converter("", Some(&link), None);
-
-        // Assert
-        assert_eq!(found, bundled(pbdoc));
-    }
-
-    #[test]
-    fn a_pbdoc_next_to_the_symlink_is_found_before_the_canonical_dir() {
-        // Arrange
-        let s = Scratch::new();
-        let target = s.file("cellar/bin/playbook", EXEC);
-        s.file("cellar/bin/pbdoc", EXEC);
-        fs::create_dir_all(s.0.join("bin")).unwrap();
-        let link = s.0.join("bin/playbook");
-        symlink(&target, &link).unwrap();
-        let beside_link = s.file("bin/pbdoc", EXEC);
-
-        // Act
-        let found = find_converter("", Some(&link), None);
-
-        // Assert
-        assert_eq!(found, bundled(beside_link));
     }
 }

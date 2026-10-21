@@ -207,7 +207,7 @@ fn usd(cents: i64) -> String {
 }
 
 /// The most `docs.maxBytes` may be: the converter's own input ceiling.
-const DOCS_MAX_BYTES_CEILING: i64 = crate::doc::convert::HARD_MAX_INPUT_BYTES as i64;
+const DOCS_MAX_BYTES_CEILING: i64 = keys::HARD_MAX_INPUT_BYTES as i64;
 
 const DOCS_DISPLAY_CHARS_MIN: i64 = 1_000;
 const DOCS_DISPLAY_CHARS_MAX: i64 = 120_000;
@@ -270,10 +270,13 @@ fn validate_number(key: &str, value: &Value) -> Result<(), ConfigError> {
             whole.is_some_and(|n| (DOCS_DISPLAY_CHARS_MIN..=DOCS_DISPLAY_CHARS_MAX).contains(&n)),
             "a whole number from 1000 to 120000",
         ),
-        "pr.bodyMaxChars"
-        | "docs.timeoutSeconds"
-        | "docs.maxOutputChars"
-        | "docs.maxMemoryMb" => (whole.is_some_and(|n| n >= 1), "a positive integer"),
+        "docs.maxMemoryMb" => (
+            whole.is_some_and(|n| (1..=keys::DOCS_MAX_MEMORY_MB_CEILING).contains(&n)),
+            "a whole number from 1 to 4096",
+        ),
+        "pr.bodyMaxChars" | "docs.timeoutSeconds" | "docs.maxOutputChars" => {
+            (whole.is_some_and(|n| n >= 1), "a positive integer")
+        }
         _ => {
             return match whole {
                 Some(n) if n >= 0 => Ok(()),
