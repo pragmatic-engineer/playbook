@@ -66,7 +66,7 @@ The limits are the ADR 0027 caps, now enforced inside the helper and by playbook
   - Heap cap. A counting global allocator covers Rust heap allocations only. It does not see direct `mmap`, C `malloc` or thread stacks. Over the cap, the helper writes a short message and exits 4 without allocating.
   - Self watchdog. A thread reads the helper's own resident size every 20 ms and exits 4 when it is over the cap. This covers memory the heap cap cannot see.
   - Linux kernel limit. playbook sets `RLIMIT_AS` to the cap plus 512 MiB for the bundled child.
-  - macOS: pending the probe.
+  - macOS: no kernel limit. A probe on macOS 15.8.1 (2026-10-21) found that `setrlimit` for `RLIMIT_AS` and `RLIMIT_DATA` fails with `EINVAL` and that large `mmap` and `malloc` calls still succeed. On macOS the heap cap, the 20 ms self watchdog and the outer 100 ms RSS watchdog are the binding limits.
   - One rayon thread, so a PDF cannot fan out stacks and parallel allocation spikes.
 - **Outer watchdog.** playbook polls the child's RSS every 100 ms and kills the process group over the cap.
 - **Time.** 30 seconds, then the process group is killed.

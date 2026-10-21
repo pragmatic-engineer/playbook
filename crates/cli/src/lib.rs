@@ -27,10 +27,15 @@ pub mod doc {
     use std::path::Path;
 
     pub mod convert {
-        pub fn find_anydoc(
+        pub const HARD_MAX_INPUT_BYTES: u64 = 104_857_600;
+
+        pub struct Converter;
+
+        pub fn find_converter(
             _configured: &str,
+            _exe: Option<&std::path::Path>,
             _path_var: Option<&std::ffi::OsStr>,
-        ) -> Option<std::path::PathBuf> {
+        ) -> Option<Converter> {
             None
         }
     }
@@ -41,7 +46,7 @@ pub mod doc {
     }
 
     pub fn status(_home: &Path) -> i32 {
-        println!("anydoc: document conversion is not supported on this platform");
+        println!("converter: document conversion is not supported on this platform");
         1
     }
 }

@@ -21,6 +21,8 @@ const STALE_AFTER: Duration = Duration::from_secs(3600);
 pub struct Settings {
     pub limits: Limits,
     pub anydoc_path: String,
+    /// `docs.maxBytes` was above the hard ceiling and has been lowered to it.
+    pub max_bytes_clamped: bool,
 }
 
 fn number(home: &Path, slug: Option<&str>, key: &str) -> u64 {
@@ -39,14 +41,16 @@ pub fn settings(home: &Path) -> Settings {
         .ok()
         .and_then(|(v, _, _)| v.as_str().map(str::to_string))
         .unwrap_or_default();
+    let max_bytes = number(home, slug, "docs.maxBytes");
     Settings {
         limits: Limits {
-            max_input_bytes: number(home, slug, "docs.maxBytes"),
+            max_input_bytes: max_bytes.min(convert::HARD_MAX_INPUT_BYTES),
             timeout: Duration::from_secs(number(home, slug, "docs.timeoutSeconds")),
             max_output_chars: number(home, slug, "docs.maxOutputChars") as usize,
             max_rss_kb: number(home, slug, "docs.maxMemoryMb") * 1024,
         },
         anydoc_path,
+        max_bytes_clamped: max_bytes > convert::HARD_MAX_INPUT_BYTES,
     }
 }
 
@@ -59,6 +63,12 @@ pub fn scratch_root(home: &Path) -> PathBuf {
 /// when the document needs OCR, 1 for every other failure.
 pub fn read(home: &Path, file: &Path, json: bool) -> i32 {
     let cfg = settings(home);
+    if cfg.max_bytes_clamped {
+        eprintln!(
+            "doc read: note: docs.maxBytes is above the 100 MiB ceiling ({} bytes), so the ceiling applies",
+            convert::HARD_MAX_INPUT_BYTES
+        );
+    }
     let root = scratch_root(home);
     tmp::sweep_stale(&root, STALE_AFTER);
     convert::install_signal_handlers();
@@ -112,8 +122,9 @@ fn run(
 ) -> Result<(String, convert::Converted, &'static str), DocError> {
     let format = convert::format_of(file)?;
     let path_var = std::env::var_os("PATH");
-    let anydoc =
-        convert::find_anydoc(&cfg.anydoc_path, path_var.as_deref()).ok_or(DocError::Absent)?;
+    let exe = std::env::current_exe().ok();
+    let anydoc = convert::find_converter(&cfg.anydoc_path, exe.as_deref(), path_var.as_deref())
+        .ok_or(DocError::Absent)?;
     let c = convert::convert(&anydoc, file, &cfg.limits, root)?;
     let id = tmp::random_hex(12);
     let source = frame::safe_name(file);
@@ -132,30 +143,63 @@ fn run(
 pub fn status(home: &Path) -> i32 {
     let cfg = settings(home);
     let path_var = std::env::var_os("PATH");
-    match convert::find_anydoc(&cfg.anydoc_path, path_var.as_deref()) {
-        Some(p) => {
-            let scratch = std::env::temp_dir();
-            let version = convert::version_of(&p, &scratch);
-            println!("anydoc: found at {}", p.display());
-            println!(
-                "version: {}",
-                if version.is_empty() {
-                    "unknown"
-                } else {
-                    &version
-                }
-            );
-            if !version.is_empty() && !version.starts_with(convert::TESTED_VERSION) {
-                println!(
-                    "note: playbook was tested with {}.x, other versions may behave differently",
-                    convert::TESTED_VERSION
-                );
-            }
-            0
+    let exe = std::env::current_exe().ok();
+    let Some(found) =
+        convert::find_converter(&cfg.anydoc_path, exe.as_deref(), path_var.as_deref())
+    else {
+        println!(
+            "{}{}",
+            convert::STATUS_NOT_FOUND_PREFIX,
+            convert::INSTALL_HINT
+        );
+        return 1;
+    };
+    let version = convert::version_of(&found.path, &std::env::temp_dir());
+    match found.kind {
+        convert::Kind::Bundled => {
+            print_bundled(&found.path, &version, path_var.as_deref());
         }
-        None => {
-            println!("anydoc: not found. {}", convert::install_hint());
-            1
+        convert::Kind::External => {
+            print_external(&found.path, &version, exe.as_deref());
         }
+    }
+    0
+}
+
+fn print_bundled(path: &Path, version: &str, path_var: Option<&std::ffi::OsStr>) {
+    let own = convert::pbdoc_number(version);
+    println!("{}{}", convert::STATUS_BUNDLED_PREFIX, path.display());
+    println!("{}{}", convert::STATUS_VERSION_PREFIX, own);
+    println!("{}", convert::STATUS_ANYDOC_LINE);
+    if own != env!("CARGO_PKG_VERSION") {
+        println!(
+            "{}",
+            convert::version_skew_note(own, env!("CARGO_PKG_VERSION"))
+        );
+    }
+    if path_var.and_then(convert::find_on_path).is_some() {
+        println!("{}", convert::STATUS_NPM_NOTE);
+    }
+}
+
+fn print_external(path: &Path, version: &str, exe: Option<&Path>) {
+    println!("{}{}", convert::STATUS_EXTERNAL_PREFIX, path.display());
+    println!(
+        "{}{}",
+        convert::STATUS_EXTERNAL_VERSION_PREFIX,
+        if version.is_empty() {
+            "unknown"
+        } else {
+            version
+        }
+    );
+    if !version.is_empty() && !version.starts_with(convert::TESTED_VERSION) {
+        println!(
+            "note: playbook was tested with {}.x, other versions may behave differently",
+            convert::TESTED_VERSION
+        );
+    }
+    if exe.and_then(convert::find_bundled).is_some() {
+        println!("{}", convert::STATUS_OVERRIDE_NOTE);
     }
 }
