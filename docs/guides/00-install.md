@@ -4,14 +4,22 @@ To see every change `playbook setup` makes before you agree to it, read [What se
 
 Releases up to v0.34.0 have only the old name (older versions: `playbook init`). It takes the same flags, and it still works on newer releases ([ADR-0040](../adr/0040-rename-init-to-setup.md)).
 
-The recommended route is the install script, one command, and `playbook update` keeps it current. Homebrew is supported too. This page covers every route, requirements, how the binary reaches `PATH`, upgrades, the settings merge and uninstall.
+The first route to try is Homebrew. Use the install script when you have no Homebrew. This page covers every route, requirements, how the binary reaches `PATH`, upgrades, the settings merge and uninstall.
+
+Install order:
+
+1. Homebrew.
+2. The install script (`install.sh`), when you have no Homebrew.
+3. cargo binstall or mise.
+4. A `.deb` or `.rpm` package.
+5. The marketplace plugin, for the skills only.
 
 ## Pick an install mode
 
 | Mode | Commands, in order | You get | You lack |
 |---|---|---|---|
 | Skills only | `claude plugin marketplace add pragmatic-engineer/marketplace`, then `claude plugin install playbook@pragmatic-engineer` | Skills, commands and subagents. No hooks, no binary, no change to `settings.json` | Safety guards, status line, hooks, usage, and every step that needs the `playbook` binary |
-| Binary only | Install script (recommended): `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash`. Or Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook setup` | The `playbook` command, hooks, guards, status line, memory and usage | The skills and slash commands |
+| Binary only | Homebrew: `brew install pragmatic-engineer/tap/playbook`, then `playbook setup`. Or, with no Homebrew, the install script: `curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh \| bash` | The `playbook` command, hooks, guards, status line, memory and usage | The skills and slash commands |
 | Both (recommended) | The binary first, then the two skills commands | Everything | Nothing |
 
 The skills are a Claude Code plugin and work on their own. The binary is optional. Installing one never installs the other, and playbook never installs or removes a plugin for you.
@@ -32,7 +40,42 @@ Which one? Choose skills only if you want to read the skills and nothing else ru
 
 ## Install
 
-### Install script (recommended)
+### Homebrew (first choice)
+
+```bash
+brew install pragmatic-engineer/tap/playbook
+playbook setup
+```
+
+`playbook setup` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `setup` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew on Linux works the same way: install [Homebrew](https://brew.sh) for Linux, then run the same two commands. The formula picks the static musl build for x86_64 or arm64, so it needs no system libraries. Brew installs under its own prefix (`/home/linuxbrew/.linuxbrew` by default) and playbook never asks for `sudo`. Each release installs `playbook` and `pbtop` this way on an x86_64 Ubuntu runner after the tap is updated, and fails the release run when that breaks. Homebrew installs update with `brew upgrade playbook` once the formula is trusted, and `playbook update` refuses a Homebrew install and tells you to use brew.
+
+### Homebrew tap trust
+
+Since Homebrew 6.0.0, a tap that is not official needs explicit trust. This is Homebrew's rule, not a playbook setting.
+
+Install with the fully qualified name. This trusts only that formula:
+
+```bash
+brew install pragmatic-engineer/tap/playbook
+```
+
+The install records that trust, so a later `brew upgrade playbook` works by short name. To install by short name without using the full name first, trust the formula:
+
+```bash
+brew tap pragmatic-engineer/tap
+brew trust --formula pragmatic-engineer/tap/playbook
+brew install playbook
+```
+
+`pbtop` is a separate formula. Trust it on its own: `brew trust --formula pragmatic-engineer/tap/pbtop`.
+
+To trust the whole tap, run `brew trust pragmatic-engineer/tap`. This covers every current and future formula in the tap. It is broader, so prefer per-formula trust.
+
+Run `brew trust` to list trusted entries. Run `brew untrust <target>` to remove trust, for example `brew untrust --formula pragmatic-engineer/tap/playbook`. If Homebrew says a formula is not trusted, run the trust command it names. Homebrew stores the entries in `~/.homebrew/trust.json`, or in `$XDG_CONFIG_HOME/homebrew/trust.json` when `XDG_CONFIG_HOME` is set. See Homebrew's own page on tap trust.
+
+### Install script
+
+Use this when you have no Homebrew. install.sh is a bash script, so it does not run on Windows. On Windows, use [Without `curl | bash`](#without-curl--bash).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install.sh | bash
@@ -64,15 +107,6 @@ curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/in
 ```
 
 A release tag installs that release. A branch or commit is refused, because it has no published binary.
-
-### Homebrew
-
-```bash
-brew install pragmatic-engineer/tap/playbook
-playbook setup
-```
-
-`playbook setup` asks before it adds the hooks to `settings.json`, and writes the `PATH` block so hook shells find the binary even when Homebrew's directory is not on their `PATH`. Homebrew ships only the binary, so `setup` seeds the settings template and the system prompt from copies compiled into it (written to `~/.config/playbook/embedded/`) when no Claude Code plugin is installed. An installed plugin, even an older version, takes precedence. Homebrew on Linux works the same way: install [Homebrew](https://brew.sh) for Linux, then run the same two commands. The formula picks the static musl build for x86_64 or arm64, so it needs no system libraries. Brew installs under its own prefix (`/home/linuxbrew/.linuxbrew` by default) and playbook never asks for `sudo`. Each release installs `playbook` and `pbtop` this way on an x86_64 Ubuntu runner after the tap is updated, and fails the release run when that breaks. Homebrew installs update with `brew upgrade playbook`, and `playbook update` refuses a Homebrew install and tells you to use brew.
 
 ### cargo binstall and mise
 
@@ -114,13 +148,15 @@ An upgrade installs the newer file the same way. The package owns no file under 
 You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. Install `pbtop`, the usage dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install-pbtop.sh | sh
 brew install pragmatic-engineer/tap/pbtop
+curl -fsSL https://raw.githubusercontent.com/pragmatic-engineer/playbook/main/install-pbtop.sh | sh
 ```
+
+The Homebrew route needs tap trust. The full name trusts only `pbtop`. See [Homebrew tap trust](#homebrew-tap-trust).
 
 `install-pbtop.sh` needs `bash` and `curl`. It downloads `install.sh` from `main` and runs it in its pbtop mode, which checks the archive like the `playbook` binary (its line in `SHA256SUMS`, the build attestation when `gh` can check it, and `pbtop --version`), installs `pbtop` into `PLAYBOOK_BIN_DIR` (default `~/.local/bin`) and puts that folder on `PATH`. It runs nothing else. To pin a release, set `PLAYBOOK_REF` for `sh`, as in `curl -fsSL .../install-pbtop.sh | PLAYBOOK_REF=v0.38.0 sh`. On a release before 0.35.0 it stops, because those have no `pbtop` archive. The old `install.sh --pbtop` still works for one more release and points to `install-pbtop.sh`.
 
-Type `pbtop`, `pbtop --summary`, `pbtop --json` or `pbtop --range 30d`. The [crate README](../../crates/telemetry/README.md) covers `cargo` builds. The `playbook-telemetry` command and formula are retired ([ADR 0041](../adr/0041-retire-playbook-telemetry.md)): with Homebrew, run `brew uninstall playbook-telemetry && brew install pbtop`, and change a script that calls `playbook-telemetry` to call `pbtop` with the same arguments. Everything stays on your machine.
+Type `pbtop`, `pbtop --summary`, `pbtop --json` or `pbtop --range 30d`. The [crate README](../../crates/telemetry/README.md) covers `cargo` builds. The `playbook-telemetry` command and formula are retired ([ADR 0041](../adr/0041-retire-playbook-telemetry.md)): with Homebrew, run `brew uninstall playbook-telemetry && brew install pragmatic-engineer/tap/pbtop`, and change a script that calls `playbook-telemetry` to call `pbtop` with the same arguments. Everything stays on your machine.
 
 The tool shares its data with playbook: the database is `~/.config/playbook/data/usage.db` and the settings are the `usage.*` keys in `~/.config/playbook/data/config.db`. See [Config keys](../reference/config-keys.md).
 
@@ -167,8 +203,8 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
 
 | Install | Command |
 |---|---|
-| Install script (recommended) | `playbook update`, or run the installer again (`--check` to look, `--list` for releases, `--pre` for pre-releases, `--yes` in auto mode) |
 | Homebrew | `brew upgrade playbook` |
+| Install script | `playbook update`, or run the installer again (`--check` to look, `--list` for releases, `--pre` for pre-releases, `--yes` in auto mode) |
 | Nix | `nix profile upgrade playbook` for a profile install, or `nix flake update` where the flake is an input |
 
 `playbook update` verifies SHA256SUMS and the attestation, keeps the old binary as `playbook.<version>.bak` (the newest three are kept), refuses a Homebrew install, and warns when another `playbook` earlier on `PATH` hides the new one. The binary and the plugin share one version line ([ADR 0038](../adr/0038-one-release-line.md)), and they work together while they are on the same MAJOR.MINOR. The plugin follows the binary on its own. After the binary, `playbook update` updates the plugin with `claude plugin update playbook@pragmatic-engineer` and says to restart Claude Code, and `playbook migrate` does the same. After a `brew upgrade` or an automatic update, the first playbook command you run at a terminal does it, and so does the next Claude Code session, which starts it in the background and never waits for it. Each binary version is updated once. A failed attempt, or one that leaves the plugin on the old version, is tried again after 24 hours. Without the `claude` command, or when the update fails, playbook prints that command for you to run, and `playbook doctor` warns until the plugin is on the binary's minor line. The automatic step after an upgrade is skipped in CI, in headless runs, when stderr is not a terminal (the session hook is not affected by that rule), when the plugin is turned off in Claude Code, and when `PLAYBOOK_SKIP_PLUGIN_UPDATE=1` is set. `playbook update` and `playbook migrate` still update in those runs unless `update.plugin` is `off`. `--no-plugin` skips the update for one run of either command. `playbook config set update.plugin ask` makes the first command at a terminal ask before it updates, and `playbook config set update.plugin off` turns it off, so you run `claude plugin update playbook@pragmatic-engineer` yourself. When something needs you after an upgrade, the next session lists it, one bullet per item with why it matters and the command that fixes it. It shows each item once, then at most once a day. A list that `playbook migrate` printed in your terminal counts as shown: a setup item comes back after a day and a report does not come back. `playbook migrate --status` shows the list again. See [What needs you](../internals/07-migrations.md#what-needs-you). A binary pinned with `PLAYBOOK_REF` gets the same warning once the plugin moves to a newer minor line. To roll back, move a backup over the binary:
@@ -272,7 +308,7 @@ The retired `--settings` and `--no-settings` flags are gone. Use `--hooks`, `--s
 
 It tracks a baseline in `~/.claude/.settings.base.json` and compares it with the new template and your live file. After each run, `$CLAUDE_HOME/settings-merge-skipped.<epoch>.json` lists every key where your value won, as `{"key":"...", "template_had":..., "yours":...}`. Review it and adopt template values by hand if you want them.
 
-The security defaults, the `permissions` block, are opt-in. A plain `playbook setup` does not add them and never removes ones you have. Update control (the Claude Code autoupdater) is left to you, `playbook update` and Homebrew. Pass `--security` or set `security.defaults` to true to merge them. `permissions` is one top-level key. If you customised it, the whole block counts as contested and the template's version is withheld, so your rules win. See [Security](../../README.md#security).
+The security defaults, the `permissions` block, are opt-in. A plain `playbook setup` does not add them and never removes ones you have. Update control (the Claude Code autoupdater) is left to you, `playbook update` and Homebrew. Pass `--security` or set `security.defaults` to true to merge them. `permissions` is one top-level key. If you customised it, the whole block counts as contested and the template's version is withheld, so your rules win. See [Security defaults](13-security-defaults.md).
 
 If a run is interrupted between writing `settings.json` and the baseline, delete `.settings.base.json`. The next run treats the missing baseline as empty and only adds keys.
 
