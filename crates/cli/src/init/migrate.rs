@@ -1752,6 +1752,9 @@ mod tests {
                 "migrations/applied/0017-auto-budget-defaults=1",
                 "migrations/applied/0020-collector-service-label=1",
                 "migrations/applied/auto-budget-defaults=1",
+                "migrations/applied/plugin-update-mode=1",
+                "migrations/applied/policy-guard-off-by-default=1",
+                "migrations/applied/rm-guard-simplified=1",
                 "migrations/shipped/system-prompt=abc",
             ]
         );
