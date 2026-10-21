@@ -45,6 +45,12 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      # anydoc is the document conversion engine behind pbdoc and is pinned
+      # exactly. A bump needs the pbdoc benchmark re-run before it merges, so it
+      # gets its own PR. This group must stay before all-cargo: a dependency
+      # joins the first group whose patterns match it.
+      anydoc:
+        patterns: ["anydoc"]
       all-cargo:
         patterns: ["*"]
         update-types: ["minor", "patch"]

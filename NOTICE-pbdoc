@@ -1,0 +1,571 @@
+SPDX-FileCopyrightText: 2026 Igor Santos
+SPDX-License-Identifier: Apache-2.0
+
+pbdoc third-party notices
+
+The pbdoc binary links the crates below (its normal and build dependency
+closure). Each crate is distributed under the licence expression shown, from
+which the permissive option applies. Full licence texts ship with each crate's
+source. Where a crate declares authors in its manifest they are listed as the
+copyright holders; otherwise the copyright line is "see crate source".
+
+adler2 2.0.1
+  Licence: 0BSD OR MIT OR Apache-2.0
+  Copyright: Jonas Schievink, oyvindln
+
+aes 0.9.3
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+aho-corasick 1.1.5
+  Licence: Unlicense OR MIT
+  Copyright: Andrew Gallant
+
+alloc-no-stdlib 2.0.4
+  Licence: BSD-3-Clause
+  Copyright: Daniel Reiter Horn
+
+alloc-stdlib 0.2.4
+  Licence: BSD-3-Clause
+  Copyright: Daniel Reiter Horn
+
+allocator-api2 0.2.21
+  Licence: MIT OR Apache-2.0
+  Copyright: Zakarum
+
+android_system_properties 0.1.6
+  Licence: MIT OR Apache-2.0
+  Copyright: Nicolas Silva
+
+anstream 1.0.0
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+anstyle 1.0.14
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+anstyle-parse 1.0.0
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+anstyle-query 1.1.5
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+anstyle-wincon 3.0.11
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+anydoc 0.2.4
+  Licence: MIT
+  Copyright: see crate source
+
+autocfg 1.5.1
+  Licence: Apache-2.0 OR MIT
+  Copyright: Josh Stone
+
+bitflags 1.3.2
+  Licence: MIT/Apache-2.0
+  Copyright: The Rust Project Developers
+
+bitflags 2.13.2
+  Licence: MIT OR Apache-2.0
+  Copyright: The Rust Project Developers
+
+block-buffer 0.12.1
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+block-padding 0.4.2
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+brotli-decompressor 5.0.3
+  Licence: BSD-3-Clause/MIT
+  Copyright: Daniel Reiter Horn, The Brotli Authors
+
+bumpalo 3.20.3
+  Licence: MIT OR Apache-2.0
+  Copyright: Nick Fitzgerald
+
+cbc 0.2.1
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+cc 1.8.0
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+cfb 0.14.0
+  Licence: MIT
+  Copyright: Matthew D. Steele
+
+cfg-if 1.0.5
+  Licence: MIT OR Apache-2.0
+  Copyright: Alex Crichton
+
+chacha20 0.10.2
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+chrono 0.4.45
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+cipher 0.5.2
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+colorchoice 1.0.5
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+const-oid 0.10.2
+  Licence: Apache-2.0 OR MIT
+  Copyright: RustCrypto Developers
+
+core-foundation-sys 0.8.7
+  Licence: MIT OR Apache-2.0
+  Copyright: The Servo Project Developers
+
+core_detect 1.0.0
+  Licence: MIT/Apache-2.0
+  Copyright: Thom Chiovoloni
+
+cpubits 0.1.1
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+cpufeatures 0.3.1
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+crc32fast 1.5.3
+  Licence: MIT OR Apache-2.0
+  Copyright: Sam Rijs, Alex Crichton
+
+crossbeam-deque 0.8.8
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+crossbeam-epoch 0.9.21
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+crossbeam-utils 0.8.23
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+crypto-common 0.2.2
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+csv 1.4.0
+  Licence: Unlicense/MIT
+  Copyright: Andrew Gallant
+
+csv-core 0.1.13
+  Licence: Unlicense/MIT
+  Copyright: Andrew Gallant
+
+defmt 1.2.0
+  Licence: MIT OR Apache-2.0
+  Copyright: The Knurling-rs developers
+
+defmt-macros 1.2.0
+  Licence: MIT OR Apache-2.0
+  Copyright: The Knurling-rs developers
+
+defmt-parser 1.1.0
+  Licence: MIT OR Apache-2.0
+  Copyright: The Knurling-rs developers
+
+digest 0.11.3
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+ecb 0.2.1
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+either 1.19.0
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+encoding_rs 0.8.42
+  Licence: (Apache-2.0 OR MIT) AND BSD-3-Clause
+  Copyright: Henri Sivonen
+
+env_filter 2.0.0
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+env_logger 0.11.11
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+equivalent 1.0.3
+  Licence: Apache-2.0 OR MIT
+  Copyright: see crate source
+
+find-msvc-tools 0.1.14
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+flate2 1.1.10
+  Licence: MIT OR Apache-2.0
+  Copyright: Alex Crichton, Josh Triplett
+
+fnv 1.0.7
+  Licence: Apache-2.0 / MIT
+  Copyright: Alex Crichton
+
+foldhash 0.2.0
+  Licence: Zlib
+  Copyright: Orson Peters
+
+futures-core 0.3.34
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+futures-task 0.3.34
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+futures-util 0.3.34
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+getrandom 0.4.3
+  Licence: MIT OR Apache-2.0
+  Copyright: The Rand Project Developers
+
+hashbrown 0.17.1
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+hybrid-array 0.4.15
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+iana-time-zone 0.1.65
+  Licence: MIT OR Apache-2.0
+  Copyright: Andrew Straw, René Kijewski, Ryan Lopopolo
+
+iana-time-zone-haiku 0.1.2
+  Licence: MIT OR Apache-2.0
+  Copyright: René Kijewski
+
+include_dir 0.7.4
+  Licence: MIT
+  Copyright: Michael Bryan
+
+include_dir_macros 0.7.4
+  Licence: MIT
+  Copyright: Michael Bryan
+
+indexmap 2.14.2
+  Licence: Apache-2.0 OR MIT
+  Copyright: see crate source
+
+inout 0.2.5
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+is_terminal_polyfill 1.70.2
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+itoa 1.0.18
+  Licence: MIT OR Apache-2.0
+  Copyright: David Tolnay
+
+jiff 0.2.38
+  Licence: Unlicense OR MIT
+  Copyright: Andrew Gallant
+
+jiff-core 0.1.1
+  Licence: Unlicense OR MIT
+  Copyright: Andrew Gallant
+
+jiff-static 0.2.38
+  Licence: Unlicense OR MIT
+  Copyright: Andrew Gallant
+
+js-sys 0.3.106
+  Licence: MIT OR Apache-2.0
+  Copyright: The wasm-bindgen Developers
+
+libc 0.2.190
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+log 0.4.34
+  Licence: MIT OR Apache-2.0
+  Copyright: The Rust Project Developers
+
+lopdf 0.45.0
+  Licence: MIT
+  Copyright: Junfeng Liu, Emulator
+
+md-5 0.11.0
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+memchr 2.8.3
+  Licence: Unlicense OR MIT
+  Copyright: Andrew Gallant, bluss
+
+miniz_oxide 0.9.1
+  Licence: MIT OR Zlib OR Apache-2.0
+  Copyright: Frommi, oyvindln, Rich Geldreich richgel99@gmail.com
+
+multiversion_no_op 1.0.0
+  Licence: Apache-2.0 OR MIT
+  Copyright: Henri Sivonen
+
+nom 8.0.0
+  Licence: MIT
+  Copyright: contact@geoffroycouprie.com
+
+num-traits 0.2.19
+  Licence: MIT OR Apache-2.0
+  Copyright: The Rust Project Developers
+
+once_cell 1.21.4
+  Licence: MIT OR Apache-2.0
+  Copyright: Aleksey Kladov
+
+once_cell_polyfill 1.70.2
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+pdf-inspector 1.25.2
+  Licence: MIT
+  Copyright: Firecrawl Team
+
+pin-project-lite 0.2.17
+  Licence: Apache-2.0 OR MIT
+  Copyright: see crate source
+
+portable-atomic 1.15.0
+  Licence: Apache-2.0 OR MIT
+  Copyright: see crate source
+
+portable-atomic-util 0.2.8
+  Licence: Apache-2.0 OR MIT
+  Copyright: see crate source
+
+proc-macro2 1.0.107
+  Licence: MIT OR Apache-2.0
+  Copyright: David Tolnay, Alex Crichton
+
+quick-xml 0.41.0
+  Licence: MIT
+  Copyright: see crate source
+
+quote 1.0.47
+  Licence: MIT OR Apache-2.0
+  Copyright: David Tolnay
+
+r-efi 6.0.0
+  Licence: MIT OR Apache-2.0 OR LGPL-2.1-or-later
+  Copyright: see crate source
+
+rand 0.10.3
+  Licence: MIT OR Apache-2.0
+  Copyright: The Rand Project Developers, The Rust Project Developers
+
+rand_core 0.10.1
+  Licence: MIT OR Apache-2.0
+  Copyright: The Rand Project Developers
+
+rangemap 1.8.0
+  Licence: MIT/Apache-2.0
+  Copyright: Jeff Parsons
+
+rayon 1.12.0
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+rayon-core 1.13.0
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+regex 1.13.1
+  Licence: MIT OR Apache-2.0
+  Copyright: The Rust Project Developers, Andrew Gallant
+
+regex-automata 0.4.18
+  Licence: MIT OR Apache-2.0
+  Copyright: The Rust Project Developers, Andrew Gallant
+
+regex-syntax 0.8.11
+  Licence: MIT OR Apache-2.0
+  Copyright: The Rust Project Developers, Andrew Gallant
+
+rustversion 1.0.23
+  Licence: MIT OR Apache-2.0
+  Copyright: David Tolnay
+
+ryu 1.0.23
+  Licence: Apache-2.0 OR BSL-1.0
+  Copyright: David Tolnay
+
+scopeguard 1.2.0
+  Licence: MIT OR Apache-2.0
+  Copyright: bluss
+
+serde_core 1.0.229
+  Licence: MIT OR Apache-2.0
+  Copyright: Erick Tryzelaar, David Tolnay
+
+serde_derive 1.0.229
+  Licence: MIT OR Apache-2.0
+  Copyright: Erick Tryzelaar, David Tolnay
+
+sha2 0.11.0
+  Licence: MIT OR Apache-2.0
+  Copyright: RustCrypto Developers
+
+shlex 2.0.1
+  Licence: MIT OR Apache-2.0
+  Copyright: comex, Fenhl, Adrian Taylor, Alex Touchet, Daniel Parks, Garrett Berg
+
+simd-adler32 0.3.10
+  Licence: MIT
+  Copyright: Marvin Countryman
+
+simdutf8 0.1.5
+  Licence: MIT OR Apache-2.0
+  Copyright: Hans Kratz
+
+slab 0.4.12
+  Licence: MIT
+  Copyright: Carl Lerche
+
+stringprep 0.1.5
+  Licence: MIT/Apache-2.0
+  Copyright: Steven Fackler
+
+syn 2.0.119
+  Licence: MIT OR Apache-2.0
+  Copyright: David Tolnay
+
+syn 3.0.9
+  Licence: MIT OR Apache-2.0
+  Copyright: David Tolnay
+
+thiserror 2.0.21
+  Licence: MIT OR Apache-2.0
+  Copyright: David Tolnay
+
+thiserror-impl 2.0.21
+  Licence: MIT OR Apache-2.0
+  Copyright: David Tolnay
+
+tinyvec 1.13.3
+  Licence: Zlib OR Apache-2.0 OR MIT
+  Copyright: Lokathor
+
+ttf-parser 0.25.1
+  Licence: MIT OR Apache-2.0
+  Copyright: Caleb Maclennan, Laurenz Stampfl, Yevhenii Reizner, خالد حسني (Khaled Hosny)
+
+typed-path 0.12.4
+  Licence: MIT OR Apache-2.0
+  Copyright: Chip Senkbeil
+
+typenum 1.20.1
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+unicode-bidi 0.3.18
+  Licence: MIT OR Apache-2.0
+  Copyright: The Servo Project Developers
+
+unicode-ident 1.0.27
+  Licence: (MIT OR Apache-2.0) AND Unicode-3.0
+  Copyright: David Tolnay
+
+unicode-normalization 0.1.26
+  Licence: (MIT OR Apache-2.0) AND Unicode-3.0
+  Copyright: kwantam, Manish Goregaokar
+
+unicode-properties 0.1.4
+  Licence: MIT/Apache-2.0
+  Copyright: Charles Lew, Manish Goregaokar
+
+utf8parse 0.2.2
+  Licence: Apache-2.0 OR MIT
+  Copyright: Joe Wilm, Christian Duerr
+
+uuid 1.28.0
+  Licence: Apache-2.0 OR MIT
+  Copyright: Ashley Mannix, Dylan DPC, Hunar Roop Kahlon
+
+wasm-bindgen 0.2.129
+  Licence: MIT OR Apache-2.0
+  Copyright: The wasm-bindgen Developers
+
+wasm-bindgen-macro 0.2.129
+  Licence: MIT OR Apache-2.0
+  Copyright: The wasm-bindgen Developers
+
+wasm-bindgen-macro-support 0.2.129
+  Licence: MIT OR Apache-2.0
+  Copyright: The wasm-bindgen Developers
+
+wasm-bindgen-shared 0.2.129
+  Licence: MIT OR Apache-2.0
+  Copyright: The wasm-bindgen Developers
+
+web-time 1.1.0
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+weezl 0.2.1
+  Licence: MIT OR Apache-2.0
+  Copyright: The image-rs Developers
+
+windows-core 0.62.2
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+windows-implement 0.60.2
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+windows-interface 0.59.3
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+windows-link 0.2.1
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+windows-result 0.4.1
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+windows-strings 0.5.1
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+windows-sys 0.61.2
+  Licence: MIT OR Apache-2.0
+  Copyright: see crate source
+
+zip 8.6.0
+  Licence: MIT
+  Copyright: Mathijs van de Nes, Marli Frost, Ryan Levick, Chris Hennick
+
+zlib-rs 0.6.8
+  Licence: Zlib
+  Copyright: see crate source
+
+zopfli 0.8.4
+  Licence: Apache-2.0
+  Copyright: see crate source
+
