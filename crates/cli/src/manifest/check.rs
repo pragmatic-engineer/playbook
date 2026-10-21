@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 17] = [
+const ALLOW_FILES: [&str; 18] = [
     ".gitignore",
     "CHANGELOG.md",
     "README.md",
