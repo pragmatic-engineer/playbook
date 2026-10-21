@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+
+# Mirrors .cargo/audit.toml. Each entry expires on 2026-12-31 so it gets
+# reviewed again. See that file for the reasons.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0367"
+ignoreUntil = 2026-12-31
+reason = "zip extraction only; pbdoc and anydoc 0.2.4 never extract to disk"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0368"
+ignoreUntil = 2026-12-31
+reason = "zip extraction only; pbdoc and anydoc 0.2.4 never extract to disk"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0369"
+ignoreUntil = 2026-12-31
+reason = "zip extraction only; pbdoc and anydoc 0.2.4 never extract to disk"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0192"
+ignoreUntil = 2026-12-31
+reason = "ttf-parser is unmaintained, which is a notice and not a vulnerability; transitive through anydoc"
