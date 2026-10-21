@@ -97,7 +97,7 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0024](adr/0024-session-management-view-and-lifecycle.md) | Session management view with a derived record and suggest first lifecycle | Proposed | 2026-10-11 |
 | [0025](adr/0025-self-improving-playbook.md) | A self improving playbook proposes config patches behind a staged trust ladder | Proposed, amended on 2026-10-21 | 2026-10-11 |
 | [0026](adr/0026-local-code-index-in-the-binary.md) | Ship a local code index in the binary, accepting about 5 MB of size | Accepted | 2026-10-12 |
-| [0027](adr/0027-anydoc-as-optional-local-tool.md) | Use anydoc as an optional local tool found on PATH, never vendored | Accepted | 2026-10-12 |
+| [0027](adr/0027-anydoc-as-optional-local-tool.md) | Use anydoc as an optional local tool found on PATH, never vendored | Superseded by 0051 | 2026-10-12 |
 | [0028](adr/0028-per-agent-auto-budget.md) | Budget auto mode per agent, with the closing steps allowed at a cap | Accepted, amended on 2026-10-17 | 2026-10-12 |
 | [0029](adr/0029-cargo-workspace-monorepo.md) | Keep the Rust crates in one Cargo workspace | Accepted, amended by 0030, 0038 and 0039 | 2026-10-13 |
 | [0030](adr/0030-skills-and-commands-in-their-own-repo.md) | Keep the skills, commands and agents in their own repository | Accepted, partly superseded by 0031 and 0032 | 2026-10-13 |
@@ -121,3 +121,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0048](adr/0048-collector-daemon-started-by-commands.md) | Start the usage collector from playbook commands and keep it running | Accepted | 2026-10-19 |
 | [0049](adr/0049-spend-limit-credential-access.md) | Read the Claude Code login token to fetch the server spend limit | Superseded by 0050 | 2026-10-20 |
 | [0050](adr/0050-limits-from-claude-data-not-the-login-token.md) | Derive usage limits from Claude Code's own data, not the login token | Accepted | 2026-10-20 |
+| [0051](adr/0051-bundle-anydoc-as-pbdoc-helper.md) | Bundle the anydoc converter as the pbdoc helper | Accepted | 2026-10-21 |
