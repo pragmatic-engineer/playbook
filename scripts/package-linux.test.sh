@@ -35,16 +35,17 @@ done
 # The publish job downloads, counts and sums the assets by these patterns. A
 # renamed package must fail here and not as a partial release.
 wf=.github/workflows/release.yml
-grep -qF 'for p in "playbook-$VERSION-*" "pbtop-$VERSION-*" "playbook-$VERSION.*.rpm" "playbook_${VERSION}_*.deb"; do' "$wf" \
+grep -qF 'for p in "playbook-$VERSION-*" "pbtop-$VERSION-*" "pbdoc-$VERSION-*" "playbook-$VERSION.*.rpm" "playbook_${VERSION}_*.deb"; do' "$wf" \
   || fail "$wf does not download the assets by these patterns"
-grep -qF '[ "$count" -ne 14 ]' "$wf" || fail "$wf does not expect 14 assets"
-grep -qF 'shasum -a 256 playbook-* playbook_* pbtop-*' "$wf" || fail "$wf does not put the .deb in SHA256SUMS"
+grep -qF '[ "$count" -ne 18 ]' "$wf" || fail "$wf does not expect 18 assets"
+grep -qF 'shasum -a 256 playbook-* playbook_* pbtop-* pbdoc-*' "$wf" || fail "$wf does not put the .deb in SHA256SUMS"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 version=1.2.3
 for t in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-pc-windows-msvc; do
   : > "$tmp/playbook-$version-$t"
   : > "$tmp/pbtop-$version-$t.tar.gz"
+  case "$t" in *windows*) ;; *) : > "$tmp/pbdoc-$version-$t.tar.gz" ;; esac
 done
 for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
   while IFS= read -r f; do : > "$tmp/$f"; done < <("$pk" names "$version" "$t")
@@ -52,10 +53,10 @@ done
 (
   cd "$tmp"
   n=0
-  for f in playbook-"$version"-* pbtop-"$version"-* playbook-"$version".*.rpm playbook_"${version}"_*.deb; do
+  for f in playbook-"$version"-* pbtop-"$version"-* pbdoc-"$version"-* playbook-"$version".*.rpm playbook_"${version}"_*.deb; do
     [ -e "$f" ] && n=$((n + 1))
   done
-  eq "$n" 14 "assets the publish patterns match"
+  eq "$n" 18 "assets the publish patterns match"
 )
 
 if command -v nfpm >/dev/null 2>&1; then
