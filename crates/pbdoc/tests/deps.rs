@@ -167,7 +167,7 @@ fn two_node_metadata(dependency: &str, edge_kind: Value, licence: &str) -> Value
 fn real_metadata() -> Value {
     let cargo = std::env::var("CARGO").expect("cargo sets CARGO for tests");
     let output = Command::new(cargo)
-        .args(["metadata", "--format-version", "1", "--locked", "--offline"])
+        .args(["metadata", "--format-version", "1", "--locked"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("cargo metadata starts");
