@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Igor Santos
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "pbdoc"
+version.workspace = true
+edition.workspace = true
+description = "Offline document to Markdown converter that ships next to playbook"
+license.workspace = true
+repository = "https://github.com/pragmatic-engineer/playbook"
+publish = false
+
+[[bin]]
+name = "pbdoc"
+path = "src/main.rs"
+
+[dependencies]
+anydoc = { version = "=0.2.4", default-features = false }
+libc = "=0.2.190"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
+
+[lints]
+workspace = true
