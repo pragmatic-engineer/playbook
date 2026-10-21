@@ -29,6 +29,8 @@ From playbook 0.35.0, with Homebrew (macOS and Linux):
 brew install pragmatic-engineer/tap/pbtop
 ```
 
+Since Homebrew 6.0.0 a tap that is not official needs trust. The fully qualified name above trusts only that formula. The install records that trust. To install by short name without the full name first, run `brew tap pragmatic-engineer/tap` and `brew trust --formula pragmatic-engineer/tap/pbtop`. To trust the whole tap, run `brew trust pragmatic-engineer/tap`.
+
 Or with the install script, which checks the archive's checksum, its build attestation when `gh` can check it, and `pbtop --version`:
 
 ```sh
@@ -43,7 +45,7 @@ gh attestation verify pbtop-<version>-<target>.tar.gz --repo pragmatic-engineer/
 tar -xzf pbtop-<version>-<target>.tar.gz -C ~/.local/bin
 ```
 
-The `playbook-telemetry` command and formula are retired ([ADR 0041](../../docs/adr/0041-retire-playbook-telemetry.md)). With Homebrew, move with `brew uninstall playbook-telemetry && brew install pbtop`. Change a script that calls `playbook-telemetry` to call `pbtop` with the same arguments, or `playbook usage` where playbook is installed.
+The `playbook-telemetry` command and formula are retired ([ADR 0041](../../docs/adr/0041-retire-playbook-telemetry.md)). With Homebrew, move with `brew uninstall playbook-telemetry && brew install pragmatic-engineer/tap/pbtop`. Change a script that calls `playbook-telemetry` to call `pbtop` with the same arguments, or `playbook usage` where playbook is installed.
 
 Or build from source with the Rust version in `rust-toolchain.toml`:
 
