@@ -2,6 +2,10 @@
 
 `pbtop` is the Claude Code usage and cost dashboard as one small program, for a machine without playbook. With playbook installed you do not need it: `playbook usage` runs the same code.
 
+![pbtop on the monthly view, with the spend and token charts, using sample data](../images/pbtop-month.svg)
+
+The monthly view with sample data. Press `m` for this month, or run `pbtop --range month`.
+
 Install it with either command:
 
 ```bash
