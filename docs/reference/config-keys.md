@@ -70,6 +70,7 @@ Older versions kept `config.json` files. The first run imports them and renames 
 | `docs.timeoutSeconds` | `30` | whole number, 1 or more | The converter is stopped after this many seconds. |
 | `docs.maxOutputChars` | `200000` | whole number, 1 or more | The text printed is cut after this many characters, with a marker that says how many were shown. |
 | `docs.maxMemoryMb` | `1024` | whole number, 1 or more | The converter is stopped when its resident memory passes this many megabytes. |
+| `docs.displayChars` | `24000` | whole number, 1000 to 120000 | The most document characters `playbook doc read` prints at once. A longer document is cut into slices of this size, read with `--offset`, `--limit` and `--section`. |
 | `docs.anydocPath` | empty | a path, or empty | The converter to run. Empty means the first `anydoc` on PATH. |
 | `usage.weekStart` | `monday` | `monday`, `sunday`, `saturday` | The first day of the week for the `week` and `last-week` ranges of `playbook usage` (view, `--json`, `--summary`). Days are in the chosen time zone, local unless `usage.timeZone` says `utc`. |
 | `usage.refreshSeconds` | `5` | whole number, 1 to 3600 | How often the `playbook usage` terminal view reads new history and redraws, in seconds. |
