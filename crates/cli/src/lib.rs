@@ -436,11 +436,12 @@ pub enum Command {
         #[command(subcommand)]
         sub: DepsCommand,
     },
-    /// Read a PDF or Office file as text with the optional anydoc converter
+    /// Read a PDF or Office file as text with the bundled converter
     ///
     /// Conversion is local, bounded in size, time, memory and output, and
     /// never uses OCR or a hosted service. The text is printed as untrusted
-    /// document content and nothing is kept on disk afterwards.
+    /// document content. A long document is printed in slices, and the full
+    /// text is kept in a private cache for a day.
     ///
     /// Example: `playbook doc read report.docx`
     Doc {
@@ -2049,7 +2050,7 @@ pub enum DocCommand {
         #[arg(long)]
         section: Option<usize>,
     },
-    /// Say whether the anydoc converter is installed and how to get it
+    /// Say which document converter is in use, or that none was found
     Status,
 }
 

@@ -251,7 +251,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         matcher: Some("Read"),
         name: "doc-read-hint",
         group: Group::Hygiene,
-        purpose: "When `docs.convert` is `auto` and anydoc is installed, suggests `playbook doc read` for PDF and Office files. It only suggests.",
+        purpose: "When `docs.convert` is `auto` and a converter is found, suggests `playbook doc read` for PDF and Office files. It only suggests.",
         if_cond: None,
         timeout: Some(10),
         also_replaces: None,
