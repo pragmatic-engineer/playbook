@@ -58,7 +58,7 @@ The rule that produced the current values: **lower effort where the work is mech
 
 The `Agent` tool takes a `model` on each call but has no per-call effort. An agent's effort is fixed by its file. When one role needs two efforts (a quick review of a small diff and a deep one of a risky diff), the role needs two agent definitions.
 
-The variants are not files. Twelve agents times four more tiers would add dozens of descriptions to every session. So `playbook cc` and `playbook ccd` render only the variants a session can use, from the base agents, into a throwaway session plugin. Nothing is committed, and `agents.variants` (`auto`, `all`, `off`) controls the set. `playbook agents variants` shows what a session would get, and `playbook agents check` fails CI when an agent has no `VARIANTS` entry or a tier cannot render. The orchestrator asks `playbook effort resolve` which agent to spawn, because the user's effort ceilings decide it, then picks by diff size and risk, following the `delegating-subagents` skill.
+The variants are not files. Eleven agents times four more tiers would add dozens of descriptions to every session. So `playbook cc` and `playbook ccd` render only the variants a session can use, from the base agents, into a throwaway session plugin. Nothing is committed, and `agents.variants` (`auto`, `all`, `off`) controls the set. `playbook agents variants` shows what a session would get, and `playbook agents check` fails CI when an agent has no `VARIANTS` entry or a tier cannot render. The orchestrator asks `playbook effort resolve` which agent to spawn, because the user's effort ceilings decide it, then picks by diff size and risk, following the `delegating-subagents` skill.
 
 ### Who decides the effort
 
