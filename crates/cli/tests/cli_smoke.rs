@@ -508,11 +508,12 @@ fn table() -> Vec<Case> {
         case("deps ensure", &["deps", "ensure", "{ROOT}/Brewfile"]).err("no Brewfile"),
         case("doc read", &["doc", "read", "{ROOT}/notes.xyz"]).file("notes.xyz", "x").code(1).err("unsupported file type"),
         // A configured path that does not exist keeps the row independent of any
-        // `pbdoc` built next to the test binary.
+        // `pbdoc` built next to the test binary. The default, nothing configured,
+        // is covered in `doc_read.rs` on a copy of the binary with no sibling.
         case("doc status", &["doc", "status"])
             .pre(&["config", "set", "docs.anydocPath", "{ROOT}/missing-anydoc"])
             .code(1)
-            .out("converter: not found"),
+            .out("anydoc: not found. docs.anydocPath is set to"),
         // health facts
         case("doctor check", &["doctor", "check"]).out("FAIL").plain().writes(),
         case("doctor models", &["doctor", "models"]).out("haiku").plain(),

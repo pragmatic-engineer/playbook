@@ -475,3 +475,39 @@ fn a_ui_layout_takes_tabs_of_known_panels_and_nothing_else() {
     assert_written("usage.ui.layout", &json!(""));
     assert_written("usage.ui.layout", &json!("Money=budget,models"));
 }
+
+#[test]
+fn docs_max_memory_mb_accepts_up_to_the_ceiling_and_refuses_more() {
+    // Arrange
+    let home = std::env::temp_dir().join(format!("playbook-memory-cap-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+
+    // Act
+    let at_cap = set(
+        Tier::Global,
+        "docs.maxMemoryMb",
+        Value::from(4096),
+        &home,
+        None,
+    );
+    let over_cap = set(
+        Tier::Global,
+        "docs.maxMemoryMb",
+        Value::from(4097),
+        &home,
+        None,
+    );
+    let huge = set(
+        Tier::Global,
+        "docs.maxMemoryMb",
+        Value::from(i64::MAX),
+        &home,
+        None,
+    );
+
+    // Assert
+    std::fs::remove_dir_all(&home).unwrap();
+    assert!(at_cap.is_ok());
+    assert!(over_cap.is_err());
+    assert!(huge.is_err());
+}

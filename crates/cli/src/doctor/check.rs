@@ -85,45 +85,37 @@ const PRE_GUARDS: [&str; 5] = [
     "policy-guard",
 ];
 
-/// The informational row for the document converter. `pbdoc_version` is the
-/// bundled helper's version, compared with playbook's own.
+/// The row for the document converter, from the facade's verdict.
 #[cfg(unix)]
-fn doc_converter_row(found: Option<&crate::doc::convert::Converter>, pbdoc_version: &str) -> Row {
-    use crate::doc::convert::{
-        Kind, DOCTOR_ROW_BUNDLED, DOCTOR_ROW_EXTERNAL, DOCTOR_ROW_NONE, DOCTOR_ROW_SKEW,
-    };
-    match found.map(|c| c.kind) {
-        Some(Kind::Bundled) if pbdoc_version == env!("CARGO_PKG_VERSION") => {
-            Row::new("-", Level::Pass, DOCTOR_ROW_BUNDLED)
+fn doc_converter_row(health: &crate::doc::converter::Health) -> Row {
+    use crate::doc::converter::Health;
+    match health {
+        Health::Ready => Row::new("-", Level::Pass, health.message()),
+        Health::VersionSkew => {
+            Row::new("-", Level::Warn, health.message()).hint("run: playbook update")
         }
-        Some(Kind::Bundled) => {
-            Row::new("-", Level::Warn, DOCTOR_ROW_SKEW).hint("run: playbook update")
-        }
-        Some(Kind::External) => Row::new("-", Level::Warn, DOCTOR_ROW_EXTERNAL),
-        None => Row::new("-", Level::Info, DOCTOR_ROW_NONE),
+        Health::External => Row::new("-", Level::Warn, health.message()),
+        Health::Missing => Row::new("-", Level::Info, health.message()),
     }
 }
 
 #[cfg(unix)]
 fn doc_rows(env: &Env) -> Vec<Row> {
-    use crate::doc::convert::{find_converter, pbdoc_number, version_of};
-    let configured = config::resolve_valid("docs.anydocPath", &env.home, env.repo_slug.as_deref())
-        .ok()
-        .and_then(|(v, _, _)| v.as_str().map(str::to_string))
-        .unwrap_or_default();
-    let exe = std::env::current_exe().ok();
-    let found = find_converter(&configured, exe.as_deref(), Some(env.path_var.as_os_str()));
-    let version = found
-        .as_ref()
-        .map(|c| version_of(&c.path, &std::env::temp_dir()))
-        .unwrap_or_default();
-    vec![doc_converter_row(found.as_ref(), pbdoc_number(&version))]
+    use crate::doc::converter::{configured_path, Search};
+    let configured = configured_path(&env.home, env.repo_slug.as_deref());
+    let search = Search::process(&configured).with_path(env.path_var.as_os_str());
+    vec![doc_converter_row(&search.health())]
+}
+
+/// Document conversion needs process groups and signals, so it is not offered
+/// here. The row says so instead of leaving the table silent.
+#[cfg(not(unix))]
+fn doc_rows(_env: &Env) -> Vec<Row> {
+    vec![Row::new("-", Level::Info, DOCTOR_ROW_UNSUPPORTED)]
 }
 
 #[cfg(not(unix))]
-fn doc_rows(_env: &Env) -> Vec<Row> {
-    Vec::new()
-}
+const DOCTOR_ROW_UNSUPPORTED: &str = "doc converter: not available on this platform";
 
 /// The guards that must also be wired on PostToolUse.
 const POST_GUARDS: [&str; 1] = ["commit-message-sanitizer"];
@@ -1531,23 +1523,12 @@ mod tests {
         assert_eq!(failing[0].level, Level::Fail);
     }
 
-    #[cfg(unix)]
-    fn converter(kind: crate::doc::convert::Kind) -> crate::doc::convert::Converter {
-        crate::doc::convert::Converter {
-            path: PathBuf::from("/opt/bin/pbdoc"),
-            kind,
-        }
-    }
-
     #[test]
     #[cfg(unix)]
-    fn a_bundled_converter_at_playbooks_version_is_a_pass_row() {
-        use crate::doc::convert::{Kind, DOCTOR_ROW_BUNDLED};
-        // Arrange
-        let found = converter(Kind::Bundled);
-
-        // Act
-        let row = doc_converter_row(Some(&found), env!("CARGO_PKG_VERSION"));
+    fn a_ready_converter_is_a_pass_row() {
+        use crate::doc::converter::{Health, DOCTOR_ROW_BUNDLED};
+        // Arrange and Act
+        let row = doc_converter_row(&Health::Ready);
 
         // Assert
         assert_eq!(row.level, Level::Pass);
@@ -1557,12 +1538,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_bundled_converter_at_another_version_is_a_warn_row() {
-        use crate::doc::convert::{Kind, DOCTOR_ROW_SKEW};
-        // Arrange
-        let found = converter(Kind::Bundled);
-
-        // Act
-        let row = doc_converter_row(Some(&found), "0.0.1");
+        use crate::doc::converter::{Health, DOCTOR_ROW_SKEW};
+        // Arrange and Act
+        let row = doc_converter_row(&Health::VersionSkew);
 
         // Assert
         assert_eq!(row.level, Level::Warn);
@@ -1572,12 +1550,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn an_external_converter_is_a_warn_row() {
-        use crate::doc::convert::{Kind, DOCTOR_ROW_EXTERNAL};
-        // Arrange
-        let found = converter(Kind::External);
-
-        // Act
-        let row = doc_converter_row(Some(&found), "");
+        use crate::doc::converter::{Health, DOCTOR_ROW_EXTERNAL};
+        // Arrange and Act
+        let row = doc_converter_row(&Health::External);
 
         // Assert
         assert_eq!(row.level, Level::Warn);
@@ -1587,9 +1562,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn no_converter_is_an_info_row() {
-        use crate::doc::convert::DOCTOR_ROW_NONE;
+        use crate::doc::converter::{Health, DOCTOR_ROW_NONE};
         // Arrange and Act
-        let row = doc_converter_row(None, "");
+        let row = doc_converter_row(&Health::Missing);
 
         // Assert
         assert_eq!(row.level, Level::Info);

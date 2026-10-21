@@ -8,8 +8,7 @@
 
 use crate::common::emit_pre_context;
 use crate::common::payload::Payload;
-use crate::doc::convert::find_converter;
-use std::ffi::OsStr;
+use crate::doc::converter::Search;
 use std::path::Path;
 
 /// Extensions the converter reads that the built in Read tool cannot parse.
@@ -45,13 +44,8 @@ pub fn hint_for(path: &Path, has_pages: bool, has_range: bool) -> Option<String>
 
 /// Whether the hint should be emitted: `docs.convert` is `auto` and a
 /// converter is available.
-fn hint_enabled(
-    convert: &str,
-    configured: &str,
-    exe: Option<&Path>,
-    path_var: Option<&OsStr>,
-) -> bool {
-    convert == "auto" && find_converter(configured, exe, path_var).is_some()
+fn hint_enabled(convert: &str, search: &Search) -> bool {
+    convert == "auto" && search.is_available()
 }
 
 pub fn run(payload: &Payload) {
@@ -74,14 +68,11 @@ pub fn run(payload: &Payload) {
             .and_then(|(v, _, _)| v.as_str().map(str::to_string))
             .unwrap_or_default()
     };
-    let path_var = std::env::var_os("PATH");
-    let exe = std::env::current_exe().ok();
-    let enabled = hint_enabled(
-        &setting("docs.convert"),
-        &setting("docs.anydocPath"),
-        exe.as_deref(),
-        path_var.as_deref(),
-    );
+    let search = Search::process(&crate::doc::converter::configured_path(
+        &home,
+        slug.as_deref(),
+    ));
+    let enabled = hint_enabled(&setting("docs.convert"), &search);
     if !enabled {
         return;
     }
@@ -145,7 +136,7 @@ mod tests {
         let (dir, exe) = exe_with_bundled_sibling("auto");
 
         // Act
-        let enabled = hint_enabled("auto", "", Some(&exe), None);
+        let enabled = hint_enabled("auto", &Search::new("", Some(&exe), None));
 
         // Assert
         std::fs::remove_dir_all(dir).unwrap();
@@ -158,7 +149,7 @@ mod tests {
         let (dir, exe) = exe_with_bundled_sibling("off");
 
         // Act
-        let enabled = hint_enabled("off", "", Some(&exe), None);
+        let enabled = hint_enabled("off", &Search::new("", Some(&exe), None));
 
         // Assert
         std::fs::remove_dir_all(dir).unwrap();

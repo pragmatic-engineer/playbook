@@ -26,6 +26,13 @@ const _: () = assert!(
         && AUTO_BUDGET_USD * AUTO_CEILING_FACTOR > AUTO_AGENT_BUDGET_USD
 );
 
+/// The largest input a document converter opens, whatever `docs.maxBytes`
+/// says. The bundled `pbdoc` keeps its own copy because it must not depend on
+/// this crate; a test in `doc::converter` keeps the two equal.
+pub const HARD_MAX_INPUT_BYTES: u64 = 104_857_600;
+/// The most `docs.maxMemoryMb` may be. The bundled `pbdoc` clamps to it too.
+pub const DOCS_MAX_MEMORY_MB_CEILING: i64 = 4096;
+
 /// Every config key playbook resolves, in v1.
 pub const KNOWN_KEYS: &[&str] = &[
     "autoReview.enabled",
