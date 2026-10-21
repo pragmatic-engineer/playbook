@@ -333,6 +333,7 @@ mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
     use crate::update::download::fake::FakeFetcher;
+    use crate::update::pbdoc_fixture;
     use crate::update::swap;
     use crate::update::verify::{self, fake::FakeAttest};
 
@@ -370,6 +371,9 @@ mod tests {
         let exe = dir.join("bin/playbook");
         std::fs::write(&exe, script("0.16.0")).unwrap();
         swap::make_executable(&exe).unwrap();
+        let pbdoc = dir.join("bin/pbdoc");
+        std::fs::write(&pbdoc, pbdoc_fixture::script("0.16.0")).unwrap();
+        swap::make_executable(&pbdoc).unwrap();
         let env = Env {
             exe,
             path_var: dir.join("bin").into_os_string(),
@@ -395,6 +399,8 @@ mod tests {
             format!("{DL}/v0.17.0/SHA256SUMS"),
             format!("{}  {ASSET}\n", verify::sha256_hex(&bin)).into_bytes(),
         );
+        let pbdoc_tar = pbdoc_fixture::good("0.17.0");
+        pbdoc_fixture::serve(&mut f, &format!("{DL}/v0.17.0"), &pbdoc_tar, &pbdoc_tar);
         let root = dir.join("root");
         Cache::update(&root, |c| {
             c.latest = Some("0.17.0".into());
@@ -419,17 +425,17 @@ mod tests {
     /// Attaches `body` as the release notes of the fake 0.17.0 release, with
     /// its line in SHA256SUMS.
     fn with_notes(f: &mut FakeFetcher, body: &str) {
-        let bin = script("0.17.0");
-        let sums = format!(
-            "{}  {ASSET}\n{}  {NOTES_ASSET}\n",
-            verify::sha256_hex(&bin),
+        let url = format!("{DL}/v0.17.0/SHA256SUMS");
+        let mut sums = String::from_utf8(f.0[&url].clone()).unwrap();
+        sums.push_str(&format!(
+            "{}  {NOTES_ASSET}\n",
             verify::sha256_hex(body.as_bytes())
-        );
+        ));
         f.0.insert(
             format!("{DL}/v0.17.0/{NOTES_ASSET}"),
             body.as_bytes().to_vec(),
         );
-        f.0.insert(format!("{DL}/v0.17.0/SHA256SUMS"), sums.into_bytes());
+        f.0.insert(url, sums.into_bytes());
     }
 
     fn run_with(root: &Path, env: &Env, fetcher: &FakeFetcher, attest: &FakeAttest, now: u64) {
@@ -643,6 +649,10 @@ mod tests {
         };
         apply(&root, auto(), &deps);
         assert_eq!(installed(&env), "playbook 0.16.0");
+        assert_eq!(
+            swap::run_version(&env.exe.with_file_name("pbdoc")).unwrap(),
+            "pbdoc 0.16.0"
+        );
         assert!(Cache::read(&root).unwrap().report.is_empty());
     }
 

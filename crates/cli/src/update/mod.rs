@@ -13,7 +13,11 @@ pub mod pathcheck;
 pub mod resolve;
 pub mod style;
 pub mod swap;
+pub mod tarball;
 pub mod verify;
+
+#[cfg(all(test, unix))]
+pub(crate) use tarball::pbdoc_fixture;
 
 use download::Fetcher;
 use std::ffi::OsString;
@@ -259,6 +263,160 @@ fn releases(
     )
 }
 
+const PLAYBOOK: &str = "playbook";
+const PBDOC: &str = "pbdoc";
+/// What a missing helper reports as its old version.
+const NO_PBDOC: &str = "none";
+
+/// Where a release's files live and what its SHA256SUMS says.
+struct PbdocRelease<'a> {
+    base: &'a str,
+    sums: &'a str,
+}
+
+/// What was swapped: its name, and how the backup line calls it.
+#[derive(Clone, Copy)]
+struct Swapped {
+    name: &'static str,
+    noun: &'static str,
+}
+
+const SWAPPED_PLAYBOOK: Swapped = Swapped {
+    name: PLAYBOOK,
+    noun: "binary",
+};
+const SWAPPED_PBDOC: Swapped = Swapped {
+    name: PBDOC,
+    noun: PBDOC,
+};
+
+/// Adds the lines that say `name` was swapped, and where its backup is.
+fn report_swap(
+    o: &mut Outcome,
+    swapped: Swapped,
+    target: &Path,
+    from: &str,
+    to: &str,
+    done: swap::Installed,
+) {
+    let Swapped { name, noun } = swapped;
+    o.warnings.extend(done.warnings);
+    o.out.push(format!(
+        "updated {name} {from} -> {to} at {}",
+        target.display()
+    ));
+    if let Some(bak) = done.backup {
+        o.out.push(format!(
+            "kept the previous {noun} as {}; to roll back: mv -f {} {}",
+            bak.display(),
+            bak.display(),
+            target.display()
+        ));
+    }
+}
+
+/// Swaps the `pbdoc` helper beside the playbook binary. It never fails the
+/// update: any problem is a warning and the old helper stays.
+fn swap_pbdoc(
+    o: &mut Outcome,
+    env: &Env,
+    fetcher: &dyn Fetcher,
+    attest: &dyn Attest,
+    release: &PbdocRelease,
+    version: &str,
+) {
+    match fetch_pbdoc(o, env, fetcher, attest, release, version) {
+        Ok((target, from, done)) => report_swap(o, SWAPPED_PBDOC, &target, &from, version, done),
+        Err(err) => o.warnings.push(format!(
+            "{PBDOC} was not updated and the old one stays: {err}"
+        )),
+    }
+}
+
+/// The version a helper binary reports, the last word of `--version`.
+fn helper_version(bin: &Path) -> Option<String> {
+    let out = swap::run_version(bin).ok()?;
+    out.split_whitespace().last().map(str::to_string)
+}
+
+/// Downloads, verifies and installs pbdoc. Returns the target, the version it
+/// replaced and what the swap left behind.
+fn fetch_pbdoc(
+    o: &mut Outcome,
+    env: &Env,
+    fetcher: &dyn Fetcher,
+    attest: &dyn Attest,
+    release: &PbdocRelease,
+    version: &str,
+) -> Result<(PathBuf, String, swap::Installed), String> {
+    let asset = resolve::pbdoc_asset_name(version, &env.os, &env.arch)?;
+    let bytes = fetcher
+        .get(&format!("{}/{asset}", release.base))
+        .map_err(|e| format!("could not download {asset}: {e}"))?;
+    verify::verify_checksum(&bytes, release.sums, &asset)?;
+    let file = tarball::gunzip(&bytes)
+        .and_then(|tar| tarball::extract_regular_file(&tar, PBDOC))
+        .map_err(|e| format!("{asset}: {e}"))?;
+    let dir = env
+        .exe
+        .parent()
+        .ok_or("the running binary has no parent directory")?;
+    let stage = swap::write_stage(dir, &file)
+        .map_err(|e| format!("cannot write to {}: {e}", dir.display()))?;
+    // The staged file is attested before it is ever run.
+    match attest.verify(&stage, env.strict) {
+        Ok(None) => o
+            .out
+            .push(format!("verified the build attestation for {asset}")),
+        Ok(Some(warning)) => o.warnings.push(warning),
+        Err(err) => {
+            let _ = std::fs::remove_file(&stage);
+            return Err(err);
+        }
+    }
+    let target = dir.join(PBDOC);
+    let from = helper_version(&target).unwrap_or_else(|| NO_PBDOC.to_string());
+    let done = swap::install(&stage, &target, &from, version, &swap::run_version)?;
+    Ok((target, from, done))
+}
+
+/// On an equal version playbook stays, but a missing or older pbdoc is still
+/// installed, so an upgrade from a release without it gets the converter.
+fn complete_pbdoc(
+    o: &mut Outcome,
+    opts: &Options,
+    env: &Env,
+    fetcher: &dyn Fetcher,
+    attest: &dyn Attest,
+    tag: &str,
+    version: &str,
+) {
+    let Some(dir) = env.exe.parent() else { return };
+    if helper_version(&dir.join(PBDOC)).as_deref() == Some(version)
+        || refusals(env).is_err()
+        || (env.auto_mode && !opts.yes)
+    {
+        return;
+    }
+    let base = format!("{}/{tag}", env.download_base);
+    match fetch_text(fetcher, &format!("{base}/SHA256SUMS")) {
+        Ok(sums) => swap_pbdoc(
+            o,
+            env,
+            fetcher,
+            attest,
+            &PbdocRelease {
+                base: &base,
+                sums: &sums,
+            },
+            version,
+        ),
+        Err(err) => o.warnings.push(format!(
+            "{PBDOC} was not updated: could not download SHA256SUMS: {err}"
+        )),
+    }
+}
+
 /// Runs the update. Read-only for `--list` and `--check`.
 pub fn run(
     opts: &Options,
@@ -302,6 +460,7 @@ pub fn run(
     if order.is_eq() {
         o.out
             .push(format!("playbook {current} is already installed"));
+        complete_pbdoc(&mut o, opts, env, fetcher, attest, &release.tag, &version);
         return Ok(o);
     }
     if order.is_lt() && opts.version.is_none() {
@@ -359,19 +518,18 @@ pub fn run(
 
     let done = swap::install(&stage, &env.exe, current, &version, smoke)?;
     o.installed = Some(version.clone());
-    o.warnings.extend(done.warnings);
-    o.out.push(format!(
-        "updated playbook {current} -> {version} at {}",
-        env.exe.display()
-    ));
-    if let Some(bak) = done.backup {
-        o.out.push(format!(
-            "kept the previous binary as {}; to roll back: mv -f {} {}",
-            bak.display(),
-            bak.display(),
-            env.exe.display()
-        ));
-    }
+    report_swap(&mut o, SWAPPED_PLAYBOOK, &env.exe, current, &version, done);
+    swap_pbdoc(
+        &mut o,
+        env,
+        fetcher,
+        attest,
+        &PbdocRelease {
+            base: &base,
+            sums: &sums,
+        },
+        &version,
+    );
     o.warnings
         .extend(pathcheck::shadow_warning(&env.path_var, &env.exe));
     Ok(o)
@@ -397,6 +555,9 @@ mod tests {
         let exe = dir.join("playbook");
         std::fs::write(&exe, script_bytes("0.16.0")).unwrap();
         swap::make_executable(&exe).unwrap();
+        let pbdoc = dir.join("pbdoc");
+        std::fs::write(&pbdoc, pbdoc_fixture::script("0.16.0")).unwrap();
+        swap::make_executable(&pbdoc).unwrap();
         Env {
             exe,
             path_var: dir.clone().into_os_string(),
@@ -464,6 +625,8 @@ mod tests {
         f.0.insert(format!("{DL}/v0.17.0/{asset}"), binary.to_vec());
         let sums = format!("{}  {asset}\n", verify::sha256_hex(sums_hash_of));
         f.0.insert(format!("{DL}/v0.17.0/SHA256SUMS"), sums.into_bytes());
+        let pbdoc = pbdoc_fixture::good("0.17.0");
+        pbdoc_fixture::serve(&mut f, &format!("{DL}/v0.17.0"), &pbdoc, &pbdoc);
         f
     }
 
@@ -864,6 +1027,353 @@ echo ran\n",
         )
         .unwrap_err();
         assert!(err.contains("brew upgrade playbook"), "{err}");
+        assert!(!env.exe.with_file_name("pbdoc").exists());
+    }
+
+    const RELEASE: &str = "https://dl.test/v0.17.0";
+
+    fn pbdoc_of(env: &Env) -> PathBuf {
+        env.exe.with_file_name("pbdoc")
+    }
+
+    #[test]
+    fn a_good_pbdoc_is_swapped_with_the_playbook_and_both_are_backed_up() {
+        // Arrange
+        let env = env_in("up-pbdoc-ok");
+        let bin = script_bytes("0.17.0");
+
+        // Act
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.17.0");
+        assert_eq!(swap::run_version(&pbdoc_of(&env)).unwrap(), "pbdoc 0.17.0");
+        assert!(env.exe.with_file_name("playbook.0.16.0.bak").exists());
+        assert!(env.exe.with_file_name("pbdoc.0.16.0.bak").exists());
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    }
+
+    #[test]
+    fn a_release_without_a_pbdoc_asset_still_updates_playbook_and_warns() {
+        // Arrange
+        let env = env_in("up-pbdoc-missing");
+        let bin = script_bytes("0.17.0");
+        let mut f = fixture(&bin, &bin);
+        pbdoc_fixture::remove(&mut f, RELEASE);
+
+        // Act
+        let out = run(
+            &Options::default(),
+            &env,
+            &f,
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.17.0");
+        assert_eq!(swap::run_version(&pbdoc_of(&env)).unwrap(), "pbdoc 0.16.0");
+        assert!(
+            out.warnings.iter().any(|w| w.contains("pbdoc")),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn a_pbdoc_with_a_bad_checksum_is_left_untouched_with_a_checksum_warning() {
+        // Arrange
+        let env = env_in("up-pbdoc-badsum");
+        let bin = script_bytes("0.17.0");
+        let mut f = fixture(&bin, &bin);
+        pbdoc_fixture::serve(&mut f, RELEASE, &pbdoc_fixture::good("0.17.0"), b"other");
+
+        // Act
+        let out = run(
+            &Options::default(),
+            &env,
+            &f,
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.17.0");
+        assert_eq!(swap::run_version(&pbdoc_of(&env)).unwrap(), "pbdoc 0.16.0");
+        assert!(
+            out.warnings
+                .iter()
+                .any(|w| w.contains("pbdoc") && w.contains("checksum")),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn a_tarball_with_pbdoc_and_its_notice_installs_only_pbdoc() {
+        // Arrange
+        let env = env_in("up-pbdoc-notice");
+        let bin = script_bytes("0.17.0");
+        let mut f = fixture(&bin, &bin);
+        let tarball = pbdoc_fixture::tarball(&[
+            pbdoc_fixture::entry("pbdoc", b'0', "", &pbdoc_fixture::script("0.17.0")),
+            pbdoc_fixture::entry("NOTICE-pbdoc", b'0', "", b"notice"),
+        ]);
+        pbdoc_fixture::serve(&mut f, RELEASE, &tarball, &tarball);
+
+        // Act
+        let out = run(
+            &Options::default(),
+            &env,
+            &f,
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(swap::run_version(&pbdoc_of(&env)).unwrap(), "pbdoc 0.17.0");
+        assert!(!env.exe.with_file_name("NOTICE-pbdoc").exists());
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    }
+
+    #[test]
+    fn a_tarball_that_is_not_one_regular_pbdoc_file_is_refused() {
+        // Arrange
+        let script = pbdoc_fixture::script("0.17.0");
+        let cases = [
+            (
+                "a symlink",
+                "is not a regular file",
+                vec![pbdoc_fixture::entry("pbdoc", b'2', "/bin/sh", b"")],
+            ),
+            (
+                "an unknown extra file",
+                "expected only pbdoc",
+                vec![
+                    pbdoc_fixture::entry("pbdoc", b'0', "", &script),
+                    pbdoc_fixture::entry("extra", b'0', "", b"x"),
+                ],
+            ),
+            (
+                "a notice that is a symlink",
+                "is not a regular file",
+                vec![
+                    pbdoc_fixture::entry("pbdoc", b'0', "", &script),
+                    pbdoc_fixture::entry("NOTICE-pbdoc", b'2', "/etc/passwd", b""),
+                ],
+            ),
+            (
+                "two pbdoc entries",
+                "more than once",
+                vec![
+                    pbdoc_fixture::entry("pbdoc", b'0', "", &script),
+                    pbdoc_fixture::entry("pbdoc", b'0', "", &script),
+                ],
+            ),
+            (
+                "a path outside the archive",
+                "expected only pbdoc",
+                vec![
+                    pbdoc_fixture::entry("pbdoc", b'0', "", &script),
+                    pbdoc_fixture::entry("../NOTICE-pbdoc", b'0', "", b"x"),
+                ],
+            ),
+            (
+                "no pbdoc",
+                "does not hold",
+                vec![pbdoc_fixture::entry("NOTICE-pbdoc", b'0', "", b"notice")],
+            ),
+            (
+                "another name",
+                "expected only pbdoc",
+                vec![pbdoc_fixture::entry("evil", b'0', "", &script)],
+            ),
+        ];
+        for (n, (what, reason, entries)) in cases.into_iter().enumerate() {
+            let env = env_in(&format!("up-pbdoc-refused-{n}"));
+            let bin = script_bytes("0.17.0");
+            let mut f = fixture(&bin, &bin);
+            let tarball = pbdoc_fixture::tarball(&entries);
+            pbdoc_fixture::serve(&mut f, RELEASE, &tarball, &tarball);
+
+            // Act
+            let out = run(
+                &Options::default(),
+                &env,
+                &f,
+                &ok_attest(),
+                &swap::run_version,
+            )
+            .unwrap();
+
+            // Assert
+            assert_eq!(
+                swap::run_version(&pbdoc_of(&env)).unwrap(),
+                "pbdoc 0.16.0",
+                "{what}"
+            );
+            assert!(
+                out.warnings
+                    .iter()
+                    .any(|w| w.contains("pbdoc") && w.contains(reason)),
+                "{what}: {:?}",
+                out.warnings
+            );
+        }
+    }
+
+    struct FailsOnPbdoc;
+
+    impl Attest for FailsOnPbdoc {
+        fn verify(&self, file: &Path, _: bool) -> Result<Option<String>, String> {
+            let text = std::fs::read_to_string(file).unwrap();
+            if text.contains("pbdoc") {
+                Err("no attestation for pbdoc".into())
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    #[test]
+    fn a_pbdoc_that_fails_attestation_is_not_run_or_installed() {
+        // Arrange: the fake helper would write a marker if it ever ran.
+        let env = env_in("up-pbdoc-attest");
+        let bin = script_bytes("0.17.0");
+        let marker = env.exe.with_file_name("ran");
+        let evil = format!("#!/bin/sh\n: > {}\necho 'pbdoc 0.17.0'\n", marker.display());
+        let tarball =
+            pbdoc_fixture::tarball(&[pbdoc_fixture::entry("pbdoc", b'0', "", evil.as_bytes())]);
+        let mut f = fixture(&bin, &bin);
+        pbdoc_fixture::serve(&mut f, RELEASE, &tarball, &tarball);
+
+        // Act
+        let out = run(
+            &Options::default(),
+            &env,
+            &f,
+            &FailsOnPbdoc,
+            &swap::run_version,
+        )
+        .unwrap();
+
+        // Assert
+        assert_eq!(swap::run_version(&pbdoc_of(&env)).unwrap(), "pbdoc 0.16.0");
+        assert!(!marker.exists());
+        assert!(
+            out.warnings
+                .iter()
+                .any(|w| w.contains("pbdoc was not updated") && w.contains("no attestation")),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn a_lenient_attestation_gap_on_pbdoc_only_warns() {
+        let env = env_in("up-pbdoc-gap");
+        let bin = script_bytes("0.17.0");
+        let attest = FakeAttest::new(Ok(Some("no gh to check".into())));
+
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &attest,
+            &swap::run_version,
+        )
+        .unwrap();
+
+        assert_eq!(swap::run_version(&pbdoc_of(&env)).unwrap(), "pbdoc 0.17.0");
+        assert!(out.warnings.iter().any(|w| w.contains("no gh")));
+    }
+
+    #[test]
+    fn the_pbdoc_backup_is_named_from_pbdoc_own_version() {
+        let env = env_in("up-pbdoc-skew");
+        std::fs::write(pbdoc_of(&env), pbdoc_fixture::script("0.15.0")).unwrap();
+        let bin = script_bytes("0.17.0");
+
+        run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        assert!(env.exe.with_file_name("pbdoc.0.15.0.bak").exists());
+        assert!(!env.exe.with_file_name("pbdoc.0.16.0.bak").exists());
+    }
+
+    #[test]
+    fn the_same_version_still_installs_a_missing_pbdoc() {
+        let mut env = env_in("up-same-no-pbdoc");
+        env.current_version = "0.17.0".into();
+        std::fs::remove_file(pbdoc_of(&env)).unwrap();
+        let bin = script_bytes("0.17.0");
+
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        assert!(out.out[0].contains("already installed"), "{:?}", out.out);
+        assert_eq!(swap::run_version(&pbdoc_of(&env)).unwrap(), "pbdoc 0.17.0");
+        assert_eq!(swap::run_version(&env.exe).unwrap(), "playbook 0.16.0");
+    }
+
+    #[test]
+    fn the_same_version_replaces_a_pbdoc_of_another_version() {
+        let mut env = env_in("up-same-old-pbdoc");
+        env.current_version = "0.17.0".into();
+        let bin = script_bytes("0.17.0");
+
+        run(
+            &Options::default(),
+            &env,
+            &fixture(&bin, &bin),
+            &ok_attest(),
+            &swap::run_version,
+        )
+        .unwrap();
+
+        assert_eq!(swap::run_version(&pbdoc_of(&env)).unwrap(), "pbdoc 0.17.0");
+    }
+
+    #[test]
+    fn the_same_version_with_a_current_pbdoc_changes_nothing() {
+        let mut env = env_in("up-same-pbdoc-ok");
+        env.current_version = "0.17.0".into();
+        std::fs::write(pbdoc_of(&env), pbdoc_fixture::script("0.17.0")).unwrap();
+        let attest = ok_attest();
+
+        let out = run(
+            &Options::default(),
+            &env,
+            &fixture(b"", b""),
+            &attest,
+            &swap::run_version,
+        )
+        .unwrap();
+
+        assert_eq!(out.out.len(), 1, "{:?}", out.out);
+        assert!(attest.1.borrow().is_empty());
     }
 
     #[test]
@@ -974,7 +1484,8 @@ echo ran\n",
             &swap::run_version,
         )
         .unwrap();
-        assert_eq!(*attest.1.borrow(), vec![true]);
+        // Once for playbook and once for pbdoc.
+        assert_eq!(*attest.1.borrow(), vec![true, true]);
     }
 
     #[test]

@@ -292,27 +292,40 @@ fn rc_step(opts: &Options, stamp: u64, report: &mut Report) {
     }
 }
 
+/// Binaries the installer puts in the bin directory, each with the
+/// `<name>.<version>.bak` copies an update leaves beside it.
+const BINARIES: [&str; 2] = ["playbook", "pbdoc"];
+
 fn binary_step(opts: &Options, verb: &str, report: &mut Report) {
-    let binary = opts.bin_dir.join("playbook");
-    if binary.is_file() {
-        remove_file(&binary, verb, opts.dry_run, report);
+    for name in BINARIES {
+        let binary = opts.bin_dir.join(name);
+        if binary.is_file() {
+            remove_file(&binary, verb, opts.dry_run, report);
+        }
+        if name == "playbook" {
+            remove_pb_link(&opts.bin_dir, &binary, verb, opts.dry_run, report);
+        }
+        remove_backups(&opts.bin_dir, name, verb, opts.dry_run, report);
     }
-    remove_pb_link(&opts.bin_dir, &binary, verb, opts.dry_run, report);
-    let Ok(entries) = fs::read_dir(&opts.bin_dir) else {
+}
+
+fn remove_backups(bin_dir: &Path, name: &str, verb: &str, dry_run: bool, report: &mut Report) {
+    let Ok(entries) = fs::read_dir(bin_dir) else {
         return;
     };
+    let prefix = format!("{name}.");
     let mut backups: Vec<PathBuf> = entries
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("playbook.") && n.ends_with(".bak"))
+                .is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".bak"))
         })
         .collect();
     backups.sort();
     for backup in backups {
-        remove_file(&backup, verb, opts.dry_run, report);
+        remove_file(&backup, verb, dry_run, report);
     }
 }
 
@@ -371,5 +384,68 @@ pub fn default_bin_dir(home: &Path, env: Option<&str>) -> PathBuf {
     match env {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir),
         _ => home.join(".local").join("bin"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bin_dir_with(files: &[&str], tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pb-uninstall-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        for name in files {
+            fs::write(dir.join(name), "x").unwrap();
+        }
+        dir
+    }
+
+    fn opts(bin_dir: &Path, dry_run: bool) -> Options {
+        Options {
+            home: bin_dir.to_path_buf(),
+            bin_dir: bin_dir.to_path_buf(),
+            remove_binary: true,
+            dry_run,
+        }
+    }
+
+    const INSTALLED: [&str; 4] = ["playbook", "pbdoc", "pbdoc.0.1.0.bak", "playbook.0.1.0.bak"];
+
+    #[test]
+    fn dry_run_lists_pbdoc_and_its_backups_without_removing_them() {
+        // Arrange
+        let dir = bin_dir_with(&INSTALLED, "dry");
+        let mut report = Report::default();
+
+        // Act
+        binary_step(&opts(&dir, true), "would remove", &mut report);
+
+        // Assert
+        let listed = report.lines.join("\n");
+        assert!(listed.contains("would remove") && listed.contains("pbdoc"));
+        assert!(listed.contains("pbdoc.0.1.0.bak"));
+        assert!(dir.join("pbdoc").exists() && dir.join("pbdoc.0.1.0.bak").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn real_run_removes_pbdoc_and_its_backups_and_keeps_other_files() {
+        // Arrange
+        let mut files = INSTALLED.to_vec();
+        files.push("pbdocs-notes");
+        let dir = bin_dir_with(&files, "real");
+        let mut report = Report::default();
+
+        // Act
+        binary_step(&opts(&dir, false), "removed", &mut report);
+
+        // Assert
+        for name in INSTALLED {
+            assert!(!dir.join(name).exists(), "{name} should be gone");
+        }
+        assert!(dir.join("pbdocs-notes").exists());
+        assert!(report.errors.is_empty());
+        let _ = fs::remove_dir_all(&dir);
     }
 }
