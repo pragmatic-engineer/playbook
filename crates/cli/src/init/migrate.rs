@@ -380,7 +380,7 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: NO_SLOP_GUARD_MIGRATION,
-            since: "next",
+            since: "0.39.0",
             kind: Kind::Idempotent,
             scope: Scope::Consent {
                 check: retired_hooks_pending,
@@ -390,28 +390,28 @@ pub fn registry() -> Vec<Migration> {
         },
         Migration {
             id: PLUGIN_UPDATE_MODE_MIGRATION,
-            since: "next",
+            since: "0.39.0",
             kind: Kind::Auto,
             scope: Scope::Owned,
             run: plugin_update_mode,
         },
         Migration {
             id: COLLECTOR_REMOVAL_MIGRATION,
-            since: "next",
+            since: "0.39.0",
             kind: Kind::Idempotent,
             scope: Scope::Owned,
             run: collector_service_removed,
         },
         Migration {
             id: POLICY_GUARD_NOTICE_MIGRATION,
-            since: "next",
+            since: "0.39.0",
             kind: Kind::Auto,
             scope: Scope::Owned,
             run: policy_guard_off_notice,
         },
         Migration {
             id: RM_GUARD_NOTICE_MIGRATION,
-            since: "next",
+            since: "0.39.0",
             kind: Kind::Auto,
             scope: Scope::Owned,
             run: rm_guard_simplified_notice,
@@ -1752,6 +1752,9 @@ mod tests {
                 "migrations/applied/0017-auto-budget-defaults=1",
                 "migrations/applied/0020-collector-service-label=1",
                 "migrations/applied/auto-budget-defaults=1",
+                "migrations/applied/plugin-update-mode=1",
+                "migrations/applied/policy-guard-off-by-default=1",
+                "migrations/applied/rm-guard-simplified=1",
                 "migrations/shipped/system-prompt=abc",
             ]
         );

@@ -250,6 +250,9 @@ fn fresh_config_gets_fully_wired() {
             "telemetry",
             "short-name",
             "policy-guard",
+            "plugin update mode",
+            "policy guard",
+            "rm guard",
         ]
         .contains(&step.name)
         {
@@ -777,6 +780,9 @@ fn running_init_twice_is_idempotent_with_no_second_run_changes() {
             "telemetry",
             "short-name",
             "policy-guard",
+            "plugin update mode",
+            "policy guard",
+            "rm guard",
         ]
         .contains(&step.name)
         {
