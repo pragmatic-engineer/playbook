@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 
 /// Top-level files the manifest allows verbatim.
-const ALLOW_FILES: [&str; 16] = [
+const ALLOW_FILES: [&str; 17] = [
     ".gitignore",
     "CHANGELOG.md",
     "README.md",
@@ -34,6 +34,7 @@ const ALLOW_FILES: [&str; 16] = [
     "Cargo.toml",
     "Cargo.lock",
     "rust-toolchain.toml",
+    "osv-scanner.toml",
 ];
 
 /// Top-level directories any tracked file may live under.
