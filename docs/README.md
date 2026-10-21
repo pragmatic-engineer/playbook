@@ -1,6 +1,6 @@
 # Playbook docs
 
-How to use and extend this Claude Code config. The [README](../README.md) covers install, the launcher and a short summary of every command. These pages go deeper: why the config is shaped the way it is, real workflows end to end, how to add your own pieces, and how the machine works underneath.
+How to use and extend this Claude Code config. The [README](../README.md) covers install, Homebrew tap trust and a first session. These pages go deeper: why the config is shaped the way it is, real workflows end to end, how to add your own pieces, and how the machine works underneath.
 
 Read them in order, or jump to what you need.
 
@@ -8,7 +8,7 @@ Read them in order, or jump to what you need.
 
 Task-oriented workflows.
 
-- [Install](guides/00-install.md): requirements, every install route, upgrade and uninstall.
+- [Install](guides/00-install.md): requirements, every install route (Homebrew first), Homebrew tap trust, upgrade and uninstall.
 - [Plan and implement](guides/01-plan-and-implement.md): design with `/playbook:plan`, build with `/playbook:implement`, fix a small bug with `/playbook:fix`.
 - [Review and PR flow](guides/02-review-and-pr-flow.md): commit, review, and work through feedback.
 - [Decisions and memory](guides/03-decisions-and-memory.md): record choices with `/playbook:adr`, build project knowledge with `/playbook:learn-project`.
@@ -17,6 +17,13 @@ Task-oriented workflows.
 - [Reading documents](guides/06-reading-documents.md): read a PDF or Office file as cheaper text with the optional anydoc converter.
 - [The rm guard](guides/07-rm-guard.md): the short rule that denies `rm` of `/` or your home folder, and what it leaves to you.
 - [The policy guard](guides/08-policy-guard.md): the optional guard that is off by default, exactly what it denies, how to turn it on and off and its pitfalls.
+- [The launcher](guides/09-launcher.md): `playbook cc`, `playbook ccd`, the `pb` alias and worktrees.
+- [Telemetry](guides/10-telemetry.md): the local collector, what setup writes and how to turn it on or off.
+- [pbtop](guides/11-pbtop.md): the usage dashboard on its own, and the retired `playbook-telemetry`.
+- [Settings](guides/12-settings.md): `playbook config`, tiers and examples.
+- [Security defaults](guides/13-security-defaults.md): the opt-in `permissions` block and its limits.
+- [Models and effort](guides/14-models-and-effort.md): the model tiers, fallbacks, effort ceiling, variants and routing.
+- [Memory](guides/15-memory.md): the local memory store and `memory.source`.
 
 ## Reference
 
@@ -27,6 +34,9 @@ Pages to look things up in.
 - [Hook reference](reference/hooks.md): every hook setup wires, with its event, matcher, what it reads and writes, and how to turn it off.
 - [Policy table](reference/policy-table.md): the model and effort each agent and command runs at.
 - [Codex support](reference/codex-support.md): what works in Codex, what does not and why.
+- [Slash commands](reference/commands.md): every `/playbook:*` command in one table.
+- [Layers](reference/layers.md): the seven layers `/playbook:doctor` reports.
+- [Repository layout](reference/repository-layout.md): the crates and the plugin folder.
 
 ## Authoring
 
