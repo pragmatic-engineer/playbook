@@ -2,6 +2,97 @@
 
 Release notes for playbook: the binary and the plugin in `plugins/playbook`. From 0.34.0 they ship together as one `vX.Y.Z` release with one version ([ADR-0038](docs/adr/0038-one-release-line.md)). Each release has a section named `## playbook <version>`, newest first, which the release pull request adds from the notes that `scripts/release-notes.sh` builds. The sections from 0.33.0 down are plugin releases from before the two lines joined. The binary skips 0.27 to 0.33: it goes from 0.26 to 0.34.0.
 
+## playbook 0.39.0
+
+### Breaking changes
+
+- **hooks**: cut the rm guard down to rm of / or the home folder ([#1202](https://github.com/pragmatic-engineer/playbook/pull/1202))
+- **hooks**: remove the disk-guard hook ([#1230](https://github.com/pragmatic-engineer/playbook/pull/1230))
+- **setup**: remove the disk-ballast part and the disk doctor rows ([#1245](https://github.com/pragmatic-engineer/playbook/pull/1245))
+- **disk**: remove the playbook disk command ([#1246](https://github.com/pragmatic-engineer/playbook/pull/1246))
+- **config**: remove the disk config keys and ADR 0047 ([#1249](https://github.com/pragmatic-engineer/playbook/pull/1249))
+
+### Features
+
+- **disk**: remove a worktree's cargo target folder with it ([#1181](https://github.com/pragmatic-engineer/playbook/pull/1181))
+- **update**: update the playbook plugin from update and migrate ([#1182](https://github.com/pragmatic-engineer/playbook/pull/1182))
+- **setup**: offer the disk ballast as an opt-in part ([#1186](https://github.com/pragmatic-engineer/playbook/pull/1186))
+- **prompt**: require a memory search before claiming no knowledge ([#1191](https://github.com/pragmatic-engineer/playbook/pull/1191))
+- **telemetry**: add writer thread with lifetime lock ([#1190](https://github.com/pragmatic-engineer/playbook/pull/1190))
+- **hooks**: hint when memory recall finds nothing or only weak matches ([#1194](https://github.com/pragmatic-engineer/playbook/pull/1194))
+- **update**: add the ask and auto modes to update.plugin ([#1192](https://github.com/pragmatic-engineer/playbook/pull/1192))
+- **skills**: add the skills sync planner and renderer for Codex ([#1196](https://github.com/pragmatic-engineer/playbook/pull/1196))
+- **telemetry**: serve with a thread per connection and shutdown ([#1197](https://github.com/pragmatic-engineer/playbook/pull/1197))
+- **hooks**: recall memory facts by crate name and alias ([#1198](https://github.com/pragmatic-engineer/playbook/pull/1198))
+- **telemetry**: add daemon ensure and stop for the collector ([#1208](https://github.com/pragmatic-engineer/playbook/pull/1208))
+- **telemetry**: add playbook usage stop ([#1212](https://github.com/pragmatic-engineer/playbook/pull/1212))
+- **telemetry**: start the collector daemon from hooks and commands ([#1215](https://github.com/pragmatic-engineer/playbook/pull/1215))
+- **doctor**: show who holds the collector daemon lock ([#1216](https://github.com/pragmatic-engineer/playbook/pull/1216))
+- **skills**: add playbook skills sync for Codex ([#1200](https://github.com/pragmatic-engineer/playbook/pull/1200))
+- **update**: update the plugin at the first command after an upgrade ([#1199](https://github.com/pragmatic-engineer/playbook/pull/1199))
+- **update**: start the plugin update from the session hook ([#1209](https://github.com/pragmatic-engineer/playbook/pull/1209))
+- **skills**: refresh synced skills when playbook is upgraded ([#1213](https://github.com/pragmatic-engineer/playbook/pull/1213))
+- **hooks**: make the policy guard optional and off by default ([#1195](https://github.com/pragmatic-engineer/playbook/pull/1195))
+- **migrate**: remove the collector service on upgrade ([#1217](https://github.com/pragmatic-engineer/playbook/pull/1217))
+- **setup**: retire the collector-service part ([#1218](https://github.com/pragmatic-engineer/playbook/pull/1218))
+- **usage**: compare reported spend with local cost ([#1227](https://github.com/pragmatic-engineer/playbook/pull/1227))
+- **usage**: model the lines the usage sources carry ([#1228](https://github.com/pragmatic-engineer/playbook/pull/1228))
+- **usage**: show crossings and why a limit is missing ([#1229](https://github.com/pragmatic-engineer/playbook/pull/1229))
+- **usage**: add the burn-up series for any limit ([#1236](https://github.com/pragmatic-engineer/playbook/pull/1236))
+- **usage**: burn-up panel from reported limits ([#1237](https://github.com/pragmatic-engineer/playbook/pull/1237))
+- **usage**: mark HTTP 429 replies on the burn-up chart ([#1262](https://github.com/pragmatic-engineer/playbook/pull/1262))
+- **release**: support cargo binstall and mise ([#1261](https://github.com/pragmatic-engineer/playbook/pull/1261))
+- **usage**: keep a bounded history of window readings ([#1263](https://github.com/pragmatic-engineer/playbook/pull/1263))
+- **usage**: add a format version to each rate limit history line ([#1265](https://github.com/pragmatic-engineer/playbook/pull/1265))
+- **nix**: add flake with release binaries and hash renderer ([#1275](https://github.com/pragmatic-engineer/playbook/pull/1275))
+- **pbdoc**: add the pbdoc helper crate with its CLI contract ([#1291](https://github.com/pragmatic-engineer/playbook/pull/1291))
+- **pbdoc**: enforce hard limits in the helper ([#1292](https://github.com/pragmatic-engineer/playbook/pull/1292))
+- **pbdoc**: guard the dependency closure and its notices ([#1293](https://github.com/pragmatic-engineer/playbook/pull/1293))
+- **doc**: prefer the bundled converter and refuse oversized files ([#1294](https://github.com/pragmatic-engineer/playbook/pull/1294))
+- **doc**: serve long conversions in bounded slices ([#1295](https://github.com/pragmatic-engineer/playbook/pull/1295))
+- **install**: build, attest and install the pbdoc helper ([#1296](https://github.com/pragmatic-engineer/playbook/pull/1296))
+- **update**: swap and remove the pbdoc helper on update and uninstall ([#1297](https://github.com/pragmatic-engineer/playbook/pull/1297))
+
+### Fixes
+
+- **prompt**: do not require task tools that many builds lack ([#1221](https://github.com/pragmatic-engineer/playbook/pull/1221))
+- **hooks**: log real compactions with session and context size ([#1250](https://github.com/pragmatic-engineer/playbook/pull/1250))
+- **git**: check the worktree and branch first in commit and PR skills ([#1253](https://github.com/pragmatic-engineer/playbook/pull/1253))
+- drop retired rm guard rules and keep foreign service files ([#1255](https://github.com/pragmatic-engineer/playbook/pull/1255))
+- **update**: recognise .deb and .rpm installs in /usr/bin ([#1266](https://github.com/pragmatic-engineer/playbook/pull/1266))
+- **statusline**: honor the auto-compact window in the compaction gap ([#1268](https://github.com/pragmatic-engineer/playbook/pull/1268))
+
+### Performance
+
+- **usage**: cache rate limit history by file mtime and size ([#1270](https://github.com/pragmatic-engineer/playbook/pull/1270))
+
+### Other changes
+
+- chore(deps): bump sha2 from 0.10.9 to 0.11.0 ([#1187](https://github.com/pragmatic-engineer/playbook/pull/1187))
+- test(hooks): replay 11 prompts against the memory recall bars ([#1210](https://github.com/pragmatic-engineer/playbook/pull/1210))
+- test(hooks): drop the rm guard roots and corpus integration tests ([#1201](https://github.com/pragmatic-engineer/playbook/pull/1201))
+- test(cli): pin collector port in setup\_alias tests ([#1222](https://github.com/pragmatic-engineer/playbook/pull/1222))
+- docs(hooks): describe the short rm guard rule ([#1203](https://github.com/pragmatic-engineer/playbook/pull/1203))
+- refactor(hooks): remove the no-slop-guard hook ([#1193](https://github.com/pragmatic-engineer/playbook/pull/1193))
+- test(hooks): drop the rm guard corpus fixture ([#1204](https://github.com/pragmatic-engineer/playbook/pull/1204))
+- refactor(hooks): remove the old rm guard module and helpers ([#1205](https://github.com/pragmatic-engineer/playbook/pull/1205))
+- refactor(disk): remove the cleanup and ballast code ([#1247](https://github.com/pragmatic-engineer/playbook/pull/1247))
+- refactor(disk): remove targets, backups and the classifier ([#1248](https://github.com/pragmatic-engineer/playbook/pull/1248))
+- refactor(hooks): remove the first part of the rm guard parser ([#1206](https://github.com/pragmatic-engineer/playbook/pull/1206))
+- refactor: prune collector service setup and move account functions ([#1219](https://github.com/pragmatic-engineer/playbook/pull/1219))
+- refactor(hooks): remove the rest of the rm guard parser ([#1207](https://github.com/pragmatic-engineer/playbook/pull/1207))
+- refactor(service): prune the service manager to its removal paths ([#1220](https://github.com/pragmatic-engineer/playbook/pull/1220))
+- docs(commands): add compact and clear checkpoints to plan and implement ([#1251](https://github.com/pragmatic-engineer/playbook/pull/1251))
+- docs: document collector daemon and retire service setup ([#1225](https://github.com/pragmatic-engineer/playbook/pull/1225))
+- test: fix zone leak, flaky self-heal test and real HOME writes ([#1254](https://github.com/pragmatic-engineer/playbook/pull/1254))
+- docs(adr): close the ADR number gaps and pin the sequence ([#1257](https://github.com/pragmatic-engineer/playbook/pull/1257))
+- test(hooks): run guard tests in scratch home, fail on HOME use ([#1269](https://github.com/pragmatic-engineer/playbook/pull/1269))
+- refactor(plugin): move worktree guard to delegating-subagents ([#1267](https://github.com/pragmatic-engineer/playbook/pull/1267))
+- test(hooks): run the Bash guards against Codex-shaped payloads ([#1274](https://github.com/pragmatic-engineer/playbook/pull/1274))
+- docs: fix the agent count and add tap trust to the pbtop README ([#1283](https://github.com/pragmatic-engineer/playbook/pull/1283))
+- docs(doc): describe the bundled converter ([#1298](https://github.com/pragmatic-engineer/playbook/pull/1298))
+- refactor(doc): route every converter lookup through one facade ([#1299](https://github.com/pragmatic-engineer/playbook/pull/1299))
+
 ## playbook 0.38.0
 
 ### Breaking changes
