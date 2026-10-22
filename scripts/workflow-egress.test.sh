@@ -103,7 +103,7 @@ for f in .github/workflows/*.yml; do
 done
 # The jobs known to run gh attestation verify. When the call moves out of
 # the workflow text, the check would see nothing, so it fails instead.
-for job in publish verify verify-packages verify-installers nix aur; do
+for job in publish verify verify-packages verify-installers nix aur scoop; do
   grep -qx "checked .github/workflows/release.yml: $job" <<<"$checked" \
     || { echo "FAIL: the check did not find release.yml job $job." >&2; fail=1; }
 done
