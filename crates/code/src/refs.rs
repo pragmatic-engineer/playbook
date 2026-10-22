@@ -272,6 +272,29 @@ mod tests {
     }
 
     #[test]
+    fn go_uses_declarations_and_imports_are_told_apart_and_comments_and_strings_skipped() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("rf-go");
+        f.write("store.go", crate::lang::go::FIXTURE);
+        f.run();
+
+        // Act
+        let got = refs(&f, "MaxItems");
+        let imported = refs(&f, "log");
+
+        // Assert
+        assert_eq!(
+            shown(&got),
+            vec![("store.go", 9, "declaration"), ("store.go", 28, "use"),]
+        );
+        assert_eq!(
+            shown(&imported),
+            vec![("store.go", 5, "import"), ("store.go", 29, "use")]
+        );
+    }
+
+    #[test]
     fn imports_are_labelled_as_imports() {
         let _g = pinned();
         // Arrange

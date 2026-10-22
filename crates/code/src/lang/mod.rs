@@ -5,6 +5,7 @@
 //! one extractor module. Extractors walk the tree with plain node access and
 //! use no Tree-sitter queries.
 
+pub mod go;
 pub mod python;
 pub mod rust;
 pub mod typescript;
@@ -19,15 +20,17 @@ pub enum Lang {
     Tsx,
     JavaScript,
     Python,
+    Go,
 }
 
 /// Every supported language, in a stable order.
-pub const ALL: [Lang; 5] = [
+pub const ALL: [Lang; 6] = [
     Lang::Rust,
     Lang::TypeScript,
     Lang::Tsx,
     Lang::JavaScript,
     Lang::Python,
+    Lang::Go,
 ];
 
 impl Lang {
@@ -40,6 +43,7 @@ impl Lang {
             "tsx" => Some(Lang::Tsx),
             "js" | "jsx" | "mjs" | "cjs" => Some(Lang::JavaScript),
             "py" | "pyi" => Some(Lang::Python),
+            "go" => Some(Lang::Go),
             _ => None,
         }
     }
@@ -52,6 +56,7 @@ impl Lang {
             Lang::TypeScript | Lang::Tsx => "typescript",
             Lang::JavaScript => "javascript",
             Lang::Python => "python",
+            Lang::Go => "go",
         }
     }
 
@@ -62,6 +67,7 @@ impl Lang {
             Lang::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
             Lang::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
             Lang::Python => tree_sitter_python::LANGUAGE.into(),
+            Lang::Go => tree_sitter_go::LANGUAGE.into(),
         }
     }
 }
@@ -167,6 +173,12 @@ pub fn identifier_kinds(lang: Lang) -> &'static [&'static str] {
             "shorthand_property_identifier_pattern",
         ],
         Lang::Python => &["identifier"],
+        Lang::Go => &[
+            "identifier",
+            "type_identifier",
+            "field_identifier",
+            "package_identifier",
+        ],
     }
 }
 
@@ -205,6 +217,15 @@ pub fn declaration_kinds(lang: Lang) -> &'static [&'static str] {
             "public_field_definition",
         ],
         Lang::Python => &["function_definition", "class_definition"],
+        Lang::Go => &[
+            "function_declaration",
+            "method_declaration",
+            "method_elem",
+            "type_spec",
+            "type_alias",
+            "const_spec",
+            "var_spec",
+        ],
     }
 }
 
@@ -218,6 +239,7 @@ pub fn import_kinds(lang: Lang) -> &'static [&'static str] {
             "import_from_statement",
             "future_import_statement",
         ],
+        Lang::Go => &["import_declaration"],
     }
 }
 
@@ -229,6 +251,7 @@ pub fn extract(lang: Lang, parsed: &Parsed, source: &[u8]) -> Extracted {
             typescript::extract(parsed.tree.root_node(), source)
         }
         Lang::Python => python::extract(parsed.tree.root_node(), source),
+        Lang::Go => go::extract(parsed.tree.root_node(), source),
     }
 }
 
@@ -290,7 +313,7 @@ mod tests {
         first_kind: &'static str,
     }
 
-    const SAMPLES: [Sample; 5] = [
+    const SAMPLES: [Sample; 6] = [
         Sample {
             lang: Lang::Rust,
             root_kind: "source_file",
@@ -325,6 +348,13 @@ mod tests {
             valid: "def f():\n    return 1\n",
             broken: "def f(:\n",
             first_kind: "function_definition",
+        },
+        Sample {
+            lang: Lang::Go,
+            root_kind: "source_file",
+            valid: "func f() int { return 1 }\n",
+            broken: "func f( {",
+            first_kind: "function_declaration",
         },
     ];
 
@@ -398,6 +428,8 @@ mod tests {
             ("a.cjs", Some(Lang::JavaScript)),
             ("a.py", Some(Lang::Python)),
             ("a.pyi", Some(Lang::Python)),
+            ("a.go", Some(Lang::Go)),
+            ("a_test.go", Some(Lang::Go)),
             ("A.RS", Some(Lang::Rust)),
             ("a.txt", None),
             ("Makefile", None),

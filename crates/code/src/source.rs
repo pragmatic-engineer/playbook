@@ -18,7 +18,7 @@ pub const READ_MAX_BYTES: usize = 32 * 1024;
 
 /// What the supported languages are, for error messages.
 pub const SUPPORTED: &str =
-    "rust (rs), typescript (ts, tsx, mts, cts), javascript (js, jsx, mjs, cjs), python (py, pyi)";
+    "rust (rs), typescript (ts, tsx, mts, cts), javascript (js, jsx, mjs, cjs), python (py, pyi), go (go)";
 
 /// One declaration in an outline.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,6 +259,38 @@ mod tests {
             ]
         );
         assert_eq!(got.lang, "typescript");
+    }
+
+    #[test]
+    fn outline_of_a_go_file_nests_methods_under_their_receiver_types() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("src-outline-go");
+        f.write("store.go", crate::lang::go::FIXTURE);
+
+        // Act
+        let got = outline(&f.root, &f.root, "store.go", OUTLINE_CAP).expect("outline");
+
+        // Assert
+        let shown: Vec<(usize, &str, &str)> = got
+            .entries
+            .iter()
+            .map(|e| (e.depth, e.kind, e.qualified_name.as_str()))
+            .collect();
+        assert_eq!(
+            shown,
+            vec![
+                (0, "const", "MaxItems"),
+                (0, "variable", "ErrFull"),
+                (0, "struct", "Item"),
+                (0, "interface", "Store"),
+                (1, "method", "Store.Put"),
+                (0, "struct", "memory"),
+                (0, "function", "New"),
+                (1, "method", "memory.Put"),
+            ]
+        );
+        assert_eq!(got.lang, "go");
     }
 
     #[test]
