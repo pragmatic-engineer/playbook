@@ -152,6 +152,24 @@ playbook setup
 
 An upgrade installs the newer file the same way. The package owns no file under `/etc` or your home folder, so an upgrade or a removal leaves your config alone, and `playbook migrate` runs on first use. The package manager owns `/usr/bin/playbook`, so update with it. Do not run `playbook update` on a package install, because it would replace a file the package manager owns. Each release installs, reinstalls and removes the packages in Debian, Ubuntu and Fedora containers before and after it is published.
 
+### Windows with scoop (experimental)
+
+```powershell
+scoop bucket add playbook https://github.com/pragmatic-engineer/scoop-bucket
+scoop install playbook
+playbook --version
+```
+
+Windows is an experimental CLI ([ADR 0053](../adr/0053-windows-experimental-cli.md)). The package puts `playbook.exe` on your PATH and nothing else: it does not run `playbook setup` and does not touch your config. CI checks on Windows that `playbook --version` and `playbook doctor check` run, and reports on `setup`, `uninstall` and the hooks. Not supported:
+
+- PATH wiring and PowerShell profile wiring by `setup`, and the `pb` short name.
+- `playbook update`. It is refused on Windows, so update with `scoop update playbook`. To go back, `scoop install playbook@<version>` needs the version in the bucket, or wait for a newer release.
+- `pbdoc` and the `doc` command, and `pbtop`.
+- Backslash paths in the `rm` guard.
+- Whether Claude Code on Windows finds `playbook hook <name>` from `settings.json` is not checked.
+
+The manifest holds the SHA256 of the release binary, copied from the attested `SHA256SUMS`, and scoop checks it on install. The binary has no Authenticode signature. Each release installs the manifest on a clean Windows runner before and after it reaches the bucket.
+
 ### Optional: pbtop alone
 
 You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. Install `pbtop`, the usage dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
@@ -179,7 +197,7 @@ The tool shares its data with playbook: the database is `~/.config/playbook/data
    | macOS, Intel | `playbook-<version>-x86_64-apple-darwin` |
    | Linux, x86_64 | `playbook-<version>-x86_64-unknown-linux-musl` |
    | Linux, arm64 | `playbook-<version>-aarch64-unknown-linux-musl` |
-   | Windows | `playbook-<version>-x86_64-pc-windows-msvc.exe` |
+   | Windows (experimental, or use [scoop](#windows-with-scoop-experimental)) | `playbook-<version>-x86_64-pc-windows-msvc.exe` |
 
 2. Verify it. `SHA256SUMS` is not signed, so it is only a corruption check. The attestation shows where the binary was built.
 

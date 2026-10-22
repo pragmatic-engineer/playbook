@@ -1276,6 +1276,11 @@ impl P { fn go(&self) {} }
         write(&f.root, "b.ts", b"export class C {\n  run() {}\n}\n");
         write(&f.root, "c.py", b"import os\ndef top():\n    pass\n");
         write(&f.root, "d.txt", b"plain text\n");
+        write(
+            &f.root,
+            "e.go",
+            b"package e\nimport \"os\"\nfunc Top() {}\n",
+        );
 
         // Act
         let report = f.run();
@@ -1307,11 +1312,13 @@ impl P { fn go(&self) {} }
         assert_eq!(langs[1].1.as_deref(), Some("typescript"));
         assert_eq!(langs[2].1.as_deref(), Some("python"));
         assert_eq!(langs[3].1, None);
+        assert_eq!(langs[4].1.as_deref(), Some("go"));
+        assert_eq!(symbol_names(&conn, "e.go"), vec!["Top"]);
         let imports: i64 = conn
             .query_row("SELECT COUNT(*) FROM imports", [], |r| r.get(0))
             .expect("count");
-        assert_eq!(imports, 2);
-        assert_eq!(report.parsed, 3);
+        assert_eq!(imports, 3);
+        assert_eq!(report.parsed, 4);
     }
 
     #[test]
