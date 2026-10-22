@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-use clap::{CommandFactory, Parser};
+use clap::CommandFactory;
 use playbook::common::payload::Payload;
 use playbook::init::run::{InitPaths, StepStatus};
 use playbook::{
@@ -106,7 +106,7 @@ fn real_main() {
         }
         None => {}
     }
-    let cli = Cli::parse();
+    let cli = playbook::parse::parse_or_exit(&args);
     // Hooks fail soft, and version, json and commands write nothing under home; every other command refuses to write state relative to
     // the current directory when there is no home.
     if !matches!(

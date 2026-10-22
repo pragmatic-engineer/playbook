@@ -81,6 +81,7 @@ pub mod migrate_cli;
 pub mod mode;
 pub mod models;
 pub mod notices;
+pub mod parse;
 pub mod pending;
 pub mod plan_cleanup;
 pub mod planning;

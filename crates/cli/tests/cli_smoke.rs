@@ -656,6 +656,8 @@ fn table() -> Vec<Case> {
         case( "segment resplit", &[ "segment", "resplit", "--type", "feat", "--plan-slug", "smoke", "--n", "1", "--title", "add a thing", "--base", "main", ], ).commit(),
         case("plans", &["plans"]).out("NO_PLANS"),
         case("trust", &["trust", "{ROOT}/repo"]).writes(),
+        case("trust", &["trust"]).code(2).err("required arguments").err("Usage: playbook trust"),
+        case("route", &["route"]).code(2).err("required arguments").err("Usage: playbook route"),
     ];
     t.extend(json_cases());
     for kind in ["plans", "implement", "worktrees", "handoff", "data"] {
