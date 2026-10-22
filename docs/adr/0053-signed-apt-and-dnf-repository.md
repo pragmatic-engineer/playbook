@@ -1,4 +1,4 @@
-# ADR-0052: Signed apt and dnf Package Repository
+# ADR-0053: Signed apt and dnf Package Repository
 
 - **Status:** Proposed
 - **Date created:** 2026-10-22
