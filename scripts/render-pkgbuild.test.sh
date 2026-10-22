@@ -52,7 +52,7 @@ expect_fail() {
   out="$("$SCRIPT" "$@" 2>&1)" || rc=$?
   [ "$rc" -eq "$code" ] || fail "expected exit $code, got $rc for: $* ($out)"
   grep -qF -- "$msg" <<<"$out" || fail "expected message '$msg', got: $out"
-  [ ! -e "${3:-/nonexistent}" ] || fail "a refused run wrote $3"
+  [ "$1" = keep ] || [ ! -e "${3:-/nonexistent}" ] || fail "a refused run wrote $3"
   ok
 }
 
@@ -164,5 +164,33 @@ expect_fail 1 'bad version' v1.2.3 "$CASE/SHA256SUMS" "$CASE/out"
 expect_fail 1 'bad version' 1.2 "$CASE/SHA256SUMS" "$CASE/out"
 expect_fail 1 'bad version' 1.2.3-rc1 "$CASE/SHA256SUMS" "$CASE/out"
 expect_fail 1 'usage' 1.2.3 "$CASE/SHA256SUMS"
+
+# keep <version> <PKGBUILD>: the pkgrel and epoch a new render must carry.
+# The same version keeps a hand-bumped pkgrel, a new version resets it to 1,
+# and the epoch is always kept. No file means pkgrel 1 and no epoch.
+new_case keep
+printf "epoch=2\npkgname=playbook-bin\npkgver=1.2.3\npkgrel=5\n" > "$CASE/PKGBUILD"
+[ "$("$SCRIPT" keep 1.2.3 "$CASE/PKGBUILD")" = "$(printf 'pkgrel=5\nepoch=2')" ] || fail "same version did not keep pkgrel and epoch"
+ok
+[ "$("$SCRIPT" keep 1.2.4 "$CASE/PKGBUILD")" = "$(printf 'pkgrel=1\nepoch=2')" ] || fail "new version did not reset pkgrel and keep epoch"
+ok
+printf "pkgname=playbook-bin\npkgver=1.2.3\npkgrel=2\n" > "$CASE/noepoch"
+[ "$("$SCRIPT" keep 1.2.3 "$CASE/noepoch")" = "$(printf 'pkgrel=2\nepoch=')" ] || fail "a file without epoch gave one"
+ok
+[ "$("$SCRIPT" keep 1.2.3 "$CASE/none")" = "$(printf 'pkgrel=1\nepoch=')" ] || fail "no file did not give pkgrel 1"
+ok
+printf "pkgver=1.2.3\npkgrel=x\n" > "$CASE/bad"
+expect_fail 1 'bad pkgrel' keep 1.2.3 "$CASE/bad"
+expect_fail 1 'bad version' keep v1 "$CASE/PKGBUILD"
+expect_fail 1 'usage' keep 1.2.3
+# The kept values feed the render.
+kept="$("$SCRIPT" keep 1.2.3 "$CASE/PKGBUILD")"
+k_pkgrel="$(sed -n 's/^pkgrel=//p' <<<"$kept")"
+k_epoch="$(sed -n 's/^epoch=//p' <<<"$kept")"
+sums_full 1.2.3 "$CASE/SHA256SUMS"
+"$SCRIPT" 1.2.3 "$CASE/SHA256SUMS" "$CASE/out" "$k_pkgrel" "$k_epoch"
+grep -qxF 'pkgrel=5' "$CASE/out" || fail "kept pkgrel not rendered"
+grep -qxF 'epoch=2' "$CASE/out" || fail "kept epoch not rendered"
+ok
 
 echo "OK render-pkgbuild: $pass checks"

@@ -142,6 +142,58 @@ it, so users pin `main` or the merge commit of the flake pull request.
 To roll the flake back, open a pull request that reverts the flake change:
 the older hashes stay valid because release assets do not change.
 
+After `verify`, the `aur` job publishes the Arch package `playbook-bin` to the
+AUR. `packaging/aur/PKGBUILD.tmpl` is the template, and
+`scripts/render-pkgbuild.sh` fills it with the version and the two Linux
+`playbook-X.Y.Z-<target>` lines of `SHA256SUMS`. Before it renders, the job
+checks `SHA256SUMS` and the two Linux binaries against their attestation, so
+the AUR carries the attested hashes. It keeps the `pkgrel` and `epoch` of the
+AUR when the `pkgver` is the same, so a manual fix is not overwritten, and a
+new `pkgver` gives `pkgrel=1`. `scripts/aur-verify.sh` runs in the
+`archlinux:base-devel` container (pinned by digest in `release.yml`): it makes
+`.SRCINFO` with `makepkg --printsrcinfo` as a non-root user, builds with
+`makepkg -f`, installs with `pacman -U`, compares `playbook --version` with the
+release, and downloads the aarch64 asset to check its sum. A failure stops the job before
+anything is pushed. Then the job commits `playbook-bin: X.Y.Z` and pushes
+`PKGBUILD` and `.SRCINFO` to `ssh://aur@aur.archlinux.org/playbook-bin.git` on
+`master`, the only branch the AUR takes, and builds the live repository from
+`https://aur.archlinux.org/playbook-bin.git`, with up to five tries for the
+AUR to catch up. No change means no commit, so a run with the same version
+pushes nothing. The SSH host key is pinned in `packaging/aur/known_hosts`
+with `StrictHostKeyChecking=yes`; the fingerprints are on
+https://aur.archlinux.org/ and `scripts/aur-verify.test.sh` checks them. A
+changed host key fails the job: refresh the file from that page. The key file
+is written to `RUNNER_TEMP` with mode 600 and removed in an `always()` step.
+The job is a leaf and a backport or an older release never rolls the AUR back.
+A dry run builds the newest published release from its real assets, shows the
+diff and pushes nothing. Without the secret `AUR_SSH_PRIVATE_KEY` in the `aur`
+environment, the job builds and checks the package, skips the push with a
+notice and passes.
+
+One-time setup, by a maintainer. The workflow cannot do these:
+
+1. Create a dedicated bot account on https://aur.archlinux.org/. An AUR SSH
+   key reaches every package of its account, so do not use a personal account
+   that owns other packages.
+2. Check that `playbook-bin` is free (https://aur.archlinux.org/packages/playbook-bin).
+   The first push creates it.
+3. Make a key pair with `ssh-keygen -t ed25519 -f aur_key -C playbook-release`,
+   add `aur_key.pub` to the bot account under My Account, SSH Public Key, and
+   store the private key as the secret `AUR_SSH_PRIVATE_KEY` of a new GitHub
+   environment `aur` that deploys from `main` only. Delete the local key files.
+4. Add a personal AUR account as co-maintainer of `playbook-bin`, so a
+   rollback does not depend on CI.
+5. Rotate by adding a new public key to the bot account, replacing the secret,
+   then removing the old public key.
+
+To fix a bad push, clone `ssh://aur@aur.archlinux.org/playbook-bin.git`, commit
+a correction and push to `master`. A fix at the same version raises `pkgrel`.
+A real rollback to an older `pkgver` looks like a downgrade to pacman, so raise
+`epoch` in the same commit; the template keeps an `epoch` that is there. A run
+with `version=` of an older release does not apply, because the job only
+publishes the latest release. Orphaning or deleting the package goes through
+the AUR web page.
+
 A dry run plans, shows the diff of the release pull request in the run
 summary, and builds the five targets from `main`. It also shows the tap and
 marketplace diffs, with placeholder checksums for the formulas, and checks the
