@@ -1,0 +1,26 @@
+# Maintainer: playbook release bot <noreply at pragmatic-engineer dot dev>
+#
+# Rendered by scripts/render-pkgbuild.sh from packaging/aur/PKGBUILD.tmpl in
+# https://github.com/pragmatic-engineer/playbook. Do not edit the AUR copy by
+# hand except for a pkgrel or epoch fix; the release job keeps both.
+@EPOCH_LINE@pkgname=playbook-bin
+pkgver=@VERSION@
+pkgrel=@PKGREL@
+pkgdesc='Playbook: skills, hooks and a CLI for Claude Code (prebuilt binary)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/pragmatic-engineer/playbook'
+license=('Apache-2.0')
+provides=('playbook')
+conflicts=('playbook')
+options=('!strip')
+source_x86_64=("playbook-${pkgver}-x86_64-unknown-linux-musl::${url}/releases/download/v${pkgver}/playbook-${pkgver}-x86_64-unknown-linux-musl")
+source_aarch64=("playbook-${pkgver}-aarch64-unknown-linux-musl::${url}/releases/download/v${pkgver}/playbook-${pkgver}-aarch64-unknown-linux-musl")
+sha256sums_x86_64=('@SHA256_X86_64@')
+sha256sums_aarch64=('@SHA256_AARCH64@')
+
+package() {
+  # The binaries are static musl builds. Only playbook is installed: no pb
+  # link (playbook setup makes it), no pbtop, no hooks, nothing under $HOME.
+  install -Dm755 "${srcdir}/playbook-${pkgver}-${CARCH}-unknown-linux-musl" \
+    "${pkgdir}/usr/bin/playbook"
+}
