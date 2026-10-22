@@ -21,6 +21,7 @@
 !/seed/
 !/plugins/
 !/scripts/
+!/packaging/
 !/CHANGELOG.md
 !/docs/
 !/.github/
