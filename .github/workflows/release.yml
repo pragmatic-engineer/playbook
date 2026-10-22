@@ -24,6 +24,8 @@
 #            then download it again and check it.
 # Then `downstream` opens release/vX.Y.Z in pragmatic-engineer/homebrew-tap and
 # pragmatic-engineer/marketplace and waits for their own vX.Y.Z releases.
+# Then `aur` pushes the Arch package playbook-bin to the AUR, after a build in an
+# Arch container (a leaf job; without its secret it skips the push).
 # Then `nix` moves flake.nix to the release with a release/nix-vX.Y.Z pull
 # request to main, and two leaf jobs run the flake on Linux and macOS.
 # A published release is never built or uploaded again. A tag is never moved.
@@ -814,6 +816,242 @@ jobs:
             echo "$bin: $out"
           done
           echo "Checked $(wc -l < SHA256SUMS) assets, their attestations and the versions." >> "$GITHUB_STEP_SUMMARY"
+
+  # Publishes the Arch package playbook-bin to the AUR (issue 1146). The
+  # package is a template (packaging/aur/PKGBUILD.tmpl) filled by
+  # scripts/render-pkgbuild.sh with the version and the Linux lines of
+  # SHA256SUMS. Before it renders, the job checks SHA256SUMS and the two
+  # Linux binaries against their attestation, so the AUR carries the attested
+  # hashes. It then builds and installs the package in an Arch container
+  # (scripts/aur-verify.sh). Only after that does it push PKGBUILD and
+  # .SRCINFO to ssh://aur@aur.archlinux.org/playbook-bin.git on master, and
+  # builds the live repository once more. It is a leaf job: it blocks no
+  # other channel, a red result fails the run, and a run with the same
+  # version starts it again (a rerun with no change pushes nothing).
+  # Without the secret AUR_SSH_PRIVATE_KEY in the `aur` environment, the job
+  # still builds and checks the package, then skips the push with a notice
+  # and passes. A backport or an older release never rolls the AUR back. A
+  # dry run builds the newest published release from its real assets, shows
+  # the diff against the AUR and pushes nothing. The host list is written
+  # from reasoning and not from a run (including port 22 and the traffic of
+  # the container): when the first release blocks a host, add it here.
+  aur:
+    needs: [plan, verify]
+    if: >-
+      ${{ !cancelled()
+      && github.event_name == 'workflow_dispatch'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && (needs.plan.outputs.dry_run == 'true' || needs.verify.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: aur
+    permissions:
+      contents: read
+      attestations: read
+    env:
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+      # archlinux:base-devel, pinned by digest.
+      AUR_IMAGE: archlinux@sha256:3cbf69d2d5958d6a294f3722c5668e6187c4df8e00fa27f72352f0bf83e495e1
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            auth.docker.io:443
+            aur.archlinux.org:22
+            aur.archlinux.org:443
+            github.com:443
+            objects.githubusercontent.com:443
+            production.cloudflare.docker.com:443
+            registry-1.docker.io:443
+            release-assets.githubusercontent.com:443
+            tmaproduction.blob.core.windows.net:443
+            tuf-repo.github.com:443
+            tuf-repo-cdn.sigstore.dev:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Check the release and render the package
+        id: render
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: refs/heads/${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          tag="$TAG"
+          if [ "$DRY_RUN" = true ]; then
+            # Nothing is released in a dry run, so the newest release stands in.
+            tag="$(gh release view --json tagName --jq .tagName)"
+          elif [ "$(gh release view --json tagName --jq .tagName)" != "$TAG" ]; then
+            echo "::notice::$TAG is not the latest release, so the AUR is left alone."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version="${tag#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::bad release tag '$tag'." >&2; exit 1; }
+          rel="$RUNNER_TEMP/rel"
+          mkdir -p "$rel"
+          cd "$rel"
+          gh release download "$tag" --pattern SHA256SUMS
+          # The file decides the hashes, so it is checked first, and then each
+          # Linux binary against its attestation and against the file.
+          gh attestation verify SHA256SUMS --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
+            --signer-workflow "$GH_REPO/.github/workflows/release.yml" >/dev/null
+          for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            f="playbook-$version-$t"
+            gh release download "$tag" --pattern "$f"
+            gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
+              --signer-workflow "$GH_REPO/.github/workflows/release.yml" >/dev/null
+            grep -F "  $f" SHA256SUMS | sha256sum -c -
+          done
+          cd "$GITHUB_WORKSPACE"
+          # What the AUR has now, to keep its pkgrel and epoch. The package
+          # does not exist before the first push.
+          aur="$RUNNER_TEMP/aur"
+          found="$(curl -fsSg --retry 3 'https://aur.archlinux.org/rpc/v5/info?arg[]=playbook-bin' | jq -r .resultcount)"
+          if [ "$found" = 0 ]; then
+            echo "::notice::playbook-bin is not on the AUR yet. The first push creates it."
+            git init -q -b master "$aur"
+          else
+            git clone -q https://aur.archlinux.org/playbook-bin.git "$aur"
+          fi
+          kept="$(scripts/render-pkgbuild.sh keep "$version" "$aur/PKGBUILD")"
+          scripts/render-pkgbuild.sh "$version" "$rel/SHA256SUMS" "$aur/PKGBUILD" \
+            "$(sed -n 's/^pkgrel=//p' <<<"$kept")" "$(sed -n 's/^epoch=//p' <<<"$kept")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The pre-push gate: a failure stops the job before anything is pushed.
+      - name: Build and install the package in an Arch container
+        if: steps.render.outputs.skip != 'true'
+        env:
+          PKG_VERSION: ${{ steps.render.outputs.version }}
+        run: |
+          set -euo pipefail
+          aur="$RUNNER_TEMP/aur"
+          run_arch() {
+            docker run --rm -v "$1:/work" -v "$GITHUB_WORKSPACE/scripts/aur-verify.sh:/usr/local/bin/aur-verify:ro" \
+              "$AUR_IMAGE" aur-verify "${@:2}"
+          }
+          run_arch "$aur" srcinfo /work
+          run_arch "$aur" build /work "$PKG_VERSION"
+
+      - name: Show the change
+        if: steps.render.outputs.skip != 'true'
+        env:
+          PKG_VERSION: ${{ steps.render.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/aur"
+          git add PKGBUILD .SRCINFO
+          {
+            echo "## AUR playbook-bin $PKG_VERSION"
+            [ "$DRY_RUN" != true ] || echo "Dry run: the newest published release stands in, and nothing is pushed."
+            echo
+            if git diff --cached --quiet; then echo "No change: the AUR already has this package."; else
+              echo '~~~diff'
+              git diff --cached
+              echo '~~~'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Read through env, so the value never appears in the script. Without
+      # the secret the job stops short of the push with a notice and passes.
+      - name: Check for the AUR key
+        id: key
+        if: steps.render.outputs.skip != 'true' && needs.plan.outputs.dry_run != 'true'
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          PKG_VERSION: ${{ steps.render.outputs.version }}
+        run: |
+          if [ -n "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::AUR_SSH_PRIVATE_KEY is not set in the aur environment, so playbook-bin $PKG_VERSION is not pushed to the AUR."
+          {
+            echo "## AUR push skipped"
+            echo
+            echo "The package built and installed, but the secret AUR_SSH_PRIVATE_KEY is not set in the \`aur\` environment. See docs/internals/06-release-channels.md for the setup, then run \`gh workflow run release.yml -f version=$VERSION\` again."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push to the AUR
+        id: push
+        if: steps.key.outputs.configured == 'true'
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          PKG_VERSION: ${{ steps.render.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "pushed=false" >> "$GITHUB_OUTPUT"
+          key="$RUNNER_TEMP/aur_key"
+          (umask 077; printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$key")
+          chmod 600 "$key"
+          # Only the pinned host key is trusted. StrictHostKeyChecking=yes
+          # refuses any other, and so does a changed one.
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$GITHUB_WORKSPACE/packaging/aur/known_hosts"
+          cd "$RUNNER_TEMP/aur"
+          git config user.name "playbook release bot"
+          git config user.email "noreply@pragmatic-engineer.dev"
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "::notice::The AUR already has playbook-bin $PKG_VERSION, so nothing is pushed."
+            exit 0
+          fi
+          git commit -q -m "playbook-bin: $PKG_VERSION"
+          # The AUR accepts only master.
+          if ! git push ssh://aur@aur.archlinux.org/playbook-bin.git HEAD:refs/heads/master; then
+            echo "::error::The push to the AUR failed. A changed host key shows as 'Host key verification failed': refresh packaging/aur/known_hosts from the fingerprints on https://aur.archlinux.org/ ." >&2
+            exit 1
+          fi
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "Pushed playbook-bin $PKG_VERSION to the AUR." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the AUR key
+        if: always()
+        run: shred -u "$RUNNER_TEMP/aur_key" 2>/dev/null || rm -f "$RUNNER_TEMP/aur_key"
+
+      # The live repository, as a user gets it. The AUR needs a moment to
+      # serve a push, so a few tries. A failure leaves the revert command.
+      - name: Build the package from the AUR
+        if: steps.key.outputs.configured == 'true'
+        env:
+          PKG_VERSION: ${{ steps.render.outputs.version }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            post="$RUNNER_TEMP/aur-live"
+            rm -rf "$post"
+            if git clone -q https://aur.archlinux.org/playbook-bin.git "$post" \
+              && grep -qx "pkgver=$PKG_VERSION" "$post/PKGBUILD" \
+              && docker run --rm -v "$post:/work" -v "$GITHUB_WORKSPACE/scripts/aur-verify.sh:/usr/local/bin/aur-verify:ro" \
+                "$AUR_IMAGE" aur-verify build /work "$PKG_VERSION"; then
+              echo "The AUR serves playbook-bin $PKG_VERSION and it builds." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Attempt $attempt did not pass. Waiting for the AUR."
+            sleep 30
+          done
+          echo "::error::The live AUR package playbook-bin $PKG_VERSION did not build." >&2
+          {
+            echo "## AUR check failed"
+            echo
+            echo "Revert the push by hand with the bot key or a maintainer key:"
+            echo
+            echo '```bash'
+            echo "git clone ssh://aur@aur.archlinux.org/playbook-bin.git && cd playbook-bin"
+            echo "git revert --no-edit HEAD && git push origin HEAD:master"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
   # Installs the published .deb and .rpm in clean Debian, Ubuntu and Fedora
   # containers, after checking them against SHA256SUMS and their attestation.
