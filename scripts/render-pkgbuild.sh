@@ -12,12 +12,36 @@
 #     spaces or after " *". pkgrel defaults to 1 and epoch to none; the
 #     release job passes the values of the AUR repository to keep them.
 #
+#   render-pkgbuild.sh keep <version> <PKGBUILD>
+#     Prints the pkgrel and epoch a render of <version> must carry, as the
+#     lines `pkgrel=N` and `epoch=M`, read from the PKGBUILD now on the AUR.
+#     The same pkgver keeps its pkgrel, so a manual fix is not overwritten;
+#     a new pkgver gives pkgrel=1. The epoch is always kept, and is empty when
+#     there is none. A missing file gives `pkgrel=1` and an empty epoch. The
+#     file is read as text and never run.
+#
 # Exit codes: 0 rendered; 1 bad arguments or version; 2 bad SHA256SUMS (empty,
 # missing or duplicate target, no hash, hash that is not 64 hex digits).
 # A refused run writes nothing.
 set -euo pipefail
 
 die() { echo "FAIL $2" >&2; exit "$1"; }
+
+if [ "${1:-}" = keep ]; then
+  [ $# -eq 3 ] || die 1 "usage: render-pkgbuild.sh keep <version> <PKGBUILD>"
+  [[ "$2" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 1 "bad version: '$2' is not MAJOR.MINOR.PATCH"
+  have_ver="" have_rel="" have_epoch=""
+  if [ -f "$3" ]; then
+    have_ver="$(sed -n "s/^pkgver=['\"]\{0,1\}\([^'\"]*\)['\"]\{0,1\}\$/\1/p" "$3" | head -n 1)"
+    have_rel="$(sed -n "s/^pkgrel=['\"]\{0,1\}\([^'\"]*\)['\"]\{0,1\}\$/\1/p" "$3" | head -n 1)"
+    have_epoch="$(sed -n "s/^epoch=['\"]\{0,1\}\([^'\"]*\)['\"]\{0,1\}\$/\1/p" "$3" | head -n 1)"
+  fi
+  [[ -z "$have_rel" || "$have_rel" =~ ^[1-9][0-9]*$ ]] || die 1 "bad pkgrel in $3: '$have_rel' is not a positive integer"
+  [[ -z "$have_epoch" || "$have_epoch" =~ ^[0-9]+$ ]] || die 1 "bad epoch in $3: '$have_epoch' is not an integer"
+  if [ "$have_ver" = "$2" ] && [ -n "$have_rel" ]; then echo "pkgrel=$have_rel"; else echo "pkgrel=1"; fi
+  echo "epoch=$have_epoch"
+  exit 0
+fi
 
 [ $# -ge 3 ] && [ $# -le 5 ] || die 1 "usage: render-pkgbuild.sh <version> <SHA256SUMS> <out> [pkgrel] [epoch]"
 version="$1" sums="$2" out="$3" pkgrel="${4:-1}" epoch="${5:-}"
