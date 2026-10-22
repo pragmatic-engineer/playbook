@@ -24,6 +24,9 @@ const LOOKUP_LIMIT: usize = 200;
 /// Omitted items listed in the output.
 const MAX_LISTED_OMITTED: usize = 50;
 
+/// A documentation candidate keeps this share of its score.
+const DOC_SCORE_FACTOR: f64 = 0.5;
+
 const STOPWORDS: &[&str] = &[
     "a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "with", "from", "by", "is",
     "are", "be", "this", "that", "it", "as", "at", "how", "what", "where", "when", "why", "add",
@@ -118,6 +121,16 @@ fn to_usize(n: i64) -> usize {
     usize::try_from(n).unwrap_or(0)
 }
 
+/// A symbol that belongs to tests: in a test path, inside a `tests` or `test`
+/// module segment, or named `test_*`.
+fn is_test_symbol(path: &str, qualified: &str, name: &str) -> bool {
+    is_test_path(path)
+        || qualified
+            .split(['.', ':'])
+            .any(|seg| matches!(seg, "tests" | "test"))
+        || name.starts_with("test_")
+}
+
 /// Symbols whose name holds `term`, with a tier from how well the name fits.
 fn symbol_cands(conn: &Connection, term: &str) -> Result<Vec<Cand>, String> {
     let pattern = format!("%{}%", term.replace('\\', "\\\\").replace('_', "\\_"));
@@ -126,7 +139,8 @@ fn symbol_cands(conn: &Connection, term: &str) -> Result<Vec<Cand>, String> {
             "SELECT f.path, f.sha256, s.name, s.qualified_name, s.start_line, s.end_line
              FROM symbols s JOIN files f ON f.id = s.file_id
              WHERE lower(s.name) LIKE ?1 ESCAPE '\\'
-             ORDER BY (lower(s.name) = ?3) DESC, f.path, s.start_line, s.id LIMIT ?2",
+             ORDER BY (lower(s.name) = ?3) DESC, length(s.name), f.path, s.start_line, s.id
+             LIMIT ?2",
         )
         .map_err(sql_err)?;
     let rows = stmt
@@ -144,6 +158,9 @@ fn symbol_cands(conn: &Connection, term: &str) -> Result<Vec<Cand>, String> {
     let mut out = Vec::new();
     for row in rows {
         let (path, sha, name, qualified, start, end) = row.map_err(sql_err)?;
+        if is_test_symbol(&path, &qualified, &name) {
+            continue;
+        }
         let lower = name.to_lowercase();
         let pieces = super::index::identifier_pieces(&name);
         let tier = if lower == term {
@@ -328,7 +345,18 @@ fn term_weights(conn: &Connection, words: &[String]) -> Result<Vec<f64>, String>
     Ok(out)
 }
 
-/// Weighted count of the query terms a candidate holds in its path, its
+/// A documentation file: a prose extension or a `docs` or `doc` directory.
+fn is_doc_path(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    let mut parts = lower.split('/').collect::<Vec<_>>();
+    let file = parts.pop().unwrap_or("");
+    let prose = [".md", ".mdx", ".rst", ".txt"]
+        .iter()
+        .any(|ext| file.ends_with(ext));
+    prose || parts.iter().any(|d| matches!(*d, "docs" | "doc"))
+}
+
+/// Weighted count of the query terms a candidate holds in its file name, its
 /// symbol names and its text. A term in a symbol name counts twice.
 fn score(
     cand: &Cand,
@@ -351,9 +379,10 @@ fn score(
             l.lines[cand.start - 1..end].join("\n")
         }
     });
-    let haystack = format!("{}\n{}", cand.path, body).to_lowercase();
+    let file_name = cand.path.rsplit('/').next().unwrap_or(&cand.path);
+    let haystack = format!("{file_name}\n{body}").to_lowercase();
     let names = cand.reason.to_lowercase();
-    words
+    let total: f64 = words
         .iter()
         .zip(weights)
         .map(|(w, weight)| {
@@ -366,7 +395,12 @@ fn score(
             }
             got
         })
-        .sum()
+        .sum();
+    if is_doc_path(&cand.path) {
+        total * DOC_SCORE_FACTOR
+    } else {
+        total
+    }
 }
 
 /// Candidates best first: score, then tier, path and line.
@@ -788,5 +822,188 @@ mod tests {
         ] {
             assert!(!is_test_path(no), "{no}");
         }
+    }
+
+    const ANCHORS_RS: &str = "pub fn run_prompt(text: &str) -> usize {\n    // match prompt words to fact names\n    prompt_tokens(text).len()\n}\n\npub fn prompt_tokens(text: &str) -> Vec<String> {\n    text.split(' ').map(str::to_string).collect()\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn matched_names() {\n        // match names\n    }\n}\n";
+
+    fn rank_fixture(tag: &str) -> Fx {
+        let f = fx(tag);
+        f.write("src/hooks/anchors.rs", ANCHORS_RS);
+        f.write(
+            "tests/anchors.rs",
+            "#[test]\nfn match_names_in_prompt() {\n    // match names prompt\n}\n",
+        );
+        f
+    }
+
+    #[test]
+    fn a_core_function_outranks_test_symbols_for_the_same_words() {
+        let _g = pinned();
+        // Arrange
+        let f = rank_fixture("cx-rank-tests");
+        f.run();
+
+        // Act
+        let got = ctx(&f, "how the memory hook matches prompt words to fact names");
+
+        // Assert
+        assert!(
+            got.snippets[0].reason.contains("run_prompt"),
+            "{:?}",
+            got.snippets
+        );
+        let first_test = got
+            .snippets
+            .iter()
+            .position(|s| s.reason.contains("tests::matched_names"));
+        assert!(first_test.is_none_or(|i| i >= 2), "{:?}", got.snippets);
+        assert!(got
+            .snippets
+            .iter()
+            .take(2)
+            .any(|s| s.reason.contains("prompt_tokens")));
+    }
+
+    #[test]
+    fn the_rust_extractor_qualifies_test_module_members_with_the_module_name() {
+        let _g = pinned();
+        // Arrange
+        let f = rank_fixture("cx-qualified");
+        f.run();
+
+        // Act
+        let q: String = f
+            .conn()
+            .query_row(
+                "SELECT qualified_name FROM symbols WHERE name = 'matched_names'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("row");
+
+        // Assert
+        assert_eq!(q, "tests::matched_names");
+    }
+
+    #[test]
+    fn test_symbols_are_told_apart_by_path_module_segment_or_name_prefix() {
+        // Arrange, Act, Assert
+        for (path, qualified, name, want) in [
+            ("src/a.rs", "tests::x", "x", true),
+            ("src/a.rs", "a.test.helper", "helper", true),
+            ("src/a.rs", "test_parse", "test_parse", true),
+            ("src/tests/x.rs", "x", "x", true),
+            ("src/a.rs", "contest", "contest", false),
+            ("src/a.rs", "latest_value", "latest_value", false),
+        ] {
+            assert_eq!(is_test_symbol(path, qualified, name), want, "{qualified}");
+        }
+    }
+
+    #[test]
+    fn a_short_exact_name_survives_the_candidate_cap() {
+        let _g = pinned();
+        // Arrange: 250 longer names sort before the one we want by path.
+        let f = fx("cx-cap");
+        let many: String = (0..250)
+            .map(|n| format!("pub fn aaa_prompt_{n}() {{}}\n"))
+            .collect();
+        f.write("src/a.rs", &many);
+        f.write("src/z.rs", "pub fn run_prompt() {}\n");
+        f.run();
+
+        // Act
+        let got = symbol_cands(&f.conn(), "prompt").expect("cands");
+
+        // Assert
+        assert!(got.iter().any(|c| c.reason == "symbol run_prompt"));
+    }
+
+    #[test]
+    fn a_directory_word_and_an_adr_do_not_outrank_core_code() {
+        let _g = pinned();
+        // Arrange
+        let f = rank_fixture("cx-dir-adr");
+        let padding = "    let _ = text.len();\n".repeat(20);
+        f.write(
+            "src/hooks/anchors.rs",
+            &ANCHORS_RS.replacen(
+                "    prompt_tokens(text).len()\n",
+                &format!("{padding}    prompt_tokens(text).len()\n"),
+                1,
+            ),
+        );
+        f.write("src/hooks/other.rs", "pub fn unrelated_thing() {}\n");
+        f.write(
+            "docs/adr/0001-anchors.md",
+            "# Anchors\n\nHow the memory hook matches prompt words to fact names.\n",
+        );
+        f.run();
+
+        // Act
+        let got = ctx(&f, "how the memory hook matches prompt words to fact names");
+
+        // Assert
+        let pos = |needle: &str| got.snippets.iter().position(|s| s.path.contains(needle));
+        let run = pos("hooks/anchors.rs").expect("core snippet");
+        assert_eq!(run, 0, "{:?}", got.snippets);
+        if let Some(other) = pos("hooks/other.rs") {
+            assert!(other > run);
+        }
+        let adr = pos("0001-anchors.md").expect("adr snippet");
+        assert!(adr > run);
+        let noise: usize = got
+            .snippets
+            .iter()
+            .filter(|s| is_test_path(&s.path) || is_doc_path(&s.path))
+            .map(|s| s.text.len())
+            .sum();
+        assert!(noise * 5 <= got.bytes, "{noise} of {}", got.bytes);
+    }
+
+    #[test]
+    fn doc_paths_are_prose_files_or_docs_directories_only() {
+        // Arrange, Act, Assert
+        for yes in ["docs/x.rs", "README.md", "a/doc/b.py", "notes.txt", "x.rst"] {
+            assert!(is_doc_path(yes), "{yes}");
+        }
+        for no in ["src/doctor.rs", "src/docs.rs", "src/a.rs"] {
+            assert!(!is_doc_path(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn a_file_name_holding_the_word_outscores_a_directory_holding_it() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("cx-file-name");
+        let body = "pub fn wire() {}\n";
+        f.write("src/hook.rs", body);
+        f.write("src/hooks/x.rs", body);
+        f.run();
+        let words = vec!["hook".to_string()];
+        let weights = vec![1.0];
+        let cand = |path: &str| Cand {
+            path: path.to_string(),
+            sha: String::new(),
+            start: 1,
+            end: 1,
+            reason: "text".to_string(),
+            tier: 6,
+        };
+        let mut cache = HashMap::new();
+
+        // Act
+        let named = score(&cand("src/hook.rs"), &words, &weights, &f.root, &mut cache);
+        let dir = score(
+            &cand("src/hooks/x.rs"),
+            &words,
+            &weights,
+            &f.root,
+            &mut cache,
+        );
+
+        // Assert
+        assert!(named > dir, "{named} vs {dir}");
     }
 }
