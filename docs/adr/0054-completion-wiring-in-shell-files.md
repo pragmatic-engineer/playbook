@@ -27,9 +27,9 @@ Tab completion for `playbook` and `pb` needs wiring in the shell. Bash and fish 
 5. **The change only appends, so setup takes no backup.** The uninstall strip removes the block and takes `.zshrc.bak-<stamp>` first, as migration 0018 does.
 6. **This part is a new setup row.** It reverses the ADR 0044 stance only for this block, and it comes with a new marker, a skip rule (the part is off with no terminal and no `--yes`), an uninstall step and a doctor row.
 
-   | Part | `--yes` | No terminal, no `--yes` |
-   |---|---|---|
-   | `completions` | on | off |
+   | Part | `--yes` before | `--yes` after | No terminal, no `--yes` |
+   |---|---|---|---|
+   | `completions` | not a part yet | on | off |
 
    It is on by default in a terminal. It adds no config key and records no decline. Doctor reports a missing stub as INFO, never as a failure.
 7. **Records of choices made:**
@@ -39,7 +39,7 @@ Tab completion for `playbook` and `pb` needs wiring in the shell. Bash and fish 
 
 ## Backups
 
-The rc backups made by the uninstall strip are kept on purpose. `playbook uninstall` never removes them: `remove_backups` (`crates/cli/src/uninstall/mod.rs:312-330`) only touches `*.bak` files in the bin directory. The uninstall docs say so, and name the file for the user to delete by hand.
+The rc backups made by the uninstall strip are kept on purpose. `playbook uninstall` never removes them: `remove_backups` (`crates/cli/src/uninstall/mod.rs:312-330`) only touches `*.bak` files in the bin directory. The uninstall docs will say so and name the file for the user to delete by hand. The work unit that adds the uninstall step writes that note.
 
 ## Security note
 
