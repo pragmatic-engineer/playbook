@@ -39,8 +39,15 @@ const ALLOW_FILES: [&str; 18] = [
 ];
 
 /// Top-level directories any tracked file may live under.
-const ALLOW_DIRS: [&str; 7] = [
-    "seed", "plugins", "scripts", "docs", ".github", "crates", ".cargo",
+const ALLOW_DIRS: [&str; 8] = [
+    "seed",
+    "plugins",
+    "scripts",
+    "docs",
+    ".github",
+    "crates",
+    ".cargo",
+    "packaging",
 ];
 
 /// A personal settings.json must never track, at the root or inside an
@@ -190,6 +197,12 @@ mod tests {
     #[test]
     fn allowlisted_top_level_directory_passes() {
         let tracked = vec!["scripts/check-links.sh".to_string()];
+        assert!(violations(&tracked).is_empty());
+    }
+
+    #[test]
+    fn the_packaging_directory_passes() {
+        let tracked = vec!["packaging/aur/PKGBUILD.tmpl".to_string()];
         assert!(violations(&tracked).is_empty());
     }
 
