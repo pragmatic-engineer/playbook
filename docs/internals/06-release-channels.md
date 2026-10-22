@@ -194,6 +194,28 @@ with `version=` of an older release does not apply, because the job only
 publishes the latest release. Orphaning or deleting the package goes through
 the AUR web page.
 
+After `verify`, the `scoop` job moves the Windows scoop bucket, the
+repository `pragmatic-engineer/scoop-bucket` (ADR 0053, Windows is
+experimental). It checks `SHA256SUMS` and the Windows `.exe` against their
+attestation, `scripts/render-scoop.sh` fills `packaging/scoop/playbook.json.tmpl`
+with the version and the hash of that `.exe`, and the job opens
+`release/vX.Y.Z` titled `chore(release): playbook X.Y.Z` in the bucket with the
+app token, auto-merge on, and waits up to 30 minutes for the merge. The job
+skips when the release is not the latest or the bucket is already ahead, so a
+backport does not move the bucket back. Without the app secrets, or when the
+app is not installed on the bucket repository, it warns and passes. Then
+`verify-scoop` installs scoop on a clean Windows runner from a pinned installer
+script, installs the rendered manifest from a file, checks `playbook --version`,
+removes it, and installs again from the bucket (with retries) once the pull
+request has merged. It is a leaf job with no secret, skipped in a dry run. A
+dry run of `scoop` renders from a stand-in `SHA256SUMS` into the run summary
+and opens nothing. To roll back, revert the bucket pull request: users who
+already installed keep their version until `scoop update`, and scoop treats a
+lower version as older, so ship a higher patch release to replace a bad one.
+Token custody is the same as for the tap: the `BOT_APP_CLIENT_ID` and
+`BOT_APP_PRIVATE_KEY` secrets, with the app installed on the bucket repository.
+There is no winget channel yet.
+
 A dry run plans, shows the diff of the release pull request in the run
 summary, and builds the five targets from `main`. It also shows the tap and
 marketplace diffs, with placeholder checksums for the formulas, and checks the
