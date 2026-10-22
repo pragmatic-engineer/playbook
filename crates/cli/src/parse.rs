@@ -23,8 +23,9 @@ pub struct ParseExit {
 
 /// Why argv did not become a [`Cli`].
 enum Failure {
-    /// Clap's own help or version display, printed to stdout with exit 0.
-    Display(clap::Error),
+    /// An error clap prints itself (help and version to stdout, other errors
+    /// to stderr with colour), exiting with its own code.
+    Clap(clap::Error),
     Exit(ParseExit),
 }
 
@@ -36,7 +37,7 @@ pub fn command() -> clap::Command {
 /// Parses `args` (including the program name).
 pub fn parse(args: &[OsString]) -> Result<Cli, ParseExit> {
     parse_inner(args).map_err(|failure| match failure {
-        Failure::Display(err) => ParseExit {
+        Failure::Clap(err) => ParseExit {
             code: err.exit_code(),
             stderr: err.to_string(),
         },
@@ -48,7 +49,7 @@ pub fn parse(args: &[OsString]) -> Result<Cli, ParseExit> {
 pub fn parse_or_exit(args: &[OsString]) -> Cli {
     match parse_inner(args) {
         Ok(cli) => cli,
-        Err(Failure::Display(err)) => err.exit(),
+        Err(Failure::Clap(err)) => err.exit(),
         Err(Failure::Exit(exit)) => {
             eprint!("{}", exit.stderr);
             std::process::exit(exit.code)
@@ -60,49 +61,50 @@ fn parse_inner(args: &[OsString]) -> Result<Cli, Failure> {
     let mut cmd = command();
     let mut matches = match cmd.try_get_matches_from_mut(args) {
         Ok(matches) => matches,
-        Err(err) => return Err(classify(err, &mut cmd, args)),
+        Err(err) => return Err(classify(err, &cmd, args)),
     };
-    Cli::from_arg_matches_mut(&mut matches).map_err(|err| classify(err, &mut cmd, args))
+    Cli::from_arg_matches_mut(&mut matches).map_err(|err| classify(err, &cmd, args))
 }
 
-fn classify(err: clap::Error, cmd: &mut clap::Command, args: &[OsString]) -> Failure {
+fn classify(err: clap::Error, cmd: &clap::Command, args: &[OsString]) -> Failure {
     match err.kind() {
-        ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => Failure::Display(err),
+        ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => Failure::Clap(err),
         ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
-            let help = deepest_command(cmd, args).render_long_help().to_string();
+            let help = deepest_command(cmd, args)
+                .clone()
+                .render_long_help()
+                .to_string();
             Failure::Exit(ParseExit {
-                code: err.exit_code(),
+                code: EXIT_USAGE,
                 stderr: help,
             })
         }
         ErrorKind::MissingRequiredArgument | ErrorKind::MissingSubcommand => {
-            let help = deepest_command(cmd, args).render_long_help().to_string();
+            let help = deepest_command(cmd, args)
+                .clone()
+                .render_long_help()
+                .to_string();
             Failure::Exit(ParseExit {
                 code: EXIT_USAGE,
                 stderr: format!("{help}\n{}\n", missing_line(&err)),
             })
         }
-        _ => Failure::Exit(ParseExit {
-            code: err.exit_code(),
-            stderr: err.to_string(),
-        }),
+        _ => Failure::Clap(err),
     }
 }
 
 /// Walks `args` past the program name, skipping flags, down to the last word
 /// that names a subcommand.
-fn deepest_command<'a>(root: &'a mut clap::Command, args: &[OsString]) -> &'a mut clap::Command {
+fn deepest_command<'a>(root: &'a clap::Command, args: &[OsString]) -> &'a clap::Command {
     let mut current = root;
     for word in args.iter().skip(1).filter_map(|a| a.to_str()) {
         if word.starts_with('-') {
             continue;
         }
-        if current.find_subcommand(word).is_none() {
-            break;
+        match current.find_subcommand(word) {
+            Some(sub) => current = sub,
+            None => break,
         }
-        current = current
-            .find_subcommand_mut(word)
-            .expect("the subcommand was just found");
     }
     current
 }
@@ -128,6 +130,19 @@ mod tests {
 
     fn parse_err(words: &[&str]) -> ParseExit {
         parse(&argv(words)).expect_err("the argv should not parse")
+    }
+
+    fn last_line(stderr: &str) -> &str {
+        stderr.trim_end().lines().last().expect("a last line")
+    }
+
+    fn assert_names_missing(stderr: &str, name: &str) {
+        let line = last_line(stderr);
+        assert!(
+            line.starts_with("error: the following required arguments were not provided:"),
+            "{line}"
+        );
+        assert!(line.contains(name), "{line}");
     }
 
     /// The long help of the command at `path`, as clap renders it.
@@ -170,17 +185,22 @@ mod tests {
     #[test]
     fn a_missing_nested_positional_names_the_deepest_command() {
         // Arrange
-        let rows: [(&[&str], &[&str]); 2] = [
-            (&["playbook", "config", "get"], &["config", "get"]),
-            (&["playbook", "config", "set", "KEY"], &["config", "set"]),
+        let rows: [(&[&str], &[&str], &str); 2] = [
+            (&["playbook", "config", "get"], &["config", "get"], "KEY"),
+            (
+                &["playbook", "config", "set", "KEY"],
+                &["config", "set"],
+                "VALUE",
+            ),
         ];
-        for (args, path) in rows {
+        for (args, path, missing) in rows {
             // Act
             let exit = parse_err(args);
 
             // Assert
             assert_eq!(exit.code, 2, "{args:?}");
             assert!(exit.stderr.starts_with(&long_help(path)), "{args:?}");
+            assert_names_missing(&exit.stderr, missing);
         }
     }
 
@@ -195,6 +215,7 @@ mod tests {
         // Assert
         assert_eq!(exit.code, 2);
         assert!(exit.stderr.starts_with(&long_help(&["pr", "reply"])));
+        assert_names_missing(&exit.stderr, "--pr <PR>");
     }
 
     #[test]
@@ -208,6 +229,7 @@ mod tests {
         // Assert
         assert_eq!(exit.code, 2);
         assert!(exit.stderr.starts_with(&long_help(&["route"])));
+        assert_names_missing(&exit.stderr, "<KIND>");
     }
 
     #[test]
@@ -250,7 +272,8 @@ mod tests {
                         json: false,
                         summary: false,
                         range: None,
-                        ..
+                        utc: false,
+                        local: false,
                     }
                 )
             }),
