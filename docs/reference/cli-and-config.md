@@ -247,7 +247,7 @@ Describe the task in words. Finds matching declarations and text, widens text hi
 Example: `playbook code context "add retry support to payment processing"`
 
 - `<QUERY>`: The task, in words
-- `--max-tokens <MAX_TOKENS>`: Budget in tokens of snippet text, counted as four bytes each
+- `--max-tokens <MAX_TOKENS>`: Budget in tokens for the whole text output, counted as four bytes each
 - `--json`: Print one JSON document
 
 ### `playbook code index`
