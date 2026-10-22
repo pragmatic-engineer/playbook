@@ -519,7 +519,7 @@ jobs:
           key: ${{ steps.cargo.outputs.cache-primary-key }}
 
   # Runs the Windows binary, which windows-check never does (it only
-  # compiles). Windows is an experimental CLI (ADR 0052), so the lane is
+  # compiles). Windows is an experimental CLI (ADR 0053), so the lane is
   # split in two:
   #   - steps 1 and 2 (version, doctor check) are required and fail the run;
   #   - steps 3 and 4 (setup and uninstall, a hook call) use
@@ -610,7 +610,7 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          "### Windows smoke (experimental, ADR 0052)" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "### Windows smoke (experimental, ADR 0053)" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
           "- setup, doctor check, uninstall: ${{ steps.setup.outcome }}" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
           "- hook session-init: ${{ steps.hook.outcome }}" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
 

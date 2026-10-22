@@ -195,7 +195,7 @@ publishes the latest release. Orphaning or deleting the package goes through
 the AUR web page.
 
 After `verify`, the `scoop` job moves the Windows scoop bucket, the
-repository `pragmatic-engineer/scoop-bucket` (ADR 0052, Windows is
+repository `pragmatic-engineer/scoop-bucket` (ADR 0053, Windows is
 experimental). It checks `SHA256SUMS` and the Windows `.exe` against their
 attestation, `scripts/render-scoop.sh` fills `packaging/scoop/playbook.json.tmpl`
 with the version and the hash of that `.exe`, and the job opens

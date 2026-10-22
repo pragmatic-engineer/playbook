@@ -160,7 +160,7 @@ scoop install playbook
 playbook --version
 ```
 
-Windows is an experimental CLI ([ADR 0052](../adr/0052-windows-experimental-cli.md)). The package puts `playbook.exe` on your PATH and nothing else: it does not run `playbook setup` and does not touch your config. CI checks on Windows that `playbook --version` and `playbook doctor check` run, and reports on `setup`, `uninstall` and the hooks. Not supported:
+Windows is an experimental CLI ([ADR 0053](../adr/0053-windows-experimental-cli.md)). The package puts `playbook.exe` on your PATH and nothing else: it does not run `playbook setup` and does not touch your config. CI checks on Windows that `playbook --version` and `playbook doctor check` run, and reports on `setup`, `uninstall` and the hooks. Not supported:
 
 - PATH wiring and PowerShell profile wiring by `setup`, and the `pb` short name.
 - `playbook update`. It is refused on Windows, so update with `scoop update playbook`. To go back, `scoop install playbook@<version>` needs the version in the bucket, or wait for a newer release.
