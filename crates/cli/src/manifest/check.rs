@@ -194,6 +194,13 @@ mod tests {
         assert_eq!(violations(&tracked).len(), 1);
     }
 
+    /// Package manifest templates (scoop) live under `packaging/`.
+    #[test]
+    fn packaging_templates_are_allowlisted() {
+        let tracked = vec!["packaging/scoop/playbook.json.tmpl".to_string()];
+        assert!(violations(&tracked).is_empty());
+    }
+
     #[test]
     fn allowlisted_top_level_directory_passes() {
         let tracked = vec!["scripts/check-links.sh".to_string()];
