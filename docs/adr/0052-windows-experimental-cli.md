@@ -1,4 +1,4 @@
-# ADR-0053: Windows Is an Experimental CLI
+# ADR-0052: Windows Is an Experimental CLI
 
 - **Status:** Accepted
 - **Date created:** 2026-10-22

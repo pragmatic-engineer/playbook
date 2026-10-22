@@ -1875,7 +1875,7 @@ jobs:
 
   # Moves the scoop bucket (pragmatic-engineer/scoop-bucket, bucket/playbook.json)
   # to the release, the way `nix` moves the flake. Windows is an experimental
-  # CLI (ADR 0053). It checks SHA256SUMS and the Windows .exe against their
+  # CLI (ADR 0052). It checks SHA256SUMS and the Windows .exe against their
   # attestation, then scripts/render-scoop.sh writes the manifest, and a
   # release/vX.Y.Z pull request to the bucket repository merges with the app
   # token. It skips when the release is not the latest or the bucket is ahead,
