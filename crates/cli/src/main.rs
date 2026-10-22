@@ -59,7 +59,33 @@ fn mode_args(mode: &str, rest: Vec<String>) -> Vec<String> {
     args
 }
 
+/// Windows gives the main thread 1 MiB, against 8 MiB on Linux and macOS. The
+/// clap tree is deep enough to overflow that in a debug build (`doctor check`
+/// died with a stack overflow on the windows-smoke job), so run on a thread
+/// with the usual 8 MiB.
+#[cfg(windows)]
 fn main() {
+    const STACK_BYTES: usize = 8 * 1024 * 1024;
+    let spawned = std::thread::Builder::new()
+        .stack_size(STACK_BYTES)
+        .spawn(real_main);
+    match spawned.map(std::thread::JoinHandle::join) {
+        Ok(Ok(())) => {}
+        // A panic already printed its message on the worker thread.
+        Ok(Err(_)) => std::process::exit(101),
+        Err(e) => {
+            eprintln!("playbook: cannot start the main thread: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn main() {
+    real_main();
+}
+
+fn real_main() {
     restore_sigpipe();
     playbook::usage_host::install();
     // Hot paths skip building the clap tree. See `fastpath`.
