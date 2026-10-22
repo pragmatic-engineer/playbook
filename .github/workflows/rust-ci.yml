@@ -518,6 +518,112 @@ jobs:
             target
           key: ${{ steps.cargo.outputs.cache-primary-key }}
 
+  # Runs the Windows binary, which windows-check never does (it only
+  # compiles). Windows is an experimental CLI (ADR 0052), so the lane is
+  # split in two:
+  #   - steps 1 and 2 (version, doctor check) are required and fail the run;
+  #   - steps 3 and 4 (setup and uninstall, a hook call) use
+  #     continue-on-error and write to the job summary. They become required
+  #     when a later decision brings them into scope.
+  # Every step runs in a scratch profile so nothing touches the runner home.
+  windows-smoke:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PB: ${{ github.workspace }}\target\debug\playbook.exe
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore cargo registry and build output (windows-smoke)
+        id: cargo
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-windows-smoke-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-windows-smoke-v1-${{ runner.os }}-
+
+      - name: Build playbook (dev profile)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --locked -p playbook --bin playbook
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Set after the build so cargo keeps its real home.
+      - name: Make a scratch profile
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:XDG_CONFIG_HOME) { throw 'XDG_CONFIG_HOME must be unset on this runner' }
+          $scratch = Join-Path $env:RUNNER_TEMP 'pb-profile'
+          New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+          "USERPROFILE=$scratch" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "HOME=$scratch" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: 1. playbook --version prints the Cargo version
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = (& $env:PB --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+          $want = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages |
+            Where-Object { $_.name -eq 'playbook' } | ForEach-Object { $_.version }
+          Write-Host "got '$out', want version $want"
+          if ($out -notmatch [regex]::Escape($want)) { throw "version mismatch" }
+
+      - name: 2. playbook doctor check --json exits 0 and prints JSON
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = & $env:PB doctor check --json | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+          $null = $out | ConvertFrom-Json
+
+      - name: 3. setup, doctor check, uninstall (reported, not required)
+        id: setup
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & $env:PB setup --yes
+          if ($LASTEXITCODE -ne 0) { throw "setup exit $LASTEXITCODE" }
+          & $env:PB doctor check
+          if ($LASTEXITCODE -ne 0) { throw "doctor check exit $LASTEXITCODE" }
+          & $env:PB uninstall --yes
+          if ($LASTEXITCODE -ne 0) { throw "uninstall exit $LASTEXITCODE" }
+
+      - name: 4. hook session-init accepts an empty object (reported, not required)
+        id: hook
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+          '{}' | & $env:PB hook session-init
+          if ($LASTEXITCODE -ne 0) { throw "hook exit $LASTEXITCODE" }
+
+      - name: Summary
+        if: always()
+        run: |
+          "### Windows smoke (experimental, ADR 0052)" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "- setup, doctor check, uninstall: ${{ steps.setup.outcome }}" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "- hook session-init: ${{ steps.hook.outcome }}" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
+      - name: Save cargo registry and build output (windows-smoke)
+        if: success() && github.event_name == 'push' && steps.cargo.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cargo.outputs.cache-primary-key }}
+
   # ADR 0007: a container built FROM debian:stable-slim with only git and
   # the binary installed runs every hook successfully, asserted by CI, not
   # by inspection. The hooks in `HookName` (the list is read from
