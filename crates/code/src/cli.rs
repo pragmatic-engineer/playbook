@@ -152,7 +152,7 @@ pub enum CodeCommand {
     Context {
         /// The task, in words
         query: String,
-        /// Budget in tokens of snippet text, counted as four bytes each
+        /// Budget in tokens for the whole text output, counted as four bytes each
         #[arg(long, default_value_t = 4000, value_parser = clap::value_parser!(u32).range(200..=65536))]
         max_tokens: u32,
         /// Print one JSON document
@@ -439,34 +439,11 @@ fn render_context(env: &Env, query: &str, max_tokens: usize, json: bool) -> Resu
     for warning in &warnings {
         eprintln!("code: {warning}");
     }
-    let mut text = String::new();
-    for s in &out.result.snippets {
-        let stale = if s.stale { " (stale)" } else { "" };
-        text.push_str(&format!(
-            "== {}:{}-{}{stale}  {}\n{}\n",
-            s.path,
-            s.start_line,
-            s.end_line,
-            s.reason,
-            visible_block(&s.text)
-        ));
-    }
-    if out.result.omitted_count > 0 {
-        text.push_str(&format!(
-            "{} more candidates did not fit:\n",
-            out.result.omitted_count
-        ));
-        for o in &out.result.omitted {
-            text.push_str(&format!(
-                "  {}:{}-{}  {}\n",
-                o.path, o.start_line, o.end_line, o.reason
-            ));
-        }
-    }
-    if out.result.snippets.is_empty() {
-        text.push_str("no matching code\n");
-    }
-    Ok(text)
+    Ok(super::context::render_text(
+        &out.result,
+        opts.byte_ceiling(),
+        visible_block,
+    ))
 }
 
 /// Like `visible`, for several lines.
