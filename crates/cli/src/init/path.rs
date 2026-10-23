@@ -168,7 +168,7 @@ pub fn ensure(home: &Path, setup: &Setup) -> io::Result<Outcome> {
 }
 
 /// Whether some non-comment line of `content` mentions `dir`.
-fn names_dir(content: &[u8], dir: &str) -> bool {
+pub(crate) fn names_dir(content: &[u8], dir: &str) -> bool {
     content.split(|&b| b == b'\n').any(|line| {
         let line = line.trim_ascii();
         !line.starts_with(b"#") && line.windows(dir.len()).any(|w| w == dir.as_bytes())

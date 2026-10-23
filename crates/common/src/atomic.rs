@@ -195,17 +195,31 @@ static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 /// existing file keeps its permissions, and a failed write leaves it as it
 /// was. The caller creates the directory.
 pub fn write_atomic(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {
-    write_through_tmp(path, content.as_ref(), false)
+    write_through_tmp(path, content.as_ref(), Staging::Plain)
+}
+
+/// Like [`write_atomic`], with the content flushed to disk before the rename,
+/// so a crash cannot leave the new name pointing at empty data.
+pub fn write_atomic_durable(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {
+    write_through_tmp(path, content.as_ref(), Staging::Durable)
 }
 
 /// Like [`write_atomic`], for a file that holds account or session data: a
 /// new file is owner-only on unix, and the content is flushed to disk before
 /// the rename.
 pub fn write_atomic_private(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {
-    write_through_tmp(path, content.as_ref(), true)
+    write_through_tmp(path, content.as_ref(), Staging::Private)
 }
 
-fn write_through_tmp(path: &Path, content: &[u8], private: bool) -> std::io::Result<()> {
+/// How the temp file is prepared before the rename.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Staging {
+    Plain,
+    Durable,
+    Private,
+}
+
+fn write_through_tmp(path: &Path, content: &[u8], staging: Staging) -> std::io::Result<()> {
     let dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -215,7 +229,7 @@ fn write_through_tmp(path: &Path, content: &[u8], private: bool) -> std::io::Res
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
     let tmp = dir.join(format!(".{name}.{}.{seq}.tmp", std::process::id()));
-    let result = stage(&tmp, content, private)
+    let result = stage(&tmp, content, staging)
         .and_then(|()| match fs::metadata(path) {
             Ok(meta) => fs::set_permissions(&tmp, meta.permissions()),
             Err(_) => Ok(()),
@@ -227,17 +241,17 @@ fn write_through_tmp(path: &Path, content: &[u8], private: bool) -> std::io::Res
     result
 }
 
-fn stage(tmp: &Path, content: &[u8], private: bool) -> std::io::Result<()> {
+fn stage(tmp: &Path, content: &[u8], staging: Staging) -> std::io::Result<()> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
-    if private {
+    if staging == Staging::Private {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
     let mut file = options.open(tmp)?;
     file.write_all(content)?;
-    if private {
+    if staging != Staging::Plain {
         file.sync_all()?;
     }
     Ok(())
@@ -548,6 +562,29 @@ mod tests {
         assert!(text.chars().all(|c| c == text.chars().next().unwrap()));
         let leftovers = fs::read_dir(&root).unwrap().count();
         assert_eq!(leftovers, 1, "no temp file may remain");
+    }
+
+    #[test]
+    fn write_atomic_durable_replaces_the_content_and_keeps_the_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = scratch_dir("atomic-durable");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("rc");
+        fs::write(&file, "old").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
+
+        write_atomic_durable(&file, "new").unwrap();
+
+        assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        assert_eq!(
+            fs::read_dir(&root).unwrap().count(),
+            1,
+            "the temp file is gone"
+        );
     }
 
     #[cfg(unix)]
