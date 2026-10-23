@@ -392,7 +392,7 @@ impl Sources {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Monthly {
     /// The statusline reported one (behind a Claude apps gateway). The cache
-    /// is not used then, and a manual budget is shown beside it.
+    /// and the manual budget are not used then.
     Measured,
     /// The spend limit in the Claude Code cache. `fresh` is false once the
     /// cache is over six hours old.
@@ -408,24 +408,10 @@ pub enum Monthly {
     Unset,
 }
 
-/// The monthly limit to use. A measured one comes first. Then a cached spend
-/// limit under six hours old, because it is what Claude Code enforces. Then
-/// the manual budget, because it is what the user chose on purpose. An older
-/// cache is the last resort.
+/// The monthly limit to use. A detected budget (the statusline reading, or a
+/// cache fetched after it, else the cache however old) always beats
+/// `usage.budget.monthlyUsd`, which is only for when nothing can be detected.
 pub fn monthly(s: &Sources, now: i64) -> Monthly {
-    let measured = s.snapshot.as_ref().is_some_and(|sn| {
-        sn.limits(now)
-            .iter()
-            .any(|l| l.period == LimitPeriod::Monthly)
-    });
-    if measured {
-        return Monthly::Measured;
-    }
-    let manual = s
-        .budgets
-        .iter()
-        .find(|(p, _)| *p == LimitPeriod::Monthly)
-        .map(|(_, usd)| *usd);
     let cached = s
         .account
         .cache
@@ -440,10 +426,27 @@ pub fn monthly(s: &Sources, now: i64) -> Monthly {
                 fresh: c.is_fresh(now),
             })
         });
-    match (cached, manual) {
-        (Some(c @ Monthly::Cached { fresh: true, .. }), _) => c,
-        (_, Some(usd)) => Monthly::Manual(usd),
-        (Some(c), None) => c,
+    let measured = s.snapshot.as_ref().is_some_and(|sn| {
+        sn.limits(now)
+            .iter()
+            .any(|l| l.period == LimitPeriod::Monthly)
+    });
+    // A cache fetched after the statusline last read the spend is the newer
+    // word from Claude Code, whatever its age: the six hour rule only decides
+    // whether its used amount is trusted.
+    let cache_is_newer = matches!(cached, Some(Monthly::Cached { fetched_at, .. })
+        if s.snapshot.as_ref().is_none_or(|sn| fetched_at > sn.read_of(LimitPeriod::Monthly)));
+    if measured && !cache_is_newer {
+        return Monthly::Measured;
+    }
+    // What Claude Code reports, however old, comes before the manual budget,
+    // which is only for when nothing can be detected.
+    match (
+        cached,
+        s.budgets.iter().find(|(p, _)| *p == LimitPeriod::Monthly),
+    ) {
+        (Some(c), _) => c,
+        (None, Some((_, usd))) => Monthly::Manual(*usd),
         (None, None) => Monthly::Unset,
     }
 }
@@ -492,9 +495,14 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
         }
     }
     let choice = monthly(s, now);
+    // The configured monthly budget is only for when nothing is detected.
+    let detected = matches!(choice, Monthly::Cached { .. } | Monthly::Measured);
     let cached_wins = matches!(choice, Monthly::Cached { .. });
+    if cached_wins {
+        out.retain(|l| l.period != LimitPeriod::Monthly);
+    }
     for (period, usd) in &s.budgets {
-        if *period == LimitPeriod::Monthly && cached_wins {
+        if *period == LimitPeriod::Monthly && detected {
             continue;
         }
         out.push(Limit::manual_budget(*period, *usd, events, now, week));
@@ -509,6 +517,8 @@ pub fn all_limits(s: &Sources, events: &[UsageEvent], now: i64, week: WeekStart)
     {
         let mut l = Limit::manual_budget(LimitPeriod::Monthly, limit_usd, events, now, week);
         l.origin = Origin::Cached;
+        // The cap is a plan property that holds across months, so even a cache
+        // from last month gives it; only the used amount is month-guarded.
         // A fresh cache knows the spend of every machine on the account, so
         // it replaces this machine's estimate, unless it was fetched before
         // this month began.
@@ -1196,7 +1206,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_cached_spend_limit_loses_to_the_manual_budget() {
+    fn a_stale_cached_spend_limit_still_beats_the_manual_budget() {
         let s = Sources {
             budgets: vec![(LimitPeriod::Monthly, 100.0)],
             account: cache(48 * 3600, spend(500.0, Some(120.0)), None),
@@ -1206,8 +1216,33 @@ mod tests {
         let l = all_limits(&s, &[], NOW, WeekStart::Monday);
 
         assert_eq!(l.len(), 1);
-        assert_eq!(l[0].origin, Origin::Manual);
-        assert_eq!(l[0].limit, 100.0);
+        assert_eq!(l[0].origin, Origin::Cached);
+        assert_eq!(l[0].limit, 500.0);
+        // A stale used amount is not trusted, the local estimate stands.
+        assert_eq!(l[0].used, 0.0);
+    }
+
+    #[test]
+    fn a_fresh_cache_newer_than_the_statusline_spend_reading_wins() {
+        // The statusline last read the spend ten days ago.
+        let mut sn = gateway_snapshot();
+        sn.captured_at = NOW - 10 * 86_400;
+        let s = Sources {
+            snapshot: Some(sn),
+            account: cache(600, spend(500.0, Some(120.0)), None),
+            ..Sources::default()
+        };
+
+        let l = all_limits(&s, &[], NOW, WeekStart::Monday);
+
+        let monthly: Vec<_> = l
+            .iter()
+            .filter(|x| x.period == LimitPeriod::Monthly)
+            .collect();
+        assert_eq!(monthly.len(), 1);
+        assert_eq!(monthly[0].origin, Origin::Cached);
+        assert_eq!(monthly[0].limit, 500.0);
+        assert_eq!(monthly[0].used, 120.0);
     }
 
     #[test]
@@ -1338,10 +1373,10 @@ mod tests {
     }
 
     #[test]
-    fn a_measured_monthly_limit_hides_the_cache_and_keeps_the_manual_budget() {
+    fn a_measured_monthly_limit_hides_the_cache_and_the_manual_monthly_budget() {
         let s = Sources {
             snapshot: Some(gateway_snapshot()),
-            budgets: vec![(LimitPeriod::Monthly, 100.0)],
+            budgets: vec![(LimitPeriod::Monthly, 100.0), (LimitPeriod::Weekly, 30.0)],
             account: cache(600, spend(500.0, Some(120.0)), None),
             rate_limited: Vec::new(),
             history: Vec::new(),
@@ -1349,9 +1384,51 @@ mod tests {
 
         let l = all_limits(&s, &[], NOW, WeekStart::Monday);
 
-        let origins: Vec<_> = l.iter().map(|x| x.origin).collect();
-        assert_eq!(origins, vec![Origin::Measured, Origin::Manual]);
+        let found: Vec<_> = l.iter().map(|x| (x.period, x.origin)).collect();
+        assert_eq!(
+            found,
+            vec![
+                (LimitPeriod::Monthly, Origin::Measured),
+                (LimitPeriod::Weekly, Origin::Manual)
+            ]
+        );
         assert_eq!(monthly(&s, NOW), Monthly::Measured);
+    }
+
+    #[test]
+    fn a_newer_cache_beats_an_older_statusline_reading_even_when_the_cache_is_stale() {
+        // The statusline read the spend ten days ago, the cache 7 hours ago.
+        let mut sn = gateway_snapshot();
+        sn.captured_at = NOW - 10 * 86_400;
+        let s = Sources {
+            snapshot: Some(sn),
+            account: cache(7 * 3600, spend(500.0, Some(120.0)), None),
+            ..Sources::default()
+        };
+
+        let l = all_limits(&s, &[], NOW, WeekStart::Monday);
+
+        assert_eq!(l.len(), 1);
+        assert_eq!((l[0].origin, l[0].limit), (Origin::Cached, 500.0));
+        // The stale used amount is still not trusted.
+        assert_eq!(l[0].used, 0.0);
+    }
+
+    #[test]
+    fn a_cache_from_last_month_still_gives_the_cap_but_not_the_used_amount() {
+        // 2027-01-01 01:00 UTC, with the cache fetched in December.
+        let now = 1_798_761_600 + 3600;
+        let s = Sources {
+            account: cache_at(now - 3 * 86_400, spend(500.0, Some(480.0)), None, None),
+            ..Sources::default()
+        };
+
+        let l = all_limits(&s, &[], now, WeekStart::Monday);
+
+        assert_eq!(
+            (l[0].origin, l[0].limit, l[0].used),
+            (Origin::Cached, 500.0, 0.0)
+        );
     }
 
     #[test]
@@ -1483,9 +1560,10 @@ mod tests {
 
     #[test]
     fn the_summary_has_no_cache_note_when_a_manual_budget_won() {
+        // A cache dated in the future loses to the manual budget.
         let s = Sources {
             budgets: vec![(LimitPeriod::Monthly, 100.0)],
-            account: cache(48 * 3600, spend(500.0, Some(120.0)), None),
+            account: cache(-7200, spend(500.0, Some(1.0)), None),
             ..Sources::default()
         };
 
