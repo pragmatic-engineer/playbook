@@ -10,7 +10,6 @@ use crate::init::path::{self, PathShell};
 use crate::init::shim::{self, RcStrip};
 use std::fs;
 use std::io::{self, ErrorKind};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 /// Comment that opens the zsh block in `~/.zshrc`.
@@ -33,6 +32,7 @@ pub const ZSH_STUB_NAME: &str = "_playbook";
 /// Mode of a `~/.zshrc` this module creates; an existing file keeps its own.
 pub const RC_NEW_MODE: u32 = 0o644;
 /// Mode of the directories this module creates, whatever a loose umask says.
+#[cfg(unix)]
 const DIR_MODE: u32 = 0o755;
 pub const SKIP_DANGLING: &str = "dangling symlink";
 pub const SKIP_OTHER_OWNER: &str = "owned by another user";
@@ -122,9 +122,27 @@ pub fn ensure(home: &Path, shell: Shell) -> io::Result<Outcome> {
     )
 }
 
+#[cfg(unix)]
 fn effective_uid() -> u32 {
     // SAFETY: geteuid has no preconditions and cannot fail.
     unsafe { libc::geteuid() }
+}
+
+/// Windows has no uid, and files there are not owner-checked.
+#[cfg(not(unix))]
+fn effective_uid() -> u32 {
+    0
+}
+
+#[cfg(unix)]
+fn owned_by(meta: &fs::Metadata, uid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    meta.uid() == uid
+}
+
+#[cfg(not(unix))]
+fn owned_by(_meta: &fs::Metadata, _uid: u32) -> bool {
+    true
 }
 
 /// [`ensure`] with an explicit effective uid and a test hook. A file or
@@ -138,7 +156,7 @@ pub fn ensure_with(home: &Path, shell: Shell, ctx: &Ctx) -> io::Result<Outcome> 
         return Ok(out);
     }
     let text = stub_text(shell);
-    let home_owned = fs::metadata(home)?.uid() == ctx.uid;
+    let home_owned = owned_by(&fs::metadata(home)?, ctx.uid);
     for stub in stubs {
         ensure_stub(stub, &text, home_owned, &mut out)?;
     }
@@ -205,18 +223,32 @@ fn create_stub(path: &Path, text: &str) -> io::Result<()> {
     create_file(path, text.as_bytes())
 }
 
+#[cfg(unix)]
 fn create_dirs(dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
     fs::DirBuilder::new()
         .recursive(true)
         .mode(DIR_MODE)
         .create(dir)
 }
 
+#[cfg(not(unix))]
+fn create_dirs(dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(dir)
+}
+
 /// `write_atomic_durable` sets permission bits only on an existing file, so a
 /// new one would carry the umask; set the mode explicitly.
+#[cfg(unix)]
 fn create_file(path: &Path, content: &[u8]) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
     write_atomic_durable(path, content)?;
     fs::set_permissions(path, fs::Permissions::from_mode(RC_NEW_MODE))
+}
+
+#[cfg(not(unix))]
+fn create_file(path: &Path, content: &[u8]) -> io::Result<()> {
+    write_atomic_durable(path, content)
 }
 
 fn has_line(content: &[u8], wanted: &str) -> bool {
@@ -242,7 +274,7 @@ fn read_rc(rc: &Path, uid: u32) -> io::Result<Rc> {
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Rc::Skip(SKIP_DANGLING)),
         Err(e) => return Err(e),
     };
-    if fs::metadata(&target)?.uid() != uid {
+    if !owned_by(&fs::metadata(&target)?, uid) {
         return Ok(Rc::Skip(SKIP_OTHER_OWNER));
     }
     Ok(match fs::read(&target) {
@@ -383,7 +415,7 @@ pub fn strip(home: &Path, uid: u32, stamp: u64, dry_run: bool) -> Vec<RcStrip> {
         unwritable: !shim::can_rewrite(&rc),
         error: None,
     };
-    if !fs::metadata(&target).is_ok_and(|meta| meta.uid() == uid) {
+    if !fs::metadata(&target).is_ok_and(|meta| owned_by(&meta, uid)) {
         entry.error = Some(SKIP_OTHER_OWNER.to_string());
         return vec![entry];
     }
@@ -416,7 +448,7 @@ pub fn backup_unless_append_only(
     Ok(Some(backup))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::collections::BTreeSet;

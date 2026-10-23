@@ -564,6 +564,7 @@ mod tests {
         assert_eq!(leftovers, 1, "no temp file may remain");
     }
 
+    #[cfg(unix)]
     #[test]
     fn write_atomic_durable_replaces_the_content_and_keeps_the_mode() {
         use std::os::unix::fs::PermissionsExt;
