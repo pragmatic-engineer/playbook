@@ -24,18 +24,18 @@ impl CompletionShell {
     }
 }
 
+// The `playbook` and `_playbook` literals below must change with this name.
 const BIN_NAME: &str = "playbook";
 
-/// The first line of the fish script.
-pub const FISH_FIRST_LINE: &str = "# Print an optspec for argparse to handle cmd's options that are independent of any subcommand.";
-
-const ZSH_FIRST_LINE: &str = "#compdef playbook pb";
-const PB_GUARD_ZSH: &str = "(( $+functions[compdef] )) && compdef _playbook pb\n";
-const PB_GUARD_BASH: &str = "[[ $(command -v pb) -ef $(command -v playbook) ]] && complete -F _playbook -o bashdefault -o default pb\n";
+// The header clap_complete (pinned with `=`) writes on the first zsh line.
+const ZSH_CLAP_HEADER: &str = "#compdef playbook\n";
+const ZSH_FIRST_LINE: &str = "#compdef playbook pb\n";
+const PB_GUARD_ZSH: &str = "if (( $+functions[compdef] )) && [[ ${commands[pb]} -ef ${commands[playbook]} ]]; then\n    compdef _playbook pb\nfi\n";
+const PB_GUARD_BASH: &str = "if [[ $(command -v pb) -ef $(command -v playbook) ]]; then\n    complete -F _playbook -o bashdefault -o default pb\nfi\n";
 const PB_GUARD_FISH: &str = "if command -sq pb; and command -sq playbook; and test (command -s pb) -ef (command -s playbook)\n    complete -c pb -w playbook\nend\n";
 
 /// The completion script for `shell`. `pb` is registered only where it is
-/// the same file as `playbook`.
+/// the same file as `playbook`, and a false test leaves the exit status 0.
 pub fn render(shell: CompletionShell) -> String {
     let mut cmd = crate::parse::command();
     let mut out = Vec::new();
@@ -44,9 +44,29 @@ pub fn render(shell: CompletionShell) -> String {
     match shell {
         CompletionShell::Bash => format!("{script}{PB_GUARD_BASH}"),
         CompletionShell::Zsh => {
-            let body = script.split_once('\n').map_or("", |(_, rest)| rest);
-            format!("{ZSH_FIRST_LINE}\n{body}{PB_GUARD_ZSH}")
+            let body = script
+                .strip_prefix(ZSH_CLAP_HEADER)
+                .expect("clap_complete zsh output starts with the pinned header");
+            format!("{ZSH_FIRST_LINE}{body}{PB_GUARD_ZSH}")
         }
         CompletionShell::Fish => format!("{script}{PB_GUARD_FISH}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clap_complete_zsh_output_starts_with_the_pinned_header() {
+        // Arrange
+        let mut cmd = crate::parse::command();
+        let mut out = Vec::new();
+
+        // Act
+        clap_complete::generate(clap_complete::Shell::Zsh, &mut cmd, BIN_NAME, &mut out);
+
+        // Assert
+        assert!(String::from_utf8_lossy(&out).starts_with(ZSH_CLAP_HEADER));
     }
 }

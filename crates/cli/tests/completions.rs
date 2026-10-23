@@ -8,7 +8,18 @@
 mod isolated;
 
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Output, Stdio};
+
+const FISH_FIRST_LINE: &str = "# Print an optspec for argparse to handle cmd's options that are independent of any subcommand.";
+#[cfg(unix)]
+const SIGPIPE: i32 = 13;
+const PIPE_BUFFER_BYTES: usize = 64 * 1024;
+
+fn skip(test: &str, why: &str) {
+    eprintln!("skipped {test}: {why}");
+}
 
 fn run(args: &[&str]) -> Output {
     isolated::playbook()
@@ -88,6 +99,7 @@ fn completions_exits_cleanly_on_a_closed_pipe() {
         .spawn()
         .expect("spawn playbook");
     let mut first = String::new();
+    let full_len = script("zsh").len();
 
     // Act
     BufReader::new(child.stdout.take().unwrap())
@@ -99,10 +111,15 @@ fn completions_exits_cleanly_on_a_closed_pipe() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!first.is_empty(), "no script line was printed");
     assert!(
+        full_len > PIPE_BUFFER_BYTES,
+        "the script fits the pipe buffer, so the pipe never closes early"
+    );
+    assert!(
         !stderr.contains("panicked") && !stderr.contains("Broken pipe"),
         "{stderr}"
     );
-    assert_ne!(out.status.code(), Some(101), "{stderr}");
+    // The default SIGPIPE action ends the process, as in `playbook ... | head`.
+    assert_eq!(out.status.signal(), Some(SIGPIPE), "{stderr}");
 }
 
 #[test]
@@ -147,6 +164,10 @@ fn the_bash_script_passes_a_syntax_check() {
         .stderr(Stdio::piped())
         .spawn()
     else {
+        skip(
+            "the_bash_script_passes_a_syntax_check",
+            "bash cannot be spawned",
+        );
         return;
     };
 
@@ -186,12 +207,63 @@ fn the_fish_script_starts_with_the_pinned_line() {
     let first = text.lines().next();
 
     // Assert
-    assert!(!playbook::completions::FISH_FIRST_LINE.is_empty());
-    assert_eq!(first, Some(playbook::completions::FISH_FIRST_LINE));
+    assert_eq!(first, Some(FISH_FIRST_LINE));
     assert!(text.contains("-c playbook"), "playbook is not registered");
     assert!(text.contains("pb"), "pb is not registered");
     assert!(
         text.contains("command -sq pb") || text.contains("type -q pb"),
         "pb is registered without a guard"
     );
+}
+
+#[test]
+fn the_zsh_script_guards_pb_with_a_same_file_check_and_an_if_block() {
+    // Arrange
+    let text = script("zsh");
+
+    // Act
+    let has_guard = text.contains(
+        "if (( $+functions[compdef] )) && [[ ${commands[pb]} -ef ${commands[playbook]} ]]; then",
+    );
+
+    // Assert
+    assert!(has_guard, "the zsh guard lacks the same-file check");
+    assert!(text.contains("-ef"));
+}
+
+/// Sources the script in `shell` with a PATH holding no `pb`, under errexit.
+fn sourcing_with_no_pb_succeeds(shell: &str, prelude: &str) {
+    // Arrange
+    let test = format!("sourcing_{shell}_script_without_pb");
+    if Command::new(shell).arg("--version").output().is_err() {
+        skip(&test, &format!("{shell} cannot be spawned"));
+        return;
+    }
+    let scratch = isolated::fresh_home();
+    let body =
+        format!("PATH=\"$1\"; {prelude} set -e; source <(\"$2\" completions {shell}); echo ok");
+
+    // Act
+    let out = Command::new(shell)
+        .args(["-c", &body, "_"])
+        .arg(&scratch)
+        .arg(env!("CARGO_BIN_EXE_playbook"))
+        .env("HOME", &scratch)
+        .output()
+        .expect("spawn shell");
+
+    // Assert
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{shell}: {stderr}");
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok", "{shell}");
+}
+
+#[test]
+fn sourcing_the_bash_script_without_pb_on_path_succeeds_under_errexit() {
+    sourcing_with_no_pb_succeeds("bash", "");
+}
+
+#[test]
+fn sourcing_the_zsh_script_without_pb_on_path_succeeds_under_errexit() {
+    sourcing_with_no_pb_succeeds("zsh", "compdef() { :; };");
 }
