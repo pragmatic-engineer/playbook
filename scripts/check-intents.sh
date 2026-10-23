@@ -12,7 +12,7 @@
 #   2. when a playbook binary is given, warns about each listed intent the
 #      binary does not offer, and fails only for an intent marked required;
 #   3. when a binary is given, fails when a command the tool map or the
-#      playbook:cli skill names is not in its `playbook commands --json`. A
+#      playbook:playbook-usage skill names is not in its `playbook commands --json`. A
 #      binary with no command list fails only under INTENTS_STRICT=1.
 #
 # Usage: [INTENTS_STRICT=1] check-intents.sh [path-to-playbook-binary]
@@ -57,7 +57,7 @@ while IFS=$'\t' read -r intent required; do
   fi
 done < <(jq -r '.[] | [.intent, (.required | tostring)] | @tsv' "$FILE")
 
-# 3. Every command the tool map and the playbook:cli skill name must exist in
+# 3. Every command the tool map and the playbook:playbook-usage skill name must exist in
 #    `playbook commands --json`, the list the binary builds from its own
 #    command tree: a tool map row as `group verb` when the group has
 #    subcommands, else as its group, and each `playbook <words>` in the skill
@@ -74,7 +74,7 @@ named="$(printf '%s' "$map" | jq -r --argjson cmds "$cmds" '.[]
   | .group as $g
   | (($cmds | map(select(.command == $g)) | .[0].subcommands) // []) as $subs
   | if .verb != "" and ($subs | length) > 0 then "\($g) \(.verb)" else $g end')"
-SKILL="$ROOT/plugins/playbook/skills/cli/SKILL.md"
+SKILL="$ROOT/plugins/playbook/skills/playbook-usage/SKILL.md"
 if [ -f "$SKILL" ]; then
   named="$named
 $({ grep -oE '`playbook [a-z][a-z-]*( [a-z][a-z-]*)*' "$SKILL" || true; } | sed 's/^`playbook //')"
@@ -82,8 +82,8 @@ fi
 while IFS= read -r command; do
   [ -n "$command" ] || continue
   if ! printf '%s\n' "$known" | grep -qxF "$command"; then
-    echo "FAIL $command is named by the tool map or the cli skill but is not a command"; fail=1
+    echo "FAIL $command is named by the tool map or the playbook-usage skill but is not a command"; fail=1
   fi
 done < <(printf '%s\n' "$named" | sort -u)
-[ "$fail" = 0 ] && echo "PASS every command the tool map and the cli skill name exists"
+[ "$fail" = 0 ] && echo "PASS every command the tool map and the playbook-usage skill name exists"
 exit "$fail"

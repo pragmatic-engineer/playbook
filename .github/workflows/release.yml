@@ -622,7 +622,7 @@ jobs:
           scripts/package-smoke.sh dist "$ver" "$TARGET"
           (cd dist && sha256sum ./*.deb ./*.rpm)
 
-      # Every command the session tool map and the playbook:cli skill name
+      # Every command the session tool map and the playbook:playbook-usage skill name
       # must exist in the built binary's `playbook commands --json`.
       - name: Check the commands the plugin names
         if: matrix.target == 'x86_64-unknown-linux-musl'
