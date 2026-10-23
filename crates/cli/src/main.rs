@@ -421,7 +421,13 @@ fn real_main() {
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
         Command::Completions { shell } => {
-            let script = playbook::completions::render(shell);
+            let script = match playbook::completions::render(shell) {
+                Ok(script) => script,
+                Err(e) => {
+                    eprintln!("playbook: cannot build the completion script: {e}");
+                    std::process::exit(1);
+                }
+            };
             match std::io::stdout().lock().write_all(script.as_bytes()) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}

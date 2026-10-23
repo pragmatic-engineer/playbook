@@ -36,20 +36,23 @@ const PB_GUARD_FISH: &str = "if command -sq pb; and command -sq playbook; and te
 
 /// The completion script for `shell`. `pb` is registered only where it is
 /// the same file as `playbook`, and a false test leaves the exit status 0.
-pub fn render(shell: CompletionShell) -> String {
+///
+/// Fails when the zsh script does not start with the header this crate
+/// rewrites, so a `clap_complete` change cannot drop real code silently.
+pub fn render(shell: CompletionShell) -> Result<String, String> {
     let mut cmd = crate::parse::command();
     let mut out = Vec::new();
     clap_complete::generate(shell.to_clap(), &mut cmd, BIN_NAME, &mut out);
     let script = String::from_utf8_lossy(&out).into_owned();
     match shell {
-        CompletionShell::Bash => format!("{script}{PB_GUARD_BASH}"),
+        CompletionShell::Bash => Ok(format!("{script}{PB_GUARD_BASH}")),
         CompletionShell::Zsh => {
             let body = script
                 .strip_prefix(ZSH_CLAP_HEADER)
-                .expect("clap_complete zsh output starts with the pinned header");
-            format!("{ZSH_FIRST_LINE}{body}{PB_GUARD_ZSH}")
+                .ok_or_else(|| format!("the zsh script does not start with {ZSH_CLAP_HEADER:?}"))?;
+            Ok(format!("{ZSH_FIRST_LINE}{body}{PB_GUARD_ZSH}"))
         }
-        CompletionShell::Fish => format!("{script}{PB_GUARD_FISH}"),
+        CompletionShell::Fish => Ok(format!("{script}{PB_GUARD_FISH}")),
     }
 }
 
