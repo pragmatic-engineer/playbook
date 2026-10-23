@@ -126,7 +126,7 @@ const INSTALL_HINT: &str = "run: curl -fsSL https://raw.githubusercontent.com/pr
 type Probe = fn(&Env) -> Vec<Row>;
 
 /// Every probe, in table order.
-const PROBES: [Probe; 20] = [
+const PROBES: [Probe; 21] = [
     |env| vec![layer1(env)],
     |env| vec![layer2(env)],
     |env| vec![layer3(env)],
@@ -152,6 +152,7 @@ const PROBES: [Probe; 20] = [
     update_rows,
     |env| vec![policy_guard_row(env)],
     doc_rows,
+    completion_rows,
 ];
 
 /// Run every check. The probes only read, and several wait on child processes
@@ -640,6 +641,45 @@ fn old_launcher_rows(env: &Env) -> Vec<Row> {
         })
         .collect()
 }
+
+/// Reports whether tab completion is wired for `$SHELL`. It only reads files:
+/// the stub is a fixed loader that tracks the binary, so it is never stale.
+fn completion_rows(env: &Env) -> Vec<Row> {
+    use crate::init::completion::{self, Status};
+    use crate::init::path::PathShell;
+    let shell = PathShell::detect(&env.shell);
+    if shell == PathShell::Other {
+        return Vec::new();
+    }
+    let row = match completion::status(&env.home, shell) {
+        Status::Ok => Row::new("-", Level::Pass, "tab completion is set up"),
+        Status::Missing => {
+            Row::new("-", Level::Info, "tab completion is not set up").hint(COMPLETION_SETUP_HINT)
+        }
+        Status::StubNotOurs => Row::new(
+            "-",
+            Level::Warn,
+            "a completion file is not written by playbook, so setup leaves it alone",
+        )
+        .hint(COMPLETION_REMOVE_HINT),
+        Status::BlockEdited => Row::new(
+            "-",
+            Level::Warn,
+            "the completion block in ~/.zshrc was edited by hand",
+        )
+        .hint(COMPLETION_REMOVE_HINT),
+        Status::BlockDuplicated => Row::new(
+            "-",
+            Level::Warn,
+            "the completion block in ~/.zshrc is duplicated",
+        )
+        .hint(COMPLETION_REMOVE_HINT),
+    };
+    vec![row]
+}
+
+const COMPLETION_SETUP_HINT: &str = "run playbook setup";
+const COMPLETION_REMOVE_HINT: &str = "remove the file or block by hand, then run playbook setup";
 
 fn layer7(env: &Env) -> Vec<Row> {
     let settings = env.settings();
@@ -1465,6 +1505,37 @@ pub fn failed(rows: &[Row]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PROBE_COUNT: usize = 21;
+    const COMPLETION_PROBE_AT: usize = PROBE_COUNT - 1;
+
+    fn env_for(home: &Path) -> Env {
+        Env {
+            home: home.to_path_buf(),
+            claude_home: home.join(".claude"),
+            plugin_root: None,
+            shell: "/bin/zsh".to_string(),
+            path_var: OsString::new(),
+            repo_root: None,
+            repo_slug: None,
+        }
+    }
+
+    #[test]
+    fn the_probes_table_has_21_entries_in_order() {
+        // Arrange
+        let home = crate::common::test_support::scratch_dir("doctor-probes");
+        std::fs::create_dir_all(&home).unwrap();
+
+        // Act
+        let last = PROBES[COMPLETION_PROBE_AT](&env_for(&home));
+
+        // Assert
+        assert_eq!(PROBES.len(), PROBE_COUNT);
+        assert_eq!(last.len(), 1, "{last:?}");
+        assert_eq!(last[0].level, Level::Info);
+        assert!(last[0].message.contains("completion"), "{last:?}");
+    }
 
     #[test]
     fn a_paused_plugin_downgrades_only_the_hook_and_status_line_passes() {
