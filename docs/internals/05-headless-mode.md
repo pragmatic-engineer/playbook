@@ -1,12 +1,12 @@
 # Headless mode
 
-Can playbook run with no person at the keyboard, for example in CI? Yes. This page records what was tested on 2026-10-03 with playbook 0.16.0 and Claude Code 2.1.286, in a scratch `HOME` and a scratch git repo with no remote. It was not rerun for 0.20.0. The `PLAYBOOK_HEADLESS` switch and the auto mode rules below are read from the current code.
+Can playbook run with no person at the keyboard, for example in CI? Yes. Tested on 2026-10-03 with playbook 0.16.0 and Claude Code 2.1.286, in a scratch `HOME` and a scratch git repo with no remote. It was not rerun for 0.20.0. The `PLAYBOOK_HEADLESS` switch and the auto mode rules below are read from the current code.
 
 ## Short answer
 
 - The compiled `playbook` binary already works unattended. No command read stdin or waited for input.
 - No model is needed for useful CI checks: `agents check`, `manifest check`, `settings check`, and the `gate` commands.
-- Slash commands also run under `claude -p` when the plugin is loaded with `--plugin-dir`, and playbook's hooks fire.
+- Slash commands also run under `claude -p` with `--plugin-dir`, and playbook's hooks fire.
 - The risks are around the model: a denied permission is not an error exit, the memory Stop hook can add turns, and any command that asks a question has no one to answer.
 
 ## What works without a model
@@ -27,7 +27,7 @@ All run with `CI=true`, stdin from `/dev/null`, and an empty `HOME`.
 | `pr prepare --help` | yes | exit 0, so a caller can detect support |
 | `setup` | yes | no prompt; second run changes nothing; with no plugin root it wires hooks and skips the rest |
 
-Nothing needed anything from `~/.claude` except `setup`, which writes `~/.claude/settings.json`. The state directories created under an empty `HOME` are the `data/` folder (`config.db`, `usage.db`), `runtime/` (handoffs, session folders, `session-start.log`), `memory/`, and `data/gate/<owner>/<repo>/<worktree>.db` for the gate.
+Nothing needed anything from `~/.claude` except `setup`, which writes `~/.claude/settings.json`. State created under an empty `HOME`: `data/` (`config.db`, `usage.db`, and `data/gate/<owner>/<repo>/<worktree>.db` for the gate), `runtime/` (handoffs, session folders, `session-start.log`), and `memory/`.
 
 ## Running Claude headless
 
@@ -50,51 +50,42 @@ Other facts:
 - `--allowedTools` takes several values, so it swallows a prompt placed after it. Put the prompt first.
 - `AskUserQuestion` does not exist under `-p` (the model said it has no such tool), with or without `--permission-prompts none`. The model falls back to asking in plain text, which no one reads, and the run still exits 0. A command that must ask has no headless path.
 - Under a scratch `HOME`, `claude -p` says "Not logged in". Credentials live in the real `HOME`, so a runner needs `ANTHROPIC_API_KEY` or an OAuth token.
-- `--bare` is excluded by decision. It skips hooks, plugins, skills, and keychain reads, and authenticates only with `ANTHROPIC_API_KEY`, so it would switch off the playbook plugin and its hooks. Design for a normal `claude -p` run with hooks on, the plugin loaded by `--plugin-dir`, and auth by `ANTHROPIC_API_KEY` or a subscription token (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`).
+- `--bare` is excluded by decision: it skips hooks, plugins, skills, and keychain reads, and authenticates only with `ANTHROPIC_API_KEY`, so it would switch off the playbook plugin and its hooks. Design for a normal `claude -p` run with hooks on, the plugin loaded by `--plugin-dir`, and auth by `ANTHROPIC_API_KEY` or a subscription token (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`).
 
 ## Plugin and hooks under `-p`
 
-- `--plugin-dir <checkout>` loads playbook with no marketplace install. The binary finds plugin files through `playbook path plugin-root`, which prefers the installed plugin, so set `PLAYBOOK_PLUGIN_DIR=<checkout>/plugins/playbook` when a marketplace install is also present. `system/init` in `stream-json` listed it as `playbook@inline`, version 0.16.0, with 23 playbook slash commands.
+- `--plugin-dir <checkout>` loads playbook with no marketplace install. The binary finds plugin files through `playbook path plugin-root`, which prefers the installed plugin. Set `PLAYBOOK_PLUGIN_DIR=<checkout>/plugins/playbook` when a marketplace install is also present. `system/init` in `stream-json` listed it as `playbook@inline`, version 0.16.0, with 23 playbook slash commands.
 - `claude -p "/playbook:session-start"` ran the command: it called `playbook handoff show`, read the log, and checked git (4 turns, 14 cents).
-- Hooks that fired in a headless run: SessionStart (`session-init`, source `startup`), UserPromptSubmit (`auto-model-detect`, `memory-anchors`), PreToolUse (`preread-*`, `bg-await-guard`, `memory-anchors`), PostToolUse (`search-counter`, `post-edit-track`), Stop (`memory-capture`, `session-clean-exit`). The `statusLine` never renders.
-- Folder trust: the runs happened in a fresh scratch directory with no trust entry. The project hooks and the plugin still ran, so `playbook trust` is not needed for CI.
+- Hooks that fired: SessionStart (`session-init`, source `startup`), UserPromptSubmit (`auto-model-detect`, `memory-anchors`), PreToolUse (`preread-*`, `bg-await-guard`, `memory-anchors`), PostToolUse (`search-counter`, `post-edit-track`), Stop (`memory-capture`, `session-clean-exit`). The `statusLine` never renders.
+- Folder trust: runs happened in a fresh scratch directory with no trust entry, and the project hooks and plugin still ran. `playbook trust` is not needed for CI.
 
 ### The memory Stop hook
 
 `memory-capture` blocks Stop only when a `capture-due` marker exists. That marker is written by the status line renderer (`playbook statusline`), which does not run headless, so in normal headless runs it never fires (checked: zero markers after four runs).
 
-To see the worst case, a marker was created for a fixed `--session-id`. The hook blocked Stop twice, then released. The run took 3 turns instead of 1, cost about 2 cents, and ended with exit 0. It did not loop or hang (the re-block cap is 2). One side effect: the final `result` text was the model's answer to the nudge, not to the prompt. Do not trust `result` as the answer when this hook may fire.
+Worst case, tested with a marker created for a fixed `--session-id`: the hook blocked Stop twice, then released (the re-block cap is 2). The run took 3 turns instead of 1, cost about 2 cents, exited 0, and did not loop or hang. One side effect: the final `result` text was the model's answer to the nudge, not to the prompt. Do not trust `result` as the answer when this hook may fire.
 
-### Hooks in a headless run
+## The headless switch
 
-| Hook | Behavior |
+One switch covers every row below. `PLAYBOOK_HEADLESS` set to `1`, `true`, `yes`, or `on` turns headless mode on, and `0`, `false`, `no`, or `off` forces it off. When it is unset, `CI=true` (or `CI=1`) turns it on, so a developer who runs with `CI=true` locally can opt out with `PLAYBOOK_HEADLESS=0`. The check lives in `crates/cli/src/common/headless.rs`.
+
+| Hook | Behavior when headless |
 |---|---|
-| `session-init` | Writes `session-start.log`. Under `PLAYBOOK_HEADLESS` it skips every nudge, the worktree sweep and memory injection (opt in with `PLAYBOOK_HEADLESS_MEMORY=1`). It still injects the tool map. |
-| `memory-capture` (Stop) | Never blocks headless. |
+| `session-init` | Writes `session-start.log`. Skips every nudge, the worktree sweep, and the handoff load. Skipping the auto-learn nudge has the same effect as `AUTO_LEARN_NUDGE=0`. Injects no memory unless `PLAYBOOK_HEADLESS_MEMORY=1` opts it in. Still injects the tool map (see `playbook tools map`). |
+| `memory-capture` (Stop) | Never blocks, even if a `capture-due` marker exists. |
 | `auto-model-detect` | Silent headless. |
-| Safety guards (`preread-*`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) | Fire and stay quiet. They are the reason to run with hooks on. |
+| Safety guards (`preread-*`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) | Fire, stay quiet, and behave exactly as they do interactively. They are the reason to run with hooks on. |
 | `search-counter`, `post-edit-track`, `session-clean-exit` | Write small files under `runtime/`. Harmless. |
 
 No hook reads a TTY or prompts. Only `crates/cli/src/main.rs` reads stdin, for the hook payload.
 
-## The headless switch
-
-One switch covers every row above. `PLAYBOOK_HEADLESS` set to `1`, `true`, `yes`, or `on` turns headless mode on, and `0`, `false`, `no`, or `off` forces it off. When `PLAYBOOK_HEADLESS` is unset, `CI=true` (or `CI=1`) turns it on, so a developer who runs with `CI=true` locally can opt out with `PLAYBOOK_HEADLESS=0`. The check lives in `crates/cli/src/common/headless.rs`.
-
-When headless:
-
-- `session-init` skips the worktree sweep, the handoff load, and the auto-learn nudge (the same effect as `AUTO_LEARN_NUDGE=0`). It injects no memory either, unless `PLAYBOOK_HEADLESS_MEMORY=1` opts memory in. It still injects the tool map (see `playbook tools map`) and writes `session-start.log`.
-- `memory-capture` (Stop) never blocks, even if a `capture-due` marker exists.
-- `auto-model-detect` stays silent.
-- The safety guards (`preread-*`, `bg-await-guard`, `rm-workspace-guard`, `precommit-check`) behave exactly as they do interactively.
-
-`memory-capture` returns without blocking when headless. Interactive runs keep the bounded re-block from ADR 0009: it blocks at most twice, the second block escalates the handoff nudge, and then it releases, so it cannot loop. It deliberately does not read `stop_hook_active`, because that field would end the escalation after the first block.
+Interactive runs keep the bounded re-block from ADR 0009: `memory-capture` blocks at most twice, the second block escalates the handoff nudge, then it releases. It cannot loop. It deliberately does not read `stop_hook_active`, because that field would end the escalation after the first block.
 
 ## Auto mode and unattended runs
 
-This section describes the design. It was not part of the tested runs above.
+Design only; not part of the tested runs above.
 
-Whether a command may ask questions is a separate setting from headless mode. `PLAYBOOK_HEADLESS` is independent of the `mode` setting: headless only quiets the session nudges and the memory Stop hook, and it never turns auto on. Auto never turns headless on either. Under `claude -p` the question tool is absent, so set `PLAYBOOK_MODE=auto` as well when a command must run with no one to answer. See [Auto mode](../guides/04-auto-mode.md) for the setting, the spend cap, and the limits.
+`PLAYBOOK_HEADLESS` is independent of the `mode` setting, which decides whether a command may ask questions. Headless only quiets the session nudges and the memory Stop hook, and never turns auto on. Auto never turns headless on either. Under `claude -p` the question tool is absent, so set `PLAYBOOK_MODE=auto` as well when a command must run with no one to answer. See [Auto mode](../guides/04-auto-mode.md) for the setting, the spend cap, and the limits.
 
 ### Supported in auto
 
@@ -122,13 +113,26 @@ These commands read the mode first and take the recommended answer instead of as
 - Anything that merges, such as `gh pr merge`, or `/playbook:implement` with `--boundary=land`.
 - A model that reads untrusted pull request text (titles, bodies, comments, diffs from forks) with write or shell tools. That text is prompt injection input.
 
-Commands that still ask a person in ask mode: `implement` (delivery questions unless flags preset them), `plan` (the divergent phase), `adr`, `setup`, `address-pr-comments`, `review` (asks quick or deep unless `--quick` or `--deep` is passed), `quick-review` (asks how to submit), `deep-review` (asks which findings to post), `learn-project` (asks if the Jira or Confluence target is ambiguous), and `fix` (confirms before commit). `commit-and-push`, `create-pull-request`, `session-start`, `doctor`, and `repo-audit` run without questions.
+In ask mode, these commands still ask a person:
+
+| Command | Asks |
+|---|---|
+| `implement` | delivery questions unless flags preset them |
+| `plan` | the divergent phase |
+| `adr`, `setup`, `address-pr-comments` | still ask a person |
+| `review` | quick or deep, unless `--quick` or `--deep` is passed |
+| `quick-review` | how to submit |
+| `deep-review` | which findings to post |
+| `learn-project` | if the Jira or Confluence target is ambiguous |
+| `fix` | confirms before commit |
+
+These run without questions: `commit-and-push`, `create-pull-request`, `session-start`, `doctor`, `repo-audit`.
 
 ## GitHub Actions
 
 The documented action is `anthropics/claude-code-action@v1`. It takes `anthropic_api_key` or `claude_code_oauth_token`, and `plugin_marketplaces`, `plugins`, and `claude_args`. It needs a write-access actor, and pull requests from forks get no secrets. Not run here.
 
-First use case, no model, proven locally (checksum check passes, a wrong checksum fails, each check exits 0, nothing was written to `HOME`). This is a documentation snippet, not a workflow in this repo:
+First use case, no model, proven locally (checksum check passes, a wrong checksum fails, each check exits 0, nothing was written to `HOME`). This snippet is documentation, not a workflow in this repo:
 
 ```yaml
 jobs:
@@ -151,7 +155,7 @@ jobs:
 
 ## Running commands under `claude -p`
 
-Use a wrapper that fails on a non-empty `permission_denials`, sets `--max-turns` and `--max-budget-usd`, and never passes `bypassPermissions`. `playbook gate check --json` prints `{"version":1,"slug":...,"ok":...,"phases":[...]}` with the same exit codes as the text output.
+Use a wrapper that sets `--max-turns` and `--max-budget-usd`, fails on a non-empty `permission_denials`, and never passes `bypassPermissions`. `playbook gate check --json` prints `{"version":1,"slug":...,"ok":...,"phases":[...]}` with the same exit codes as the text output.
 
 ## Open items
 
