@@ -59,10 +59,25 @@ done
   eq "$n" 18 "assets the publish patterns match"
 )
 
+# Each completion file the packages ship must be listed in the nfpm config,
+# and the build and smoke scripts must know the generated folder.
+cfg=scripts/nfpm.yaml
+for d in /usr/share/bash-completion/completions/playbook \
+  /usr/share/bash-completion/completions/pb \
+  /usr/share/fish/vendor_completions.d/playbook.fish \
+  /usr/share/fish/vendor_completions.d/pb.fish \
+  /usr/share/zsh/vendor-completions/_playbook \
+  /usr/share/zsh/site-functions/_playbook; do
+  grep -qF "dst: $d" "$cfg" || fail "$cfg does not install $d"
+done
+grep -qF 'COMPLETIONS_DIR=' "$pk" || fail "$pk does not pass COMPLETIONS_DIR to nfpm"
+grep -qF 'bash -n' scripts/package-smoke.sh || fail "package-smoke.sh does not syntax check the bash completion"
+
 if command -v nfpm >/dev/null 2>&1; then
   bin="$tmp/bin" out="$tmp/out"
   mkdir -p "$bin"
-  printf '#!/bin/sh\necho playbook %s\n' "$version" > "$bin/playbook"
+  # The fake prints a stub for `completions <shell>` and a version otherwise.
+  printf '#!/bin/sh\n[ "$1" = completions ] && { echo "# $2 completion"; exit 0; }\necho playbook %s\n' "$version" > "$bin/playbook"
   cp "$bin/playbook" "$bin/pbtop"
   chmod +x "$bin/playbook" "$bin/pbtop"
   "$pk" build "$version" x86_64-unknown-linux-musl "$bin" "$out" >/dev/null
