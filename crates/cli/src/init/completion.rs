@@ -17,6 +17,14 @@ pub const MARKER: &str = "# playbook completions";
 /// The one line `playbook setup` adds to `~/.zshrc`.
 pub const RC_LINE: &str = r#"[ -r "$HOME/.local/share/playbook/completions.zsh" ] && . "$HOME/.local/share/playbook/completions.zsh"  # playbook completions"#;
 pub const ZSHRC: &str = ".zshrc";
+/// The fpath stub earlier versions wrote for zsh, relative to `$HOME`.
+pub const LEGACY_STUB: &str = ".local/share/zsh/site-functions/_playbook";
+/// The two lines after [`MARKER`] in the `~/.zshrc` block earlier versions
+/// wrote for zsh. Setup migrates that block and uninstall removes it.
+pub const LEGACY_BLOCK_REST: [&str; 2] = [
+    r#"fpath=("$HOME/.local/share/zsh/site-functions" $fpath)"#,
+    "if (( $+functions[compdef] )); then autoload -Uz _playbook; compdef _playbook playbook; [[ ${commands[pb]} -ef ${commands[playbook]} ]] && compdef _playbook pb; else autoload -Uz compinit && compinit; fi",
+];
 /// The zsh loader, relative to `$HOME`.
 pub const LOADER: &str = ".local/share/playbook/completions.zsh";
 /// First line of the loader, which tells our file from a user's.
@@ -63,6 +71,12 @@ end\n";
 /// The shell the completion files are written for.
 pub type Shell = PathShell;
 
+/// What the caller resolved: the shell to write completion for.
+#[derive(Debug, Clone, Copy)]
+pub struct Setup {
+    pub shell: Shell,
+}
+
 /// What `ensure` did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Outcome {
@@ -70,6 +84,8 @@ pub struct Outcome {
     pub created: Vec<PathBuf>,
     /// Files this call changed.
     pub changed: Vec<PathBuf>,
+    /// Files this call removed.
+    pub removed: Vec<PathBuf>,
     /// Files that already held what setup would write.
     pub already: Vec<PathBuf>,
     /// Files with an edited line or stub, left alone.
@@ -152,6 +168,7 @@ pub fn ensure_with(home: &Path, shell: Shell, ctx: &Ctx) -> io::Result<Outcome> 
         ensure_stub(stub, &text, home_owned, &mut out)?;
     }
     if shell == Shell::Zsh {
+        remove_legacy_stub(home, &mut out)?;
         let loader_ours = ensure_loader(home, home_owned, ctx, &mut out)?;
         // A rc line that sources a file we did not write would run their code.
         if loader_ours {
@@ -159,6 +176,21 @@ pub fn ensure_with(home: &Path, shell: Shell, ctx: &Ctx) -> io::Result<Outcome> 
         }
     }
     Ok(out)
+}
+
+/// Every file setup writes for `shell` with the text it would hold: the
+/// stubs for bash and fish, the loader for zsh.
+pub fn wired_files(home: &Path, shell: Shell) -> Vec<(PathBuf, String)> {
+    match shell {
+        Shell::Zsh => vec![(loader_path(home), loader_text())],
+        _ => {
+            let text = stub_text(shell);
+            stub_paths(home, shell)
+                .into_iter()
+                .map(|path| (path, text.clone()))
+                .collect()
+        }
+    }
 }
 
 /// The stub files for `shell`, the `pb` ones included. Zsh has none: it uses
@@ -203,6 +235,35 @@ pub fn loader_is_ours(bytes: &[u8]) -> bool {
         .split(|&b| b == b'\n')
         .next()
         .is_some_and(|first| first.trim_ascii_end() == LOADER_HEADER.as_bytes())
+}
+
+/// Whether `bytes` is a pre-loader zsh stub we wrote.
+pub fn legacy_stub_is_ours(bytes: &[u8]) -> bool {
+    has_line(bytes, STUB_MARKER)
+}
+
+/// Removes the pre-loader zsh stub when it carries our marker, and its
+/// directory when that leaves it empty.
+fn remove_legacy_stub(home: &Path, out: &mut Outcome) -> io::Result<()> {
+    let stub = home.join(LEGACY_STUB);
+    let Ok(bytes) = fs::read(&stub) else {
+        return Ok(());
+    };
+    if !legacy_stub_is_ours(&bytes) {
+        return Ok(());
+    }
+    match fs::remove_file(&stub) {
+        Ok(()) => out.removed.push(stub.clone()),
+        Err(e) if e.kind() == ErrorKind::PermissionDenied => {
+            out.skipped.push((stub, SKIP_READ_ONLY.to_string()));
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    }
+    if let Some(dir) = stub.parent() {
+        let _ = fs::remove_dir(dir);
+    }
+    Ok(())
 }
 
 /// Writes or rewrites the loader. Returns false when the path holds a file
@@ -361,19 +422,26 @@ fn rc_line_text() -> String {
 struct RcLines {
     /// Lines equal to [`RC_LINE`].
     exact: usize,
-    /// Lines that end with [`MARKER`] but are not [`RC_LINE`].
+    /// Lines that end with [`MARKER`] but are not [`RC_LINE`], and do not open
+    /// a block of [`LEGACY_BLOCK_REST`].
     edited: usize,
+    /// Blocks of the pre-loader text.
+    legacy: usize,
 }
 
 fn rc_lines(content: &[u8]) -> RcLines {
     let mut found = RcLines {
         exact: 0,
         edited: 0,
+        legacy: 0,
     };
-    for line in shim::split_lines(content) {
+    let lines = shim::split_lines(content);
+    for (at, line) in lines.iter().enumerate() {
         let line = line.trim_ascii_end();
         if line == RC_LINE.as_bytes() {
             found.exact += 1;
+        } else if shim::is_marked_block(&lines, at, MARKER, &LEGACY_BLOCK_REST) {
+            found.legacy += 1;
         } else if line.ends_with(MARKER.as_bytes()) {
             found.edited += 1;
         }
@@ -400,6 +468,15 @@ fn ensure_zshrc(home: &Path, home_owned: bool, ctx: &Ctx, out: &mut Outcome) -> 
     let created = existing.is_none();
     let content = existing.as_ref().map_or(&[][..], |(_, c)| c.as_slice());
     match rc_lines(content) {
+        RcLines {
+            legacy: 1.., exact, ..
+        } => {
+            let Some((target, content)) = existing else {
+                return Ok(());
+            };
+            let result = migrate_legacy(&rc, &target, &content, exact == 0);
+            record_write(rc, result, false, out)?;
+        }
         RcLines { exact: 1.., .. } => out.already.push(rc),
         RcLines { edited: 1.., .. } => out.kept.push(rc),
         RcLines { .. } => {
@@ -411,6 +488,25 @@ fn ensure_zshrc(home: &Path, home_owned: bool, ctx: &Ctx, out: &mut Outcome) -> 
         }
     }
     Ok(())
+}
+
+/// Replaces every pre-loader block with the new line, appended when the file
+/// has none, after a backup of the original.
+fn migrate_legacy(rc: &Path, target: &Path, original: &[u8], add_line: bool) -> io::Result<()> {
+    if !shim::can_rewrite(rc) {
+        return Err(ErrorKind::PermissionDenied.into());
+    }
+    let mut migrated = shim::strip_marked_block(original, MARKER, &LEGACY_BLOCK_REST)
+        .unwrap_or_else(|| original.to_vec());
+    if add_line {
+        if !migrated.is_empty() && !migrated.ends_with(b"\n") {
+            migrated.push(b'\n');
+        }
+        migrated.extend_from_slice(rc_line_text().as_bytes());
+    }
+    let stamp = crate::common::time::now_epoch_secs();
+    backup_unless_append_only(rc, original, &migrated, stamp)?;
+    write_atomic_durable(target, &migrated)
 }
 
 /// Appends the line through an atomic replace of the real target, so a
@@ -473,6 +569,7 @@ fn zsh_status(home: &Path) -> Status {
     }
     let zshrc = fs::read(home.join(ZSHRC)).unwrap_or_default();
     match rc_lines(&zshrc) {
+        RcLines { legacy: 1.., .. } => Status::Missing,
         RcLines { exact: 1, .. } => Status::Ok,
         RcLines { exact: 2.., .. } => Status::LineDuplicated,
         RcLines { edited: 1.., .. } => Status::LineEdited,
@@ -480,7 +577,15 @@ fn zsh_status(home: &Path) -> Status {
     }
 }
 
-/// Removes every exact line from `~/.zshrc` after a backup, for uninstall.
+/// `content` without every exact rc line and every pre-loader block; `None`
+/// when there was nothing to remove.
+pub fn strip_ours(content: &[u8]) -> Option<Vec<u8>> {
+    let no_legacy = shim::strip_marked_block(content, MARKER, &LEGACY_BLOCK_REST);
+    let rest = no_legacy.as_deref().unwrap_or(content);
+    shim::strip_marked_block(rest, RC_LINE, &[]).or(no_legacy)
+}
+
+/// Removes every exact line and pre-loader block from `~/.zshrc` after a backup, for uninstall.
 /// A file whose real target belongs to a uid other than `uid` is reported and
 /// left alone. The loader file is the caller's to remove.
 pub fn strip(home: &Path, uid: u32, stamp: u64, dry_run: bool) -> Vec<RcStrip> {
@@ -491,7 +596,7 @@ pub fn strip(home: &Path, uid: u32, stamp: u64, dry_run: bool) -> Vec<RcStrip> {
     let Ok(old) = fs::read(&target) else {
         return Vec::new();
     };
-    let Some(new) = shim::strip_marked_block(&old, RC_LINE, &[]) else {
+    let Some(new) = strip_ours(&old) else {
         return Vec::new();
     };
     let mut entry = RcStrip {
@@ -1424,5 +1529,126 @@ mod tests {
         assert!(out.is_empty());
         assert_eq!(read(zshrc(&home)), EDITED_RC_LINE);
         assert!(backups(&home).is_empty(), "{:?}", backups(&home));
+    }
+
+    fn legacy_block() -> String {
+        format!(
+            "{MARKER}\n{}\n{}\n",
+            LEGACY_BLOCK_REST[0], LEGACY_BLOCK_REST[1]
+        )
+    }
+
+    fn write_legacy_stub(home: &Path, text: &str) -> PathBuf {
+        let stub = home.join(LEGACY_STUB);
+        fs::create_dir_all(stub.parent().unwrap()).unwrap();
+        fs::write(&stub, text).unwrap();
+        stub
+    }
+
+    fn legacy_stub_text() -> String {
+        format!("#compdef playbook pb\n{STUB_MARKER}\n# old body\n")
+    }
+
+    #[test]
+    fn the_legacy_block_is_the_pre_loader_text() {
+        assert_eq!(
+            LEGACY_BLOCK_REST[0],
+            r#"fpath=("$HOME/.local/share/zsh/site-functions" $fpath)"#
+        );
+        assert!(LEGACY_BLOCK_REST[1].starts_with("if (( $+functions[compdef] ))"));
+        assert!(LEGACY_BLOCK_REST[1].ends_with("else autoload -Uz compinit && compinit; fi"));
+    }
+
+    #[test]
+    fn setup_migrates_the_old_block_and_stub_to_the_loader_with_a_backup() {
+        // Arrange
+        let home = home("completion-migrate");
+        let original = format!("{USER_LINES}{}export B=2\n", legacy_block());
+        fs::write(zshrc(&home), &original).unwrap();
+        let stub = write_legacy_stub(&home, &legacy_stub_text());
+
+        // Act
+        let out = ensure(&home, Shell::Zsh).unwrap();
+
+        // Assert
+        assert_eq!(
+            read(zshrc(&home)),
+            format!("{USER_LINES}export B=2\n{}", rc_line_text())
+        );
+        assert!(!stub.exists());
+        assert!(!stub.parent().unwrap().exists(), "the empty dir stays");
+        assert_eq!(read(loader_path(&home)), loader_text());
+        let saved = backups(&home);
+        assert_eq!(saved.len(), 1, "{saved:?}");
+        assert_eq!(read(home.join(&saved[0])), original);
+        assert!(out.changed.contains(&zshrc(&home)), "{out:?}");
+        assert_eq!(out.removed, [stub], "{out:?}");
+        assert_eq!(status(&home, Shell::Zsh), Status::Ok);
+    }
+
+    #[test]
+    fn a_legacy_stub_without_our_marker_and_an_edited_old_block_are_kept() {
+        // Arrange
+        let home = home("completion-migrate-kept");
+        let theirs = write_legacy_stub(&home, "#compdef playbook\n# mine\n");
+        let edited = format!("{MARKER}\n# my own fpath\n{}\n", LEGACY_BLOCK_REST[1]);
+        fs::write(zshrc(&home), &edited).unwrap();
+
+        // Act
+        let out = ensure(&home, Shell::Zsh).unwrap();
+
+        // Assert
+        assert_eq!(read(&theirs), "#compdef playbook\n# mine\n");
+        assert_eq!(read(zshrc(&home)), edited);
+        assert!(out.kept.contains(&zshrc(&home)), "{out:?}");
+    }
+
+    #[test]
+    fn a_legacy_block_beside_the_new_line_is_dropped_without_a_second_line() {
+        // Arrange
+        let home = home("completion-migrate-both");
+        fs::write(
+            zshrc(&home),
+            format!("{}{USER_LINES}{}", rc_line_text(), legacy_block()),
+        )
+        .unwrap();
+
+        // Act
+        ensure(&home, Shell::Zsh).unwrap();
+
+        // Assert
+        assert_eq!(
+            read(zshrc(&home)),
+            format!("{}{USER_LINES}", rc_line_text())
+        );
+    }
+
+    #[test]
+    fn strip_removes_the_legacy_block_with_a_backup() {
+        // Arrange
+        let home = home("completion-strip-legacy");
+        let original = format!("{USER_LINES}{}", legacy_block());
+        fs::write(zshrc(&home), &original).unwrap();
+
+        // Act
+        let done = strip(&home, effective_uid(), STAMP, false);
+
+        // Assert
+        assert_eq!(read(zshrc(&home)), USER_LINES);
+        assert_eq!(read(done[0].backup.as_ref().unwrap()), original);
+    }
+
+    #[test]
+    fn the_legacy_block_is_reported_as_not_set_up() {
+        // Arrange
+        let home = home("completion-status-legacy");
+        ensure(&home, Shell::Zsh).unwrap();
+        fs::write(zshrc(&home), legacy_block()).unwrap();
+
+        // Act
+        let found = status(&home, Shell::Zsh);
+
+        // Assert
+        assert_eq!(found, Status::Missing);
     }
 }
