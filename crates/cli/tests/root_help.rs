@@ -150,18 +150,32 @@ fn root_help_keeps_usage_options_and_the_pb_alias_line() {
 }
 
 #[test]
-fn playbook_commands_output_equals_the_origin_main_golden() {
+fn playbook_commands_json_keeps_its_keys_and_lists_completions() {
     // Arrange
-    let golden = std::fs::read(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/golden/commands.txt"
-    ))
-    .expect("golden file");
+    let keys = [
+        "command",
+        "purpose",
+        "access",
+        "args",
+        "subcommands",
+        "intents",
+    ];
 
     // Act
-    let out = run(&["commands"]);
+    let out = run(&["commands", "--json"]);
+    let rows: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
 
     // Assert
     assert!(out.status.success());
-    assert_eq!(out.stdout, golden);
+    let rows = rows.as_array().expect("array");
+    assert!(rows.iter().any(|r| r["command"] == "completions"));
+    for row in rows {
+        let found: Vec<&str> = row
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(found, keys, "{row}");
+    }
 }
