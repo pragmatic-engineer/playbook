@@ -311,6 +311,12 @@ Hooks do not read these files. Measured on Claude Code 2.1.293 (2026-10-09), a h
 
 `playbook commands` prints one line per command with its subcommands, what it does and who may run it. `(read-only)` commands only read. A `(user-only)` command, or a name ending in `!`, changes your home or Claude Code settings, needs your consent, runs a paid benchmark or starts a session, so a Claude session asks you to type it with `!` instead of running it. `playbook commands <group>`, such as `playbook commands pr`, lists the subcommands of one group with their flags, and `--json` prints the same for scripts. The list comes from the binary itself, so it names only the commands the binary has. Inside Claude Code, the `playbook:cli` skill points a session to this list. Every flag is in the [CLI and config reference](../reference/cli-and-config.md).
 
+`playbook --help` groups the commands by audience. The first list is for you. A second list, "Agent commands", holds the commands that skills and agents call. When you run a command without a required argument or subcommand, it prints that command's full help to stderr and exits with code 2. A missing argument adds one `error:` line that names it.
+
+## Shell completions
+
+`playbook completions bash`, `playbook completions zsh` and `playbook completions fish` print a completion script on stdout. Nothing is written to your shell files. Load the script from your own shell setup, for example `source <(playbook completions bash)` in `~/.bashrc`. The script also completes `pb`, but only when `pb` on your `PATH` is the same file as `playbook`. `playbook setup` does not install completions.
+
 ## Skills without the binary
 
 With the skills plugin alone, some commands call the `playbook` binary. They fall back to plain git, gh and file steps where they can. No hook runs, so the guards and status line are not active, and `/playbook:doctor` reports the binary and the hook entries as missing. Install the binary and run `playbook setup` to add them.
