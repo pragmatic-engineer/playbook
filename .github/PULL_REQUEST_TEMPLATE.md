@@ -29,6 +29,8 @@
 - [ ] My commits are GPG-signed (`git commit --gpg-sign`) where possible
 - [ ] My commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
 - [ ] I have signed the [Individual CLA](.github/ICLA.md) (first-time contributors)
+- Only a maintainer adds the labels `flags-change` and `help-lint-rules`.
+- If the branch is behind main, rebase it and regenerate the generated files.
 
 ## Testing
 

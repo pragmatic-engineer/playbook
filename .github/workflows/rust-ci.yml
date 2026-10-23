@@ -166,6 +166,8 @@ jobs:
     runs-on: ${{ (matrix.os == 'macos-latest' && !(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v') || (inputs.ref || '') != '')) && 'ubuntu-latest' || matrix.os }}
     permissions:
       contents: read
+      # The help lint step reads the labels of the pull request.
+      pull-requests: read
     outputs:
       sha: ${{ steps.head.outputs.sha }}
     env:
@@ -203,12 +205,41 @@ jobs:
           # Set only by a release gate. Empty means the event's commit.
           ref: ${{ inputs.ref }}
           persist-credentials: false
+          # HEAD^1 is the main tip of a pull_request merge commit, the base of
+          # the help lint guard below.
+          fetch-depth: 2
 
       # The commit under test, which a release gate hands back to release.yml.
       - name: Record the commit under test
         id: head
         if: env.LANE == 'true'
         run: echo "sha=$(git rev-parse HEAD)" | tee -a "$GITHUB_OUTPUT"
+
+      # Runs the copy of the script on main, so a pull request cannot edit the
+      # script that judges it in the same run. Labels are read live: a re-run
+      # reuses the old event payload, and adding a label starts no run.
+      - name: Check the help lint only shrinks
+        if: env.LANE == 'true' && runner.os == 'Linux' && github.event_name == 'pull_request' && (inputs.ref || '') == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          guard="$RUNNER_TEMP/check-help-lint-shrink.sh"
+          if git cat-file -e HEAD^1:scripts/check-help-lint-shrink.sh 2>/dev/null; then
+            git show HEAD^1:scripts/check-help-lint-shrink.sh > "$guard"
+          else
+            cp scripts/check-help-lint-shrink.sh "$guard"
+          fi
+          labels="$(gh pr view "$PR" --json labels --jq '.labels[].name')"
+          args=()
+          if printf '%s\n' "$labels" | grep -qx 'flags-change'; then
+            args+=(--allow-flags-change)
+          fi
+          if printf '%s\n' "$labels" | grep -qx 'help-lint-rules'; then
+            args+=(--allow-rules-change)
+          fi
+          bash "$guard" ${args[@]+"${args[@]}"}
 
       - name: Cache cargo registry and build output (build-test)
         id: cargo
