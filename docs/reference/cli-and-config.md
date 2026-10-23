@@ -95,7 +95,7 @@ Configure and support Claude Code from the command line.
 
 playbook installs hooks and a session launcher, shows a usage view, and helps with pull requests, reviews, worktrees and session handoffs.
 
-Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
+Subcommands: `adr`, `agents`, `atlassian`, `cc`, `ccd`, `ci`, `code`, `commands`, `commit`, `completions`, `config`, `deliver`, `deps`, `doc`, `doctor`, `effort`, `eval`, `gate`, `glossary`, `handoff`, `hooks`, `learn`, `manifest`, `memory`, `migrate`, `mode`, `path`, `plan`, `plans`, `pr`, `prose`, `review`, `route`, `run-context`, `sanitize`, `segment`, `sessions`, `settings`, `setup`, `skills`, `state`, `statusline`, `tools`, `trust`, `uninstall`, `update`, `usage`, `version`, `worktree`
 
 ### `playbook adr`
 
@@ -375,6 +375,14 @@ Reads the message from stdin, or from `--message-file`. Adds a sign-off per `com
 - `--no-signoff`: Leave the sign-off trailer off
 - `--no-type-check`: Skip the check that the commit type fits the files (a docs-only change is not `feat`, a lock-file bump is not `fix`)
 - `--no-prose-check`: Skip the prose check (a dash, a curly quote, a banned word or a contrast phrase in the message)
+
+### `playbook completions`
+
+Print a shell completion script for bash, zsh or fish
+
+Example: `playbook completions zsh`
+
+- `<SHELL>`: The shell to print the script for (one of `bash`, `zsh`, `fish`)
 
 ### `playbook config`
 

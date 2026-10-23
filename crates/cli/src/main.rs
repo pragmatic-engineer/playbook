@@ -16,7 +16,7 @@ use playbook::{
     SegmentTopology, SessionsCommand, SettingsCommand, SkillsCommand, ToolsCommand,
     WorktreeCommand,
 };
-use std::io::{IsTerminal, Read};
+use std::io::{IsTerminal, Read, Write};
 
 /// Restore the default SIGPIPE action so `playbook ... | head` ends quietly
 /// instead of panicking on a closed pipe (Rust ignores SIGPIPE by default).
@@ -107,11 +107,15 @@ fn real_main() {
         None => {}
     }
     let cli = playbook::parse::parse_or_exit(&args);
-    // Hooks fail soft, and version, json and commands write nothing under home; every other command refuses to write state relative to
+    // Hooks fail soft, and version, completions, json and commands write nothing under home; every other command refuses to write state relative to
     // the current directory when there is no home.
     if !matches!(
         cli.command,
-        Command::Hook { .. } | Command::Version | Command::Json { .. } | Command::Commands { .. }
+        Command::Hook { .. }
+            | Command::Version
+            | Command::Completions { .. }
+            | Command::Json { .. }
+            | Command::Commands { .. }
     ) {
         if let Some(message) = common::home_error(&common::home_dir()) {
             eprintln!("playbook: {message}");
@@ -416,6 +420,23 @@ fn real_main() {
         }
         Command::Statusline => std::process::exit(statusline::run()),
         Command::Version => print!("{}", Cli::command().render_version()),
+        Command::Completions { shell } => {
+            let script = match playbook::completions::render(shell) {
+                Ok(script) => script,
+                Err(e) => {
+                    eprintln!("playbook: cannot build the completion script: {e}");
+                    std::process::exit(1);
+                }
+            };
+            match std::io::stdout().lock().write_all(script.as_bytes()) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+                Err(e) => {
+                    eprintln!("playbook: cannot write the completion script: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Command::Setup { flags } | Command::Init { flags } if flags.explain.is_some() => {
             let mut flags = flags;
             init::choices::map_and_note(&mut flags);
