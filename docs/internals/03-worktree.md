@@ -8,8 +8,8 @@ In order:
 
 1. Finds the repo's base branch through `origin/HEAD`, falling back to `main`, `master`, `trunk` or `develop`.
 2. Stashes a dirty main worktree and restores it afterward, even when a later step fails.
-3. Names the folder after the JIRA key in the branch (`PROJECT-1234-foo-bar` gives `PROJECT-1234/`), or the branch leaf when there is none.
-4. Creates the worktree at `<repo-parent>/<base>/<repo>/<folder>`. `<base>` is `WORKTREE_BASE_DIR` (default `.worktrees`, a relative value sits under the repo parent, an absolute one is used as is). An existing worktree on the right branch is fast-forwarded instead.
+3. Names the folder after the JIRA key in the branch (`PROJECT-1234-foo-bar` gives `PROJECT-1234/`), else the branch leaf.
+4. Creates the worktree at `<repo-parent>/<base>/<repo>/<folder>`. `<base>` is `WORKTREE_BASE_DIR` (default `.worktrees`; a relative value sits under the repo parent, an absolute one is used as is). An existing worktree on the right branch is fast-forwarded instead.
 5. Copies `.env` from the base repo without overwriting.
 6. Rebases the branch onto the latest base when you authored it. Protected names (`main`, `master`, `trunk`, `develop`, `staging`, `release/*`, `hotfix/*`) are never rebased. A conflict aborts the rebase and leaves the worktree on the branch as created. AI conflict resolution is not wired in the binary yet (#446).
 7. Hands the rest to the background.
@@ -27,13 +27,13 @@ A detached, silent process (`playbook cc housekeep`) runs these best-effort step
 
 ### node_modules
 
-When `package-lock.json` hashes match between the base repo and the worktree, `node_modules` is cloned copy-on-write: `cp -cR` on APFS, `cp -R --reflink=auto` on GNU filesystems, a plain `cp -R` as the last fallback. Each worktree gets an independent tree. Then a bounded `npm install --prefer-offline --no-audit --no-fund` reconciles extra packages. When the hashes differ, nothing is cloned.
+When `package-lock.json` hashes match between the base repo and the worktree, `node_modules` is cloned copy-on-write (`cp -cR` on APFS, `cp -R --reflink=auto` on GNU filesystems, plain `cp -R` as the last fallback). Each worktree gets an independent tree. Then a bounded `npm install --prefer-offline --no-audit --no-fund` reconciles extra packages. When the hashes differ, nothing is cloned.
 
 ## The daily sweep
 
-`maybe_sweep_worktrees` (`crates/cli/src/hooks/session_init.rs`) also runs the sweep on every Claude Code `SessionStart`, at most once per 24 hours per repo (a row under `worktree-sweep/<repo slug>` in the [state store](08-state-store.md)). So a repo is swept when you create a worktree and again the first time a session opens each day. Both call the same function. The overlap is deliberate.
+`maybe_sweep_worktrees` (`crates/cli/src/hooks/session_init.rs`) also runs the sweep on every Claude Code `SessionStart`, at most once per 24 hours per repo (a row under `worktree-sweep/<repo slug>` in the [state store](08-state-store.md)). So a repo is swept when you create a worktree and again the first time a session opens each day. Both triggers call the same function. The overlap is deliberate.
 
-A repo nobody opens is swept by neither trigger. That is a known limit. Fixing it needs an OS scheduler, which nothing here uses.
+A repo nobody opens is swept by neither trigger. That is a known limit: fixing it needs an OS scheduler, which nothing here uses.
 
 Settings: `worktreeCleanup.enabled`, `worktreeCleanup.staleAfterDays` and `worktreeCleanup.conflictGracePeriodDays`. See [Config keys](../reference/config-keys.md).
 
@@ -41,15 +41,30 @@ Settings: `worktreeCleanup.enabled`, `worktreeCleanup.staleAfterDays` and `workt
 
 `playbook hook worktree-create` and `playbook hook worktree-remove` are written into `~/.claude/settings.json` by `playbook setup` for the `WorktreeCreate` and `WorktreeRemove` events. They stop `claude --worktree`, `isolation: "worktree"` agents, and background sessions from creating worktrees under `.claude/worktrees/`.
 
-**Create.** The hook reads `cwd` and `worktree_name` (or `name`) from stdin, finds the main worktree of the repo at `cwd`, and targets `<main-parent>/.worktrees/<repo>/<name>` (or the `WORKTREE_BASE_DIR` base, like the launcher), using the same `main_worktree` and `resolve_base` the launcher uses. The name must be a single safe path segment, and `worktree-<name>` must be a valid branch name: empty names, `..`, slashes, a leading `-`, and anything git rejects are refused. If the target is already a registered worktree of the repo, it is reused; a registered entry whose folder is gone is pruned and re-added. Otherwise the hook runs `git worktree add -b worktree-<name> <target> <base>`, matching Claude Code's default branch name. The base is the payload's `base_commit`, then the cached `origin/HEAD`, then local `HEAD`. When the payload gives no `base_commit`, the hook first refreshes `origin/HEAD`, like Claude Code does: it fetches the default branch if neither `FETCH_HEAD` nor the `playbook-origin-fetch` stamp in the git directory is under 24 hours old, waits at most 5 seconds, never prompts for credentials, and keeps the cached ref when the fetch fails. For a newly created worktree (not a reused one) the hook also copies the files that match a pattern in the main checkout's `.worktreeinclude` and are ignored by git, so local files such as `.env` follow the worktree. Tracked files are never copied, an existing file is never overwritten, symlinks are skipped, and a path that leaves the repo is ignored. Stdout carries only the absolute path; all git output goes to stderr. Because the path follows the launcher convention, `classify` reports it as `CcLauncher` and the sweep cleans it once its work has landed.
+**Create.** The hook reads `cwd` and `worktree_name` (or `name`) from stdin, finds the main worktree of the repo at `cwd`, and targets `<main-parent>/.worktrees/<repo>/<name>` (or the `WORKTREE_BASE_DIR` base, like the launcher). It uses the launcher's `main_worktree` and `resolve_base`.
 
-If anything fails, the hook says why on stderr and falls back to `<repo>/.claude/worktrees/<name>` with the same branch and base. It exits non-zero only if the fallback fails too.
+- The name must be one safe path segment and `worktree-<name>` a valid branch name. Refused: empty names, `..`, slashes, a leading `-`, anything git rejects.
+- A target that is already a registered worktree is reused. A registered entry whose folder is gone is pruned and re-added.
+- Otherwise the hook runs `git worktree add -b worktree-<name> <target> <base>`, matching Claude Code's default branch name.
+- The base is the payload's `base_commit`, then the cached `origin/HEAD`, then local `HEAD`.
+- With no `base_commit`, the hook first refreshes `origin/HEAD`, like Claude Code. It fetches the default branch unless `FETCH_HEAD` or the `playbook-origin-fetch` stamp in the git directory is under 24 hours old. The fetch waits at most 5 seconds, never prompts for credentials, and keeps the cached ref on failure.
+- A newly created worktree (not a reused one) gets the files that match a pattern in the main checkout's `.worktreeinclude` and are ignored by git, so local files such as `.env` follow it. Tracked files are never copied, existing files are never overwritten, symlinks are skipped, and a path that leaves the repo is ignored.
+- Stdout carries only the absolute path. All git output goes to stderr.
+- The path follows the launcher convention: `classify` reports `CcLauncher` and the sweep cleans it once its work has landed.
 
-**Remove.** The hook acts only on a registered worktree of the repo and never on the main worktree. It keeps the worktree, prints a reason on stderr, and exits 0 when the tree has uncommitted or untracked changes, or when any commit is not reachable from a remote-tracking ref or the local default branch. Otherwise it runs `git worktree remove` without `--force`, then deletes the branch only if its name starts with `worktree-` (so a launcher branch is never touched) and it passes the same reachability rule.
+On any failure the hook says why on stderr and falls back to `<repo>/.claude/worktrees/<name>` with the same branch and base. It exits non-zero only if the fallback fails too.
+
+**Remove.** The hook acts only on a registered worktree of the repo and never on the main worktree.
+
+It keeps the worktree, prints a reason on stderr, and exits 0 when the tree has uncommitted or untracked changes, or when any commit is not reachable from a remote-tracking ref or the local default branch. Otherwise it runs `git worktree remove` without `--force`.
+
+Then it deletes the branch only if its name starts with `worktree-` (so a launcher branch is never touched) and it passes the same reachability rule.
 
 ## Delivery from a worktree
 
-`playbook deliver` (code in `crates/cli/src/deliver/`) never depends on the session's working directory. It runs `git` and `gh` with fixed argument vectors and the worktree as their directory, so a subagent that cannot change its cwd still delivers its own branch. The base is `--base`, then the open PR's base, then the nearest open PR branch that is an ancestor of HEAD (a stacked PR), then the default branch. The module imports only `common/` helpers and its own `sys` adapter. The pre-commit step relies on the repo's own git hooks, which always run.
+`playbook deliver` (code in `crates/cli/src/deliver/`) never depends on the session's working directory. It runs `git` and `gh` with fixed argument vectors and the worktree as their directory, so a subagent that cannot change its cwd still delivers its branch. The module imports only `common/` helpers and its own `sys` adapter. The pre-commit step relies on the repo's own git hooks, which always run.
+
+The base is `--base`, then the open PR's base, then the nearest open PR branch that is an ancestor of HEAD (a stacked PR), then the default branch.
 
 ## See also
 
