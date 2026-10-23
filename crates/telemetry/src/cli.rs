@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The command line of `pbtop`, the standalone usage dashboard (ADR 0041).
+//! The command line of `pbtop`, the standalone Agent Budget Dashboard (ADR 0041).
 use crate::command::UsageCommand;
 use crate::entry::{interactive, run, Opts};
 use crate::run::Paths;

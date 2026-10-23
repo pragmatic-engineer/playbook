@@ -121,7 +121,7 @@ pub use usage::command::UsageCommand;
 
 /// Configure and support Claude Code from the command line.
 ///
-/// playbook installs hooks and a session launcher, shows a usage view,
+/// playbook installs hooks and a session launcher, shows the Agent Budget Dashboard,
 /// and helps with pull requests, reviews, worktrees and session handoffs.
 #[derive(Parser, Debug)]
 #[command(
