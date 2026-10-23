@@ -565,8 +565,7 @@ fn verdict_lines(s: &limits_source::Sources, now: i64) -> Vec<String> {
     }
     out.push(match limits_source::monthly(s, now) {
         limits_source::Monthly::Measured => {
-            "  monthly limit: from the statusline reading (a manual budget is shown beside it)"
-                .to_string()
+            "  monthly limit: from the statusline reading".to_string()
         }
         limits_source::Monthly::Cached {
             limit_usd,
