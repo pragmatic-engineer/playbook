@@ -453,7 +453,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
     use std::fs;
-    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::os::unix::fs::{symlink, MetadataExt, PermissionsExt};
     use std::process::Command;
     use std::sync::{Arc, Condvar, Mutex};
     use std::time::{Duration, SystemTime};
