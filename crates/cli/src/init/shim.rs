@@ -243,6 +243,38 @@ fn strip_binary_path(content: &[u8]) -> Option<Vec<u8>> {
     )
 }
 
+/// `content` without every block that starts at a `marker` line and is
+/// followed by exactly `rest`. A block with other lines after its marker is
+/// kept. `None` when nothing matched.
+pub(crate) fn strip_marked_block(content: &[u8], marker: &str, rest: &[&str]) -> Option<Vec<u8>> {
+    strip_lines(
+        content,
+        |lines, i| {
+            if is_marked_block(lines, i, marker, rest) {
+                rest.len() + 1
+            } else {
+                0
+            }
+        },
+        |_| false,
+    )
+}
+
+/// Whether the line at `at` is `marker` and the lines after it are `rest`.
+pub(crate) fn is_marked_block(lines: &[&[u8]], at: usize, marker: &str, rest: &[&str]) -> bool {
+    let expected = std::iter::once(marker).chain(rest.iter().copied());
+    let found = lines.iter().skip(at);
+    found.len() > rest.len()
+        && expected
+            .zip(found)
+            .all(|(want, got)| got.trim_ascii_end() == want.as_bytes())
+}
+
+/// The lines of `content`, each with its line break.
+pub(crate) fn split_lines(content: &[u8]) -> Vec<&[u8]> {
+    content.split_inclusive(|&b| b == b'\n').collect()
+}
+
 /// Remove the spans `remove_at` reports (a line count at line `i`, 0 for
 /// none), with the line above a span when `is_marker` accepts it, and the
 /// blank line the gap would otherwise double or leave dangling at the end.
@@ -251,7 +283,7 @@ fn strip_lines(
     remove_at: impl Fn(&[&[u8]], usize) -> usize,
     is_marker: impl Fn(&[u8]) -> bool,
 ) -> Option<Vec<u8>> {
-    let lines: Vec<&[u8]> = content.split_inclusive(|&b| b == b'\n').collect();
+    let lines = split_lines(content);
     let is_blank = |l: &[u8]| l.trim_ascii().is_empty();
     let mut out: Vec<&[u8]> = Vec::new();
     let mut touched = false;
