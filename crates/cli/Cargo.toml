@@ -21,6 +21,7 @@ disabled-strategies = ["quick-install"]
 
 [dependencies]
 clap = { version = "=4.6.7", features = ["derive"] }
+clap_complete = { version = "=4.6.11", default-features = false }
 libc = "=0.2.190"
 playbook-code = { path = "../code" }
 playbook-common = { path = "../common" }

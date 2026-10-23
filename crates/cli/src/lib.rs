@@ -15,6 +15,7 @@ pub mod command_index;
 pub use playbook_code as code;
 pub mod commit;
 pub mod common;
+pub mod completions;
 pub mod config;
 pub mod deliver;
 pub mod deps;
@@ -436,6 +437,14 @@ pub enum Command {
     },
     /// Print the installed version, same as `--version`
     Version,
+    /// Print a shell completion script for bash, zsh or fish
+    ///
+    /// Example: `playbook completions zsh`
+    Completions {
+        /// The shell to print the script for
+        #[arg(value_enum)]
+        shell: completions::CompletionShell,
+    },
     /// Install the tools a Brewfile lists, keeping any already on PATH
     ///
     /// Example: `playbook deps ensure Brewfile`
@@ -1013,7 +1022,7 @@ pub enum Command {
 
 impl Command {
     /// Commands that run many times a session or inside other commands:
-    /// hooks, the status line, `version`, and
+    /// hooks, the status line, `version`, `completions`, and
     /// the hidden `json` helpers that hook scripts call. `commands` is here
     /// too: it only prints the clap tree and reads nothing under home. Steps
     /// that run before a command (the first-run heal, the update check) skip
@@ -1024,6 +1033,7 @@ impl Command {
             Command::Hook { .. }
                 | Command::Statusline
                 | Command::Version
+                | Command::Completions { .. }
                 | Command::Json { .. }
                 | Command::Commands { .. }
         )
@@ -2378,6 +2388,18 @@ pub enum CcCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn completions_is_a_hot_path_command() {
+        // Arrange
+        let cli = Cli::try_parse_from(["playbook", "completions", "bash"]).unwrap();
+
+        // Act
+        let hot = cli.command.is_hot_path();
+
+        // Assert
+        assert!(hot);
+    }
 
     #[test]
     fn version_flag_prints_cargo_toml_version() {

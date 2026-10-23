@@ -8,6 +8,7 @@ ci: Run the repo checks that need no model (manifest, agents, settings) (read-on
 code index|status|search|symbol|outline|read|refs|context: Index and search the repository's source code
 commands: List every playbook command, what it does and who may run it (read-only)
 commit prepare|run: Prepare and run the signed commit of `/playbook:commit-and-push`
+completions: Print a shell completion script for bash, zsh or fish (read-only)
 config get|set|list|export|import!: Read and change playbook settings in the repo, org or global tier
 deliver: Commit, push and open or update a pull request from any worktree
 deps ensure: Install the tools a Brewfile lists, keeping any already on PATH (user-only)
