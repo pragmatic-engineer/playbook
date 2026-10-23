@@ -108,6 +108,8 @@ fn root_help_lists_user_commands_before_agent_commands() {
     agent.sort_unstable();
     assert_eq!(user, sorted(USER), "{help}");
     assert_eq!(agent, sorted(AGENT), "{help}");
+    let at = |heading: &str| help.find(heading).unwrap_or_else(|| panic!("no {heading}"));
+    assert!(at("\nCommands:\n") < at("\nAgent commands:\n"), "{help}");
 }
 
 #[test]

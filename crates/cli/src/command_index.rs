@@ -64,23 +64,30 @@ pub(crate) enum Audience {
 const USER_HEADING: &str = "Commands";
 const AGENT_HEADING: &str = "Agent commands";
 const HELP_NAME: &str = "help";
-const HELP_PURPOSE: &str = "Print this message or the help of the given subcommand(s)";
+const OPTIONS_HEADING: &str = "Options";
 const INDENT: &str = "  ";
 const GAP: usize = 2;
 
 /// The `--help` template that groups the top-level commands by audience: the
 /// user's commands first, then the agent's. A command with no audience counts
-/// as the user's.
-pub fn grouped_template(cmd: &Command) -> String {
+/// as the user's. Clap help templates have no brace escape, so a purpose must
+/// not contain `{` or `}`.
+pub(crate) fn grouped_template(cmd: &Command) -> String {
     let (agent, user): (Vec<&Command>, Vec<&Command>) = visible(cmd)
         .partition(|c| meta(c.get_name()).and_then(|m| m.audience) == Some(Audience::Agent));
     let mut user_rows = rows(&user);
     let mut agent_rows = rows(&agent);
-    let help_row = (HELP_NAME.to_string(), HELP_PURPOSE.to_string());
-    if agent_rows.is_empty() {
-        user_rows.push(help_row);
-    } else {
-        agent_rows.push(help_row);
+    let help_about = cmd
+        .find_subcommand(HELP_NAME)
+        .and_then(Command::get_about)
+        .map(ToString::to_string);
+    if let Some(about) = help_about {
+        let help_row = (HELP_NAME.to_string(), about);
+        if agent_rows.is_empty() {
+            user_rows.push(help_row);
+        } else {
+            agent_rows.push(help_row);
+        }
     }
     let styles = clap::builder::Styles::default();
     let header = styles.get_header();
@@ -92,22 +99,13 @@ pub fn grouped_template(cmd: &Command) -> String {
         let _ = writeln!(template, "{header}{heading}:{header:#}");
         let width = block.iter().map(|(name, _)| name.len()).max().unwrap_or(0);
         for (name, purpose) in &block {
-            let _ = writeln!(
-                template,
-                "{INDENT}{name:<width$}{:GAP$}{}",
-                "",
-                escape(purpose)
-            );
+            let _ = writeln!(template, "{INDENT}{name:<width$}{:GAP$}{}", "", purpose);
         }
         template.push('\n');
     }
-    template.push_str("Options:\n{options}{after-help}");
+    let _ = writeln!(template, "{header}{OPTIONS_HEADING}:{header:#}");
+    template.push_str("{options}{after-help}");
     template
-}
-
-/// Braces in generated text would read as template tags.
-fn escape(text: &str) -> String {
-    text.replace('{', "{{").replace('}', "}}")
 }
 
 fn rows(cmds: &[&Command]) -> Vec<(String, String)> {
@@ -374,7 +372,7 @@ pub(crate) fn meta(path: &str) -> Option<&'static Meta> {
 /// generator uses the same rule.
 pub fn visible(cmd: &Command) -> impl Iterator<Item = &Command> {
     cmd.get_subcommands()
-        .filter(|s| !s.is_hide_set() && s.get_name() != "help")
+        .filter(|s| !s.is_hide_set() && s.get_name() != HELP_NAME)
 }
 
 /// The visible arguments of `cmd`, help and version left out. The reference
@@ -996,17 +994,75 @@ mod tests {
     }
 
     #[test]
+    fn the_constants_agree_with_each_commands_audience() {
+        // Arrange
+        let audience = |name: &str| meta(name).and_then(|m| m.audience);
+
+        // Act
+        let wrong_user: Vec<&&str> = USER
+            .iter()
+            .filter(|n| audience(n) != Some(Audience::User))
+            .collect();
+        let wrong_agent: Vec<&&str> = AGENT
+            .iter()
+            .filter(|n| audience(n) != Some(Audience::Agent))
+            .collect();
+
+        // Assert
+        assert!(wrong_user.is_empty(), "not for users: {wrong_user:?}");
+        assert!(wrong_agent.is_empty(), "not for agents: {wrong_agent:?}");
+    }
+
+    #[test]
+    fn the_template_styles_all_three_headings() {
+        // Arrange
+        let root = tree();
+        let styles = clap::builder::Styles::default();
+        let header = styles.get_header();
+
+        // Act
+        let template = grouped_template(&root);
+
+        // Assert
+        for heading in [USER_HEADING, AGENT_HEADING, OPTIONS_HEADING] {
+            let styled = format!("{header}{heading}:{header:#}");
+            assert!(template.contains(&styled), "unstyled {heading}: {template}");
+        }
+    }
+
+    #[test]
+    fn no_top_level_purpose_holds_a_brace() {
+        // Arrange
+        let root = tree();
+        let mut texts: Vec<String> = visible(&root).map(|c| purpose(c.get_name(), c)).collect();
+        texts.extend(
+            root.find_subcommand(HELP_NAME)
+                .and_then(Command::get_about)
+                .map(ToString::to_string),
+        );
+
+        // Act
+        let braced: Vec<&String> = texts.iter().filter(|t| t.contains(['{', '}'])).collect();
+
+        // Assert
+        assert!(
+            braced.is_empty(),
+            "help templates cannot hold braces: {braced:?}"
+        );
+    }
+
+    #[test]
     fn the_grouped_block_matches_clap_for_a_one_group_tree() {
         // Arrange
         let mut cmd = Command::new("demo")
             .subcommand(Command::new("alpha").about("First one"))
-            .subcommand(Command::new("beta").about("Second one"))
+            .subcommand(Command::new("long-name").about("Second one"))
             .subcommand(Command::new("gamma").about("Third one"));
         cmd.build();
         let command_lines = |text: &str| -> Vec<String> {
             text.lines()
                 .filter(|l| {
-                    ["alpha", "beta", "gamma"]
+                    ["alpha", "long-name", "gamma", HELP_NAME]
                         .iter()
                         .any(|n| l.trim_start().starts_with(n))
                 })
@@ -1021,7 +1077,7 @@ mod tests {
 
         // Assert
         assert_eq!(command_lines(&grouped_text), command_lines(&clap_text));
-        assert_eq!(command_lines(&grouped_text).len(), 3, "{grouped_text}");
+        assert_eq!(command_lines(&grouped_text).len(), 4, "{grouped_text}");
     }
 
     #[test]
