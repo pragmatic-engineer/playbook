@@ -50,9 +50,87 @@ pub(crate) struct Meta {
     /// Used instead of the doc comment's first sentence when that is too
     /// long or too vague for one line.
     pub(crate) purpose: Option<&'static str>,
+    /// Who the top-level command is for. Subcommands leave it unset.
+    pub(crate) audience: Option<Audience>,
+}
+
+/// Who a top-level command is for, which decides its block in `--help`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Audience {
+    User,
+    Agent,
+}
+
+const USER_HEADING: &str = "Commands";
+const AGENT_HEADING: &str = "Agent commands";
+const HELP_NAME: &str = "help";
+const HELP_PURPOSE: &str = "Print this message or the help of the given subcommand(s)";
+const INDENT: &str = "  ";
+const GAP: usize = 2;
+
+/// The `--help` template that groups the top-level commands by audience: the
+/// user's commands first, then the agent's. A command with no audience counts
+/// as the user's.
+pub fn grouped_template(cmd: &Command) -> String {
+    let (agent, user): (Vec<&Command>, Vec<&Command>) = visible(cmd)
+        .partition(|c| meta(c.get_name()).and_then(|m| m.audience) == Some(Audience::Agent));
+    let mut user_rows = rows(&user);
+    let mut agent_rows = rows(&agent);
+    let help_row = (HELP_NAME.to_string(), HELP_PURPOSE.to_string());
+    if agent_rows.is_empty() {
+        user_rows.push(help_row);
+    } else {
+        agent_rows.push(help_row);
+    }
+    let styles = clap::builder::Styles::default();
+    let header = styles.get_header();
+    let mut template = String::from("{about-with-newline}\n{usage-heading} {usage}\n\n");
+    for (heading, block) in [(USER_HEADING, user_rows), (AGENT_HEADING, agent_rows)] {
+        if block.is_empty() {
+            continue;
+        }
+        let _ = writeln!(template, "{header}{heading}:{header:#}");
+        let width = block.iter().map(|(name, _)| name.len()).max().unwrap_or(0);
+        for (name, purpose) in &block {
+            let _ = writeln!(
+                template,
+                "{INDENT}{name:<width$}{:GAP$}{}",
+                "",
+                escape(purpose)
+            );
+        }
+        template.push('\n');
+    }
+    template.push_str("Options:\n{options}{after-help}");
+    template
+}
+
+/// Braces in generated text would read as template tags.
+fn escape(text: &str) -> String {
+    text.replace('{', "{{").replace('}', "}}")
+}
+
+fn rows(cmds: &[&Command]) -> Vec<(String, String)> {
+    cmds.iter()
+        .map(|c| (c.get_name().to_string(), purpose(c.get_name(), c)))
+        .collect()
 }
 
 impl Meta {
+    const fn for_users(self) -> Meta {
+        Meta {
+            audience: Some(Audience::User),
+            ..self
+        }
+    }
+
+    const fn for_agents(self) -> Meta {
+        Meta {
+            audience: Some(Audience::Agent),
+            ..self
+        }
+    }
+
     const fn purpose(self, text: &'static str) -> Meta {
         Meta {
             purpose: Some(text),
@@ -66,6 +144,7 @@ const fn free(path: &'static str) -> Meta {
         path,
         access: Access::Default,
         purpose: None,
+        audience: None,
     }
 }
 
@@ -74,6 +153,7 @@ const fn ro(path: &'static str) -> Meta {
         path,
         access: Access::ReadOnly,
         purpose: None,
+        audience: None,
     }
 }
 
@@ -82,20 +162,27 @@ const fn user(path: &'static str) -> Meta {
         path,
         access: Access::UserOnly,
         purpose: None,
+        audience: None,
     }
 }
 
 /// One entry for every visible command and subcommand, sorted by path. A
 /// group's own entry describes the group when it runs with no subcommand.
 pub(crate) const META: &[Meta] = &[
-    free("adr").purpose("Helpers for ADRs, such as the next free record number"),
+    free("adr")
+        .purpose("Helpers for ADRs, such as the next free record number")
+        .for_agents(),
     free("adr next"),
-    ro("agents").purpose("Check agent definition files and their effort variants"),
+    ro("agents")
+        .purpose("Check agent definition files and their effort variants")
+        .for_agents(),
     ro("agents check"),
     ro("agents variants"),
-    ro("atlassian").purpose("Check the Atlassian tools the `playbook:atlassian` skill uses"),
+    ro("atlassian")
+        .purpose("Check the Atlassian tools the `playbook:atlassian` skill uses")
+        .for_agents(),
     ro("atlassian check").purpose("Check the `acli` version and whether `twg` is installed"),
-    user("cc"),
+    user("cc").for_users(),
     user("cc bust-cache"),
     user("cc clean").purpose("Launcher mode: clean up and resume a session"),
     user("cc fresh").purpose("Launcher mode: start a fresh session"),
@@ -104,9 +191,9 @@ pub(crate) const META: &[Meta] = &[
     free("cc prune"),
     user("cc raw").purpose("Launcher mode: resume a session as it was"),
     free("cc worktree"),
-    user("ccd"),
-    ro("ci"),
-    free("code"),
+    user("ccd").for_users(),
+    ro("ci").for_agents(),
+    free("code").for_agents(),
     ro("code context"),
     free("code index"),
     ro("code outline"),
@@ -115,24 +202,32 @@ pub(crate) const META: &[Meta] = &[
     ro("code search"),
     ro("code status"),
     ro("code symbol"),
-    ro("commands"),
-    free("commit").purpose("Prepare and run the signed commit of `/playbook:commit-and-push`"),
+    ro("commands").for_users(),
+    free("commit")
+        .purpose("Prepare and run the signed commit of `/playbook:commit-and-push`")
+        .for_agents(),
     free("commit prepare"),
     free("commit run"),
-    free("config").purpose("Read and change playbook settings in the repo, org or global tier"),
+    free("config")
+        .purpose("Read and change playbook settings in the repo, org or global tier")
+        .for_users(),
     ro("config export"),
     ro("config get"),
     user("config import"),
     ro("config list"),
     free("config set")
         .purpose("Change a setting; protected keys such as `pr.rules.*` are the user's"),
-    free("deliver"),
-    user("deps"),
+    free("deliver").for_agents(),
+    user("deps").for_users(),
     user("deps ensure").purpose("Install the missing tools of a Brewfile with Homebrew"),
-    ro("doc").purpose("Read a PDF or Office file as text with the bundled converter"),
+    ro("doc")
+        .purpose("Read a PDF or Office file as text with the bundled converter")
+        .for_agents(),
     ro("doc read"),
     ro("doc status"),
-    user("doctor").purpose("Check the playbook setup, or read one fact the check uses"),
+    user("doctor")
+        .purpose("Check the playbook setup, or read one fact the check uses")
+        .for_users(),
     ro("doctor check"),
     ro("doctor hook-commands"),
     ro("doctor hook-commands-for-event"),
@@ -141,7 +236,7 @@ pub(crate) const META: &[Meta] = &[
     ro("doctor pending-migrations"),
     ro("doctor plugin-version"),
     ro("doctor statusline-command"),
-    user("effort"),
+    user("effort").for_users(),
     user("effort apply"),
     free("effort choose"),
     ro("effort list"),
@@ -149,47 +244,59 @@ pub(crate) const META: &[Meta] = &[
     user("effort reset"),
     ro("effort resolve"),
     ro("effort suggest"),
-    user("eval"),
+    user("eval").for_agents(),
     user("eval bench"),
     user("eval review-triage").purpose("Run the review triage classifier on known cases"),
-    free("gate"),
+    free("gate").for_agents(),
     ro("gate check"),
     free("gate record"),
     free("gate snapshot"),
-    free("glossary").purpose("Append one term to the repo's `GLOSSARY.md`"),
+    free("glossary")
+        .purpose("Append one term to the repo's `GLOSSARY.md`")
+        .for_agents(),
     free("glossary add"),
-    free("handoff").purpose("Save and show the notes that carry a session to the next"),
+    free("handoff")
+        .purpose("Save and show the notes that carry a session to the next")
+        .for_agents(),
     ro("handoff check"),
     ro("handoff facts"),
     free("handoff save"),
     ro("handoff show"),
     ro("handoff status"),
     ro("handoff template"),
-    ro("hooks").purpose("List the hooks that setup adds to settings.json"),
+    ro("hooks")
+        .purpose("List the hooks that setup adds to settings.json")
+        .for_users(),
     ro("hooks list"),
-    ro("learn").purpose("Gather repo facts for the `/playbook:learn-project` collectors"),
+    ro("learn")
+        .purpose("Gather repo facts for the `/playbook:learn-project` collectors")
+        .for_agents(),
     ro("learn collect"),
     ro("learn preflight"),
-    ro("manifest"),
+    ro("manifest").for_agents(),
     ro("manifest check"),
-    free("memory"),
+    free("memory").for_users(),
     ro("memory context").purpose("Print the memory facts, edges and anchors in scope for a repo"),
     ro("memory export"),
     user("memory import-claude"),
     free("memory rebuild"),
     ro("memory stats"),
-    user("migrate"),
-    free("mode"),
+    user("migrate").for_users(),
+    free("mode").for_users(),
     free("mode ask"),
     user("mode auto"),
     ro("mode status"),
-    free("path").purpose("Print a playbook storage folder of this repo, or the plugin folder"),
-    free("plan").purpose("Plan helpers: checkpoints, Work Unit briefs and scratch cleanup"),
+    free("path")
+        .purpose("Print a playbook storage folder of this repo, or the plugin folder")
+        .for_agents(),
+    free("plan")
+        .purpose("Plan helpers: checkpoints, Work Unit briefs and scratch cleanup")
+        .for_agents(),
     free("plan brief"),
     free("plan checkpoint"),
     free("plan cleanup"),
-    ro("plans"),
-    free("pr"),
+    ro("plans").for_agents(),
+    free("pr").for_agents(),
     ro("pr ci-wait"),
     ro("pr comments"),
     free("pr create"),
@@ -200,47 +307,53 @@ pub(crate) const META: &[Meta] = &[
     free("pr review-triage"),
     ro("pr rules"),
     ro("pr stack"),
-    ro("prose"),
+    ro("prose").for_agents(),
     ro("prose check"),
-    free("review").purpose("Prepare a review: size the diff, pick a depth, run checks"),
+    free("review")
+        .purpose("Prepare a review: size the diff, pick a depth, run checks")
+        .for_agents(),
     free("review checks"),
     free("review prepare"),
     ro("review size"),
     ro("review suggest"),
     ro("review triage-merge"),
-    ro("route"),
-    ro("run-context").purpose("Read the run mode and effort ceiling for a command's Step 0"),
-    free("sanitize"),
+    ro("route").for_agents(),
+    ro("run-context")
+        .purpose("Read the run mode and effort ceiling for a command's Step 0")
+        .for_agents(),
+    free("sanitize").for_agents(),
     free("sanitize commit-msg"),
     free("sanitize pr-text"),
-    free("segment"),
+    free("segment").for_agents(),
     free("segment branch"),
     free("segment resplit"),
     ro("segment size"),
-    ro("sessions").purpose("List recent sessions with their branch, PR, state and cost"),
+    ro("sessions")
+        .purpose("List recent sessions with their branch, PR, state and cost")
+        .for_users(),
     ro("sessions list"),
-    free("settings"),
+    free("settings").for_agents(),
     ro("settings check"),
     free("settings gen"),
-    user("setup"),
-    ro("skills"),
+    user("setup").for_users(),
+    ro("skills").for_users(),
     user("skills sync"),
-    ro("state"),
+    ro("state").for_agents(),
     ro("state list"),
-    ro("statusline"),
-    ro("tools"),
+    ro("statusline").for_agents(),
+    ro("tools").for_agents(),
     ro("tools map"),
-    user("trust"),
-    user("uninstall"),
-    user("update"),
-    ro("usage"),
+    user("trust").for_users(),
+    user("uninstall").for_users(),
+    user("update").for_users(),
+    ro("usage").for_users(),
     user("usage collect"),
     ro("usage doctor"),
     user("usage prune"),
     ro("usage status"),
     user("usage stop"),
-    ro("version"),
-    free("worktree"),
+    ro("version").for_users(),
+    free("worktree").for_agents(),
     free("worktree remove"),
     free("worktree review").purpose("Create or remove the locked worktrees a review runs in"),
     free("worktree review setup")
@@ -777,5 +890,167 @@ mod tests {
                 tool.intent
             );
         }
+    }
+
+    const USER: &[&str] = &[
+        "setup",
+        "hooks",
+        "uninstall",
+        "update",
+        "version",
+        "deps",
+        "doctor",
+        "migrate",
+        "skills",
+        "cc",
+        "ccd",
+        "usage",
+        "sessions",
+        "trust",
+        "commands",
+        "config",
+        "effort",
+        "mode",
+        "memory",
+    ];
+    const AGENT: &[&str] = &[
+        "doc",
+        "run-context",
+        "state",
+        "route",
+        "statusline",
+        "settings",
+        "manifest",
+        "agents",
+        "gate",
+        "code",
+        "sanitize",
+        "ci",
+        "path",
+        "plan",
+        "prose",
+        "atlassian",
+        "learn",
+        "segment",
+        "pr",
+        "review",
+        "commit",
+        "deliver",
+        "plans",
+        "worktree",
+        "handoff",
+        "adr",
+        "glossary",
+        "tools",
+        "eval",
+    ];
+
+    fn top_level_names() -> BTreeSet<String> {
+        visible(&tree()).map(|c| c.get_name().to_string()).collect()
+    }
+
+    #[test]
+    fn every_top_level_command_names_an_audience() {
+        // Arrange
+        let names = top_level_names();
+
+        // Act
+        let unset: Vec<&String> = names
+            .iter()
+            .filter(|n| meta(n).and_then(|m| m.audience).is_none())
+            .collect();
+
+        // Assert
+        assert!(unset.is_empty(), "no audience for: {unset:?}");
+    }
+
+    #[test]
+    fn only_top_level_rows_name_an_audience() {
+        // Arrange
+        let nested = META.iter().filter(|m| m.path.contains(' '));
+
+        // Act
+        let named: Vec<&str> = nested
+            .filter(|m| m.audience.is_some())
+            .map(|m| m.path)
+            .collect();
+
+        // Assert
+        assert!(named.is_empty(), "nested rows with an audience: {named:?}");
+    }
+
+    #[test]
+    fn the_user_and_agent_sets_are_the_agreed_constants() {
+        // Arrange
+        let names = top_level_names();
+        let user: BTreeSet<String> = USER.iter().map(|s| s.to_string()).collect();
+        let agent: BTreeSet<String> = AGENT.iter().map(|s| s.to_string()).collect();
+
+        // Act
+        let shared: Vec<&String> = user.intersection(&agent).collect();
+        let union: BTreeSet<String> = user.union(&agent).cloned().collect();
+
+        // Assert
+        assert!(shared.is_empty(), "in both lists: {shared:?}");
+        assert_eq!(union, names);
+    }
+
+    #[test]
+    fn the_grouped_block_matches_clap_for_a_one_group_tree() {
+        // Arrange
+        let mut cmd = Command::new("demo")
+            .subcommand(Command::new("alpha").about("First one"))
+            .subcommand(Command::new("beta").about("Second one"))
+            .subcommand(Command::new("gamma").about("Third one"));
+        cmd.build();
+        let command_lines = |text: &str| -> Vec<String> {
+            text.lines()
+                .filter(|l| {
+                    ["alpha", "beta", "gamma"]
+                        .iter()
+                        .any(|n| l.trim_start().starts_with(n))
+                })
+                .map(str::to_string)
+                .collect()
+        };
+        let clap_text = cmd.clone().render_help().to_string();
+        let grouped = cmd.clone().help_template(grouped_template(&cmd));
+
+        // Act
+        let grouped_text = grouped.clone().render_help().to_string();
+
+        // Assert
+        assert_eq!(command_lines(&grouped_text), command_lines(&clap_text));
+        assert_eq!(command_lines(&grouped_text).len(), 3, "{grouped_text}");
+    }
+
+    #[test]
+    fn the_json_row_keeps_exactly_its_current_keys() {
+        // Arrange
+        let root = tree();
+
+        // Act
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(&render_json(&root, &[]).unwrap()).unwrap();
+
+        // Assert
+        let mut keys: Vec<&str> = rows[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "access",
+                "args",
+                "command",
+                "intents",
+                "purpose",
+                "subcommands"
+            ]
+        );
     }
 }
