@@ -3,11 +3,12 @@
 #
 # nfpm config for the .deb and .rpm packages of a release. It is read by
 # scripts/package-linux.sh, which sets NFPM_ARCH (amd64 or arm64), NFPM_VERSION
-# and BIN_DIR (the folder with the static musl `playbook` and `pbtop`).
+# BIN_DIR (the folder with the static musl `playbook` and `pbtop`) and
+# COMPLETIONS_DIR (the folder with the bash, zsh and fish completion text).
 #
-# One package holds both binaries and the `pb` link, because every binary is
+# One package holds both binaries, the `pb` link and the shell completions, because every binary is
 # static and the package has no dependencies. It owns no file under /etc or the
-# home folder and has no install or remove script, so an upgrade or a removal
+# home folder (completions go to /usr/share) and has no install or remove script, so an upgrade or a removal
 # never touches user config. `playbook migrate` runs on first use.
 name: playbook
 arch: ${NFPM_ARCH}
@@ -39,5 +40,34 @@ contents:
     type: symlink
   - src: LICENSE
     dst: /usr/share/doc/playbook/copyright
+    file_info:
+      mode: 0644
+  - src: ${COMPLETIONS_DIR}/bash
+    dst: /usr/share/bash-completion/completions/playbook
+    expand: true
+    file_info:
+      mode: 0644
+  - src: playbook
+    dst: /usr/share/bash-completion/completions/pb
+    type: symlink
+  - src: ${COMPLETIONS_DIR}/fish
+    dst: /usr/share/fish/vendor_completions.d/playbook.fish
+    expand: true
+    file_info:
+      mode: 0644
+  - src: playbook.fish
+    dst: /usr/share/fish/vendor_completions.d/pb.fish
+    type: symlink
+  # Debian and Fedora look for zsh functions in different folders.
+  - src: ${COMPLETIONS_DIR}/zsh
+    dst: /usr/share/zsh/vendor-completions/_playbook
+    expand: true
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: ${COMPLETIONS_DIR}/zsh
+    dst: /usr/share/zsh/site-functions/_playbook
+    expand: true
+    packager: rpm
     file_info:
       mode: 0644
