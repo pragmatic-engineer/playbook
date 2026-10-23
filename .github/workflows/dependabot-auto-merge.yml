@@ -16,6 +16,8 @@ permissions:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
+    # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
+    timeout-minutes: 5
     if: github.event.pull_request.user.login == 'dependabot[bot]' && github.event.sender.login == 'dependabot[bot]'
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1

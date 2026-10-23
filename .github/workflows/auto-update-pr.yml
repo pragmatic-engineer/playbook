@@ -10,6 +10,8 @@ permissions: {}
 jobs:
   update:
     runs-on: ubuntu-latest
+    # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
+    timeout-minutes: 5
     permissions:
       contents: write
       pull-requests: write

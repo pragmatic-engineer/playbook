@@ -75,6 +75,8 @@ jobs:
   # read them.
   changes:
     runs-on: ubuntu-latest
+    # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
+    timeout-minutes: 5
     permissions:
       contents: read
     outputs:
@@ -164,6 +166,7 @@ jobs:
     if: ${{ !cancelled() }}
     # The macOS condition here and in LANE below must stay the same.
     runs-on: ${{ (matrix.os == 'macos-latest' && !(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v') || (inputs.ref || '') != '')) && 'ubuntu-latest' || matrix.os }}
+    timeout-minutes: 25
     permissions:
       contents: read
       # The help lint step reads the labels of the pull request.
@@ -444,6 +447,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && !inputs.ref }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -530,6 +534,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docs_only == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -599,6 +604,7 @@ jobs:
     # release gate runs macOS only.
     if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref
     runs-on: windows-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -646,6 +652,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true' && github.event_name != 'merge_group' && !inputs.ref
     runs-on: windows-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     defaults:
@@ -791,6 +798,7 @@ jobs:
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
