@@ -206,6 +206,7 @@ pub(crate) const META: &[Meta] = &[
         .for_agents(),
     free("commit prepare"),
     free("commit run"),
+    ro("completions").for_users(),
     free("config")
         .purpose("Read and change playbook settings in the repo, org or global tier")
         .for_users(),
@@ -906,6 +907,7 @@ mod tests {
         "sessions",
         "trust",
         "commands",
+        "completions",
         "config",
         "effort",
         "mode",

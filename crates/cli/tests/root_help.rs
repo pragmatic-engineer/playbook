@@ -25,6 +25,7 @@ const USER: &[&str] = &[
     "sessions",
     "trust",
     "commands",
+    "completions",
     "config",
     "effort",
     "mode",
