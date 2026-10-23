@@ -13,7 +13,9 @@
 #      root and no host file changes),
 #   2. runs `playbook --version`, `pb --version` and `pbtop --version`, which
 #      must all report <version>,
-#   3. writes a file under ~/.config/playbook, reinstalls the same package over
+#   3. checks the bash, zsh and fish completion files (bash must pass
+#      `bash -n`, and `pb` must resolve to the playbook one),
+#   4. writes a file under ~/.config/playbook, reinstalls the same package over
 #      itself and removes it, and checks that the file is still there.
 #
 # The images are pinned by digest. The packages have no dependencies, so the
@@ -47,6 +49,14 @@ for b in playbook pb pbtop; do
   [ "${out##* }" = "$want" ] || { echo "$b --version says $out, not $want" >&2; exit 1; }
 done
 [ "$(readlink /usr/bin/pb)" = playbook ] || { echo "/usr/bin/pb is not a link to playbook" >&2; exit 1; }
+bc=/usr/share/bash-completion/completions
+fc=/usr/share/fish/vendor_completions.d
+case "$1" in *.deb) zc=/usr/share/zsh/vendor-completions ;; *) zc=/usr/share/zsh/site-functions ;; esac
+for f in "$bc/playbook" "$bc/pb" "$fc/playbook.fish" "$fc/pb.fish" "$zc/_playbook"; do
+  [ -s "$f" ] || { echo "$f is missing or empty" >&2; exit 1; }
+done
+bash -n "$bc/playbook" || { echo "the bash completion has a syntax error" >&2; exit 1; }
+[ "$(readlink "$bc/pb")" = playbook ] || { echo "the pb bash completion is not a link to playbook" >&2; exit 1; }
 mkdir -p "$HOME/.config/playbook"
 echo keep > "$HOME/.config/playbook/user.conf"
 eval "$UPGRADE"

@@ -12,7 +12,8 @@
 #       its SHA-256
 #   package-linux.sh build <version> <target> <bindir> <outdir>
 #       build both packages from <bindir>/playbook and <bindir>/pbtop, the
-#       static musl binaries of <target>, with the nfpm on PATH
+#       static musl binaries of <target>, with the nfpm on PATH. The shell
+#       completions come from that playbook binary, so it must run here.
 #
 # Targets are the two Linux musl targets of the release. The names are part
 # of the release contract: SHA256SUMS lists them, and the publish and verify
@@ -72,7 +73,7 @@ install_nfpm() {
 }
 
 build() {
-  local version="${1:-}" target="${2:-}" bindir="${3:-}" outdir="${4:-}" f
+  local version="${1:-}" target="${2:-}" bindir="${3:-}" outdir="${4:-}" f sh comps
   [ -n "$version" ] && [ -n "$target" ] && [ -d "$bindir" ] && [ -n "$outdir" ] \
     || fail "usage: package-linux.sh build <version> <target> <bindir> <outdir>"
   check_version "$version"
@@ -85,12 +86,18 @@ build() {
   # BIN_DIR is made absolute, because nfpm reads the config from the repo root.
   bindir="$(cd "$bindir" && pwd)"
   outdir="$(cd "$outdir" && pwd)"
+  comps="$(mktemp -d)"
+  for sh in bash zsh fish; do
+    "$bindir/playbook" completions "$sh" > "$comps/$sh" || fail "playbook completions $sh failed"
+    [ -s "$comps/$sh" ] || fail "playbook completions $sh printed nothing"
+  done
   while IFS= read -r f; do
-    (cd "$ROOT" && NFPM_ARCH="$DEB_ARCH" NFPM_VERSION="$version" BIN_DIR="$bindir" \
+    (cd "$ROOT" && NFPM_ARCH="$DEB_ARCH" NFPM_VERSION="$version" BIN_DIR="$bindir" COMPLETIONS_DIR="$comps" \
       nfpm package --config scripts/nfpm.yaml --packager "${f##*.}" --target "$outdir/$f")
     [ -s "$outdir/$f" ] || fail "nfpm made no $f"
     echo "built $f"
   done < <(names "$version" "$target")
+  rm -rf "$comps"
 }
 
 case "${1:-}" in
