@@ -172,7 +172,7 @@ The manifest holds the SHA256 of the release binary, copied from the attested `S
 
 ### Optional: pbtop alone
 
-You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. Install `pbtop`, the usage dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
+You do not need this if you have `playbook`. `playbook usage` runs the same code, because playbook embeds the `playbook-telemetry` crate. Install `pbtop`, the Agent Budget Dashboard, only on a machine that has no `playbook`. From release 0.35.0 each `vX.Y.Z` release has `pbtop-X.Y.Z-<target>.tar.gz`, which holds `pbtop` alone, and there are two ways to install it:
 
 ```bash
 brew install pragmatic-engineer/tap/pbtop

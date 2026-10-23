@@ -382,11 +382,11 @@ fn the_budget_panel_says_how_to_set_a_limit_when_none_is_known() {
 fn the_budget_panel_is_left_out_of_a_short_screen() {
     for (w, h) in [(80, 24), (100, 30), (100, 35)] {
         assert!(
-            !draw(&app(Theme::Standard), w, h).contains("Budget"),
+            !draw(&app(Theme::Standard), w, h).contains("\u{2524}Budget\u{251c}"),
             "{w}x{h}"
         );
     }
-    assert!(draw(&app(Theme::Standard), 100, 36).contains("Budget"));
+    assert!(draw(&app(Theme::Standard), 100, 36).contains("\u{2524}Budget\u{251c}"));
 }
 
 #[test]
@@ -929,10 +929,13 @@ fn the_header_title_starts_with_the_tv_in_both_width_modes() {
     let wide = top_row(Icon::Wide);
     // The buffer keeps a blank cell behind a two-cell emoji, so the wide row
     // reads emoji, blank, one pad. The narrow row has two pads after the blank.
-    assert!(wide.contains("\u{2524}\u{1F4FA}  playbook usage"), "{wide}");
+    assert!(
+        wide.contains("\u{2524}\u{1F4FA}  Agent Budget Dashboard"),
+        "{wide}"
+    );
     let narrow = top_row(Icon::Narrow);
     assert!(
-        narrow.contains("\u{2524}\u{1F4FA}   playbook usage"),
+        narrow.contains("\u{2524}\u{1F4FA}   Agent Budget Dashboard"),
         "{narrow}"
     );
 }
@@ -940,7 +943,10 @@ fn the_header_title_starts_with_the_tv_in_both_width_modes() {
 #[test]
 fn the_header_has_no_icon_in_plain_text_mode() {
     let plain = top_row(Icon::Off);
-    assert!(plain.contains("\u{2500}\u{2524}playbook usage"), "{plain}");
+    assert!(
+        plain.contains("\u{2500}\u{2524}Agent Budget Dashboard"),
+        "{plain}"
+    );
     assert!(!plain.contains('\u{1F4FA}'));
 }
 
