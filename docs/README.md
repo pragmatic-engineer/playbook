@@ -19,7 +19,7 @@ Task-oriented workflows.
 - [The policy guard](guides/08-policy-guard.md): the optional guard that is off by default, exactly what it denies, how to turn it on and off and its pitfalls.
 - [The launcher](guides/09-launcher.md): `playbook cc`, `playbook ccd`, the `pb` alias and worktrees.
 - [Telemetry](guides/10-telemetry.md): the local collector, what setup writes and how to turn it on or off.
-- [pbtop](guides/11-pbtop.md): the usage dashboard on its own, and the retired `playbook-telemetry`.
+- [pbtop](guides/11-pbtop.md): the Agent Budget Dashboard on its own, and the retired `playbook-telemetry`.
 - [Settings](guides/12-settings.md): `playbook config`, tiers and examples.
 - [Security defaults](guides/13-security-defaults.md): the opt-in `permissions` block and its limits.
 - [Models and effort](guides/14-models-and-effort.md): the model tiers, fallbacks, effort ceiling, variants and routing.
@@ -52,7 +52,7 @@ How the machine works, and why it is shaped this way.
 - [Launcher and hooks](internals/01-launcher-and-hooks.md): the `playbook cc` launcher and the hook lifecycle.
 - [Model routing and memory](internals/02-model-routing-and-memory.md): tiers, effort policy, `playbook route` and the memory graph.
 - [Worktree engine](internals/03-worktree.md): the `playbook cc launch worktree` background subshell, node_modules cloning, and rebase conflict resolution.
-- [Usage view](internals/04-usage-dashboard.md): `playbook usage`, the terminal view and its keys, where the numbers come from and the store.
+- [Agent Budget Dashboard](internals/04-usage-dashboard.md): `playbook usage`, the terminal view and its keys, where the numbers come from and the store.
 - [Headless mode](internals/05-headless-mode.md): what runs without a person at the keyboard, real `claude -p` exit codes, how the hooks behave headless, and a first CI use case.
 - [Release channels](internals/06-release-channels.md): how a tagged release reaches the GitHub assets and the Homebrew tap.
 - [Migrations](internals/07-migrations.md): how `playbook setup` carries an install across breaking changes, the three migration kinds, and how edits to placed files are detected.

@@ -26,7 +26,7 @@
 # binary, so it is refused.
 #
 # install-pbtop.sh runs this script with PLAYBOOK_INSTALL_ONLY=pbtop, which
-# installs only pbtop, the standalone usage dashboard, from the
+# installs only pbtop, the standalone Agent Budget Dashboard, from the
 # pbtop-<version>-<target>.tar.gz asset of the same release, verified the same
 # way. It then stops: no migrate, no setup. The --pbtop flag does the same
 # for one more release.
@@ -668,7 +668,7 @@ trap _cleanup_staging EXIT INT TERM
 if [ "$ONLY_PBTOP" -eq 1 ]; then
     resolve_release
     install_pbtop
-    log "Done. Run pbtop for the usage dashboard."
+    log "Done. Run pbtop for the Agent Budget Dashboard."
     exit 0
 fi
 

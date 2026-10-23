@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The interactive usage view (`playbook usage`). `data` is the snapshot it
+//! The interactive Agent Budget Dashboard (`playbook usage`). `data` is the snapshot it
 //! draws, `worker` keeps it fresh in the background, `app` is the state and
 //! keys, `view` draws a frame, and `run` is the terminal loop around them.
 

@@ -5,7 +5,7 @@
 name = "playbook-telemetry"
 version.workspace = true
 edition.workspace = true
-description = "Token and cost usage dashboard for Claude Code sessions: a terminal view, reports and an optional telemetry receiver"
+description = "Agent Budget Dashboard for Claude Code sessions: a terminal view, reports and an optional telemetry receiver"
 license.workspace = true
 repository = "https://github.com/pragmatic-engineer/playbook"
 publish = false

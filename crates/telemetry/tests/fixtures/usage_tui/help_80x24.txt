@@ -1,4 +1,4 @@
-╭─┤playbook usage├──┤UTC├──────────────────────────────────────────────────────╮
+╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────╮
 │╭┤ Help: keys by group ├─────────────────────────────────────────────────────╮│
 ││Navigation                                                                  ││
 ││1 to 6     Focus a panel by its number              all panels              ││
