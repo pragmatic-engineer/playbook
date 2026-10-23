@@ -6,15 +6,17 @@ The session model defaults to Sonnet. Four things shape which model and effort a
 
 The policy lives in each file's frontmatter (`agents/*.md` and `commands/*.md`) and in `playbook route`. The system prompt points there and does not restate models, so the two cannot disagree.
 
-- **Sonnet** is the session default and covers most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`.
-- **Haiku** takes mechanical, formatting and search work: `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, and the `doctor`, `session-handoff`, `session-start` and `setup` commands.
-- **Opus** takes design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:quick-review`, `/playbook:deep-review` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`.
+| Tier | Takes |
+|---|---|
+| **Sonnet** (session default) | Most coding: `/playbook:implement`, `/playbook:fix`, the `implementer` and the `critic`. |
+| **Haiku** | Mechanical, formatting and search work: `git`, `collector`, `cheap-checker`, `review-triage`, `fact-checker`, `test-reviewer`, `analyst`, and the `doctor`, `session-handoff`, `session-start` and `setup` commands. |
+| **Opus** | Design (`/playbook:plan`, `/playbook:adr`), every `reviewer` (`/playbook:quick-review`, `/playbook:deep-review` and `/playbook:implement` Step 9, all at the reviewer's own medium effort unless a variant is picked), the `auditor` behind `/playbook:repo-audit`, `/playbook:address-pr-comments` and `/playbook:learn-project`. |
 
 Design work uses `/playbook:plan` and `/playbook:adr`, not the built-in plan mode.
 
 ### The routing table
 
-`playbook route <kind>` is one table for every command that dispatches agents (`crates/cli/src/routing.rs`). It says which model, effort and agent a kind of task goes to, and whether you must approve first.
+`playbook route <kind>` (`crates/cli/src/routing.rs`) maps a kind of task to a model, effort and agent for every command that dispatches agents, and says whether you must approve first.
 
 | Kind | Model and effort | Agent |
 |---|---|---|
@@ -29,19 +31,24 @@ Approval is needed for the top model, the high implement tier, and a task that h
 
 ### auto-model-detect
 
-The `auto-model-detect` hook (invoked as `playbook hook auto-model-detect`, `crates/cli/src/hooks/auto_model_detect.rs`) runs on every `UserPromptSubmit` event, wired in `settings.json` under the `UserPromptSubmit` hook list. It can't flip the session model mid-stream (Claude Code doesn't support that). Instead it detects design intent and injects a context message nudging Claude toward an Opus subagent.
+The `auto-model-detect` hook (`playbook hook auto-model-detect`, `crates/cli/src/hooks/auto_model_detect.rs`) runs on every `UserPromptSubmit` event, wired in `settings.json` under the `UserPromptSubmit` hook list. Claude Code cannot flip the session model mid-stream, so the hook detects design intent and injects a context message nudging Claude toward an Opus subagent.
 
-The hook skips slash commands and prompts under 20 characters. For natural-prose prompts it matches a hand-expanded set of phrases (case-insensitive, word-boundary matched, ported from the original regex) covering:
+It skips slash commands and prompts under 20 characters. For natural-prose prompts it matches a hand-expanded set of phrases (case-insensitive, word-boundary matched, ported from the original regex):
 
 - Design nouns: `design`, `architecture`, `ADR`, `schema`, `tradeoffs`, `migration`, `data model`, `interface design`, and related terms.
 - Decision verbs: `evaluate`, `compare`, `brainstorm`, `propose`, `critique`, `review the approach`.
 - Design-shaped questions: `should we`, `how would/should we/you/I`, `what's the best`, `which approach/design/pattern`, `pros and cons`.
 
-On a match, the hook emits a prompt context message reminding Claude the session runs on Sonnet and recommending one of two delegation paths: the `Plan` agent (via `Agent` tool with `model: "opus"`) for implementation planning with codebase grounding, or `/playbook:plan` for design work before any code. For narrow prompts (a quick choice between two named options) staying inline on Sonnet is fine. No match: the hook exits silently.
+On a match, the hook reminds Claude the session runs on Sonnet and recommends one of two paths:
+
+- The `Plan` agent (via `Agent` tool with `model: "opus"`) for implementation planning with codebase grounding.
+- `/playbook:plan` for design work before any code.
+
+For narrow prompts (a quick choice between two named options) staying inline on Sonnet is fine. No match: the hook exits silently.
 
 ### Effort policy
 
-The reasoning is in [Why the pieces are shaped this way](../internals/14-why-the-pieces-are-shaped-this-way.md).
+Reasoning: [Why the pieces are shaped this way](../internals/14-why-the-pieces-are-shaped-this-way.md).
 
 Effort is a second dial next to the model tier. Agents, commands and skills accept an `effort` key (`low`, `medium`, `high`, `xhigh`, `max`). The `Agent` tool has no per-call effort, only `model`, so an agent's effort is fixed by its file. Where one role needs two efforts, the launcher renders tier variants for the session (see [Authoring agents](../authoring/02-authoring-agents.md)) and the orchestrator picks by name. To compare settings on real inputs, run `playbook eval bench`.
 
@@ -49,47 +56,80 @@ Effort is a second dial next to the model tier. Agents, commands and skills acce
 
 The rule: lower effort where the work is mechanical or already decided, and never where a missed finding is costly. A wrong model costs a rerun. A reviewer that stops looking costs a bug in production, which is why risky diffs still get the `-xhigh` reviewer.
 
-| File | Model | Effort | Reasoning |
+| File | Model | Effort | Why |
 | --- | --- | --- | --- |
-| `agents/git` | haiku | `xhigh` (was low) | Drafts the commit message and PR title and body, and runs fixed git and `gh` steps. The Haiku evaluation found the conventional commit type was right 42% of the time at `low` and 100% at `xhigh`; at about $0.0006 a call the extra effort costs less than a cent. This is the one Haiku role allowed above `medium` (see the effort cap below), and `playbook commit run` also refuses a type that contradicts the files. |
-| `agents/collector` | haiku | `low` (was medium) | Gathers and compacts raw history; the analyst does the thinking later. |
+| `agents/git` | haiku | `xhigh` (was low) | Drafts the commit message and PR title and body, runs fixed git and `gh` steps. See below. |
+| `agents/collector` | haiku | `low` (was medium) | Gathers and compacts raw history. The analyst thinks later. |
 | `agents/cheap-checker` | haiku | `low` (was medium) | One narrow concern from a named reference file. A full lens covers the rest. |
-| `agents/review-triage` | haiku | `low` (was medium) | A three-way classifier; any bad or missing answer already falls back to `full-lens`, so a wrong call fails safe. |
-| `commands/quick-review` | sonnet (orchestrator); its reviewer runs on opus | `medium` for the command and for its reviewer (the reviewer's base is now `medium` too) | One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. The reviewer is spawned through `playbook effort resolve agents reviewer --cap medium`, which returns the base reviewer (already at medium), or `reviewer-low` when the user's ceiling is lower. See [ADR-0021](../adr/0021-reviewer-at-opus-medium.md). |
-| `agents/reviewer` | opus | `medium` (was high) | Lowered by [ADR-0021](../adr/0021-reviewer-at-opus-medium.md). Benched on 10 real diffs (7 with a seeded real finding, 3 clean), 20 runs per cell (200 calls): Opus high 200/200, Opus medium 199/200 (the one miss was `rd-lower`, a seeded finding, 139/140 recall), Sonnet medium and high 200/200, Opus low 49/50 in a 5 run round. Cost per call: Opus high $0.0155 to $0.0168, Opus medium $0.0125 to $0.0136 (19% less), Sonnet high $0.0066 to $0.0072, Sonnet medium $0.0050 to $0.0054. The 7 seeded findings are a small set of distinct bugs, so the bench does not prove recall on harder ones. Risk is bounded by the variants: an orchestrator sends a security lens, a diff over 60 KB or an auth, secrets or crypto diff to `reviewer-xhigh`, and a small diff to `reviewer-low`. A session started without `playbook cc` or `playbook ccd` has the base reviewer only, at medium. Sonnet matched Opus on this set at about 60% less; moving the reviewer to Sonnet would also change the tier rule above and stays unapplied until a larger set of seeded diffs exists. |
-| `agents/critic` | sonnet | `medium` (was high) | Round 2 bench (2026-10-10, 90 calls per cell on 6 plans, 4 with a seeded flaw and 2 clean): Sonnet medium 89/90 (98.9%) at $0.0088, Sonnet low 89/90 at $0.0078, Sonnet high 71/90 (78.9%) at $0.0145. Every miss at `high` was a false blocking finding on a clean plan; the only missed flaw in 180 medium and low calls was one `cr-destructive` run. Medium is 39% cheaper and no worse on seeded flaws. Haiku scored 67 to 73% on the same cases (false blocks on clean plans), so the critic stays on Sonnet. |
-| `agents/fact-checker` | haiku | `medium` (was high) | The `high` in the file was already cut to `medium` by the Haiku effort cap, so the file now says what runs. Measured with `playbook eval bench` on real playbook excerpts over three rounds (2026-10-09 and 2026-10-10, 6 cases): Haiku high 137/138 (99.3%) at $0.00027 a call, Haiku medium 134/138 (97.1%) at $0.00021, Haiku low 86/90 (95.6%, four misses on one case) at $0.00015, Sonnet high 78/78. Medium is within 3 points of high, so it is the setting. |
-| `agents/test-reviewer` | haiku | `low` (kept) | Pilot, same benchmark (18 calls per cell, then 90 per Haiku cell in round 2 on real tests with weakened assertions and clean controls): Haiku low 86/90 (95.6%), medium 86/90, high 90/90, Sonnet high 48/48, Sonnet low 42/48. Every Haiku low miss was a false alarm on a clean control, not a missed weak test, so low stays; it is the lowest setting there is. |
-| `agents/analyst` | haiku (was sonnet) | `medium` (was high) | Round 2 bench (2026-10-10, 3 cluster cases checked for well formed facts and for anchors drawn only from the allowed set): Haiku low 45/45 at $0.00035, Haiku medium 45/45 at $0.00049, Haiku high 44/45 at $0.00072, Sonnet medium and high 15/15 at $0.005 and $0.007. About 14 times cheaper than Sonnet high at the same pass rate. The bench checks structure and grounding, not how useful a fact is; the `learn-project` Phase 3 confirmation by the user is still the quality gate, and the analyst never writes to the store. Medium rather than low keeps one step of margin on a bench of only three cases. |
+| `agents/review-triage` | haiku | `low` (was medium) | A three-way classifier. Any bad or missing answer falls back to `full-lens`, so a wrong call fails safe. |
+| `commands/quick-review` | sonnet (orchestrator); its reviewer runs on opus | `medium` for the command and its reviewer | See below. |
+| `agents/reviewer` | opus | `medium` (was high) | Lowered by [ADR-0021](../adr/0021-reviewer-at-opus-medium.md). See below. |
+| `agents/critic` | sonnet | `medium` (was high) | See below. |
+| `agents/fact-checker` | haiku | `medium` (was high) | See below. |
+| `agents/test-reviewer` | haiku | `low` (kept) | See below. |
+| `agents/analyst` | haiku (was sonnet) | `medium` (was high) | See below. |
+| `agents/implementer` | sonnet | `medium` (was high) | See the implementer bench below. |
+| `agents/auditor` | opus | `high` (kept) | A whole repository audit whose findings people act on. No headless bench exists for it. The maintainer kept it at `high` on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). |
+| `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | opus, except implement and fix (sonnet) | `medium` (was high) | Lowered by the maintainer on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). No bench exists for the design commands. The evidence is the reviewer, implementer and critic results. Watch rework and missed findings. |
+| `commands/commit-and-push`, `create-pull-request`, `repo-audit` | fork into git (haiku) and auditor (opus) | none | They fork into `playbook:git` (`xhigh`) and `playbook:auditor` (`high`), which set the effort. |
+| `commands/doctor`, `session-start`, `setup` | haiku (was sonnet) | `low` (kept) | Run compiled helpers and print the result, or load a saved handoff. Mechanical, so the cheapest tier fits (about 95% less per call, 20x cheaper per token). Checked live (see PR). |
+| per-session variants such as `reviewer-low` | same as base | any tier | Not files. `playbook cc` and `playbook ccd` render them from the base agent into a throwaway session plugin (`--plugin-dir`), spawned as `playbook-variants:<name>`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
+| `skills/*` | none | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
+
+Evidence for the rows marked "See below":
+
+- **`agents/git`.** The Haiku evaluation found the conventional commit type right 42% of the time at `low` and 100% at `xhigh`. At about $0.0006 a call the extra effort costs less than a cent. It is the one Haiku role allowed above `medium` (see the effort cap below), and `playbook commit run` also refuses a type that contradicts the files.
+- **`commands/quick-review`.** One pass over a diff the user chose not to deep review; `/playbook:deep-review` is the thorough path. The reviewer's base is now `medium` too. It is spawned through `playbook effort resolve agents reviewer --cap medium`, which returns the base reviewer (already at medium), or `reviewer-low` when the user's ceiling is lower. See [ADR-0021](../adr/0021-reviewer-at-opus-medium.md).
+- **`agents/reviewer`.** Benched on 10 real diffs (7 with a seeded real finding, 3 clean), 20 runs per cell (200 calls):
+  - Opus high 200/200. Opus medium 199/200 (the one miss was `rd-lower`, a seeded finding, 139/140 recall). Sonnet medium and high 200/200. Opus low 49/50 in a 5 run round.
+  - Cost per call: Opus high $0.0155 to $0.0168, Opus medium $0.0125 to $0.0136 (19% less), Sonnet high $0.0066 to $0.0072, Sonnet medium $0.0050 to $0.0054.
+  - The 7 seeded findings are a small set of distinct bugs. The bench does not prove recall on harder ones.
+  - Risk is bounded by the variants: an orchestrator sends a security lens, a diff over 60 KB or an auth, secrets or crypto diff to `reviewer-xhigh`, and a small diff to `reviewer-low`. A session started without `playbook cc` or `playbook ccd` has the base reviewer only, at medium.
+  - Sonnet matched Opus on this set at about 60% less. Moving the reviewer to Sonnet would also change the tier rule above and stays unapplied until a larger set of seeded diffs exists.
+- **`agents/critic`.** Round 2 bench (2026-10-10, 90 calls per cell on 6 plans, 4 with a seeded flaw and 2 clean): Sonnet medium 89/90 (98.9%) at $0.0088, Sonnet low 89/90 at $0.0078, Sonnet high 71/90 (78.9%) at $0.0145. Every miss at `high` was a false blocking finding on a clean plan. The only missed flaw in 180 medium and low calls was one `cr-destructive` run. Medium is 39% cheaper and no worse on seeded flaws. Haiku scored 67 to 73% on the same cases (false blocks on clean plans), so the critic stays on Sonnet.
+- **`agents/fact-checker`.** The `high` in the file was already cut to `medium` by the Haiku effort cap, so the file now says what runs. Measured with `playbook eval bench` on real playbook excerpts over three rounds (2026-10-09 and 2026-10-10, 6 cases): Haiku high 137/138 (99.3%) at $0.00027 a call, medium 134/138 (97.1%) at $0.00021, low 86/90 (95.6%, four misses on one case) at $0.00015, Sonnet high 78/78. Medium is within 3 points of high, so it is the setting.
+- **`agents/test-reviewer`.** Pilot, same benchmark (18 calls per cell, then 90 per Haiku cell in round 2 on real tests with weakened assertions and clean controls): Haiku low 86/90 (95.6%), medium 86/90, high 90/90, Sonnet high 48/48, Sonnet low 42/48. Every Haiku low miss was a false alarm on a clean control, not a missed weak test, so `low` stays; it is the lowest setting there is.
+- **`agents/analyst`.** Round 2 bench (2026-10-10, 3 cluster cases checked for well formed facts and for anchors drawn only from the allowed set): Haiku low 45/45 at $0.00035, medium 45/45 at $0.00049, high 44/45 at $0.00072, Sonnet medium and high 15/15 at $0.005 and $0.007. About 14 times cheaper than Sonnet high at the same pass rate. The bench checks structure and grounding, not how useful a fact is. The `learn-project` Phase 3 confirmation by the user is still the quality gate, and the analyst never writes to the store. Medium rather than low keeps one step of margin on a bench of only three cases.
 
 To undo the Haiku moves, set `model: sonnet` and `effort: high` in the agent file and re-run `playbook eval bench --role <role> --model haiku,sonnet --effort medium,high` to compare. Tier overrides (`models.haiku`) stay inside one tier, so no config key moves a single agent to Sonnet.
 
-The `implementer` stays on Sonnet and moves from `high` to `medium`. Round 1 (2026-10-10, 8 cases, 3 runs) and round 2 (20 repo tasks in `crates/cli/tests/fixtures/bench/implementer-repo-tasks.json` and `-2.json`: a stub to fill, a refactor, multi file changes, a bug whose root is in a helper, existing patterns to follow, a tempting hardcode, a test that must not be edited, scope and input mutation traps) apply each reply in a temp dir, run visible and hidden tests, and fail any edit to a test file or to a file outside the allowed list, with no judge model. Round 2 with 5 runs per case (100 calls per cell): Haiku low 89%, medium 88%, high 91% at $0.0003 to $0.0004 a call; Sonnet low 99%, medium 96%, high 95% at $0.0035 to $0.0037. With one fixture bug fixed (a hidden input the spec never asked for) and 10 runs per case (200 calls per cell): Sonnet medium 200/200 at $0.0027, Sonnet low 199/200 at $0.0027, Sonnet high 198/200 at $0.0029. Haiku never reaches 95% on 20 tasks (it drops the file sections or misses a multi file thread), so it stays out. On Sonnet, effort barely changes the cost of a single reply, so the saving here is about 7%, and `medium` is a no-loss setting rather than a big saving. The bench is a single turn with no tools, so it does not measure reading a real repo, running the verify command or committing, which is why `low` is not taken even though it scored the same.
-| `agents/implementer` | sonnet | `medium` (was high) | See the paragraph above. |
-| `agents/auditor` | opus | `high` (kept) | A whole repository audit whose findings people act on; no headless bench exists for it. The maintainer kept it at `high` on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). |
-| `commands/deep-review`, `implement`, `plan`, `adr`, `learn-project`, `fix`, `address-pr-comments` | opus, except implement and fix (sonnet) | `medium` (was high) | Lowered by the maintainer on 2026-10-11 ([ADR-0023](../adr/0023-commands-at-medium.md)). No bench exists for the design commands; the evidence is the reviewer, implementer and critic results. Watch rework and missed findings. |
-| `commands/commit-and-push`, `create-pull-request`, `repo-audit` | fork into git (haiku) and auditor (opus) | none | They fork into `playbook:git` (`xhigh`) and `playbook:auditor` (`high`), which set the effort. |
-| `commands/doctor`, `session-start`, `setup` | haiku (was sonnet) | `low` (kept) | Run compiled helpers and print the result, or load a saved handoff. Mechanical, so the cheapest tier fits (about 95% less per call, 20x cheaper per token). Checked live (see PR). |
-| per-session variants such as `reviewer-low` | same as base | any tier | Not files. Rendered from the base agent by `playbook cc` and `playbook ccd` into a throwaway session plugin (`--plugin-dir`), spawned as `playbook-variants:<name>`. The orchestrator picks by ceiling, then diff size and risk; see `playbook:delegating-subagents`. |
-| `skills/*` | none | none | A skill is knowledge loaded into whoever uses it. An `effort` key would override the caller's choice, so none sets one. |
+**Implementer bench.** The `implementer` stays on Sonnet and moves from `high` to `medium`. Round 1 (2026-10-10, 8 cases, 3 runs) and round 2 (20 repo tasks in `crates/cli/tests/fixtures/bench/implementer-repo-tasks.json` and `-2.json`) apply each reply in a temp dir and run visible and hidden tests. Any edit to a test file or to a file outside the allowed list fails, with no judge model. The tasks: a stub to fill, a refactor, multi file changes, a bug whose root is in a helper, existing patterns to follow, a tempting hardcode, a test that must not be edited, scope and input mutation traps.
 
-Dispatch granularity was benched with tools. `playbook eval bench --cases crates/cli/tests/fixtures/bench/implementer-wu-tdd.json --strategy per-step,per-wu --model sonnet --effort medium --runs 3` runs 12 of the repo tasks in a scratch git repo with the real `implementer` agent, the plugin loaded and every tool on, once with one dispatch per TDD step (RED, GREEN, REFACTOR, three calls) and once with one dispatch for the whole Work Unit. A run passes only when the final code passes the original visible test and the hidden tests, nothing outside the allowed files changed, the RED commit holds only the test file and that test fails at that commit, and RED comes before GREEN in the log. Two batches of 36 runs per strategy (the first lost two runs to a scratch directory name collision, fixed since), 71 scored runs each: per-step 71/71 (100%) at $0.151 and 27.0 s a Work Unit, per-wu 68/71 (95.8%) at $0.064 and 13.8 s. Per-wu cost 58% less and took 49% less time, but its pass rate is 4.2 points lower, outside the 3 point rule, so `/playbook:implement` keeps one dispatch per step. All three misses were the same task (`wu-imx2-error-pattern`, a hidden edge case on whitespace and number formats that the RED step did not cover when it wrote its own tests); per-step passed that task 6 of 6. Each task has one scenario, so a real Work Unit with N scenarios saves more than the 3 to 1 measured here, and the orchestrator turns between steps are not counted. A prompt that makes the single dispatch derive edge cases from the Changes text before writing RED is the obvious next experiment.
+| Run | Haiku | Sonnet |
+|---|---|---|
+| Round 2, 5 runs per case (100 calls per cell) | low 89%, medium 88%, high 91% at $0.0003 to $0.0004 a call | low 99%, medium 96%, high 95% at $0.0035 to $0.0037 |
+| One fixture bug fixed (a hidden input the spec never asked for), 10 runs per case (200 calls per cell) | | medium 200/200 at $0.0027, low 199/200 at $0.0027, high 198/200 at $0.0029 |
+
+- Haiku never reaches 95% on 20 tasks (it drops the file sections or misses a multi file thread), so it stays out.
+- On Sonnet, effort barely changes the cost of a single reply. The saving here is about 7%, and `medium` is a no-loss setting with only a small saving.
+- The bench is a single turn with no tools. It does not measure reading a real repo, running the verify command or committing, which is why `low` is not taken even though it scored the same.
+
+**Dispatch granularity.** `playbook eval bench --cases crates/cli/tests/fixtures/bench/implementer-wu-tdd.json --strategy per-step,per-wu --model sonnet --effort medium --runs 3` runs 12 of the repo tasks in a scratch git repo with the real `implementer` agent, the plugin loaded and every tool on. It runs once with one dispatch per TDD step (RED, GREEN, REFACTOR, three calls) and once with one dispatch for the whole Work Unit. A run passes only when the final code passes the original visible test and the hidden tests, nothing outside the allowed files changed, the RED commit holds only the test file and that test fails at that commit, and RED comes before GREEN in the log.
+
+Two batches of 36 runs per strategy (the first lost two runs to a scratch directory name collision, fixed since), 71 scored runs each:
+
+| Strategy | Pass rate | Cost per Work Unit | Time |
+|---|---|---|---|
+| per-step | 71/71 (100%) | $0.151 | 27.0 s |
+| per-wu | 68/71 (95.8%) | $0.064 | 13.8 s |
+
+Per-wu cost 58% less and took 49% less time, but its pass rate is 4.2 points lower, outside the 3 point rule, so `/playbook:implement` keeps one dispatch per step. All three misses were the same task (`wu-imx2-error-pattern`, a hidden edge case on whitespace and number formats that the RED step did not cover when it wrote its own tests). Per-step passed it 6 of 6. Each task has one scenario, so a real Work Unit with N scenarios saves more than the 3 to 1 measured here. Orchestrator turns between steps are not counted. A prompt that makes the single dispatch derive edge cases from the Changes text before writing RED is the obvious next experiment.
 
 ### Policy table: every component
 
-The table of every agent, command and skill with the model and effort in its file, and why, now lives in [`docs/reference/policy-table.md`](../reference/policy-table.md). A test there keeps it equal to the frontmatter.
+Every agent, command and skill with its model, effort and reason is in [`docs/reference/policy-table.md`](../reference/policy-table.md). A test there keeps it equal to the frontmatter.
 
 ### Effort cap per model
 
-The Haiku 5.5 evaluation (#576) priced effort on Haiku: `xhigh` costs 2x `medium` for the same pass rate, and `max` costs 13x (about 7,100 thinking tokens and 32 s per call) and scores worst (91% against 97% at `medium`). So `crates/cli/src/effort/model_cap.rs` puts a ceiling on every component whose frontmatter model is Haiku:
+The Haiku 5.5 evaluation (#576) found `xhigh` costs 2x `medium` for the same pass rate. `max` costs 13x (about 7,100 thinking tokens and 32 s per call) and scores worst (91% against 97% at `medium`). `crates/cli/src/effort/model_cap.rs` therefore caps every component whose frontmatter model is Haiku:
 
 - `max` is never used on Haiku, whatever a role or a variant asks for.
 - Haiku roles stop at `medium` by default.
-- A role may go up to `xhigh` only when it has an entry in `OPT_INS` with a recorded reason. Today that is the `git` agent: its conventional commit type was right 42% of the time at `low` and 100% at `xhigh`, so the `git` agent itself ships at `xhigh`. Because the fork skills `commit-and-push` and `create-pull-request` name `agent: playbook:git` (the prefix is required, a bare `git` forks a general purpose agent on the session model), the base file is the simple place for it, and a cheaper `git-low` variant stays available for a session that wants it.
+- A role may go up to `xhigh` only when it has an entry in `OPT_INS` with a recorded reason. Today that is the `git` agent (evidence above), so the `git` agent itself ships at `xhigh`. Because the fork skills `commit-and-push` and `create-pull-request` name `agent: playbook:git` (the prefix is required, a bare `git` forks a general purpose agent on the session model), the base file is the simple place for it. A cheaper `git-low` variant stays available for a session that wants it.
 
 The cap is a ceiling like the others. The lowest ceiling wins, your `maxEffortLevel` still beats it when lower, and it never raises anything. It applies in `playbook effort resolve`, in the variants `playbook cc` and `playbook ccd` render, and it shows in `playbook effort list` and `playbook doctor models`.
 
-Effort is fixed per agent definition: base agents run at their own effort, and an orchestrator picks a variant by ceiling, diff size and risk. Do not request xhigh or max on your own for anything else; if a deployment rejects it, use the base agent.
+Effort is fixed per agent definition: base agents run at their own effort, and an orchestrator picks a variant by ceiling, diff size and risk. Do not request xhigh or max on your own for anything else. If a deployment rejects it, use the base agent.
 
 ### Per-component ceilings
 
@@ -97,17 +137,37 @@ A ceiling for one component is the key `effort.<agents|commands|skills>.<name>` 
 
 ### Tuning from usage
 
-`playbook effort suggest` is a read only report (stage 1 of [ADR-0022](../adr/0022-effort-auto-tune-from-evidence.md)). For each agent it shows the dispatches in the window, how many used a variant above or below the shipped effort, repeats inside a session, the cost per effort bucket, your ceilings, and whether lowering is permitted or something needs a look. Permission to lower comes only from the quality floor table in `crates/cli/src/effort/floor.rs`, one row per agent with the benchmark run behind it. A floor is pinned to the shipped effort when the bench is thin, so a row moves below shipped only when a larger bench says so, and the policy table above stays the human readable record. Usage evidence can hold a change back or ask for a look, and it never grants a lowering. `crates/cli/tests/effort_suggest.rs` fails when an agent has no floor row or a floor is above the effort in the agent file, so change both with the agent file.
+**Stage 1.** `playbook effort suggest` is a read only report (stage 1 of [ADR-0022](../adr/0022-effort-auto-tune-from-evidence.md)). For each agent it shows the dispatches in the window and how many used a variant above or below the shipped effort, repeats inside a session, the cost per effort bucket, your ceilings, and whether lowering is permitted or something needs a look.
 
-Stage 2 of the same ADR is `playbook effort suggest --patch`, `playbook effort apply` and `playbook effort reset` (`crates/cli/src/effort/patch.rs`). The patch is built only from agents the report marks `lower`, and `validate` repeats the checks at apply time: a floor row exists, the agent is not costly to miss, the value is not below the floor, and it is below what the agent runs at now (so it cannot pass any ceiling). Apply needs a `y` at a terminal or `--yes`. It writes a backup of the global `effort.*` keys, records each key in `effort/ledger.json`, appends to `effort/changes.log`, and sets the keys through the config store. `reset` restores ledgered keys that still hold the applied value and leaves edited ones. All files are under `~/.config/playbook/effort/`, written with `write_atomic` and `atomic_append`. Claude Code settings and memory are never written.
+Permission to lower comes only from the quality floor table in `crates/cli/src/effort/floor.rs`, one row per agent with the benchmark run behind it. A floor is pinned to the shipped effort when the bench is thin, so a row moves below shipped only when a larger bench says so. The policy table above stays the human readable record. Usage evidence can hold a change back or ask for a look, and it never grants a lowering. `crates/cli/tests/effort_suggest.rs` fails when an agent has no floor row or a floor is above the effort in the agent file, so change both with the agent file.
 
-Stage 3 is the key `effort.auto` (`off`, `suggest`, `on`; `crates/cli/src/effort/auto.rs`). `playbook effort choose <agent>` takes the diff shape (from `git diff --numstat <ref>` or explicit flags), a risk class (path patterns and memory facts anchored to touched paths whose name or description names a risk) and the stage 1 evidence. The candidates are exactly `Resolution::allowed`, the variant files at or under every ceiling, so the result is a `subagent_type` that `resolve` already lists, which is the mechanism the `-low` and `-xhigh` variants use today. Raising (large diff, risky path, security lens) aims for `xhigh`. Lowering needs a small, clean diff, a row in the floor table, an agent that is not costly to miss, a level at or above the floor, and evidence with enough history and no escalation or repeat signal. Any error or panic gives the default, and every call in `suggest` or `on` mode appends a row to `effort/auto.log`. `resolve` keeps its contract, so `choose` is a separate lookup.
+**Stage 2** of the same ADR: `playbook effort suggest --patch`, `playbook effort apply` and `playbook effort reset` (`crates/cli/src/effort/patch.rs`).
 
-The ceilings the patch works inside already exist (`maxEffortLevel` and `effort.<kind>.<name>`, ADR-0017), so no new ceiling key was added.
+- The patch is built only from agents the report marks `lower`.
+- `validate` repeats the checks at apply time: a floor row exists, the agent is not costly to miss, the value is not below the floor, and it is below what the agent runs at now (so it cannot pass any ceiling).
+- Apply needs a `y` at a terminal or `--yes`. It writes a backup of the global `effort.*` keys, records each key in `effort/ledger.json`, appends to `effort/changes.log`, and sets the keys through the config store.
+- `reset` restores ledgered keys that still hold the applied value and leaves edited ones.
+- All files are under `~/.config/playbook/effort/`, written with `write_atomic` and `atomic_append`. Claude Code settings and memory are never written.
+
+**Stage 3.** The key `effort.auto` (`off`, `suggest`, `on`; `crates/cli/src/effort/auto.rs`). `playbook effort choose <agent>` takes:
+
+- the diff shape (from `git diff --numstat <ref>` or explicit flags);
+- a risk class (path patterns and memory facts anchored to touched paths whose name or description names a risk);
+- the stage 1 evidence.
+
+The candidates are exactly `Resolution::allowed`, the variant files at or under every ceiling, so the result is a `subagent_type` that `resolve` already lists, which is the mechanism the `-low` and `-xhigh` variants use today.
+
+- Raising (large diff, risky path, security lens) aims for `xhigh`.
+- Lowering needs a small, clean diff, a row in the floor table, an agent that is not costly to miss, a level at or above the floor, and evidence with enough history and no escalation or repeat signal.
+- Any error or panic gives the default.
+- Every call in `suggest` or `on` mode appends a row to `effort/auto.log`.
+- `resolve` keeps its contract, so `choose` is a separate lookup.
+
+No new ceiling key was added: the patch works inside the existing ceilings (`maxEffortLevel` and `effort.<kind>.<name>`, ADR-0017).
 
 ### Model tiers and the 5.5 rule
 
-Every model playbook picks is the 5.5 generation. Plugin files name a tier by alias (`haiku`, `sonnet`, `opus`) and never pin a model id. Claude Code resolves each alias to the newest model the provider offers (on the Anthropic API that is the 5.5 model).
+Every model playbook picks is the 5.5 generation. Plugin files name a tier by alias (`haiku`, `sonnet`, `opus`) and never pin a model id. Claude Code resolves each alias to the newest model the provider offers (on the Anthropic API, the 5.5 model).
 
 | Tier | Alias | Preferred (5.5) | Falls back to |
 |---|---|---|---|
@@ -117,7 +177,7 @@ Every model playbook picks is the 5.5 generation. Plugin files name a tier by al
 
 The table lives in `crates/cli/src/models/mod.rs`. When the preferred model is overloaded or unavailable (including a Bedrock or Vertex account that cannot invoke it), Claude Code switches to a fallback for that turn. `playbook cc` and `playbook ccd` pass the chain `claude-opus-5,claude-sonnet-5,claude-haiku-4-5` with `--fallback-model`. They add nothing when you pass `--fallback-model` yourself or set `fallbackModel` in `~/.claude/settings.json`. A session started without the launcher gets no playbook fallback.
 
-Measured on Claude Code 2.1.293 (2026-10-09): all six ids answer, and the aliases resolve to the 5.5 ids. With an unknown primary id and `--fallback-model`, Claude Code runs the fallback. Without it the call fails with `api_error`. Claude Code accepts a chain of more than three models without a flag error, so the three-model cap is only a documented limit.
+Measured on Claude Code 2.1.293 (2026-10-09): all six ids answer, and the aliases resolve to the 5.5 ids. With an unknown primary id and `--fallback-model`, Claude Code runs the fallback. Without it the call fails with `api_error`. A chain of more than three models gives no flag error, so the three-model cap is only a documented limit.
 
 **Effort and the fallback.** The previous Sonnet and Opus reject `xhigh` and `max` with HTTP 400 `Invalid effort level`. They accept `low`, `medium` and `high`. Haiku 4.5 accepts all four. A 400 also triggers the fallback, so a session at `xhigh` would walk the chain and end at Haiku anyway. When the effort in force is `xhigh` or `max` (from `--effort`, or `effortLevel` in your user settings, lowered to the effective ceiling), `playbook cc` therefore passes only `claude-haiku-4-5`. When no effort is stated, the model default applies and the full chain is passed. Playbook never changes your effort to suit a fallback.
 
@@ -125,7 +185,7 @@ Measured on Claude Code 2.1.293 (2026-10-09): all six ids answer, and the aliase
 
 `playbook doctor models` (add `--json`) prints the table, any override, the chain `playbook cc` passes, whether your own fallback replaces it, and whether the effort in force trimmed the chain.
 
-a test fails when an agent, command, skill, prompt, output style, workflow or `settings.shared.json` names a model id outside this table, or when an agent uses anything but a tier alias.
+A test fails when an agent, command, skill, prompt, output style, workflow or `settings.shared.json` names a model id outside this table, or when an agent uses anything but a tier alias.
 
 ## Memory Protocol
 
@@ -143,7 +203,7 @@ The `<owner>/<repo>` project index is injected at session start. The global inde
 
 ### Claude Code's memory
 
-Playbook memory and Claude Code's auto memory stay separate. Playbook never writes Claude Code's memory or settings. `memory.source` is `both` (default) or `playbook`. With `playbook`, `playbook cc` and `playbook ccd` set `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for that session only. `playbook memory import-claude` copies Claude Code's notes for a project into playbook memory, read-only on the Claude side.
+Playbook memory and Claude Code's auto memory stay separate, and playbook never writes Claude Code's memory or settings. `memory.source` is `both` (default) or `playbook`. With `playbook`, `playbook cc` and `playbook ccd` set `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for that session only. `playbook memory import-claude` copies Claude Code's notes for a project into playbook memory, read-only on the Claude side.
 
 ### File format
 
@@ -182,7 +242,7 @@ Edge values are bare basenames with no path and no extension. For `feedback` and
 }
 ```
 
-Nodes carry names and descriptions for navigation; edge declarations live only in each fact's frontmatter, not duplicated on the node.
+Nodes carry names and descriptions for navigation. Edge declarations live only in each fact's frontmatter, not duplicated on the node.
 
 ### Edge types
 
@@ -199,7 +259,7 @@ Traversal depth is 1 for all edge types except `supersedes`, which is followed f
 
 ### memory.db
 
-`~/.config/playbook/data/memory.db` is the single navigable store of the full memory graph: nodes are facts and referenced code locations, edges are `links:` between facts plus `anchors:` from facts to code. It covers all scopes: global, org, and project. The `rebuild-memory-graph` PostToolUse hook rebuilds it automatically after any fact file is saved. The database is derived from the fact files and safe to delete. See [Decisions and Memory](../guides/03-decisions-and-memory.md) for how to query and use it day-to-day.
+`~/.config/playbook/data/memory.db` is the single navigable store of the full memory graph. Nodes are facts and referenced code locations. Edges are `links:` between facts plus `anchors:` from facts to code. It covers all scopes: global, org, and project. The `rebuild-memory-graph` PostToolUse hook rebuilds it automatically after any fact file is saved. The database is derived from the fact files and safe to delete. See [Decisions and Memory](../guides/03-decisions-and-memory.md) for how to query and use it day-to-day.
 
 ## See also
 
@@ -213,7 +273,7 @@ An omitted `subagent_type` forks the parent conversation and bills its full hist
 
 ### Inline briefs for reviewers and implementers
 
-`/playbook:deep-review`, `/playbook:quick-review` and `/playbook:implement` build the brief once per run: diff, numbered excerpts, test command, and the limit to read beyond them only when needed. On the seeded-defect reviewer fixture (7 seeded bugs, 3 clean, 3 repeats, Opus medium) recall stayed 21 of 21 and clean cases 9 of 9, turns fell from 3.4 to 2.2 per run and cost from $0.0447 to $0.0395.
+`/playbook:deep-review`, `/playbook:quick-review` and `/playbook:implement` build the brief once per run: diff, numbered excerpts, test command, and the limit to read beyond them only when needed. On the seeded-defect reviewer fixture (7 seeded bugs, 3 clean, 3 repeats, Opus medium) recall stayed 21 of 21 and clean cases 9 of 9. Turns fell from 3.4 to 2.2 per run and cost from $0.0447 to $0.0395.
 
 ### Return cap
 
