@@ -406,6 +406,91 @@ jobs:
             target
           key: ${{ steps.cargo.outputs.cache-primary-key }}
 
+  # Runs the completion scripts in real bash, zsh and fish. Non-required by
+  # design, and skipped in a release gate (`!inputs.ref`) so a flaky or newly
+  # broken shell test can never stop a release.
+  shell-tests:
+    needs: changes
+    if: ${{ !cancelled() && !inputs.ref }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      LANE: ${{ needs.changes.outputs.docs_only != 'true' }}
+      PLAYBOOK_REQUIRE_SHELLS: "1"
+      # The number of tests in crates/cli/tests/shells.rs. Update it with the
+      # tests, so a deleted or renamed test cannot pass silently.
+      EXPECTED_SHELL_TESTS: "7"
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        if: env.LANE == 'true'
+        with:
+          # On audit, not block, for the same reason as shell-ci.yml:98-105:
+          # apt mirrors rotate per runner and harden-runner has no wildcard.
+          # Expected endpoints, for a later move to block: the rotating apt
+          # mirrors, api.github.com, github.com, crates.io, index.crates.io,
+          # static.crates.io, static.rust-lang.org, objects.githubusercontent.com
+          # and release-assets.githubusercontent.com.
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.LANE == 'true'
+        with:
+          persist-credentials: false
+
+      - name: Cache cargo registry and build output (shell-tests)
+        if: env.LANE == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-build-test-v3-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-build-test-v3-${{ runner.os }}-
+
+      - name: rustc --version
+        if: env.LANE == 'true'
+        run: rustc --version
+
+      - name: Install the shells
+        if: env.LANE == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y zsh fish bash
+
+      # A missing shell fails the job here, never skips a test.
+      - name: Check the shells are installed
+        if: env.LANE == 'true'
+        run: |
+          set -euo pipefail
+          command -v zsh fish
+          bash --version
+
+      - name: Install cargo-nextest
+        if: env.LANE == 'true'
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: nextest@0.9.145
+
+      - name: Build the shell tests
+        if: env.LANE == 'true'
+        run: cargo nextest run -p playbook --test shells --no-run
+
+      - name: Check the shell test count
+        if: env.LANE == 'true'
+        run: |
+          set -euo pipefail
+          count="$(cargo nextest list -p playbook --test shells --message-format oneline | grep -c '^playbook::shells ')"
+          echo "Found $count shell tests, expected $EXPECTED_SHELL_TESTS."
+          [ "$count" = "$EXPECTED_SHELL_TESTS" ]
+
+      - name: Run the shell tests
+        if: env.LANE == 'true'
+        run: |
+          set -euo pipefail
+          cargo nextest run -p playbook --test shells --no-tests=fail --config-file .github/nextest.toml --profile ci 2>&1 | tee shell-tests.log
+          grep -Eq "$EXPECTED_SHELL_TESTS tests run: $EXPECTED_SHELL_TESTS passed( \([^)]*\))?, 0 skipped" shell-tests.log
+
   # Cheap lane for docs-only changes: the only cargo tests that read docs
   # (generated reference page drift, config-key coverage, README and index
   # links, the policy table, the PR-flow wording). Runs only when the heavy
