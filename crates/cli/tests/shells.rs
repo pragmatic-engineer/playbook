@@ -30,6 +30,12 @@ const PTY_DEADLINE_SECS: u32 = 10;
 const PTY_PROMPT: &str = "READY> ";
 const TAB: &str = "\t";
 const TERMINAL: &str = "xterm-256color";
+/// Proxies nothing listens on, so a shell started by a test cannot reach the
+/// network. Apply after `env_clear`.
+const OFFLINE_ENV: [(&str, &str); 2] = [
+    ("HTTPS_PROXY", "127.0.0.1:9"),
+    ("HTTP_PROXY", "127.0.0.1:9"),
+];
 
 /// What a gated test does, decided from the opt-in value and the shell.
 #[derive(Debug, PartialEq)]
@@ -118,7 +124,8 @@ fn shell_in(work: &Work, shell: &str, bin: &Path) -> Command {
         .env("ZDOTDIR", work.dir("home"))
         .env("XDG_CONFIG_HOME", work.dir("home"))
         .env("XDG_DATA_HOME", work.dir("home"))
-        .env("PATH", path_with(bin));
+        .env("PATH", path_with(bin))
+        .envs(OFFLINE_ENV);
     cmd
 }
 
@@ -224,6 +231,7 @@ fn zsh_pty_completes(with_alias: bool, typed: &str, expected: &str) {
     let zsh = find_on_path(ZSH).expect("zsh on PATH");
     let out = Command::new(&zsh)
         .env_clear()
+        .envs(OFFLINE_ENV)
         .env("PB_ZSH", &zsh)
         .env("HOME", &home)
         .env("ZDOTDIR", &home)
@@ -350,4 +358,45 @@ fn zsh_completes_through_a_pty() {
     zsh_pty_completes(false, "playbook tr", "playbook trust ");
     // `pb pl` is ambiguous (plan, plans), so zsh adds no trailing space.
     zsh_pty_completes(true, "pb tr", "pb trust ");
+}
+
+/// A `playbook` that fails noisily, standing in for a broken install.
+const FAILING_PLAYBOOK: &str = "#!/bin/sh\necho 'playbook: broken' >&2\necho 'noise'\nexit 1\n";
+
+#[test]
+fn a_stub_is_silent_when_completions_fails_or_the_binary_is_missing() {
+    for shell in [BASH, ZSH, FISH] {
+        if !gated(shell) {
+            continue;
+        }
+        let kind = playbook::init::completion::Shell::detect(shell);
+        for playbook_fails in [true, false] {
+            // Arrange
+            let work = Work::new("stub-silence");
+            let bin = work.dir("bin");
+            if playbook_fails {
+                shell_fixture::write_exec(&bin.join(BINARY), FAILING_PLAYBOOK);
+            }
+            let stub = work.path("stub");
+            std::fs::write(&stub, playbook::init::completion::stub_text(kind)).expect("stub");
+            let shell_path = find_on_path(shell).expect("shell on PATH");
+
+            // Act
+            let out = Command::new(&shell_path)
+                .env_clear()
+                .envs(OFFLINE_ENV)
+                .env("HOME", work.dir("home"))
+                .env("PATH", &bin)
+                .arg("-c")
+                .arg(format!("source '{}'", stub.display()))
+                .output()
+                .expect("spawn shell");
+
+            // Assert
+            let case = format!("{shell}, playbook fails: {playbook_fails}");
+            assert_eq!(out.status.code(), Some(0), "{case}: {}", text(&out));
+            assert!(out.stdout.is_empty(), "{case}: stdout {}", text(&out));
+            assert!(out.stderr.is_empty(), "{case}: stderr {}", text(&out));
+        }
+    }
 }
