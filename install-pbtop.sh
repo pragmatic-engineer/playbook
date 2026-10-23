@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Igor Santos
 # SPDX-License-Identifier: Apache-2.0
 #
-# Installer for pbtop alone, the standalone usage dashboard, on a machine
+# Installer for pbtop alone, the standalone Agent Budget Dashboard, on a machine
 # without playbook. The README shows the curl command that pipes it to sh.
 #
 # It runs install.sh in its pbtop mode. That fetches

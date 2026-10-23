@@ -782,10 +782,9 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App, pal: &Palette) {
         .border_style(edge)
         .title(Line::from(vec![
             Span::styled("\u{2500}\u{2524}", edge),
-            // To my friend Joshua. The first beta tester.
             Span::styled(app.icon.prefix(), edge),
             Span::styled(
-                "playbook usage",
+                "Agent Budget Dashboard",
                 Style::default()
                     .fg(pal.color(pal.title))
                     .add_modifier(Modifier::BOLD),

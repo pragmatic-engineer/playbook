@@ -1,6 +1,6 @@
 # pbtop
 
-`pbtop` is the usage dashboard of playbook as a command of its own. The Cargo package is `playbook-telemetry`.
+`pbtop` is the Agent Budget Dashboard of playbook as a command of its own. The Cargo package is `playbook-telemetry`.
 
 ```sh
 brew install pragmatic-engineer/tap/pbtop
