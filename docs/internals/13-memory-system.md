@@ -149,6 +149,8 @@ The loop is nudge-and-approve by design. Memory is durable. A bad fact, a duplic
 - **Durable over re-learned.** Write once, load on demand.
 - **Typed edges.** Each link type tells the system what to do.
 - **Three scopes.** Preferences, org conventions and project facts live in different parts of the store.
+- **Human approve.** Memory writes are permanent, so a gate catches duplicates and stale facts.
+- **Local only.** The store is never committed.
 
 ## See also
 
