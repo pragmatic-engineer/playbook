@@ -1,6 +1,6 @@
 ---
 name: playbook-usage
-description: Lists /playbook:* commands and when to use each. Use when asked what the plugin does or which command fits a task.
+description: Lists /playbook:* commands and when to use each, and points to the binary command list. Use when asked what the plugin does or which command fits, or when a task might have a playbook command the tool map lacks.
 ---
 
 # Playbook Usage
@@ -47,3 +47,7 @@ description: Lists /playbook:* commands and when to use each. Use when asked wha
 `/playbook:commit-and-push`, `/playbook:create-pull-request` and `/playbook:repo-audit` run in an isolated forked context (`context: fork`). `/playbook:implement` delegates each Work Unit to `implementer` subagents, some in isolated git worktrees. A subagent's return value alone is not a reliable signal of what it did. See `playbook:delegating-subagents` for the file-based handoff discipline.
 
 The memory store, its scopes and its edge types are described in `docs/guides/03-decisions-and-memory.md`.
+
+## Binary commands
+
+Run `playbook commands` to list every playbook command and subcommand (an older binary without it: run `playbook --help`); run `playbook commands <group>` for one group with its flags; never run a command marked user-only (tagged `(user-only)` or a name ending in `!`); instead, ask the user to run it with `!`. Use this before running a playbook command you are not sure about.

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! The `playbook:cli` skill holds no list of commands. Its body is one line
-//! that sends a session to `playbook commands`, which the binary builds from
+//! The `playbook:playbook-usage` skill holds no list of binary commands. Its
+//! "Binary commands" section is one paragraph that sends a session to `playbook commands`, which the binary builds from
 //! its own command tree, so the skill cannot drift. `scripts/check-intents.sh`
 //! checks against a built binary that the commands it names exist.
 
@@ -10,20 +10,26 @@ use std::fs;
 use std::path::Path;
 
 fn body() -> String {
-    let path = Path::new(env!("PLAYBOOK_PLUGIN_ROOT")).join("skills/cli/SKILL.md");
-    let text = fs::read_to_string(path).expect("skills/cli/SKILL.md");
+    let path = Path::new(env!("PLAYBOOK_PLUGIN_ROOT")).join("skills/playbook-usage/SKILL.md");
+    let text = fs::read_to_string(path).expect("skills/playbook-usage/SKILL.md");
     let rest = text.strip_prefix("---\n").expect("frontmatter");
     let end = rest.find("\n---\n").expect("closing ---");
-    rest[end + 5..].trim().to_string()
+    let rest = &rest[end + 5..];
+    let start = rest
+        .find("## Binary commands\n")
+        .expect("Binary commands section");
+    let section = &rest[start + "## Binary commands\n".len()..];
+    let section = section.split("\n## ").next().unwrap();
+    section.trim().to_string()
 }
 
 #[test]
-fn the_body_is_one_line_that_points_to_playbook_commands() {
+fn the_section_is_one_paragraph_that_points_to_playbook_commands() {
     let body = body();
     assert_eq!(
         body.lines().count(),
         1,
-        "the body must stay one line: {body}"
+        "the section must stay one line: {body}"
     );
     for needle in [
         "`playbook commands`",
@@ -82,7 +88,7 @@ fn the_check_passes_when_every_named_command_exists() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{text}");
     assert!(
-        text.contains("PASS every command the tool map and the cli skill name exists"),
+        text.contains("PASS every command the tool map and the playbook-usage skill name exists"),
         "{text}"
     );
 }
