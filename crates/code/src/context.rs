@@ -495,12 +495,32 @@ pub fn build(
     Ok(result)
 }
 
+/// Room kept for the closing `N more candidates did not fit` line.
+const OMITTED_LINE_RESERVE: usize = 48;
+
+fn header_for(path: &str, start: usize, end: usize, stale: bool, reason: &str) -> String {
+    let stale = if stale { " (stale)" } else { "" };
+    format!("== {path}:{start}-{end}{stale}  {reason}\n")
+}
+
+/// The line that introduces a snippet in the text output.
+pub fn snippet_header(s: &Snippet) -> String {
+    header_for(&s.path, s.start_line, s.end_line, s.stale, &s.reason)
+}
+
+fn omitted_line(count: usize) -> String {
+    format!("{count} more candidates did not fit:\n")
+}
+
 /// Reads each candidate from disk in order until the byte ceiling is reached.
+/// Each snippet is charged its header, its text and its newline, so the text
+/// output fits the ceiling as a whole.
 fn fill(result: &mut ContextResult, root: &Path, ordered: &[Cand], ceiling: usize) {
     let mut cache: HashMap<String, Option<Loaded>> = HashMap::new();
     let mut full = false;
+    let mut used = 0usize;
     let mut stale_cache: HashMap<String, bool> = HashMap::new();
-    for cand in ordered {
+    for (idx, cand) in ordered.iter().enumerate() {
         let omit = |result: &mut ContextResult, cand: &Cand| {
             result.omitted_count += 1;
             if result.omitted.len() < MAX_LISTED_OMITTED {
@@ -531,8 +551,17 @@ fn fill(result: &mut ContextResult, root: &Path, ordered: &[Cand], ceiling: usiz
             omit(result, cand);
             continue;
         }
+        let stale = *stale_cache
+            .entry(cand.path.clone())
+            .or_insert_with(|| !loaded.same(&cand.sha));
+        let header = header_for(&cand.path, cand.start, end, stale, &cand.reason);
         let text = loaded.lines[cand.start - 1..end].join("\n");
-        let room = ceiling.saturating_sub(result.bytes);
+        let reserve = if idx + 1 < ordered.len() {
+            OMITTED_LINE_RESERVE
+        } else {
+            0
+        };
+        let room = ceiling.saturating_sub(used + header.len() + 1 + reserve);
         let (text, cut) = if text.len() > room {
             (cut_at_boundary(&text, room).to_string(), true)
         } else {
@@ -550,6 +579,7 @@ fn fill(result: &mut ContextResult, root: &Path, ordered: &[Cand], ceiling: usiz
             omit(result, cand);
             continue;
         }
+        used += header.len() + text.len() + 1;
         result.bytes += text.len();
         result.snippets.push(Snippet {
             path: cand.path.clone(),
@@ -557,16 +587,37 @@ fn fill(result: &mut ContextResult, root: &Path, ordered: &[Cand], ceiling: usiz
             end_line: end,
             reason: cand.reason.clone(),
             tier: cand.tier,
-            stale: *stale_cache
-                .entry(cand.path.clone())
-                .or_insert_with(|| !loaded.same(&cand.sha)),
+            stale,
             text,
         });
-        if cut || result.bytes >= ceiling {
+        if cut || used >= ceiling {
             full = true;
             if cut {
                 result.truncated = true;
             }
+        }
+    }
+    // The closing line must fit too: give back the last snippets until it does.
+    while result.omitted_count > 0
+        && used + omitted_line(result.omitted_count).len() > ceiling
+        && !result.snippets.is_empty()
+    {
+        let Some(last) = result.snippets.pop() else {
+            break;
+        };
+        used -= snippet_header(&last).len() + last.text.len() + 1;
+        result.bytes -= last.text.len();
+        result.omitted_count += 1;
+        if result.omitted.len() < MAX_LISTED_OMITTED {
+            result.omitted.insert(
+                0,
+                Omitted {
+                    path: last.path,
+                    start_line: last.start_line,
+                    end_line: last.end_line,
+                    reason: last.reason,
+                },
+            );
         }
     }
     if result.omitted_count > 0 {
@@ -574,10 +625,52 @@ fn fill(result: &mut ContextResult, root: &Path, ordered: &[Cand], ceiling: usiz
     }
 }
 
+/// The text form of a result, never longer than `ceiling` bytes. `escape`
+/// makes a snippet safe to print. Omitted candidates are listed only while
+/// they fit, and the last whole line within the ceiling is the final guard.
+pub fn render_text(
+    result: &ContextResult,
+    ceiling: usize,
+    escape: impl Fn(&str) -> String,
+) -> String {
+    if result.snippets.is_empty() {
+        return "no matching code\n".to_string();
+    }
+    let mut text = String::new();
+    for s in &result.snippets {
+        text.push_str(&snippet_header(s));
+        text.push_str(&escape(&s.text));
+        text.push('\n');
+    }
+    if result.omitted_count > 0 {
+        let closing = omitted_line(result.omitted_count);
+        text.push_str(&closing);
+        for o in &result.omitted {
+            let line = format!(
+                "  {}:{}-{}  {}\n",
+                o.path, o.start_line, o.end_line, o.reason
+            );
+            if text.len() + line.len() > ceiling {
+                break;
+            }
+            text.push_str(&line);
+        }
+    }
+    if text.len() > ceiling {
+        let kept = cut_at_boundary(&text, ceiling);
+        let whole = kept.rfind('\n').map_or(0, |i| i + 1);
+        text.truncate(whole);
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testkit::{fx, pinned, Fx};
+
+    /// Header and newline bytes around the single `retry` snippet of `a.ts`.
+    const SNIPPET_OVERHEAD: usize = "== a.ts:1-3  symbol retry; text\n".len() + 1;
 
     fn ctx(f: &Fx, q: &str) -> ContextResult {
         build(&f.conn(), &f.root, &ContextOptions::new(q)).expect("context")
@@ -728,7 +821,7 @@ mod tests {
             f.write("a.ts", &format!("{head}\n{}\n{tail}\n", "x".repeat(filler)));
             f.run();
             let mut opts = ContextOptions::new("retry");
-            opts.ceiling = Some(1024);
+            opts.ceiling = Some(1024 + SNIPPET_OVERHEAD);
 
             // Act
             let got = build(&f.conn(), &f.root, &opts).expect("context");
@@ -771,13 +864,13 @@ mod tests {
         );
         f.run();
         let mut opts = ContextOptions::new("retry");
-        opts.ceiling = Some(25);
+        opts.ceiling = Some(25 + SNIPPET_OVERHEAD);
 
         // Act
         let got = build(&f.conn(), &f.root, &opts).expect("context");
 
         // Assert
-        assert!(got.bytes <= 25);
+        assert!(got.bytes <= 25, "{}", got.bytes);
         assert!(got.truncated);
         let s = &got.snippets[0];
         assert_eq!(s.end_line, s.start_line + s.text.matches('\n').count());
@@ -1005,5 +1098,93 @@ mod tests {
 
         // Assert
         assert!(named > dir, "{named} vs {dir}");
+    }
+
+    fn candidates(n: usize) -> ContextResult {
+        let mut r = ContextResult::default();
+        for i in 0..n {
+            r.snippets.push(Snippet {
+                path: format!("src/f{i}.rs"),
+                start_line: 1,
+                end_line: 3,
+                reason: "symbol run".to_string(),
+                tier: 2,
+                text: "fn run() {\n    work();\n}".to_string(),
+                stale: false,
+            });
+        }
+        r
+    }
+
+    #[test]
+    fn rendered_text_stays_within_the_ceiling_and_ends_on_the_omitted_line() {
+        // Arrange
+        let f = fx("cx-render-many");
+        for i in 0..40 {
+            f.write(
+                &format!("src/f{i}.ts"),
+                &format!("function retry{i}() {{\n{}}}\n", "  work();\n".repeat(6)),
+            );
+        }
+        f.run();
+        let mut opts = ContextOptions::new("retry");
+        opts.ceiling = Some(1024);
+        let _g = pinned();
+
+        // Act
+        let got = build(&f.conn(), &f.root, &opts).expect("context");
+        let text = render_text(&got, 1024, str::to_string);
+
+        // Assert
+        assert!(!text.is_empty());
+        assert!(text.len() <= 1024, "{}", text.len());
+        assert!(got.omitted_count > 0);
+        assert!(text.contains("more candidates did not fit:\n"));
+    }
+
+    #[test]
+    fn one_large_snippet_is_cut_to_a_header_and_whole_lines_within_the_ceiling() {
+        let _g = pinned();
+        // Arrange
+        let f = fx("cx-render-big");
+        f.write(
+            "a.ts",
+            &format!("function retry() {{\n{}}}\n", "  work();\n".repeat(200)),
+        );
+        f.run();
+        let mut opts = ContextOptions::new("retry");
+        opts.ceiling = Some(800);
+
+        // Act
+        let got = build(&f.conn(), &f.root, &opts).expect("context");
+        let text = render_text(&got, 800, str::to_string);
+
+        // Assert
+        assert!(text.starts_with("== a.ts:1-"), "{text}");
+        assert!(text.len() <= 800, "{}", text.len());
+        assert!(text.ends_with('\n'));
+    }
+
+    #[test]
+    fn a_result_with_no_snippets_renders_the_no_match_line() {
+        // Arrange, Act
+        let text = render_text(&ContextResult::default(), 100, str::to_string);
+
+        // Assert
+        assert_eq!(text, "no matching code\n");
+    }
+
+    #[test]
+    fn an_escape_that_doubles_every_byte_still_fits_the_ceiling() {
+        // Arrange
+        let mut r = candidates(3);
+        r.omitted_count = 2;
+
+        // Act
+        let text = render_text(&r, 120, |t| t.repeat(2));
+
+        // Assert
+        assert!(text.len() <= 120, "{}", text.len());
+        assert!(text.is_empty() || text.ends_with('\n'));
     }
 }

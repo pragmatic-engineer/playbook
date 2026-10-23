@@ -464,6 +464,69 @@ fn context_prints_snippets_and_a_stable_json_document() {
     assert!(!small.status.success());
 }
 
+const BUDGET_FILES: usize = 60;
+
+fn budget_fixture(name: &str) -> Fixture {
+    let fx = Fixture::new(name, true);
+    for i in 0..BUDGET_FILES {
+        fx.write(
+            &format!("src/m{i}.ts"),
+            &format!(
+                "export function processPayment{i}() {{\n{}}}\n",
+                "  charge();\n".repeat(30)
+            ),
+        );
+    }
+    assert!(fx.playbook(&["code", "index"]).status.success());
+    fx
+}
+
+#[test]
+fn context_text_output_fits_a_small_token_budget_as_a_whole() {
+    // Arrange
+    let fx = budget_fixture("ctx-small-budget");
+
+    // Act
+    let out = fx.playbook(&["code", "context", "payment", "--max-tokens", "200"]);
+
+    // Assert
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success());
+    assert!(text.contains("== "), "{text}");
+    assert!(out.stdout.len() <= 800, "{}", out.stdout.len());
+}
+
+#[test]
+fn context_text_output_fits_the_default_budget_and_lists_what_was_left_out() {
+    // Arrange
+    let fx = budget_fixture("ctx-default-budget");
+
+    // Act
+    let out = fx.playbook(&["code", "context", "payment"]);
+
+    // Assert
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.stdout.len() <= 16_000, "{}", out.stdout.len());
+    assert!(text.contains("more candidates did not fit"), "{text}");
+}
+
+#[test]
+fn context_json_bytes_count_snippet_text_only() {
+    // Arrange
+    let fx = budget_fixture("ctx-json-bytes");
+
+    // Act
+    let doc = json_of(&fx.playbook(&["code", "context", "payment", "--json"]));
+
+    // Assert
+    let snippets = doc["results"]["snippets"].as_array().expect("snippets");
+    let text_bytes: usize = snippets
+        .iter()
+        .map(|s| s["text"].as_str().expect("text").len())
+        .sum();
+    assert_eq!(doc["results"]["bytes"].as_u64(), Some(text_bytes as u64));
+}
+
 #[test]
 fn an_index_at_the_old_state_path_moves_into_the_data_folder() {
     // Arrange: build an index, then put it back where earlier versions kept it.

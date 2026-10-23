@@ -1,4 +1,4 @@
-# pbtop, the usage dashboard on its own
+# pbtop, the Agent Budget Dashboard on its own
 
 `pbtop` is the Claude Code usage and cost dashboard as one small program, for a machine without playbook. With playbook installed you do not need it: `playbook usage` runs the same code.
 

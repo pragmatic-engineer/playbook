@@ -20,7 +20,7 @@ This is a Cargo workspace. The skills, commands and agents live in `plugins/play
 | `crates/plugin-checks` | `playbook-plugin-checks` | tests that read `plugins/playbook`: prose, structure and policy table |
 | `crates/common` | `playbook-common` | shared helpers: paths, git, sqlite, atomic files |
 | `crates/code` | `playbook-code` | the code index, search, symbols and references |
-| `crates/telemetry` | `playbook-telemetry` | the usage dashboard, with the `pbtop` binary |
+| `crates/telemetry` | `playbook-telemetry` | the Agent Budget Dashboard, with the `pbtop` binary |
 | `crates/data` | `playbook-data` | shared storage (data folder, `config.db`, `memory.db`) |
 
 Run `just test` for everything, or `cargo nextest run -p playbook-code --config-file .github/nextest.toml` for one crate (nextest, because some tests share ports and plain `cargo test` runs them in one process). Doc tests run with `cargo test --workspace --doc`. Tests read the repository through `env!("PLAYBOOK_REPO_ROOT")` and the plugin through `env!("PLAYBOOK_PLUGIN_ROOT")`, both set in `.cargo/config.toml`, instead of `CARGO_MANIFEST_DIR`. Regenerate the reference docs with `UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs`. See [ADR-0029](docs/adr/0029-cargo-workspace-monorepo.md) for the layout and the release tags.
