@@ -451,7 +451,7 @@ jobs:
       PLAYBOOK_REQUIRE_SHELLS: "1"
       # The number of tests in crates/cli/tests/shells.rs. Update it with the
       # tests, so a deleted or renamed test cannot pass silently.
-      EXPECTED_SHELL_TESTS: "8"
+      EXPECTED_SHELL_TESTS: "10"
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         if: env.LANE == 'true'

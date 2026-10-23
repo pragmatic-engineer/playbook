@@ -63,6 +63,12 @@ end\n";
 /// The shell the completion files are written for.
 pub type Shell = PathShell;
 
+/// What the caller resolved: the shell to write completion for.
+#[derive(Debug, Clone, Copy)]
+pub struct Setup {
+    pub shell: Shell,
+}
+
 /// What `ensure` did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Outcome {
@@ -159,6 +165,21 @@ pub fn ensure_with(home: &Path, shell: Shell, ctx: &Ctx) -> io::Result<Outcome> 
         }
     }
     Ok(out)
+}
+
+/// Every file setup writes for `shell` with the text it would hold: the
+/// stubs for bash and fish, the loader for zsh.
+pub fn wired_files(home: &Path, shell: Shell) -> Vec<(PathBuf, String)> {
+    match shell {
+        Shell::Zsh => vec![(loader_path(home), loader_text())],
+        _ => {
+            let text = stub_text(shell);
+            stub_paths(home, shell)
+                .into_iter()
+                .map(|path| (path, text.clone()))
+                .collect()
+        }
+    }
 }
 
 /// The stub files for `shell`, the `pb` ones included. Zsh has none: it uses

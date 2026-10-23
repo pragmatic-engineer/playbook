@@ -74,6 +74,7 @@ Each part has a flag pair. With no flag, `setup` asks in a terminal and uses the
 | System prompt | on, asked | `--system-prompt`, `--no-system-prompt` | `~/.config/playbook/prompts/SYSTEM_PROMPT.md`, and `~/.config/playbook` (the `systemPrompt.enabled` key) |
 | Usage telemetry | on, asked | `--telemetry`, `--no-telemetry` | `~/.claude/settings.json` (the `env` block), `~/.config/playbook/telemetry-env.json` |
 | `pb` short name | on, asked | `--short-name`, `--no-short-name` | the `pb` symlink in the install folder, and `~/.config/playbook` (the `launcher.shortName` key) |
+| Shell completion | on, asked | `--completions`, `--no-completions` | small files in the shell's own completion folder (zsh: `~/.local/share/playbook/completions.zsh`), and for zsh one marked line in `~/.zshrc` |
 | Policy guard | off, asked | `--policy-guard`, `--no-policy-guard` | `~/.config/playbook` (the `hooks.policyGuard.enabled` key) |
 | Attribution | OFF, asked | `--attribution` (ON), `--no-attribution` (OFF) | `~/.claude/settings.json` (the `attribution` key), and `~/.config/playbook` (the `attribution.enabled` key) |
 
@@ -127,6 +128,8 @@ Setup writes no line to your `.zshrc` or `.bashrc`. `playbook cc`, `playbook ccd
 
 `--short-name` asks whether `pb` should be a short name for `playbook`. `install.sh` and the Homebrew formula already make a `pb` symlink, so on those installs the part only checks it. Otherwise, when no other `pb` is on your PATH and playbook sits in the install folder (`$PLAYBOOK_BIN_DIR`, default `~/.local/bin`), setup adds the relative symlink `pb -> playbook` there, the same link `install.sh` makes. It never replaces a `pb` that runs something else, and when playbook lives anywhere else it prints the `ln -s` command to run by hand. The answer is stored as `launcher.shortName`, and a stored no keeps `--yes` from adding the link. `playbook uninstall --remove-binary` removes the link. See [the launcher](../internals/01-launcher-and-hooks.md#the-pb-short-name).
 
+`--completions` installs tab completion for the shell in `$SHELL`. Bash and fish get a small stub for `playbook` and for `pb` in their own completion folders. Zsh has no such folder, so setup writes a loader at `~/.local/share/playbook/completions.zsh` and adds one line to `~/.zshrc`, marked with the trailing comment `# playbook completions`, that sources it when the loader is readable. The loader runs `playbook completions zsh` on the first Tab press, so shell startup costs nothing, and it prints nothing when `playbook` is missing. Setup rewrites a loader it wrote, keeps a loader or stub it did not write, and does not touch a marked line that you edited. `playbook uninstall` removes the loader and every exact line after a backup `~/.zshrc.bak-<stamp>`, and keeps that backup.
+
 ### Disk ballast
 
 ### Policy guard
@@ -160,7 +163,7 @@ Older installs placed `~/.config/playbook/hooks/lib/config-hash.sh`. The config 
 
 ## Undo
 
-- `playbook uninstall` removes the hook entries and status line setup wrote, the launcher block, the files setup placed under `~/.config/playbook`, a collector service file that an older setup installed, and the Codex skill folders that `skills sync` wrote and you did not edit. Run it with `--dry-run` first to see the list. Add `--remove-binary` to remove the binary and its PATH block too. It does not stop a running usage collector, so run `playbook usage stop` first.
+- `playbook uninstall` removes the hook entries and status line setup wrote, the launcher block, the files setup placed under `~/.config/playbook`, the completion files and the zsh line, a collector service file that an older setup installed, and the Codex skill folders that `skills sync` wrote and you did not edit. Run it with `--dry-run` first to see the list. Add `--remove-binary` to remove the binary and its PATH block too. It does not stop a running usage collector, so run `playbook usage stop` first.
 - Memory, your own settings, sessions, history and earlier backups are never removed.
 - Backups of `settings.json` are timestamped files next to it, named `settings.json.bak.<time>`.
 - Any single part can be turned off by running `setup` again with its `--no-` flag, then removing the entries by hand. Setup never deletes a value you have.
