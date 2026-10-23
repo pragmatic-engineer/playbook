@@ -1,6 +1,6 @@
 # Sessions
 
-`playbook sessions` lists your recent agent sessions in one table, so you can see which ones still matter. It is read only. The same records show in the usage terminal view (key `p`). Design: [ADR-0024](../adr/0024-session-management-view-and-lifecycle.md), stage 1.
+`playbook sessions` lists your recent agent sessions in one table, so you can see which ones still matter. It is read only. The usage terminal view shows the same records (key `p`). Design: [ADR-0024](../adr/0024-session-management-view-and-lifecycle.md), stage 1.
 
 ```
 playbook sessions
@@ -15,16 +15,18 @@ playbook sessions --json
 | Session | The first 8 characters of the session id. |
 | Repo, Branch | The newest message of the session in the usage store. |
 | Worktree | Whether the directory the session started in is a linked git worktree, with the playbook convention that made it (`cc` for `playbook cc launch worktree`, `wu`, `agent`, `review`), `main checkout`, or `gone` when the folder no longer exists. |
-| Link | The PR of the branch from `gh pr list --head`, or `issue #N?` when only the branch name has a number. The question mark means the issue is a guess. A session on `main` has no PR link. |
+| Link | The PR of the branch from `gh pr list --head`, or `issue #N?` when only the branch name has a number (the `?` marks a guess). A session on `main` has no PR link. |
 | Last | Time since the last message. |
 | Context | Input plus cache read plus cache write tokens of the newest request, the size of the prompt the model last read. |
 | Cost | The whole session's cost, as in `playbook usage`. |
 
-It reads the same store as `playbook usage` (and ingests new history first), the first transcript lines of each session for its working directory, `git` for the worktree and `git status`, and `gh` for the PR. `gh` and `git` calls have timeouts. A missing `gh` or no network leaves the link empty.
+Reads: the same store as `playbook usage` (new history is ingested first), the first transcript lines of each session for its working directory, `git` for the worktree and `git status`, and `gh` for the PR. `gh` and `git` calls have timeouts. A missing `gh` or no network leaves the link empty.
 
 ## The sessions view
 
-In `playbook usage`, press `p` for a full screen table of the same records, in the usage theme and in UTC. `j` and `k` move, `v` changes the order (newest activity, grouped by repo, or by state with the ones that need attention first), `r` reads again now, `p` or `Esc` goes back and `q` quits. It reads again every 30 seconds, off the drawing loop, so a slow `gh` never freezes the screen. The selected session's suggestion shows under the table. The view has no key that closes, removes or stops anything.
+In `playbook usage`, press `p` for a full screen table of the same records, in the usage theme and in UTC. Keys: `j` and `k` move, `v` changes the order (newest activity, grouped by repo, or by state with the ones that need attention first), `r` reads again now, `p` or `Esc` goes back, `q` quits.
+
+The view reads again every 30 seconds, off the drawing loop, so a slow `gh` never freezes the screen. The selected session's suggestion shows under the table. The view has no key that closes, removes or stops anything.
 
 ## What it never does
 
@@ -36,7 +38,7 @@ In `playbook usage`, press `p` for a full screen table of the same records, in t
 ## Limits
 
 - The working directory is the first one the transcript records. A session that moves into a worktree later shows where it started.
-- The state `working` is a guess from the last message time. A session that is thinking and has not written a message looks idle.
+- `working` is a guess from the last message time. A session that is thinking and has not written a message looks idle.
 - Codex sessions show repo, branch, context and cost, but no directory, so no worktree or PR.
 
 Keys: `sessions.staleAfterDays` and `sessions.recentDays` in [config keys](../reference/config-keys.md).
