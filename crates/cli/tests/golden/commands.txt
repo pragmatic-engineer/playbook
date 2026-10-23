@@ -1,0 +1,49 @@
+playbook commands: one line per command. `(read-only)` runs freely. `(user-only)`, or a name ending in `!`, is for the user: never run it yourself, ask them to type it with `!`. `playbook commands <group>` gives flags, `playbook <command> --help` the details.
+adr next: Helpers for ADRs, such as the next free record number
+agents check|variants: Check agent definition files and their effort variants (read-only)
+atlassian check: Check the Atlassian tools the `playbook:atlassian` skill uses (read-only)
+cc! clean!|fresh!|raw!|list|prune|bust-cache!|launch!|worktree: Start a Claude Code session, or manage sessions and worktrees
+ccd: Start a session with permission prompts skipped (user-only)
+ci: Run the repo checks that need no model (manifest, agents, settings) (read-only)
+code index|status|search|symbol|outline|read|refs|context: Index and search the repository's source code
+commands: List every playbook command, what it does and who may run it (read-only)
+commit prepare|run: Prepare and run the signed commit of `/playbook:commit-and-push`
+config get|set|list|export|import!: Read and change playbook settings in the repo, org or global tier
+deliver: Commit, push and open or update a pull request from any worktree
+deps ensure: Install the tools a Brewfile lists, keeping any already on PATH (user-only)
+doc read|status: Read a PDF or Office file as text with the bundled converter (read-only)
+doctor! check|models|pending-migrations|plugin-version|statusline-command|hook-commands|hook-commands-for-event|hook-commands-matching: Check the playbook setup, or read one fact the check uses
+effort! resolve|suggest|apply!|choose|log|reset!|list: Set playbook's own ceiling on effort, or inspect one component's
+eval review-triage|bench: Check how well the review triage classifier sorts real pull requests (user-only)
+gate record|snapshot|check: Record and check plan verdicts used as gates
+glossary add: Append one term to the repo's `GLOSSARY.md`
+handoff save|show|status|template|facts|check: Save and show the notes that carry a session to the next
+hooks list: List the hooks that setup adds to settings.json (read-only)
+learn preflight|collect: Gather repo facts for the `/playbook:learn-project` collectors (read-only)
+manifest check: Check that tracked files sit in allowed top-level paths (read-only)
+memory rebuild|stats|export|import-claude!|context: Manage the memory graph that sessions read from
+migrate: Bring playbook's own files up to date with this binary (user-only)
+mode auto!|ask|status: Choose whether playbook asks questions or decides on its own
+path: Print a playbook storage folder of this repo, or the plugin folder
+plan checkpoint|cleanup|brief: Plan helpers: checkpoints, Work Unit briefs and scratch cleanup
+plans: List the plans and ADR blueprints `/playbook:implement` can run (read-only)
+pr prepare|create|review-triage|rules|comments|reply|stack|ci-wait|land-wait|merge: Prepare and open pull requests, and pick a review depth
+prose check: Check prose against the writing-style rules (read-only)
+review prepare|suggest|checks|size|triage-merge: Prepare a review: size the diff, pick a depth, run checks
+route: Say which model, effort and agent a kind of task goes to (read-only)
+run-context: Read the run mode and effort ceiling for a command's Step 0 (read-only)
+sanitize commit-msg|pr-text: Remove AI attribution lines from message text
+segment branch|size|resplit: The git recipes `/playbook:implement` runs for a Segment
+sessions list: List recent sessions with their branch, PR, state and cost (read-only)
+settings gen|check: Create or check the shared settings template
+setup: Install or repair your local Claude Code setup (user-only)
+skills sync: Share the playbook skills with other agents (user-only)
+state list: Inspect playbook's own bookkeeping (migration record, sweep markers) (read-only)
+statusline: Print the Claude Code status line (read-only)
+tools map: List the commands a session can use for each task (read-only)
+trust: Mark a directory as trusted in Claude Code (user-only)
+uninstall: Remove what playbook installed from this machine (user-only)
+update: Update playbook to a published release (user-only)
+usage collect!|status|stop!|doctor|prune!: Show token and cost usage across your sessions
+version: Print the installed version, same as `--version` (read-only)
+worktree sweep|remove|review: Clean up git worktrees whose branches have landed

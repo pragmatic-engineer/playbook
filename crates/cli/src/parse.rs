@@ -31,7 +31,10 @@ enum Failure {
 
 /// The clap command tree for [`Cli`].
 pub fn command() -> clap::Command {
-    <Cli as clap::CommandFactory>::command()
+    let mut cmd = <Cli as clap::CommandFactory>::command();
+    cmd.build();
+    let template = crate::command_index::grouped_template(&cmd);
+    cmd.help_template(template)
 }
 
 /// Parses `args` (including the program name).
