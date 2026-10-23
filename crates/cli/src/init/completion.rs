@@ -40,9 +40,9 @@ pub const SKIP_READ_ONLY: &str = "read-only";
 pub const SKIP_NOT_OURS: &str = "not written by playbook";
 pub const SKIP_UNREADABLE: &str = "unreadable";
 pub const SKIP_UNKNOWN_SHELL: &str = "unknown or unset $SHELL";
-const BACKUP_INFIX: &str = ".bak-";
+pub const BACKUP_INFIX: &str = ".bak-";
 /// Second line of every stub, which tells our files from a user's.
-const STUB_MARKER: &str = "# playbook completions (written by playbook setup)";
+pub const STUB_MARKER: &str = "# playbook completions (written by playbook setup)";
 /// zsh reads the `#compdef` tag only from the first line of a function file.
 const ZSH_STUB_HEAD: &str = "#compdef playbook pb\n";
 const BASH_STUB_BODY: &str = "command -v playbook >/dev/null 2>&1 || return 0\n\
@@ -123,14 +123,14 @@ pub fn ensure(home: &Path, shell: Shell) -> io::Result<Outcome> {
 }
 
 #[cfg(unix)]
-fn effective_uid() -> u32 {
+pub fn effective_uid() -> u32 {
     // SAFETY: geteuid has no preconditions and cannot fail.
     unsafe { libc::geteuid() }
 }
 
 /// Windows has no uid, and files there are not owner-checked.
 #[cfg(not(unix))]
-fn effective_uid() -> u32 {
+pub fn effective_uid() -> u32 {
     0
 }
 
@@ -433,6 +433,8 @@ pub fn strip(home: &Path, uid: u32, stamp: u64, dry_run: bool) -> Vec<RcStrip> {
 }
 
 /// Copies `rc` to `<rc>.bak-<stamp>` unless `new` only appends to `old`.
+/// An existing backup under that name is kept and returned as is: it holds
+/// the file from before an earlier step of the same run rewrote it.
 pub fn backup_unless_append_only(
     rc: &Path,
     old: &[u8],
@@ -444,7 +446,9 @@ pub fn backup_unless_append_only(
     }
     let name = rc.file_name().unwrap_or_default().to_string_lossy();
     let backup = rc.with_file_name(format!("{name}{BACKUP_INFIX}{stamp}"));
-    fs::copy(rc, &backup)?;
+    if !backup.exists() {
+        fs::copy(rc, &backup)?;
+    }
     Ok(Some(backup))
 }
 
