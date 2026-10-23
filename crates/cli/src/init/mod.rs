@@ -32,6 +32,7 @@ pub mod attribution;
 pub mod catalog;
 pub mod choices;
 pub mod collector_service;
+pub mod completion;
 pub mod dead_hooks;
 pub mod memory_migrate;
 pub mod merge;
