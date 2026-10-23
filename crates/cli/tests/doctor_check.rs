@@ -1861,3 +1861,138 @@ fn doctor_honors_policy_guard_in_the_environment_like_the_hook() {
     assert_eq!(row["level"], "PASS");
     assert!(row["message"].as_str().unwrap().contains("POLICY_GUARD"));
 }
+
+mod completion_row {
+    use super::*;
+    use playbook::init::completion::{self, Shell, MARKER, ZSH_BLOCK_LINES};
+
+    const ROW_WORD: &str = "completion";
+    const GENERIC_HINT: &str = "run playbook setup";
+    const FUTURE_FLAG: &str = "--only completions";
+    const EDITED_FPATH_LINE: &str = "fpath=(\"$HOME/somewhere/else\" $fpath)";
+    const DUPLICATE_MESSAGE_WORD: &str = "duplicated";
+    const UNMARKED_STUB: &str = "#compdef playbook pb\n_arguments '*: :_files'\n";
+    const SHELL_PATH: &str = "/bin/zsh";
+
+    fn after_setup(tag: &str) -> Box {
+        let b = Box::new(tag);
+        completion::ensure(&b.home(), Shell::Zsh).unwrap();
+        b
+    }
+
+    fn completion_rows(b: &Box) -> Vec<Value> {
+        b.run(&[], SHELL_PATH, None)
+            .into_iter()
+            .filter(|r| r["message"].as_str().unwrap().contains(ROW_WORD))
+            .collect()
+    }
+
+    fn only_row(b: &Box) -> Value {
+        let mut rows = completion_rows(b);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        rows.remove(0)
+    }
+
+    fn zshrc(b: &Box) -> PathBuf {
+        b.home().join(completion::ZSHRC)
+    }
+
+    fn block() -> String {
+        format!("{}\n", ZSH_BLOCK_LINES.join("\n"))
+    }
+
+    #[test]
+    fn doctor_reports_pass_when_the_stub_and_block_are_in_place() {
+        // Arrange
+        let b = after_setup("compl-pass");
+
+        // Act
+        let row = only_row(&b);
+
+        // Assert
+        assert_eq!(row["level"], "PASS", "{row}");
+    }
+
+    #[test]
+    fn doctor_reports_info_when_the_stub_is_absent() {
+        // Arrange
+        let b = Box::new("compl-info");
+
+        // Act
+        let row = only_row(&b);
+
+        // Assert
+        assert_eq!(row["level"], "INFO", "{row}");
+        let hint = row["hint"].as_str().unwrap_or_default();
+        assert!(hint.contains(GENERIC_HINT), "{row}");
+        assert!(!hint.contains(FUTURE_FLAG), "{row}");
+    }
+
+    #[test]
+    fn doctor_warns_when_the_stub_lost_its_marker() {
+        // Arrange
+        let b = after_setup("compl-nomarker");
+        for stub in completion::stub_paths(&b.home(), Shell::Zsh) {
+            fs::write(stub, UNMARKED_STUB).unwrap();
+        }
+
+        // Act
+        let row = only_row(&b);
+
+        // Assert
+        assert_eq!(row["level"], "WARN", "{row}");
+    }
+
+    #[test]
+    fn doctor_warns_when_the_block_is_edited() {
+        // Arrange
+        let b = after_setup("compl-edited");
+        let edited = block().replace(ZSH_BLOCK_LINES[1], EDITED_FPATH_LINE);
+        fs::write(zshrc(&b), edited).unwrap();
+
+        // Act
+        let row = only_row(&b);
+
+        // Assert
+        assert_eq!(row["level"], "WARN", "{row}");
+    }
+
+    #[test]
+    fn doctor_warns_when_the_block_is_duplicated() {
+        // Arrange
+        let b = after_setup("compl-duplicate");
+        fs::write(zshrc(&b), format!("{0}{0}", block())).unwrap();
+        assert_eq!(
+            fs::read_to_string(zshrc(&b))
+                .unwrap()
+                .matches(MARKER)
+                .count(),
+            2
+        );
+
+        // Act
+        let row = only_row(&b);
+
+        // Assert
+        assert_eq!(row["level"], "WARN", "{row}");
+        assert!(
+            row["message"]
+                .as_str()
+                .unwrap()
+                .contains(DUPLICATE_MESSAGE_WORD),
+            "{row}"
+        );
+    }
+
+    #[test]
+    fn the_zsh_block_never_trips_the_retired_launcher_check() {
+        // Arrange
+        let b = after_setup("compl-layer3");
+
+        // Act
+        let rows = b.run(&[], SHELL_PATH, None);
+
+        // Assert
+        assert_eq!(layer(&rows, "3")[0]["level"], "PASS");
+    }
+}
