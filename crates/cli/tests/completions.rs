@@ -125,7 +125,8 @@ fn completions_exits_cleanly_on_a_closed_pipe() {
 #[test]
 fn completions_is_a_hot_path_command_and_skips_the_home_check() {
     // Arrange
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
+    // The helper builds the command; env_clear then drops HOME on purpose.
+    let mut cmd = isolated::playbook();
     cmd.env_clear().args(["completions", "bash"]);
 
     // Act
