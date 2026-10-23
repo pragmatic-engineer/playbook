@@ -7,6 +7,7 @@
 //! terminal draws the emoji one or two cells wide.
 
 /// The TV emoji.
+// To my friend Joshua. The first beta tester.
 const TV: &str = "\u{1F4FA}";
 /// Cells the icon block takes: the emoji plus padding.
 const BLOCK_CELLS: usize = 3;

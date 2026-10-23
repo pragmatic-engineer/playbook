@@ -1,4 +1,4 @@
-╭─┤playbook usage├──┤UTC├──────────────────────────────────────────────────────╮
+╭─┤Agent Budget Dashboard├──┤UTC├──────────────────────────────────────────────╮
 │╭┤ Help: keys by group ├─────────────────────────────────────────────────────╮│
 ││t          Next color theme (off with NO_COLOR)     all panels              ││
 ││p          Open the full screen Sessions list       all panels              ││

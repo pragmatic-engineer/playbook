@@ -2,11 +2,11 @@
 
 An opinionated toolkit for Claude Code. It gives you slash commands, skills and subagents for planning, building, reviewing and remembering, plus a small Rust binary that runs the safety guards, hooks, launcher and status line.
 
-The skills ship as a Claude Code plugin and work on their own. The binary, which adds the guards, hooks, status line and launcher, is optional. Only want the usage dashboard? See [pbtop](docs/guides/11-pbtop.md).
+The skills ship as a Claude Code plugin and work on their own. The binary, which adds the guards, hooks, status line and launcher, is optional. Only want the Agent Budget Dashboard? See [pbtop](docs/guides/11-pbtop.md).
 
 ![pbtop on the monthly view, with the spend and token charts, using sample data](docs/images/pbtop-month.svg)
 
-*`pbtop`, the usage dashboard, on the monthly view with sample data.*
+*`pbtop`, the Agent Budget Dashboard, on the monthly view with sample data.*
 
 ## Install
 
