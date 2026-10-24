@@ -378,7 +378,11 @@ fn a_stub_is_silent_when_completions_fails_or_the_binary_is_missing() {
                 shell_fixture::write_exec(&bin.join(BINARY), FAILING_PLAYBOOK);
             }
             let stub = work.path("stub");
-            std::fs::write(&stub, playbook::init::completion::stub_text(kind)).expect("stub");
+            let script = match kind {
+                playbook::init::completion::Shell::Zsh => playbook::init::completion::loader_text(),
+                _ => playbook::init::completion::stub_text(kind),
+            };
+            std::fs::write(&stub, script).expect("stub");
             let shell_path = find_on_path(shell).expect("shell on PATH");
 
             // Act

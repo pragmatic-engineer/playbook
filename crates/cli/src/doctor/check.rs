@@ -643,7 +643,7 @@ fn old_launcher_rows(env: &Env) -> Vec<Row> {
 }
 
 /// Reports whether tab completion is wired for `$SHELL`. It only reads files:
-/// the stub is a fixed loader that tracks the binary, so it is never stale.
+/// the stub or loader asks the binary for the script, so it is never stale.
 fn completion_rows(env: &Env) -> Vec<Row> {
     use crate::init::completion::{self, Status};
     use crate::init::path::PathShell;
@@ -662,16 +662,16 @@ fn completion_rows(env: &Env) -> Vec<Row> {
             "a completion file is not written by playbook, so setup leaves it alone",
         )
         .hint(COMPLETION_REMOVE_HINT),
-        Status::BlockEdited => Row::new(
+        Status::LineEdited => Row::new(
             "-",
             Level::Warn,
-            "the completion block in ~/.zshrc was edited by hand",
+            "the completion line in ~/.zshrc was edited by hand",
         )
         .hint(COMPLETION_REMOVE_HINT),
-        Status::BlockDuplicated => Row::new(
+        Status::LineDuplicated => Row::new(
             "-",
             Level::Warn,
-            "the completion block in ~/.zshrc is duplicated",
+            "the completion line in ~/.zshrc is duplicated",
         )
         .hint(COMPLETION_REMOVE_HINT),
     };
@@ -679,7 +679,7 @@ fn completion_rows(env: &Env) -> Vec<Row> {
 }
 
 const COMPLETION_SETUP_HINT: &str = "run playbook setup";
-const COMPLETION_REMOVE_HINT: &str = "remove the file or block by hand, then run playbook setup";
+const COMPLETION_REMOVE_HINT: &str = "remove the file or line by hand, then run playbook setup";
 
 fn layer7(env: &Env) -> Vec<Row> {
     let settings = env.settings();

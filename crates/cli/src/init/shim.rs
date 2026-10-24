@@ -4,6 +4,7 @@
 //! Finds and removes the rc-file lines older playbook versions wrote for the
 //! retired shell launcher (ADR 0044), and the installer's `PATH` block.
 
+use crate::init::completion::MARKER as COMPLETION_MARKER;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -203,6 +204,14 @@ fn strip_launcher(content: &[u8], shell_kind: ShellKind) -> Option<Vec<u8>> {
         content,
         |lines, i| {
             let line = lines[i];
+            // The completion rc line (ADR 0054) is not a launcher line, even
+            // when a user's own text before the marker looks like one.
+            if line
+                .trim_ascii_end()
+                .ends_with(COMPLETION_MARKER.as_bytes())
+            {
+                return 0;
+            }
             let trimmed = line.trim_ascii();
             let ours = trimmed == SOURCE_LINE.as_bytes()
                 || BARE_EVALS

@@ -1864,14 +1864,15 @@ fn doctor_honors_policy_guard_in_the_environment_like_the_hook() {
 
 mod completion_row {
     use super::*;
-    use playbook::init::completion::{self, Shell, MARKER, ZSH_BLOCK_LINES};
+    use playbook::init::completion::{self, Shell, MARKER, RC_LINE};
 
     const ROW_WORD: &str = "completion";
     const GENERIC_HINT: &str = "run playbook setup";
     const FUTURE_FLAG: &str = "--only completions";
-    const EDITED_FPATH_LINE: &str = "fpath=(\"$HOME/somewhere/else\" $fpath)";
+    const EDITED_RC_LINE: &str =
+        "[ -r \"$HOME/mine.zsh\" ] && . \"$HOME/mine.zsh\"  # playbook completions\n";
     const DUPLICATE_MESSAGE_WORD: &str = "duplicated";
-    const UNMARKED_STUB: &str = "#compdef playbook pb\n_arguments '*: :_files'\n";
+    const UNMARKED_LOADER: &str = "# somebody else's loader\n";
     const SHELL_PATH: &str = "/bin/zsh";
 
     fn after_setup(tag: &str) -> Box {
@@ -1897,12 +1898,12 @@ mod completion_row {
         b.home().join(completion::ZSHRC)
     }
 
-    fn block() -> String {
-        format!("{}\n", ZSH_BLOCK_LINES.join("\n"))
+    fn rc_line() -> String {
+        format!("{RC_LINE}\n")
     }
 
     #[test]
-    fn doctor_reports_pass_when_the_stub_and_block_are_in_place() {
+    fn doctor_reports_pass_when_the_loader_and_rc_line_are_in_place() {
         // Arrange
         let b = after_setup("compl-pass");
 
@@ -1914,7 +1915,7 @@ mod completion_row {
     }
 
     #[test]
-    fn doctor_reports_info_when_the_stub_is_absent() {
+    fn doctor_reports_info_when_the_loader_is_absent() {
         // Arrange
         let b = Box::new("compl-info");
 
@@ -1929,12 +1930,27 @@ mod completion_row {
     }
 
     #[test]
-    fn doctor_warns_when_the_stub_lost_its_marker() {
+    fn doctor_reports_info_when_the_loader_is_gone_but_the_rc_line_stays() {
+        // Arrange
+        let b = after_setup("compl-loader-gone");
+        fs::remove_file(completion::loader_path(&b.home())).unwrap();
+
+        // Act
+        let row = only_row(&b);
+
+        // Assert
+        assert_eq!(row["level"], "INFO", "{row}");
+        assert!(
+            row["hint"].as_str().unwrap().contains(GENERIC_HINT),
+            "{row}"
+        );
+    }
+
+    #[test]
+    fn doctor_warns_when_the_loader_lost_its_header() {
         // Arrange
         let b = after_setup("compl-nomarker");
-        for stub in completion::stub_paths(&b.home(), Shell::Zsh) {
-            fs::write(stub, UNMARKED_STUB).unwrap();
-        }
+        fs::write(completion::loader_path(&b.home()), UNMARKED_LOADER).unwrap();
 
         // Act
         let row = only_row(&b);
@@ -1944,11 +1960,10 @@ mod completion_row {
     }
 
     #[test]
-    fn doctor_warns_when_the_block_is_edited() {
+    fn doctor_warns_when_the_rc_line_is_edited() {
         // Arrange
         let b = after_setup("compl-edited");
-        let edited = block().replace(ZSH_BLOCK_LINES[1], EDITED_FPATH_LINE);
-        fs::write(zshrc(&b), edited).unwrap();
+        fs::write(zshrc(&b), EDITED_RC_LINE).unwrap();
 
         // Act
         let row = only_row(&b);
@@ -1958,10 +1973,10 @@ mod completion_row {
     }
 
     #[test]
-    fn doctor_warns_when_the_block_is_duplicated() {
+    fn doctor_warns_when_the_rc_line_is_duplicated() {
         // Arrange
         let b = after_setup("compl-duplicate");
-        fs::write(zshrc(&b), format!("{0}{0}", block())).unwrap();
+        fs::write(zshrc(&b), format!("{0}{0}", rc_line())).unwrap();
         assert_eq!(
             fs::read_to_string(zshrc(&b))
                 .unwrap()
@@ -1985,9 +2000,26 @@ mod completion_row {
     }
 
     #[test]
-    fn the_zsh_block_never_trips_the_retired_launcher_check() {
+    fn the_zsh_rc_line_never_trips_the_retired_launcher_check() {
         // Arrange
         let b = after_setup("compl-layer3");
+
+        // Act
+        let rows = b.run(&[], SHELL_PATH, None);
+
+        // Assert
+        assert_eq!(layer(&rows, "3")[0]["level"], "PASS");
+    }
+
+    #[test]
+    fn layer3_ignores_any_rc_line_ending_with_the_marker() {
+        // Arrange
+        let b = Box::new("compl-layer3-marker");
+        let legacy = format!(
+            "source \"$HOME/.config/playbook/shell/zsh/cc.zsh\"  {MARKER}\n{}  {MARKER}\n",
+            playbook::init::shim::SOURCE_LINE
+        );
+        fs::write(zshrc(&b), legacy).unwrap();
 
         // Act
         let rows = b.run(&[], SHELL_PATH, None);
