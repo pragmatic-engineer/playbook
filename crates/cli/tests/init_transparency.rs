@@ -186,6 +186,7 @@ fn explain_without_a_part_describes_every_part() {
         "path",
         "system-prompt",
         "short-name",
+        "completions",
         "trust",
     ] {
         assert!(
