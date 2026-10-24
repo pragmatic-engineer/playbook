@@ -2,33 +2,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Wires tab completion for `playbook` and `pb` into the user's shell files
-//! (ADR 0054): small loader stubs in each shell's autoload directory, and for
-//! zsh one marked block in `~/.zshrc`.
+//! (ADR 0054): small loader stubs in the bash and fish autoload directories,
+//! and for zsh a loader file plus one marked line in `~/.zshrc` that sources it.
 
 use crate::common::atomic::write_atomic_durable;
-use crate::init::path::{self, PathShell};
+use crate::init::path::PathShell;
 use crate::init::shim::{self, RcStrip};
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
-/// Comment that opens the zsh block in `~/.zshrc`.
+/// Trailing comment that marks the zsh line in `~/.zshrc` as ours.
 pub const MARKER: &str = "# playbook completions";
-/// The exact lines of the zsh block, marker first.
-pub const ZSH_BLOCK_LINES: [&str; 3] = [
-    MARKER,
-    r#"fpath=("$HOME/.local/share/zsh/site-functions" $fpath)"#,
-    "if (( $+functions[compdef] )); then autoload -Uz _playbook; compdef _playbook playbook; [[ ${commands[pb]} -ef ${commands[playbook]} ]] && compdef _playbook pb; else autoload -Uz compinit && compinit; fi",
-];
+/// The one line `playbook setup` adds to `~/.zshrc`.
+pub const RC_LINE: &str = r#"[ -r "$HOME/.local/share/playbook/completions.zsh" ] && . "$HOME/.local/share/playbook/completions.zsh"  # playbook completions"#;
 pub const ZSHRC: &str = ".zshrc";
-pub const ZSHENV: &str = ".zshenv";
-pub const ZSH_SITE_FUNCTIONS: &str = ".local/share/zsh/site-functions";
+/// The zsh loader, relative to `$HOME`.
+pub const LOADER: &str = ".local/share/playbook/completions.zsh";
+/// First line of the loader, which tells our file from a user's.
+pub const LOADER_HEADER: &str =
+    "# Written by playbook setup; playbook update rewrites it. Edits are lost.";
+/// The loader after its header. It registers a stub that loads the real
+/// function on the first Tab, so shell startup pays nothing.
+pub const LOADER_BODY: [&str; 5] = [
+    "(( $+commands[playbook] )) || return 0",
+    "(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -C; }",
+    r#"_playbook() { unfunction _playbook; source <(playbook completions zsh 2>/dev/null); _playbook "$@"; }"#,
+    "compdef _playbook playbook",
+    "[[ ${commands[pb]} -ef ${commands[playbook]} ]] && compdef _playbook pb",
+];
 pub const BASH_COMPLETIONS: &str = ".local/share/bash-completion/completions";
 pub const FISH_COMPLETIONS: &str = ".config/fish/completions";
 pub const BINARY_NAME: &str = "playbook";
 pub const ALIAS_NAME: &str = "pb";
 pub const FISH_SUFFIX: &str = ".fish";
-pub const ZSH_STUB_NAME: &str = "_playbook";
 /// Mode of a `~/.zshrc` this module creates; an existing file keeps its own.
 pub const RC_NEW_MODE: u32 = 0o644;
 /// Mode of the directories this module creates, whatever a loose umask says.
@@ -43,8 +50,6 @@ pub const SKIP_UNKNOWN_SHELL: &str = "unknown or unset $SHELL";
 pub const BACKUP_INFIX: &str = ".bak-";
 /// Second line of every stub, which tells our files from a user's.
 pub const STUB_MARKER: &str = "# playbook completions (written by playbook setup)";
-/// zsh reads the `#compdef` tag only from the first line of a function file.
-const ZSH_STUB_HEAD: &str = "#compdef playbook pb\n";
 const BASH_STUB_BODY: &str = "command -v playbook >/dev/null 2>&1 || return 0\n\
 source <(playbook completions bash 2>/dev/null) 2>/dev/null || return 0\n";
 // The script is captured first so a broken `playbook` that prints on stdout
@@ -55,19 +60,6 @@ const FISH_STUB_BODY: &str = "if command -q playbook\n\
 \x20       printf '%s\\n' $script | source\n\
 \x20   end\n\
 end\n";
-// The generated script's own tail does not run `_playbook` under `eval`, so
-// the stub calls it after the load.
-const ZSH_STUB_BODY: &str =
-    "if [[ $service == pb && ! ${commands[pb]} -ef ${commands[playbook]} ]]; then\n\
-\x20 _default \"$@\"\n\
-\x20 return\n\
-fi\n\
-(( $+commands[playbook] )) || return 0\n\
-local script\n\
-script=$(playbook completions zsh 2>/dev/null) || return 0\n\
-eval \"$script\" 2>/dev/null || return 0\n\
-_playbook \"$@\"\n";
-
 /// The shell the completion files are written for.
 pub type Shell = PathShell;
 
@@ -80,7 +72,7 @@ pub struct Outcome {
     pub changed: Vec<PathBuf>,
     /// Files that already held what setup would write.
     pub already: Vec<PathBuf>,
-    /// Files with an edited block or stub, left alone.
+    /// Files with an edited line or stub, left alone.
     pub kept: Vec<PathBuf>,
     /// Files left alone, with the reason.
     pub skipped: Vec<(PathBuf, String)>,
@@ -97,19 +89,19 @@ pub struct Ctx<'a> {
 /// What doctor reports for one shell.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Status {
-    /// No stub, or no way for zsh to find it.
+    /// No stub or loader, or no line that sources it.
     Missing,
     Ok,
-    /// A stub path holds a file without our marker.
+    /// A stub or loader path holds a file without our marker.
     StubNotOurs,
-    /// The zsh block was changed by hand.
-    BlockEdited,
-    /// The zsh block appears more than once.
-    BlockDuplicated,
+    /// The `~/.zshrc` line carries our marker but its text was changed.
+    LineEdited,
+    /// The exact `~/.zshrc` line appears more than once.
+    LineDuplicated,
 }
 
 /// Writes the completion stubs for `shell` under `home`, and for zsh the
-/// block in `~/.zshrc`, as the current user. Never overwrites a file it did
+/// loader and its line in `~/.zshrc`, as the current user. Never overwrites a file it did
 /// not write.
 pub fn ensure(home: &Path, shell: Shell) -> io::Result<Outcome> {
     ensure_with(
@@ -149,24 +141,28 @@ fn owned_by(_meta: &fs::Metadata, _uid: u32) -> bool {
 /// directory is created only under a `home` that uid owns.
 pub fn ensure_with(home: &Path, shell: Shell, ctx: &Ctx) -> io::Result<Outcome> {
     let mut out = Outcome::default();
-    let stubs = stub_paths(home, shell);
-    if stubs.is_empty() {
+    if shell == Shell::Other {
         out.skipped
             .push((home.to_path_buf(), SKIP_UNKNOWN_SHELL.to_string()));
         return Ok(out);
     }
-    let text = stub_text(shell);
     let home_owned = owned_by(&fs::metadata(home)?, ctx.uid);
-    for stub in stubs {
+    let text = stub_text(shell);
+    for stub in stub_paths(home, shell) {
         ensure_stub(stub, &text, home_owned, &mut out)?;
     }
     if shell == Shell::Zsh {
-        ensure_zshrc(home, home_owned, ctx, &mut out)?;
+        let loader_ours = ensure_loader(home, home_owned, ctx, &mut out)?;
+        // A rc line that sources a file we did not write would run their code.
+        if loader_ours {
+            ensure_zshrc(home, home_owned, ctx, &mut out)?;
+        }
     }
     Ok(out)
 }
 
-/// The stub files for `shell`, the `pb` ones included.
+/// The stub files for `shell`, the `pb` ones included. Zsh has none: it uses
+/// [`loader_path`].
 pub fn stub_paths(home: &Path, shell: Shell) -> Vec<PathBuf> {
     let names = |dir: &str, suffix: &str| {
         [BINARY_NAME, ALIAS_NAME]
@@ -176,20 +172,93 @@ pub fn stub_paths(home: &Path, shell: Shell) -> Vec<PathBuf> {
     match shell {
         Shell::Bash => names(BASH_COMPLETIONS, ""),
         Shell::Fish => names(FISH_COMPLETIONS, FISH_SUFFIX),
-        Shell::Zsh => vec![home.join(ZSH_SITE_FUNCTIONS).join(ZSH_STUB_NAME)],
-        Shell::Other => Vec::new(),
+        Shell::Zsh | Shell::Other => Vec::new(),
     }
 }
 
-/// The full text of the loader stub written for `shell`.
+/// The full text of the loader stub written for `shell`; empty for zsh, which
+/// has [`loader_text`] instead.
 pub fn stub_text(shell: Shell) -> String {
-    let (head, body) = match shell {
-        Shell::Bash => ("", BASH_STUB_BODY),
-        Shell::Fish => ("", FISH_STUB_BODY),
-        Shell::Zsh => (ZSH_STUB_HEAD, ZSH_STUB_BODY),
-        Shell::Other => return String::new(),
+    let body = match shell {
+        Shell::Bash => BASH_STUB_BODY,
+        Shell::Fish => FISH_STUB_BODY,
+        Shell::Zsh | Shell::Other => return String::new(),
     };
-    format!("{head}{STUB_MARKER}\n{body}")
+    format!("{STUB_MARKER}\n{body}")
+}
+
+/// Where the zsh loader lives under `home`.
+pub fn loader_path(home: &Path) -> PathBuf {
+    home.join(LOADER)
+}
+
+/// The full text of the zsh loader.
+pub fn loader_text() -> String {
+    format!("{LOADER_HEADER}\n{}\n", LOADER_BODY.join("\n"))
+}
+
+/// Whether `bytes` is a loader we wrote, whatever its body.
+pub fn loader_is_ours(bytes: &[u8]) -> bool {
+    bytes
+        .split(|&b| b == b'\n')
+        .next()
+        .is_some_and(|first| first.trim_ascii_end() == LOADER_HEADER.as_bytes())
+}
+
+/// Writes or rewrites the loader. Returns false when the path holds a file
+/// that is not ours.
+fn ensure_loader(home: &Path, home_owned: bool, ctx: &Ctx, out: &mut Outcome) -> io::Result<bool> {
+    let path = loader_path(home);
+    let text = loader_text();
+    match fs::symlink_metadata(&path) {
+        Err(e) if e.kind() == ErrorKind::NotFound && !home_owned => {
+            out.skipped.push((path, SKIP_OTHER_OWNER.to_string()));
+        }
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            record_write(path.clone(), create_stub(&path, &text), true, out)?;
+        }
+        Err(e) => return Err(e),
+        Ok(_) => return rewrite_loader(&path, &text, ctx, out),
+    }
+    Ok(true)
+}
+
+fn rewrite_loader(path: &Path, text: &str, ctx: &Ctx, out: &mut Outcome) -> io::Result<bool> {
+    let target = match fs::canonicalize(path) {
+        Ok(target) => target,
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            out.skipped
+                .push((path.to_path_buf(), SKIP_DANGLING.to_string()));
+            return Ok(true);
+        }
+        Err(e) => return Err(e),
+    };
+    if !owned_by(&fs::metadata(&target)?, ctx.uid) {
+        out.skipped
+            .push((path.to_path_buf(), SKIP_OTHER_OWNER.to_string()));
+        return Ok(true);
+    }
+    let Ok(bytes) = fs::read(&target) else {
+        out.skipped
+            .push((path.to_path_buf(), SKIP_UNREADABLE.to_string()));
+        return Ok(true);
+    };
+    if !loader_is_ours(&bytes) {
+        out.skipped
+            .push((path.to_path_buf(), SKIP_NOT_OURS.to_string()));
+        return Ok(false);
+    }
+    if bytes == text.as_bytes() {
+        out.already.push(path.to_path_buf());
+        return Ok(true);
+    }
+    let result = if shim::can_rewrite(path) {
+        write_atomic_durable(&target, text.as_bytes())
+    } else {
+        Err(ErrorKind::PermissionDenied.into())
+    };
+    record_write(path.to_path_buf(), result, false, out)?;
+    Ok(true)
 }
 
 fn ensure_stub(path: PathBuf, text: &str, home_owned: bool, out: &mut Outcome) -> io::Result<()> {
@@ -283,25 +352,33 @@ fn read_rc(rc: &Path, uid: u32) -> io::Result<Rc> {
     })
 }
 
-fn zsh_block() -> String {
-    format!("{}\n", ZSH_BLOCK_LINES.join("\n"))
+fn rc_line_text() -> String {
+    format!("{RC_LINE}\n")
 }
 
-/// For each marker line in `content`, whether the block after it is exactly
-/// ours.
-fn marked_blocks(content: &[u8]) -> Vec<bool> {
-    let lines = shim::split_lines(content);
-    (0..lines.len())
-        .filter(|&i| lines[i].trim_ascii_end() == MARKER.as_bytes())
-        .map(|i| shim::is_marked_block(&lines, i, MARKER, &ZSH_BLOCK_LINES[1..]))
-        .collect()
+/// How the lines of `~/.zshrc` relate to ours.
+#[derive(Debug, PartialEq, Eq)]
+struct RcLines {
+    /// Lines equal to [`RC_LINE`].
+    exact: usize,
+    /// Lines that end with [`MARKER`] but are not [`RC_LINE`].
+    edited: usize,
 }
 
-/// Whether `~/.zshrc` or `~/.zshenv` already puts the site-functions dir on
-/// `fpath` by the user's own line.
-fn names_site_functions(home: &Path, zshrc: &[u8]) -> bool {
-    let zshenv = fs::read(home.join(ZSHENV)).unwrap_or_default();
-    path::names_dir(zshrc, ZSH_SITE_FUNCTIONS) || path::names_dir(&zshenv, ZSH_SITE_FUNCTIONS)
+fn rc_lines(content: &[u8]) -> RcLines {
+    let mut found = RcLines {
+        exact: 0,
+        edited: 0,
+    };
+    for line in shim::split_lines(content) {
+        let line = line.trim_ascii_end();
+        if line == RC_LINE.as_bytes() {
+            found.exact += 1;
+        } else if line.ends_with(MARKER.as_bytes()) {
+            found.edited += 1;
+        }
+    }
+    found
 }
 
 fn ensure_zshrc(home: &Path, home_owned: bool, ctx: &Ctx, out: &mut Outcome) -> io::Result<()> {
@@ -322,14 +399,13 @@ fn ensure_zshrc(home: &Path, home_owned: bool, ctx: &Ctx, out: &mut Outcome) -> 
     };
     let created = existing.is_none();
     let content = existing.as_ref().map_or(&[][..], |(_, c)| c.as_slice());
-    match marked_blocks(content).first() {
-        Some(true) => out.already.push(rc),
-        Some(false) => out.kept.push(rc),
-        None if names_site_functions(home, content) => out.already.push(rc),
-        None => {
+    match rc_lines(content) {
+        RcLines { exact: 1.., .. } => out.already.push(rc),
+        RcLines { edited: 1.., .. } => out.kept.push(rc),
+        RcLines { .. } => {
             let result = match existing {
-                None => create_file(&rc, zsh_block().as_bytes()),
-                Some((target, content)) => append_block(&rc, &target, &content),
+                None => create_file(&rc, rc_line_text().as_bytes()),
+                Some((target, content)) => append_line(&rc, &target, &content),
             };
             record_write(rc, result, created, out)?;
         }
@@ -337,10 +413,10 @@ fn ensure_zshrc(home: &Path, home_owned: bool, ctx: &Ctx, out: &mut Outcome) -> 
     Ok(())
 }
 
-/// Appends the block through an atomic replace of the real target, so a
+/// Appends the line through an atomic replace of the real target, so a
 /// symlinked rc stays a symlink. The replace would succeed on a read-only
 /// file in a writable directory, so writability is checked first.
-fn append_block(rc: &Path, target: &Path, original: &[u8]) -> io::Result<()> {
+fn append_line(rc: &Path, target: &Path, original: &[u8]) -> io::Result<()> {
     if !shim::can_rewrite(rc) {
         return Err(ErrorKind::PermissionDenied.into());
     }
@@ -348,7 +424,7 @@ fn append_block(rc: &Path, target: &Path, original: &[u8]) -> io::Result<()> {
     if !appended.is_empty() && !appended.ends_with(b"\n") {
         appended.push(b'\n');
     }
-    appended.extend_from_slice(zsh_block().as_bytes());
+    appended.extend_from_slice(rc_line_text().as_bytes());
     write_atomic_durable(target, appended)
 }
 
@@ -371,6 +447,9 @@ fn record_write(
 
 /// What doctor should report for `shell` under `home`, from the files on disk.
 pub fn status(home: &Path, shell: Shell) -> Status {
+    if shell == Shell::Zsh {
+        return zsh_status(home);
+    }
     let stubs = stub_paths(home, shell);
     if stubs.is_empty() {
         return Status::Missing;
@@ -382,22 +461,28 @@ pub fn status(home: &Path, shell: Shell) -> Status {
     if contents.iter().flatten().any(|c| !has_line(c, STUB_MARKER)) {
         return Status::StubNotOurs;
     }
-    if shell != Shell::Zsh {
-        return Status::Ok;
+    Status::Ok
+}
+
+fn zsh_status(home: &Path) -> Status {
+    let Ok(loader) = fs::read(loader_path(home)) else {
+        return Status::Missing;
+    };
+    if !loader_is_ours(&loader) {
+        return Status::StubNotOurs;
     }
     let zshrc = fs::read(home.join(ZSHRC)).unwrap_or_default();
-    match marked_blocks(&zshrc).as_slice() {
-        [] if names_site_functions(home, &zshrc) => Status::Ok,
-        [] => Status::Missing,
-        [true] => Status::Ok,
-        [false] => Status::BlockEdited,
-        _ => Status::BlockDuplicated,
+    match rc_lines(&zshrc) {
+        RcLines { exact: 1, .. } => Status::Ok,
+        RcLines { exact: 2.., .. } => Status::LineDuplicated,
+        RcLines { edited: 1.., .. } => Status::LineEdited,
+        RcLines { .. } => Status::Missing,
     }
 }
 
-/// Removes the exact zsh block from `~/.zshrc` after a backup, for uninstall.
+/// Removes every exact line from `~/.zshrc` after a backup, for uninstall.
 /// A file whose real target belongs to a uid other than `uid` is reported and
-/// left alone. Stub files are the caller's to remove.
+/// left alone. The loader file is the caller's to remove.
 pub fn strip(home: &Path, uid: u32, stamp: u64, dry_run: bool) -> Vec<RcStrip> {
     let rc = home.join(ZSHRC);
     let Ok(target) = fs::canonicalize(&rc) else {
@@ -406,7 +491,7 @@ pub fn strip(home: &Path, uid: u32, stamp: u64, dry_run: bool) -> Vec<RcStrip> {
     let Ok(old) = fs::read(&target) else {
         return Vec::new();
     };
-    let Some(new) = shim::strip_marked_block(&old, MARKER, &ZSH_BLOCK_LINES[1..]) else {
+    let Some(new) = shim::strip_marked_block(&old, RC_LINE, &[]) else {
         return Vec::new();
     };
     let mut entry = RcStrip {
@@ -479,6 +564,14 @@ mod tests {
     const USER_LINES: &str = "export EDITOR=vim\nalias ll='ls -l'\n";
     const NO_NEWLINE: &str = "export EDITOR=vim\nalias ll='ls -l'";
     const CREATED: &str = "created";
+    const EDITED_RC_LINE: &str =
+        "[ -r \"$HOME/mine.zsh\" ] && . \"$HOME/mine.zsh\"  # playbook completions\n";
+    const THEIR_LOADER: &str = "# somebody else's loader\n";
+    const OLD_LOGIC: &str = "# old logic\n";
+
+    fn stale_loader() -> String {
+        format!("{LOADER_HEADER}\n{OLD_LOGIC}")
+    }
 
     fn home(tag: &str) -> PathBuf {
         let dir = crate::common::test_support::scratch_dir(tag);
@@ -508,7 +601,7 @@ mod tests {
     }
 
     fn marker_lines(path: &Path) -> usize {
-        read(path).lines().filter(|l| *l == MARKER).count()
+        read(path).lines().filter(|l| l.ends_with(MARKER)).count()
     }
 
     fn backups(dir: &Path) -> Vec<String> {
@@ -570,7 +663,7 @@ mod tests {
 
         // Assert
         let rc = zshrc(&home);
-        assert_eq!(read(&rc), zsh_block());
+        assert_eq!(read(&rc), rc_line_text());
         assert_eq!(mode(&rc), RC_NEW_MODE);
         assert!(backups(&home).is_empty(), "{:?}", backups(&home));
         assert!(out.created.contains(&rc), "{CREATED}: {out:?}");
@@ -586,7 +679,10 @@ mod tests {
         ensure(&home, Shell::Zsh).unwrap();
 
         // Assert
-        assert_eq!(read(zshrc(&home)), format!("{USER_LINES}{}", zsh_block()));
+        assert_eq!(
+            read(zshrc(&home)),
+            format!("{USER_LINES}{}", rc_line_text())
+        );
         assert!(backups(&home).is_empty(), "{:?}", backups(&home));
     }
 
@@ -617,7 +713,7 @@ mod tests {
             // Assert
             assert_eq!(
                 String::from_utf8(after_first).unwrap(),
-                format!("{original}{separator}{}", zsh_block()),
+                format!("{original}{separator}{}", rc_line_text()),
                 "{tag}"
             );
             assert_eq!(marker_lines(&zshrc(&home)), 1, "{tag}");
@@ -721,9 +817,9 @@ mod tests {
     #[test]
     fn two_ensure_calls_forced_to_interleave_leave_exactly_one_block() {
         // Arrange
-        let with_block = format!("{USER_LINES}{}", zsh_block());
+        let with_block = format!("{USER_LINES}{}", rc_line_text());
         let cases = [
-            ("create", None, zsh_block()),
+            ("create", None, rc_line_text()),
             ("append", Some(USER_LINES.to_string()), with_block.clone()),
             ("no-op", Some(with_block.clone()), with_block),
         ];
@@ -743,11 +839,10 @@ mod tests {
     }
 
     #[test]
-    fn an_edited_block_is_kept_and_not_duplicated() {
+    fn an_edited_marker_line_is_kept_and_not_duplicated() {
         // Arrange
         let home = home("completion-edited");
-        let edited = format!("{MARKER}\n# my own fpath\n{}\n", ZSH_BLOCK_LINES[2]);
-        let original = format!("{USER_LINES}{edited}");
+        let original = format!("{USER_LINES}{EDITED_RC_LINE}");
         fs::write(zshrc(&home), &original).unwrap();
 
         // Act
@@ -770,7 +865,7 @@ mod tests {
         ensure(&home, Shell::Zsh).unwrap();
 
         // Assert
-        assert!(read(&rc).ends_with(&zsh_block()));
+        assert!(read(&rc).ends_with(&rc_line_text()));
         assert_eq!(mode(&rc), PRIVATE_MODE);
     }
 
@@ -817,7 +912,7 @@ mod tests {
         run_ensure_under_umask(PRIVATE_UMASK, &home);
 
         // Assert
-        assert_eq!(read(zshrc(&home)), zsh_block());
+        assert_eq!(read(zshrc(&home)), rc_line_text());
         assert_eq!(mode(&zshrc(&home)), RC_NEW_MODE);
     }
 
@@ -830,8 +925,10 @@ mod tests {
         run_ensure_under_umask(LOOSE_UMASK, &home);
 
         // Assert
-        let site_functions = home.join(ZSH_SITE_FUNCTIONS);
-        let chain: Vec<_> = site_functions
+        let loader = loader_path(&home);
+        let chain: Vec<_> = loader
+            .parent()
+            .unwrap()
             .ancestors()
             .take_while(|dir| *dir != home)
             .collect();
@@ -918,7 +1015,7 @@ mod tests {
         // Assert
         assert!(zshrc(&home).is_symlink());
         assert_eq!(fs::read_link(zshrc(&home)).unwrap(), target);
-        assert_eq!(read(&target), format!("{USER_LINES}{}", zsh_block()));
+        assert_eq!(read(&target), format!("{USER_LINES}{}", rc_line_text()));
     }
 
     #[test]
@@ -998,7 +1095,7 @@ mod tests {
 
     #[test]
     fn a_stub_path_that_is_not_ours_is_never_overwritten() {
-        for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+        for shell in [Shell::Bash, Shell::Fish] {
             // Arrange
             let home = home("completion-foreign-stub");
             let stubs = stub_paths(&home, shell);
@@ -1017,27 +1114,151 @@ mod tests {
     }
 
     #[test]
-    fn a_zshrc_that_names_the_dir_gets_no_block() {
+    fn zsh_has_no_fpath_stub() {
         // Arrange
-        let home = home("completion-names-dir");
-        let own = format!(
-            "fpath=({} $fpath)\n",
-            home.join(ZSH_SITE_FUNCTIONS).display()
-        );
-        fs::write(zshrc(&home), &own).unwrap();
+        let home = home("completion-no-fpath-stub");
+
+        // Act
+        let out = ensure(&home, Shell::Zsh).unwrap();
+
+        // Assert
+        assert!(stub_paths(&home, Shell::Zsh).is_empty());
+        assert!(stub_text(Shell::Zsh).is_empty());
+        let written: Vec<_> = out.created.iter().collect();
+        assert_eq!(written, [&loader_path(&home), &zshrc(&home)], "{out:?}");
+    }
+
+    #[test]
+    fn the_loader_is_the_header_then_the_five_adr_lines() {
+        // Arrange
+        let home = home("completion-loader-text");
 
         // Act
         ensure(&home, Shell::Zsh).unwrap();
 
         // Assert
-        assert_eq!(read(zshrc(&home)), own);
+        let loader = loader_path(&home);
+        assert_eq!(read(&loader), loader_text());
+        let lines: Vec<_> = loader_text().lines().map(str::to_owned).collect();
+        assert_eq!(lines[0], LOADER_HEADER);
+        assert_eq!(lines[1..], LOADER_BODY);
+        assert_eq!(mode(&loader), RC_NEW_MODE);
+        assert_eq!(
+            LOADER_BODY[2],
+            "_playbook() { unfunction _playbook; source <(playbook completions zsh 2>/dev/null); _playbook \"$@\"; }"
+        );
     }
 
     #[test]
-    fn the_block_and_stubs_leave_the_retired_launcher_check_clean() {
+    fn the_rc_line_is_the_adr_line() {
+        assert_eq!(
+            RC_LINE,
+            "[ -r \"$HOME/.local/share/playbook/completions.zsh\" ] && . \"$HOME/.local/share/playbook/completions.zsh\"  # playbook completions"
+        );
+    }
+
+    #[test]
+    fn a_loader_whose_text_differs_is_rewritten_when_it_has_our_header() {
+        // Arrange
+        let home = home("completion-loader-stale");
+        let loader = loader_path(&home);
+        fs::create_dir_all(loader.parent().unwrap()).unwrap();
+        fs::write(&loader, stale_loader()).unwrap();
+
+        // Act
+        let out = ensure(&home, Shell::Zsh).unwrap();
+
+        // Assert
+        assert_eq!(read(&loader), loader_text());
+        assert!(out.changed.contains(&loader), "{out:?}");
+    }
+
+    #[test]
+    fn a_loader_without_our_header_is_kept_and_no_rc_line_is_added() {
+        // Arrange
+        let home = home("completion-loader-theirs");
+        let loader = loader_path(&home);
+        fs::create_dir_all(loader.parent().unwrap()).unwrap();
+        fs::write(&loader, THEIR_LOADER).unwrap();
+
+        // Act
+        let out = ensure(&home, Shell::Zsh).unwrap();
+
+        // Assert
+        assert_eq!(read(&loader), THEIR_LOADER);
+        assert!(
+            out.skipped
+                .iter()
+                .any(|(p, why)| *p == loader && why == SKIP_NOT_OURS),
+            "{out:?}"
+        );
+        assert!(!zshrc(&home).exists(), "{:?}", listing(&home));
+    }
+
+    #[test]
+    fn a_dangling_symlink_loader_is_skipped_and_a_live_one_is_followed() {
+        // Arrange
+        let dangling = home("completion-loader-dangling");
+        let live = home("completion-loader-live");
+        for (home, target_exists) in [(&dangling, false), (&live, true)] {
+            let loader = loader_path(home);
+            fs::create_dir_all(loader.parent().unwrap()).unwrap();
+            let target = home.join("dotfiles-loader");
+            if target_exists {
+                fs::write(&target, stale_loader()).unwrap();
+            }
+            symlink(&target, &loader).unwrap();
+        }
+
+        // Act
+        let out_dangling = ensure(&dangling, Shell::Zsh).unwrap();
+        ensure(&live, Shell::Zsh).unwrap();
+
+        // Assert
+        assert!(!dangling.join("dotfiles-loader").exists());
+        assert!(
+            out_dangling
+                .skipped
+                .iter()
+                .any(|(p, why)| *p == loader_path(&dangling) && why == SKIP_DANGLING),
+            "{out_dangling:?}"
+        );
+        assert!(loader_path(&live).is_symlink());
+        assert_eq!(read(live.join("dotfiles-loader")), loader_text());
+    }
+
+    #[test]
+    fn two_exact_lines_are_left_as_they_are_and_a_marker_with_other_text_is_kept() {
+        // Arrange
+        let twice = home("completion-two-lines");
+        let both = format!("{0}{USER_LINES}{0}", rc_line_text());
+        fs::write(zshrc(&twice), &both).unwrap();
+        let mixed = home("completion-mixed-lines");
+        let kept = format!("{EDITED_RC_LINE}{USER_LINES}");
+        fs::write(zshrc(&mixed), &kept).unwrap();
+
+        // Act
+        let out_twice = ensure(&twice, Shell::Zsh).unwrap();
+        let out_mixed = ensure(&mixed, Shell::Zsh).unwrap();
+
+        // Assert
+        assert_eq!(read(zshrc(&twice)), both);
+        assert!(out_twice.already.contains(&zshrc(&twice)), "{out_twice:?}");
+        assert_eq!(read(zshrc(&mixed)), kept);
+        assert!(out_mixed.kept.contains(&zshrc(&mixed)), "{out_mixed:?}");
+    }
+
+    #[test]
+    fn the_rc_line_never_trips_the_retired_launcher_check() {
         // Arrange
         let home = home("completion-layer3");
         fs::write(zshrc(&home), USER_LINES).unwrap();
+        let retired = [
+            format!("{}  {MARKER}", shim::SOURCE_LINE),
+            format!("source \"$HOME/.config/playbook/shell/zsh/cc.zsh\"  {MARKER}"),
+            format!("eval \"$(playbook shell-init)\"  {MARKER}"),
+            format!("# playbook launchers (ccc/ccd)  {MARKER}"),
+        ];
 
         // Act
         ensure(&home, Shell::Zsh).unwrap();
@@ -1048,7 +1269,14 @@ mod tests {
             "{:?}",
             shim::retired_rc_entries(&home)
         );
-        for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+        for line in retired {
+            fs::write(zshrc(&home), format!("{line}\n")).unwrap();
+            assert!(
+                shim::retired_rc_entries(&home).is_empty(),
+                "a line ending with the marker was flagged: {line}"
+            );
+        }
+        for shell in [Shell::Bash, Shell::Fish] {
             assert!(
                 !stub_text(shell).contains(shim::SOURCE_LINE),
                 "{shell:?} stub names the retired launcher line"
@@ -1069,40 +1297,66 @@ mod tests {
         // Act
         fs::write(&rc, format!("{original}{original}")).unwrap();
         let twice = status(&home, Shell::Zsh);
-        fs::write(&rc, original.replace(ZSH_BLOCK_LINES[1], "# edited")).unwrap();
+        fs::write(&rc, EDITED_RC_LINE).unwrap();
         let edited = status(&home, Shell::Zsh);
-        fs::write(&stub_paths(&home, Shell::Zsh)[0], "# not ours\n").unwrap();
+        fs::write(&rc, USER_LINES).unwrap();
+        let no_line = status(&home, Shell::Zsh);
+        fs::write(&rc, &original).unwrap();
+        fs::write(loader_path(&home), THEIR_LOADER).unwrap();
         let foreign = status(&home, Shell::Zsh);
+        fs::remove_file(loader_path(&home)).unwrap();
+        let no_loader = status(&home, Shell::Zsh);
 
         // Assert
         assert_eq!(before, Status::Missing);
         assert_eq!(after, Status::Ok);
-        assert_eq!(twice, Status::BlockDuplicated);
-        assert_eq!(edited, Status::BlockEdited);
+        assert_eq!(twice, Status::LineDuplicated);
+        assert_eq!(edited, Status::LineEdited);
+        assert_eq!(no_line, Status::Missing);
         assert_eq!(foreign, Status::StubNotOurs);
+        assert_eq!(no_loader, Status::Missing);
     }
 
     #[test]
-    fn strip_removes_only_an_exact_block_after_a_backup() {
+    fn strip_removes_every_exact_line_after_a_backup_that_is_never_overwritten() {
         // Arrange
         let home = home("completion-strip");
         let rc = zshrc(&home);
-        fs::write(&rc, USER_LINES).unwrap();
-        ensure(&home, Shell::Zsh).unwrap();
+        let original = format!("{USER_LINES}{0}{0}", rc_line_text());
+        fs::write(&rc, &original).unwrap();
+        let backup = home.join(format!("{ZSHRC}{BACKUP_INFIX}{STAMP}"));
+        fs::write(&backup, "an earlier backup\n").unwrap();
 
         // Act
         let dry = strip(&home, effective_uid(), STAMP, true);
+        let dry_text = read(&rc);
         let done = strip(&home, effective_uid(), STAMP, false);
         let again = strip(&home, effective_uid(), STAMP, false);
 
         // Assert
         assert_eq!(dry.len(), 1);
+        assert_eq!(dry_text, original);
         assert_eq!(read(&rc), USER_LINES);
-        assert_eq!(
-            done[0].backup.as_deref().map(|p| read(p).contains(MARKER)),
-            Some(true)
-        );
+        assert_eq!(done[0].backup.as_ref(), Some(&backup));
+        assert_eq!(read(&backup), "an earlier backup\n");
         assert!(again.is_empty());
+    }
+
+    #[test]
+    fn strip_takes_a_backup_with_the_original_when_none_exists() {
+        // Arrange
+        let home = home("completion-strip-backup");
+        let rc = zshrc(&home);
+        let original = format!("{USER_LINES}{}", rc_line_text());
+        fs::write(&rc, &original).unwrap();
+
+        // Act
+        let done = strip(&home, effective_uid(), STAMP, false);
+
+        // Assert
+        let backup = done[0].backup.as_ref().expect("a backup");
+        assert_eq!(read(backup), original);
+        assert_eq!(read(&rc), USER_LINES);
     }
 
     #[test]
@@ -1139,23 +1393,6 @@ mod tests {
     }
 
     #[test]
-    fn the_zsh_stub_hands_a_foreign_pb_to_the_default_completer() {
-        // Arrange
-        let text = stub_text(Shell::Zsh);
-
-        // Act
-        let first_line = text.lines().next();
-        let guard = text.find("$service == pb").expect("service guard");
-        let default = text.find("_default \"$@\"").expect("default completer");
-        let load = text.find("completions zsh").expect("script load");
-
-        // Assert
-        assert_eq!(first_line, Some("#compdef playbook pb"));
-        assert!(text.contains("! ${commands[pb]} -ef ${commands[playbook]}"));
-        assert!(guard < default && default < load, "{text}");
-    }
-
-    #[test]
     fn the_fish_stub_sources_only_a_successful_non_empty_script() {
         // Arrange
         let text = stub_text(Shell::Fish);
@@ -1175,17 +1412,17 @@ mod tests {
     }
 
     #[test]
-    fn strip_keeps_an_edited_block() {
+    fn strip_keeps_an_edited_marker_line() {
         // Arrange
         let home = home("completion-strip-edited");
-        let edited = format!("{MARKER}\n# my own fpath\n");
-        fs::write(zshrc(&home), &edited).unwrap();
+        fs::write(zshrc(&home), EDITED_RC_LINE).unwrap();
 
         // Act
         let out = strip(&home, effective_uid(), STAMP, false);
 
         // Assert
         assert!(out.is_empty());
-        assert_eq!(read(zshrc(&home)), edited);
+        assert_eq!(read(zshrc(&home)), EDITED_RC_LINE);
+        assert!(backups(&home).is_empty(), "{:?}", backups(&home));
     }
 }

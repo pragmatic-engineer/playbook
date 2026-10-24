@@ -274,18 +274,16 @@ fn settings_step(
     }
 }
 
-/// Removes the completion stubs and the `~/.zshrc` block `playbook setup`
-/// wrote, keeping any the user edited. Runs with or without the binary, since
-/// the stubs are silent when it is gone.
+/// Removes the completion stubs, the zsh loader and the `~/.zshrc` line
+/// `playbook setup` wrote, keeping any the user edited. Runs with or without
+/// the binary, since the stubs and the loader are silent when it is gone.
 fn completion_step(home: &Path, uid: u32, stamp: u64, dry_run: bool, report: &mut Report) {
     let verb = if dry_run { "would remove" } else { "removed" };
-    for shell in [Shell::Bash, Shell::Fish, Shell::Zsh] {
+    for shell in [Shell::Bash, Shell::Fish] {
         stub_files_step(home, shell, verb, dry_run, report);
     }
-    if !dry_run {
-        let _ = fs::remove_dir(home.join(completion::ZSH_SITE_FUNCTIONS));
-    }
-    zshrc_block_step(home, uid, stamp, dry_run, report);
+    loader_step(home, verb, dry_run, report);
+    zshrc_line_step(home, uid, stamp, dry_run, report);
     keep_zshrc_backups(home, stamp, report);
 }
 
@@ -306,35 +304,50 @@ fn stub_files_step(home: &Path, shell: Shell, verb: &str, dry_run: bool, report:
     }
 }
 
-fn zshrc_block_step(home: &Path, uid: u32, stamp: u64, dry_run: bool, report: &mut Report) {
+/// Removes the loader when it carries our header, and its directory when that
+/// leaves it empty. A file without the header is not ours and is kept.
+fn loader_step(home: &Path, verb: &str, dry_run: bool, report: &mut Report) {
+    let loader = completion::loader_path(home);
+    let Ok(bytes) = fs::read(&loader) else { return };
+    if !completion::loader_is_ours(&bytes) {
+        report
+            .lines
+            .push(format!("kept {} (not ours)", loader.display()));
+        return;
+    }
+    remove_file(&loader, verb, dry_run, report);
+    if let (false, Some(dir)) = (dry_run, loader.parent()) {
+        let _ = fs::remove_dir(dir);
+    }
+}
+
+fn zshrc_line_step(home: &Path, uid: u32, stamp: u64, dry_run: bool, report: &mut Report) {
     let rc = home.join(completion::ZSHRC);
     for change in completion::strip(home, uid, stamp, dry_run) {
         let name = change.rc_file.display();
         if change.unwritable {
             report.errors.push(format!(
-                "{name} is read-only; remove the playbook completion block by hand"
+                "{name} is read-only; remove the playbook completion line by hand"
             ));
         } else if let Some(err) = change.error {
             report.errors.push(format!("{name} left unchanged: {err}"));
         } else if let Some(backup) = change.backup {
             report.lines.push(format!(
-                "removed the playbook completion block from {name} (backup: {})",
+                "removed the playbook completion line from {name} (backup: {})",
                 backup.display()
             ));
         } else {
             report.lines.push(format!(
-                "would remove the playbook completion block from {name}"
+                "would remove the playbook completion line from {name}"
             ));
         }
     }
-    // Whatever the strip leaves behind is a block whose lines were edited.
+    // Whatever the strip leaves behind is a marker line whose text was edited.
     let Ok(old) = fs::read(&rc) else { return };
-    let left =
-        shim::strip_marked_block(&old, completion::MARKER, &completion::ZSH_BLOCK_LINES[1..])
-            .unwrap_or(old);
+    let left = shim::strip_marked_block(&old, completion::RC_LINE, &[]).unwrap_or(old);
     if left
         .split(|&b| b == b'\n')
-        .any(|l| l.trim_ascii_end() == completion::MARKER.as_bytes())
+        .any(|l| l.trim_ascii_end().ends_with(completion::MARKER.as_bytes()))
     {
         report.lines.push(format!("kept {} (edited)", rc.display()));
     }
@@ -550,21 +563,20 @@ mod tests {
     #[cfg(unix)]
     mod completion {
         use super::*;
-        use crate::init::completion::{
-            self, Shell, MARKER, SKIP_OTHER_OWNER, ZSHRC, ZSH_BLOCK_LINES, ZSH_SITE_FUNCTIONS,
-        };
+        use crate::init::completion::{self, Shell, MARKER, RC_LINE, SKIP_OTHER_OWNER, ZSHRC};
         use std::os::unix::fs::{symlink, MetadataExt};
 
         const STAMP: u64 = 1_700_000_000;
         const LATER_STAMP: u64 = 1_700_000_500;
         const BEFORE: &str = "export EDITOR=vim\n";
         const AFTER: &str = "alias ll='ls -l'\n";
-        const EDITED_FPATH_LINE: &str = "fpath=(\"$HOME/somewhere/else\" $fpath)\n";
+        const EDITED_RC_LINE: &str =
+            "[ -r \"$HOME/mine.zsh\" ] && . \"$HOME/mine.zsh\"  # playbook completions\n";
+        const THEIR_LOADER: &str = "# somebody else's loader\n";
         const EDITED_SUFFIX: &str = "# my own tweak\n";
         const KEPT_EDITED: &str = "kept";
         const EDITED_WORD: &str = "(edited)";
         const EARLIER_BACKUP: &str = "(earlier backup)";
-        const FOREIGN_FILE_NAME: &str = "_other";
         const OLD_MTIME_SECS: u64 = 86_400;
 
         fn home(tag: &str) -> PathBuf {
@@ -578,11 +590,7 @@ mod tests {
         }
 
         fn block() -> String {
-            format!("{}\n", ZSH_BLOCK_LINES.join("\n"))
-        }
-
-        fn edited_block() -> String {
-            block().replace(ZSH_BLOCK_LINES[1], EDITED_FPATH_LINE.trim_end())
+            format!("{RC_LINE}\n")
         }
 
         fn backup_name(stamp: u64) -> String {
@@ -627,11 +635,11 @@ mod tests {
         }
 
         fn marker_lines(content: &str) -> usize {
-            content.lines().filter(|l| *l == MARKER).count()
+            content.lines().filter(|l| l.ends_with(MARKER)).count()
         }
 
         #[test]
-        fn uninstall_strips_an_exact_block_and_keeps_user_lines_byte_for_byte() {
+        fn uninstall_strips_the_exact_line_and_keeps_user_lines_byte_for_byte() {
             // Arrange
             let home = home("uninstall-completion-strip");
             let original = format!("{BEFORE}{}{AFTER}", block());
@@ -646,7 +654,7 @@ mod tests {
         }
 
         #[test]
-        fn uninstall_strips_each_exact_block() {
+        fn uninstall_strips_each_exact_line() {
             // Arrange
             let home = home("uninstall-completion-two");
             write_zshrc(&home, &format!("{BEFORE}{}{AFTER}{}", block(), block()));
@@ -661,12 +669,12 @@ mod tests {
         }
 
         #[test]
-        fn uninstall_keeps_an_edited_block_and_strips_the_exact_one() {
+        fn uninstall_keeps_an_edited_marker_line_and_strips_the_exact_one() {
             // Arrange
             let home = home("uninstall-completion-mixed");
             write_zshrc(
                 &home,
-                &format!("{BEFORE}{}{AFTER}{}", edited_block(), block()),
+                &format!("{BEFORE}{EDITED_RC_LINE}{AFTER}{}", block()),
             );
 
             // Act
@@ -674,7 +682,7 @@ mod tests {
 
             // Assert
             let after = read(&home.join(ZSHRC));
-            assert_eq!(after, format!("{BEFORE}{}{AFTER}", edited_block()));
+            assert_eq!(after, format!("{BEFORE}{EDITED_RC_LINE}{AFTER}"));
             let said = said(&report);
             assert!(
                 said.contains(KEPT_EDITED) && said.contains(EDITED_WORD),
@@ -686,7 +694,7 @@ mod tests {
         fn uninstall_removes_the_stubs_including_pb_and_keeps_an_edited_stub() {
             // Arrange
             let home = home("uninstall-completion-stubs");
-            for shell in [Shell::Bash, Shell::Fish, Shell::Zsh] {
+            for shell in [Shell::Bash, Shell::Fish] {
                 completion::ensure(&home, shell).unwrap();
             }
             let edited = completion::stub_paths(&home, Shell::Bash).pop().unwrap();
@@ -698,7 +706,7 @@ mod tests {
             let report = run_step(&home, uid_of(&home), STAMP);
 
             // Assert
-            for shell in [Shell::Bash, Shell::Fish, Shell::Zsh] {
+            for shell in [Shell::Bash, Shell::Fish] {
                 for stub in completion::stub_paths(&home, shell) {
                     assert_eq!(stub == edited, stub.exists(), "{}", stub.display());
                 }
@@ -711,22 +719,50 @@ mod tests {
         }
 
         #[test]
-        fn uninstall_removes_the_site_functions_dir_only_when_empty() {
+        fn uninstall_removes_our_loader_and_an_empty_dir_and_keeps_a_foreign_loader() {
             // Arrange
-            let emptied = home("uninstall-completion-dir-empty");
-            completion::ensure(&emptied, Shell::Zsh).unwrap();
-            let shared = home("uninstall-completion-dir-shared");
-            completion::ensure(&shared, Shell::Zsh).unwrap();
-            let foreign = shared.join(ZSH_SITE_FUNCTIONS).join(FOREIGN_FILE_NAME);
-            fs::write(&foreign, BEFORE).unwrap();
+            let ours = home("uninstall-completion-loader");
+            completion::ensure(&ours, Shell::Zsh).unwrap();
+            let theirs = home("uninstall-completion-loader-foreign");
+            completion::ensure(&theirs, Shell::Zsh).unwrap();
+            fs::write(completion::loader_path(&theirs), THEIR_LOADER).unwrap();
 
             // Act
-            run_step(&emptied, uid_of(&emptied), STAMP);
-            run_step(&shared, uid_of(&shared), STAMP);
+            run_step(&ours, uid_of(&ours), STAMP);
+            let report = run_step(&theirs, uid_of(&theirs), STAMP);
 
             // Assert
-            assert!(!emptied.join(ZSH_SITE_FUNCTIONS).exists());
-            assert!(foreign.exists());
+            let loader = completion::loader_path(&ours);
+            assert!(!loader.exists());
+            assert!(!loader.parent().unwrap().exists());
+            assert_eq!(read(&completion::loader_path(&theirs)), THEIR_LOADER);
+            let said = said(&report);
+            assert!(
+                said.contains("kept") && said.contains("(not ours)"),
+                "{said}"
+            );
+        }
+
+        #[test]
+        fn a_dry_run_removes_nothing_and_says_what_it_would_remove() {
+            // Arrange
+            let home = home("uninstall-completion-dry");
+            completion::ensure(&home, Shell::Zsh).unwrap();
+            let rc_before = read(&home.join(ZSHRC));
+            let mut report = Report::default();
+
+            // Act
+            completion_step(&home, uid_of(&home), STAMP, true, &mut report);
+
+            // Assert
+            assert!(completion::loader_path(&home).exists());
+            assert_eq!(read(&home.join(ZSHRC)), rc_before);
+            assert!(backups(&home).is_empty(), "{:?}", backups(&home));
+            let said = said(&report);
+            assert!(
+                said.contains("would remove") && said.contains("completions.zsh"),
+                "{said}"
+            );
         }
 
         #[test]
