@@ -9,6 +9,7 @@
 pub mod atomic;
 pub mod git;
 pub mod gitfacts;
+pub mod hash;
 pub mod paths;
 pub mod payload;
 pub mod proc;
@@ -17,6 +18,7 @@ pub mod session;
 pub mod sqlite;
 #[doc(hidden)]
 pub mod testing;
+pub mod time;
 
 /// Scratch space for unit tests of this crate and of crates that depend on it.
 /// Not created by this call; callers create what they need inside it. Unique

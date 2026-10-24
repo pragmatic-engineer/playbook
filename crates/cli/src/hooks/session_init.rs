@@ -14,6 +14,7 @@
 //! the memory store is only ever read here.
 
 use crate::common::mode::{resolve_for_hook, Mode, Source};
+use crate::common::slug::slugify;
 use crate::common::{config_hash, home_dir, repo_slug, run_with_timeout, session_dir, Payload};
 use crate::hooks::memory_signals;
 use crate::init::run::StepStatus;
@@ -84,7 +85,7 @@ const DRIFT_EXTRA_CONTEXT: &str = "The user resumed this session, but the config
 pub fn run(payload: &Payload) {
     let home = home_dir().to_string_lossy().into_owned();
     let dir = session_dir(payload);
-    let repo_root = git_toplevel();
+    let repo_root = git_toplevel_with_plain_git_fallback();
 
     prepare_memory_store();
     zero_session_state(&dir);
@@ -549,12 +550,6 @@ fn push_context(ctx: &mut String, addition: &str) {
     }
 }
 
-/// Replace every character outside `[A-Za-z0-9_.-]` with `_`. Matches
-/// the retired shell original's `slugify`.
-fn slugify(s: &str) -> String {
-    crate::state::slugify(s)
-}
-
 /// How often the periodic sweep this hook triggers may run, matching
 /// `cc::worktree::cleanup_due`'s own daily interval.
 const WORKTREE_SWEEP_INTERVAL_SECS: i64 = 86_400;
@@ -640,8 +635,9 @@ fn maybe_sweep_worktrees(home: &str, repo_root: &str) {
 }
 
 /// `git rev-parse --show-toplevel`, trimmed. Empty outside a repo or on any
-/// failure. Never panics.
-fn git_toplevel() -> String {
+/// failure. Never panics. Unlike `hooks::git_toplevel`, the fallback runs
+/// plain `git` under this hook's own timeout instead of the shared git runner.
+fn git_toplevel_with_plain_git_fallback() -> String {
     if let Some(top) = std::env::current_dir()
         .ok()
         .and_then(|cwd| crate::common::gitfacts::toplevel(&cwd))
