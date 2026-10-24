@@ -31,11 +31,15 @@ The design was prototyped in a real zsh on 2026-10-24. The lazy stub was replace
 
    ```zsh
    (( $+commands[playbook] )) || return 0
-   (( $+functions[compdef] )) || { autoload -Uz compinit && compinit -C; }
+   (( $+functions[compdef] )) || { autoload -Uz compinit && compinit -C; } 2>/dev/null
+   (( $+functions[compdef] )) || return 0
    _playbook() { unfunction _playbook; source <(playbook completions zsh 2>/dev/null); _playbook "$@"; }
    compdef _playbook playbook
-   [[ ${commands[pb]} -ef ${commands[playbook]} ]] && compdef _playbook pb
+   if [[ ${commands[pb]} -ef ${commands[playbook]} ]]; then compdef _playbook pb; fi
+   return 0
    ```
+
+   The loader must stay silent and leave the shell's exit status alone on every failure. `compinit` writes its dump with `mv`, so on a PATH without `mv` it prints an error and fails. Its output is discarded, and the loader returns early if `compdef` is still missing.
 
 3. **Zsh gets one marked line in `~/.zshrc`.** The line is exact text. The marker is the trailing comment `# playbook completions`.
 
