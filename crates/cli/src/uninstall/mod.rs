@@ -282,6 +282,7 @@ fn completion_step(home: &Path, uid: u32, stamp: u64, dry_run: bool, report: &mu
     for shell in [Shell::Bash, Shell::Fish] {
         stub_files_step(home, shell, verb, dry_run, report);
     }
+    legacy_stub_step(home, verb, dry_run, report);
     loader_step(home, verb, dry_run, report);
     zshrc_line_step(home, uid, stamp, dry_run, report);
     keep_zshrc_backups(home, stamp, report);
@@ -301,6 +302,20 @@ fn stub_files_step(home: &Path, shell: Shell, verb: &str, dry_run: bool, report:
                 .lines
                 .push(format!("kept {} (edited)", stub.display()));
         }
+    }
+}
+
+/// Removes the pre-loader zsh stub when it carries our marker, and its
+/// directory when that leaves it empty.
+fn legacy_stub_step(home: &Path, verb: &str, dry_run: bool, report: &mut Report) {
+    let stub = home.join(completion::LEGACY_STUB);
+    let Ok(bytes) = fs::read(&stub) else { return };
+    if !completion::legacy_stub_is_ours(&bytes) {
+        return;
+    }
+    remove_file(&stub, verb, dry_run, report);
+    if let (false, Some(dir)) = (dry_run, stub.parent()) {
+        let _ = fs::remove_dir(dir);
     }
 }
 
@@ -344,7 +359,7 @@ fn zshrc_line_step(home: &Path, uid: u32, stamp: u64, dry_run: bool, report: &mu
     }
     // Whatever the strip leaves behind is a marker line whose text was edited.
     let Ok(old) = fs::read(&rc) else { return };
-    let left = shim::strip_marked_block(&old, completion::RC_LINE, &[]).unwrap_or(old);
+    let left = completion::strip_ours(&old).unwrap_or(old);
     if left
         .split(|&b| b == b'\n')
         .any(|l| l.trim_ascii_end().ends_with(completion::MARKER.as_bytes()))
@@ -741,6 +756,41 @@ mod tests {
                 said.contains("kept") && said.contains("(not ours)"),
                 "{said}"
             );
+        }
+
+        #[test]
+        fn uninstall_removes_the_pre_loader_stub_and_block_and_keeps_a_foreign_file() {
+            // Arrange
+            let home = home("uninstall-completion-legacy");
+            let dir = home.join(completion::LEGACY_STUB);
+            let dir = dir.parent().unwrap().to_path_buf();
+            fs::create_dir_all(&dir).unwrap();
+            let stub = home.join(completion::LEGACY_STUB);
+            fs::write(
+                &stub,
+                format!("#compdef playbook pb\n{}\n", completion::STUB_MARKER),
+            )
+            .unwrap();
+            let old_block = format!(
+                "{MARKER}\n{}\n{}\n",
+                completion::LEGACY_BLOCK_REST[0],
+                completion::LEGACY_BLOCK_REST[1]
+            );
+            write_zshrc(&home, &format!("{BEFORE}{old_block}{AFTER}"));
+            let other = home.join("other");
+            fs::create_dir_all(&other).unwrap();
+            let other_stub = other.join(completion::LEGACY_STUB);
+            fs::create_dir_all(other_stub.parent().unwrap()).unwrap();
+            fs::write(&other_stub, "# not ours\n").unwrap();
+
+            // Act
+            run_step(&home, uid_of(&home), STAMP);
+            run_step(&other, uid_of(&other), STAMP);
+
+            // Assert
+            assert!(!stub.exists() && !dir.exists());
+            assert_eq!(read(&home.join(ZSHRC)), format!("{BEFORE}{AFTER}"));
+            assert!(other_stub.exists());
         }
 
         #[test]
