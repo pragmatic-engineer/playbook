@@ -15,7 +15,7 @@ mod shell_fixture;
 
 use shell_fixture::Work;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 const REQUIRE_SHELLS_VAR: &str = "PLAYBOOK_REQUIRE_SHELLS";
 const REQUIRE_SHELLS_ON: &str = "1";
@@ -30,6 +30,10 @@ const PTY_DEADLINE_SECS: u32 = 10;
 const PTY_PROMPT: &str = "READY> ";
 const TAB: &str = "\t";
 const TERMINAL: &str = "xterm-256color";
+/// A zsh with no startup files, for the fpath-function scenario.
+const BARE_ZSH_ARGS: &str = "-f";
+/// An interactive zsh that reads `$ZDOTDIR/.zshrc` but not the global files.
+const SETUP_ZSH_ARGS: &str = "-d -i";
 /// Proxies nothing listens on, so a shell started by a test cannot reach the
 /// network. Apply after `env_clear`.
 const OFFLINE_ENV: [(&str, &str); 2] = [
@@ -183,9 +187,11 @@ fn has_line(output: &str, wanted: &str) -> bool {
     output.lines().any(|l| l == wanted)
 }
 
-/// Types `typed` plus a tab into an interactive `zsh -f` on a pty, with the
-/// completion script as an fpath function, and waits for `expected` to show
-/// up. The driver is a zsh script because zsh/zpty needs no extra crate.
+/// Types `typed` plus a tab into an interactive zsh on a pty and waits for
+/// `expected` to show up. With `PB_STUB_DIR` set, zsh starts bare and gets the
+/// completion script as an fpath function; otherwise it starts with
+/// `PB_ZSH_ARGS` and reads the `.zshrc` that setup wrote. The driver is a zsh
+/// script because zsh/zpty needs no extra crate.
 const ZPTY_DRIVER: &str = r#"
 zmodload zsh/zpty zsh/system
 transcript=''
@@ -203,11 +209,13 @@ wait_for() {
     sysread -t 1 -i $fd chunk && transcript+=$chunk
   done
 }
-zpty child "$PB_ZSH" -f
+zpty child "$PB_ZSH" ${(z)PB_ZSH_ARGS}
 fd=$REPLY
 send() { syswrite -o $fd -- "$1" }
-send $'fpath=('"$PB_STUB_DIR"$' $fpath)\n'
-send $'autoload -Uz compinit && compinit -u -D\n'
+if [[ -n $PB_STUB_DIR ]]; then
+  send $'fpath=('"$PB_STUB_DIR"$' $fpath)\n'
+  send $'autoload -Uz compinit && compinit -u -D\n'
+fi
 # The prompt reaches the inner shell by env so the echoed line never holds
 # the prompt text, which would satisfy the wait before the prompt is drawn.
 send $'PS1="$PB_PROMPT"\n'
@@ -218,11 +226,15 @@ zpty -d child
 "#;
 
 fn zsh_pty_completes(with_alias: bool, typed: &str, expected: &str) {
-    // Arrange
     let work = Work::new("zpty");
     let bin = bin_dir(&work, with_alias);
     let stub_dir = work.dir("stub");
     std::fs::write(stub_dir.join("_playbook"), completions_script(ZSH)).expect("stub");
+    zsh_pty(&work, &bin, BARE_ZSH_ARGS, &stub_dir, typed, expected);
+}
+
+fn zsh_pty(work: &Work, bin: &Path, zsh_args: &str, stub_dir: &Path, typed: &str, expected: &str) {
+    // Arrange
     let driver = work.path("driver.zsh");
     std::fs::write(&driver, ZPTY_DRIVER).expect("driver");
     let home = work.dir("home");
@@ -235,9 +247,10 @@ fn zsh_pty_completes(with_alias: bool, typed: &str, expected: &str) {
         .env("PB_ZSH", &zsh)
         .env("HOME", &home)
         .env("ZDOTDIR", &home)
-        .env("PATH", &bin)
+        .env("PATH", bin)
         .env("TERM", TERMINAL)
-        .env("PB_STUB_DIR", &stub_dir)
+        .env("PB_ZSH_ARGS", zsh_args)
+        .env("PB_STUB_DIR", stub_dir)
         .env("PB_DEADLINE", PTY_DEADLINE_SECS.to_string())
         .env("PB_PROMPT", PTY_PROMPT)
         .env("PB_TYPED", format!("{typed}{TAB}"))
@@ -358,6 +371,78 @@ fn zsh_completes_through_a_pty() {
     zsh_pty_completes(false, "playbook tr", "playbook trust ");
     // `pb pl` is ambiguous (plan, plans), so zsh adds no trailing space.
     zsh_pty_completes(true, "pb tr", "pb trust ");
+}
+
+/// Runs `playbook setup --yes --only completions` for zsh in the work home,
+/// as a user would, so the `.zshrc` and the loader are the ones setup wrote.
+fn setup_zsh_home(work: &Work, bin: &Path) {
+    let home = work.dir("home");
+    let zsh = find_on_path(ZSH).expect("zsh on PATH");
+    let out = Command::new(bin.join(BINARY))
+        .args(["setup", "--yes", "--only", "completions"])
+        .env_clear()
+        .envs(OFFLINE_ENV)
+        .env("HOME", &home)
+        .env("PATH", bin)
+        .env("SHELL", zsh)
+        .env("CLAUDE_PLUGIN_ROOT", env!("PLAYBOOK_REPO_ROOT"))
+        .current_dir(&home)
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn setup");
+    assert!(out.status.success(), "setup: {}", text(&out));
+}
+
+#[test]
+fn zsh_completes_through_the_files_setup_wrote() {
+    if !gated(ZSH) {
+        return;
+    }
+    for (with_alias, typed, expected) in [
+        (false, "playbook tr", "playbook trust "),
+        (true, "pb tr", "pb trust "),
+    ] {
+        // Arrange
+        let work = Work::new("zpty-setup");
+        let bin = bin_dir(&work, with_alias);
+        setup_zsh_home(&work, &bin);
+
+        // Act and assert
+        zsh_pty(&work, &bin, SETUP_ZSH_ARGS, Path::new(""), typed, expected);
+    }
+}
+
+#[test]
+fn a_zsh_started_after_setup_prints_nothing_without_the_binary_on_path() {
+    if !gated(ZSH) {
+        return;
+    }
+    // Arrange
+    let work = Work::new("zsh-silent");
+    let bin = bin_dir(&work, true);
+    setup_zsh_home(&work, &bin);
+    let home = work.dir("home");
+    let zsh = find_on_path(ZSH).expect("zsh on PATH");
+
+    // Act
+    let out = Command::new(zsh)
+        .env_clear()
+        .envs(OFFLINE_ENV)
+        .env("HOME", &home)
+        .env("ZDOTDIR", &home)
+        .env("PATH", work.dir("empty"))
+        .args(["-d", "-i", "-c", "exit 0"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn zsh");
+
+    // Assert
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert!(
+        out.stdout.is_empty() && out.stderr.is_empty(),
+        "{}",
+        text(&out)
+    );
 }
 
 /// A `playbook` that fails noisily, standing in for a broken install.
