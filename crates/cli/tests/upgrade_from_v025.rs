@@ -153,6 +153,7 @@ impl V025Home {
             short_name: playbook::init::pb_link::Choice::Skip,
             policy_guard: false,
             pb_target: None,
+            completions: None,
             attribution: playbook::init::attribution::Choice::Off { replace: false },
             path_setup: None,
             repo: None,

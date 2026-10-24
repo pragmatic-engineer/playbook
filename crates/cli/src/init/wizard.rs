@@ -57,6 +57,10 @@ fn extra_lines(id: &str) -> Vec<String> {
             "Adds the same link install.sh makes: pb -> playbook, in the playbook install folder."
                 .to_string(),
         ],
+        "completions" => vec![
+            "Each loader file starts with `# playbook completions (written by playbook setup)`."
+                .to_string(),
+        ],
         "policy-guard" => vec![
             "Turn it off later with `playbook config set --global hooks.policyGuard.enabled false`."
                 .to_string(),
@@ -78,6 +82,7 @@ pub fn decline_line(id: &str) -> &'static str {
         "system-prompt" => "No file is copied, and `systemPrompt.enabled` is set to false, so `pb cc` starts with Claude Code's own prompt.",
         "telemetry" => "No variables are written. `playbook usage` reads transcripts instead.",
         "short-name" => "No `pb` link is added, and an existing one stays. Use `playbook` in full where `pb` is missing.",
+        "completions" => "No completion files are written, and your shell files are not touched. Tab does not complete `playbook` or `pb` until you run `playbook setup --only completions`.",
         "policy-guard" => "The policy guard setting is not changed. It is off by default, and its hook entry allows every call while off. A guard you turned on stays on until `hooks.policyGuard.enabled` is set to false. Turn it on later with `playbook config set --global hooks.policyGuard.enabled true`.",
         "attribution" => "Attribution is OFF, the default: playbook adds the missing `attribution` keys to ~/.claude/settings.json and keeps your own values, so Claude Code adds no trailer, generated-by line or session link.",
         _ => "Nothing changes for this part.",
@@ -249,6 +254,7 @@ mod tests {
             system_prompt: true,
             telemetry: true,
             short_name: true,
+            completions: true,
             policy_guard: true,
             attribution: true,
             ..Flags::default()
