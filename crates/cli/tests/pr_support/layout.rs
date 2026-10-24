@@ -8,11 +8,11 @@ use super::fixture::Fixture;
 use std::path::PathBuf;
 
 impl Fixture {
-    pub fn bare(&self) -> PathBuf {
+    pub(crate) fn bare(&self) -> PathBuf {
         self.work.with_file_name("origin.git")
     }
 
-    pub fn state(&self) -> PathBuf {
+    pub(crate) fn state(&self) -> PathBuf {
         self.work.with_file_name("state")
     }
 }

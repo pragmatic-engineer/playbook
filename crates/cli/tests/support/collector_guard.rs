@@ -9,14 +9,14 @@ use playbook::usage::run::Paths;
 use std::time::{Duration, Instant};
 
 /// How long a killed collector may take to let go of the lock.
-pub const GONE_BOUND: Duration = Duration::from_secs(5);
+pub(crate) const GONE_BOUND: Duration = Duration::from_secs(5);
 /// How long to watch for a late collector after the lock freed.
-pub const RECHECK: Duration = Duration::from_millis(500);
+const RECHECK: Duration = Duration::from_millis(500);
 const POLL: Duration = Duration::from_millis(50);
 
 /// Polls `done` every `POLL` until `bound`, checking it before the deadline
 /// so a condition met on the last poll still counts.
-pub fn within(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
+pub(crate) fn within(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + bound;
     loop {
         if done() {
@@ -30,7 +30,7 @@ pub fn within(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
 }
 
 /// Sends `SIGKILL` to the pid the lock names; true when the lock was held.
-pub fn kill_holder(paths: &Paths) -> bool {
+pub(crate) fn kill_holder(paths: &Paths) -> bool {
     match lock_state(paths) {
         LockState::Held(h) => {
             if let Some(pid) = h.pid.and_then(|p| libc::pid_t::try_from(p).ok()) {
@@ -47,7 +47,7 @@ pub fn kill_holder(paths: &Paths) -> bool {
 /// one. A collector still starting writes its pid a moment later, and a
 /// late spawn can take the lock after the first one goes. True when no
 /// collector holds the lock at the end.
-pub fn kill_all(paths: &Paths) -> bool {
+pub(crate) fn kill_all(paths: &Paths) -> bool {
     let free = within(GONE_BOUND, || {
         kill_holder(paths);
         lock_state(paths) == LockState::Free

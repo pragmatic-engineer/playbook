@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 
 /// Write `content` to `path` and make it executable.
-pub fn write_exec(path: &Path, content: &str) {
+pub(crate) fn write_exec(path: &Path, content: &str) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("parent dir");
     }

@@ -9,7 +9,12 @@ use std::process::Stdio;
 
 /// Run the hook with `stdin` and the extra `env` pairs, returning stdout and
 /// the exit code.
-pub fn run_hook(scratch: &Scratch, hook: &str, stdin: &str, env: &[(&str, &str)]) -> (String, i32) {
+pub(crate) fn run_hook(
+    scratch: &Scratch,
+    hook: &str,
+    stdin: &str,
+    env: &[(&str, &str)],
+) -> (String, i32) {
     let mut command = hook_command(scratch, hook);
     command
         .envs(env.iter().copied())
