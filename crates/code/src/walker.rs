@@ -213,7 +213,7 @@ pub(crate) mod test_repo {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    pub fn git_in(dir: &Path, args: &[&str]) {
+    pub(crate) fn git_in(dir: &Path, args: &[&str]) {
         let status = Command::new("git")
             .arg("-C")
             .arg(dir)
@@ -226,7 +226,7 @@ pub(crate) mod test_repo {
     }
 
     /// An initialised repo with an origin, under a unique scratch dir.
-    pub fn init(tag: &str) -> PathBuf {
+    pub(crate) fn init(tag: &str) -> PathBuf {
         let dir = playbook_common::test_support::scratch_dir(tag);
         std::fs::create_dir_all(&dir).expect("repo dir");
         let dir = dir.canonicalize().expect("canonical");
@@ -243,7 +243,7 @@ pub(crate) mod test_repo {
         dir
     }
 
-    pub fn write(dir: &Path, rel: &str, bytes: &[u8]) {
+    pub(crate) fn write(dir: &Path, rel: &str, bytes: &[u8]) {
         let path = dir.join(rel);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("parent");
