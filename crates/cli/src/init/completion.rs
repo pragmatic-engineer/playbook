@@ -32,12 +32,14 @@ pub const LOADER_HEADER: &str =
     "# Written by playbook setup; playbook update rewrites it. Edits are lost.";
 /// The loader after its header. It registers a stub that loads the real
 /// function on the first Tab, so shell startup pays nothing.
-pub const LOADER_BODY: [&str; 5] = [
+pub const LOADER_BODY: [&str; 7] = [
     "(( $+commands[playbook] )) || return 0",
-    "(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -C; }",
+    "(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -C; } 2>/dev/null",
+    "(( $+functions[compdef] )) || return 0",
     r#"_playbook() { unfunction _playbook; source <(playbook completions zsh 2>/dev/null); _playbook "$@"; }"#,
     "compdef _playbook playbook",
-    "[[ ${commands[pb]} -ef ${commands[playbook]} ]] && compdef _playbook pb",
+    "if [[ ${commands[pb]} -ef ${commands[playbook]} ]]; then compdef _playbook pb; fi",
+    "return 0",
 ];
 pub const BASH_COMPLETIONS: &str = ".local/share/bash-completion/completions";
 pub const FISH_COMPLETIONS: &str = ".config/fish/completions";
@@ -1234,7 +1236,7 @@ mod tests {
     }
 
     #[test]
-    fn the_loader_is_the_header_then_the_five_adr_lines() {
+    fn the_loader_is_the_header_then_the_seven_adr_lines() {
         // Arrange
         let home = home("completion-loader-text");
 
@@ -1249,7 +1251,7 @@ mod tests {
         assert_eq!(lines[1..], LOADER_BODY);
         assert_eq!(mode(&loader), RC_NEW_MODE);
         assert_eq!(
-            LOADER_BODY[2],
+            LOADER_BODY[3],
             "_playbook() { unfunction _playbook; source <(playbook completions zsh 2>/dev/null); _playbook \"$@\"; }"
         );
     }
