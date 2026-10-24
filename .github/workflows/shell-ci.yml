@@ -36,6 +36,8 @@ jobs:
   # read them.
   changes:
     runs-on: ubuntu-latest
+    # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
+    timeout-minutes: 5
     permissions:
       contents: read
     outputs:
@@ -88,6 +90,7 @@ jobs:
     # turn a required check into a skipped one.
     if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
