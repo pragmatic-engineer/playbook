@@ -1485,6 +1485,7 @@ fn with_lock_retry(home: &Path, retries: u32, f: impl FnOnce()) -> bool {
 }
 
 /// Runs the shipped registry.
+#[cfg(test)]
 pub fn run_pending(ctx: &Ctx) -> Report {
     run_pending_for(ctx, true, true)
 }

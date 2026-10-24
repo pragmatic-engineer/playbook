@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Every `usage.*` key.
+#[cfg(test)]
 pub const KEYS: &[&str] = &[
     "usage.theme",
     "usage.weekStart",

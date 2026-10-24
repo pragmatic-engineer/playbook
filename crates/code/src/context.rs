@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 pub const DEFAULT_MAX_TOKENS: usize = 4000;
+#[cfg(test)]
 pub const MIN_TOKENS: usize = 200;
 /// The byte ceiling never exceeds this, whatever the budget.
 pub const ABS_CEILING: usize = 256 * 1024;

@@ -200,11 +200,6 @@ pub struct Parsed {
     pub errors: Vec<TelemetryError>,
 }
 
-/// Parses an OTLP JSON logs body into API requests only.
-pub fn parse_logs(body: &[u8], now: i64) -> Result<Vec<TelemetryRequest>, String> {
-    parse_events(body, now).map(|p| p.requests)
-}
-
 /// Parses an OTLP JSON logs body. Records that are not a complete
 /// `api_request`, `tool_result` or `api_error` (no session id, no key, or
 /// another event) are skipped. `now` stamps a record that has no usable time.
@@ -381,6 +376,10 @@ fn error(f: Fields, timestamp: i64) -> Option<TelemetryError> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn parse_logs(body: &[u8], now: i64) -> Result<Vec<TelemetryRequest>, String> {
+        parse_events(body, now).map(|p| p.requests)
+    }
 
     fn attr(k: &str, v: Value) -> Value {
         json!({"key": k, "value": v})

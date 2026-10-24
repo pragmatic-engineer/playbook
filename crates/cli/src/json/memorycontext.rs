@@ -312,17 +312,8 @@ pub fn parse_graph(graph_json: &str) -> Option<Graph<'_>> {
     serde_json::from_str(graph_json).ok()
 }
 
-/// Reads `graph` and renders it for `repo`; empty when the file is missing
-/// or unreadable, so callers never break on absent memory.
-pub fn render_for_graph_file(graph: &std::path::Path, repo: &str) -> String {
-    match std::fs::read_to_string(graph) {
-        Ok(json) => render_memory_context(&json, repo),
-        Err(_) => String::new(),
-    }
-}
-
-/// `render_for_graph_file`, but never silent: when there is nothing to show it
-/// returns a one-line `Memory context: none (<reason>)` so the caller can tell
+/// Reads `graph` and renders it for `repo`, but never silent: when there is
+/// nothing to show it returns a one-line `Memory context: none (<reason>)` so the caller can tell
 /// a missing graph, a corrupt graph and an empty scope apart without reading
 /// the file itself.
 pub fn render_with_source(graph: &std::path::Path, repo: &str) -> String {

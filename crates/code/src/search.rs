@@ -11,9 +11,8 @@ use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Default and maximum result counts.
+/// Default result count.
 pub const DEFAULT_LIMIT: usize = 20;
-pub const MAX_LIMIT: usize = 200;
 /// The literal fallback scans at most this many indexed files.
 pub const DEFAULT_SCAN_CAP: usize = 2000;
 
