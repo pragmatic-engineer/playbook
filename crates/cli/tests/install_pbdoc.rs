@@ -5,10 +5,19 @@
 //! `pbdoc-<version>-<target>.tar.gz` asset of the same release, checked like
 //! the playbook binary. A release without the asset still installs playbook.
 
+#[path = "support/install_stubs.rs"]
+mod install_stubs;
+#[path = "support/shell_exec.rs"]
+mod shell_exec;
 #[path = "support/shell_fixture.rs"]
-mod fx;
+mod shell_fixture;
+#[path = "support/shell_run.rs"]
+mod shell_run;
 
-use fx::{both, install_stubs, repo_root, sha256_hex, write_exec, Work};
+use install_stubs::{install_stubs, sha256_hex};
+use shell_exec::write_exec;
+use shell_fixture::Work;
+use shell_run::{both, repo_root};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
