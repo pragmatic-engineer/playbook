@@ -1267,7 +1267,6 @@ dependencies = [
  "playbook-common",
  "playbook-data",
  "playbook-telemetry",
- "ratatui",
  "regex",
  "rusqlite",
  "serde",
