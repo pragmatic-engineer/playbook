@@ -82,14 +82,14 @@ pub(crate) mod pbdoc_fixture {
     use crate::update::download::fake::FakeFetcher;
     use crate::update::verify;
 
-    pub const ASSET: &str = "pbdoc-0.17.0-x86_64-unknown-linux-musl.tar.gz";
+    pub(crate) const ASSET: &str = "pbdoc-0.17.0-x86_64-unknown-linux-musl.tar.gz";
 
-    pub fn script(version: &str) -> Vec<u8> {
+    pub(crate) fn script(version: &str) -> Vec<u8> {
         format!("#!/bin/sh\necho 'pbdoc {version}'\n").into_bytes()
     }
 
     /// One ustar entry: `kind` is the type flag, `link` the link target.
-    pub fn entry(name: &str, kind: u8, link: &str, data: &[u8]) -> Vec<u8> {
+    pub(crate) fn entry(name: &str, kind: u8, link: &str, data: &[u8]) -> Vec<u8> {
         let mut head = [0u8; 512];
         head[..name.len()].copy_from_slice(name.as_bytes());
         head[100..108].copy_from_slice(b"0000755\0");
@@ -107,7 +107,7 @@ pub(crate) mod pbdoc_fixture {
     }
 
     /// The entries as a gzipped tar, ending with the two empty blocks.
-    pub fn tarball(entries: &[Vec<u8>]) -> Vec<u8> {
+    pub(crate) fn tarball(entries: &[Vec<u8>]) -> Vec<u8> {
         let mut tar = entries.concat();
         tar.extend_from_slice(&[0u8; 1024]);
         let mut gzip = std::process::Command::new("gzip");
@@ -117,12 +117,12 @@ pub(crate) mod pbdoc_fixture {
             .stdout
     }
 
-    pub fn good(version: &str) -> Vec<u8> {
+    pub(crate) fn good(version: &str) -> Vec<u8> {
         tarball(&[entry("pbdoc", b'0', "", &script(version))])
     }
 
     /// Drops the pbdoc asset and its SHA256SUMS line from the release.
-    pub fn remove(f: &mut FakeFetcher, base: &str) {
+    pub(crate) fn remove(f: &mut FakeFetcher, base: &str) {
         f.0.remove(&format!("{base}/{ASSET}"));
         let url = format!("{base}/SHA256SUMS");
         let sums = String::from_utf8(f.0[&url].clone()).unwrap();
@@ -136,7 +136,7 @@ pub(crate) mod pbdoc_fixture {
 
     /// Serves `tarball` under `base` and lists it in that release's
     /// SHA256SUMS with the hash of `hashed`, replacing any earlier one.
-    pub fn serve(f: &mut FakeFetcher, base: &str, tarball: &[u8], hashed: &[u8]) {
+    pub(crate) fn serve(f: &mut FakeFetcher, base: &str, tarball: &[u8], hashed: &[u8]) {
         remove(f, base);
         f.0.insert(format!("{base}/{ASSET}"), tarball.to_vec());
         let url = format!("{base}/SHA256SUMS");

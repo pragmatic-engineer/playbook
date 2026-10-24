@@ -25,14 +25,14 @@ const CLOSING_SKILLS: [&str; 4] = [
 ];
 
 /// Whether a `Skill` call names a closing skill.
-pub fn is_closing_skill(skill: &str) -> bool {
+pub(super) fn is_closing_skill(skill: &str) -> bool {
     CLOSING_SKILLS.contains(&skill.trim())
 }
 
 /// Whether every simple command of `command` is a closing step. `cwd` is where
 /// the command runs: a `git push` that names no branch is allowed when the
 /// branch checked out there is not protected.
-pub fn is_closing_command_in(command: &str, cwd: Option<&Path>) -> bool {
+pub(super) fn is_closing_command_in(command: &str, cwd: Option<&Path>) -> bool {
     let plain = without_stream_merges(command);
     let source: Vec<char> = plain.chars().collect();
     let parsed = commands(&plain);
