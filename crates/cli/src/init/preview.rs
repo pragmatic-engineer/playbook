@@ -197,6 +197,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         policy_guard: false,
         pb_target: paths.pb_target.clone(),
         attribution: paths.attribution,
+        completions: paths.completions,
         path_setup: paths.path_setup.as_ref().map(|s| path::Setup {
             bin_dir: s.bin_dir.clone(),
             shell: s.shell,
@@ -211,6 +212,8 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         crate::init::pb_link::preview(scratch_paths.short_name, scratch_paths.pb_target.as_ref());
     let path_step = run::path_step(&sh, scratch_paths.path_setup.as_ref());
     let after_path = rc_snapshot(&sh);
+    let completions_step = run::completions_step(&sh, scratch_paths.completions.as_ref());
+    let after_completions = rc_snapshot(&sh);
     let before_rc = rc_snapshot(&paths.home);
 
     let settings_rel = ".claude/settings.json";
@@ -234,6 +237,7 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
         ("system-prompt", choices.system_prompt),
         ("telemetry", choices.telemetry),
         ("short-name", choices.short_name),
+        ("completions", choices.completions),
         ("policy-guard", choices.policy_guard),
         ("attribution", paths.attribution != Attribution::Skip),
     ];
@@ -284,6 +288,9 @@ pub fn dry_run(paths: &InitPaths, choices: &Choices) -> String {
             "telemetry" => own_key_lines(&changes, id, &settings_file, &telemetry_step),
             "attribution" => own_key_lines(&changes, id, &settings_file, &attribution_step),
             "short-name" => vec![format!("pb: {short_line}")],
+            "completions" => {
+                completions_lines(paths, &completions_step, &after_path, &after_completions)
+            }
             "policy-guard" => vec![policy_guard_line(&paths.home)],
             "path" => file_lines(&before_rc, &after_path, &path_step),
             _ => vec![system_prompt_line(paths)],
@@ -357,6 +364,43 @@ fn file_lines(
         }
     }
     if lines.is_empty() {
+        lines.push(format!("{}: {}", verb(step), step.detail));
+    }
+    lines
+}
+
+/// The files the part would write, and the line it would add to a shell
+/// startup file.
+fn completions_lines(
+    paths: &InitPaths,
+    step: &StepReport,
+    before: &[(&'static str, String)],
+    after: &[(&'static str, String)],
+) -> Vec<String> {
+    let Some(setup) = paths.completions else {
+        return vec![format!("{}: {}", verb(step), step.detail)];
+    };
+    use crate::init::completion::{self, Shell};
+    let mut lines: Vec<String> = completion::wired_files(&paths.home, setup.shell)
+        .iter()
+        .filter_map(|(file, text)| {
+            let rel = file.strip_prefix(&paths.home).ok()?.to_str()?;
+            Some(match read(file) {
+                None => format!("{}: add the file", tilde(rel)),
+                Some(have) if have == *text => format!("{}: already up to date", tilde(rel)),
+                Some(have)
+                    if setup.shell == Shell::Zsh && completion::loader_is_ours(have.as_bytes()) =>
+                {
+                    format!("{}: rewrite the file", tilde(rel))
+                }
+                Some(_) => format!("{}: left as it is", tilde(rel)),
+            })
+        })
+        .collect();
+    let rc_changes = file_lines(before, after, step);
+    if rc_changes.iter().any(|l| l.contains(": add `")) {
+        lines.extend(rc_changes);
+    } else if lines.is_empty() {
         lines.push(format!("{}: {}", verb(step), step.detail));
     }
     lines

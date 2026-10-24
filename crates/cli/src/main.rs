@@ -649,6 +649,11 @@ fn real_main() {
                 repo,
                 self_root,
                 claude_home,
+                completions: choices.completions.then(|| init::completion::Setup {
+                    shell: init::completion::Shell::detect(
+                        &std::env::var("SHELL").unwrap_or_default(),
+                    ),
+                }),
                 pb_target: std::env::current_exe()
                     .ok()
                     .map(|exe| init::pb_link::Target {
