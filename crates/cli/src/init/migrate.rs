@@ -21,6 +21,11 @@ const SKILL_KEY_PREFIX: &str = "skill:";
 pub const STATUSLINE_MIGRATION: &str = "statusline-rust-command";
 /// The `Consent` migration `init` skips when the user declines the hooks.
 pub const DEAD_HOOKS_MIGRATION: &str = "dead-hook-scripts";
+/// The 0.18.0 item that rewrote legacy `source` lines to the `shell-init` line.
+/// ADR 0044 made it do nothing, and `retired-launcher-rc-line` removes those
+/// lines. Its registry entry is gone, because ids are slugs and a gap costs
+/// nothing; a record row under it still loads and is ignored.
+pub const RETIRED_SHELL_INIT_MIGRATION: &str = "shell-init-rc-line";
 /// The `Consent` item 0.36.0 and 0.37.0 shipped for the attribution part,
 /// retired with ADR 0042's amendment. A record that names it, by slug or as
 /// `0015-attribution-off`, still loads, and the id is ignored.
@@ -29,7 +34,8 @@ pub const RETIRED_ATTRIBUTION_MIGRATION: &str = "attribution-off";
 /// Slugs taken out of the registry. A record row or pending id under one
 /// loads and is ignored. A retired slug is never given to a new migration,
 /// because old applied rows would mark that one as already run.
-pub const RETIRED_IDS: [&str; 4] = [
+pub const RETIRED_IDS: [&str; 5] = [
+    RETIRED_SHELL_INIT_MIGRATION,
     RETIRED_ATTRIBUTION_MIGRATION,
     RETIRED_DISK_GUARD_MIGRATION,
     RETIRED_COLLECTOR_SERVICE_MIGRATION,
@@ -288,16 +294,6 @@ pub fn registry() -> Vec<Migration> {
                 command: "playbook setup --statusline",
             },
             run: statusline_rust_command,
-        },
-        Migration {
-            id: "shell-init-rc-line",
-            since: "0.18.0",
-            kind: Kind::Idempotent,
-            scope: Scope::Consent {
-                check: shell_init_rc_line_pending,
-                command: "playbook setup",
-            },
-            run: shell_init_rc_line,
         },
         Migration {
             id: "remove-config-hash-script",
@@ -929,12 +925,6 @@ fn remove_config_hash_script(ctx: &Ctx) -> Outcome {
     ))
 }
 
-/// Retired by ADR 0044: setup no longer writes a shell line, so the legacy
-/// `source` lines are no longer rewritten to one. `retired-launcher-rc-line` removes them.
-fn shell_init_rc_line(_: &Ctx) -> Outcome {
-    Outcome::Quiet
-}
-
 fn statusline_rust_command_pending(ctx: &Ctx) -> Option<String> {
     let script = crate::init::statusline::playbook_statusline_path(&ctx.home);
     let edited = user_edited(&ctx.home, STATUSLINE_KEY, &script);
@@ -944,11 +934,6 @@ fn statusline_rust_command_pending(ctx: &Ctx) -> Option<String> {
         edited,
     )
     .then(|| "statusLine.command in settings.json still runs the old script".to_string())
-}
-
-/// Retired with `shell_init_rc_line`: nothing to report.
-fn shell_init_rc_line_pending(_: &Ctx) -> Option<String> {
-    None
 }
 
 fn join_paths(files: &[PathBuf]) -> String {
@@ -1789,6 +1774,27 @@ mod tests {
     }
 
     #[test]
+    fn a_record_from_0_18_with_the_removed_shell_init_row_loads_and_ignores_it() {
+        // Arrange: the row a pre-ADR 0044 install holds for the removed item.
+        let h = home("shell-init-row");
+        write_state(&h, &["applied 0007-shell-init-rc-line".to_string()]).unwrap();
+
+        // Act
+        let report = run_owned(&ctx(&h), 0, None);
+        let plan = plan(&ctx(&h)).expect("the record reads");
+        let open = open_items(&ctx(&h), None);
+
+        // Assert
+        assert!(!report.failed, "{:?}", report.warnings);
+        assert!(registry()
+            .iter()
+            .all(|m| m.id != RETIRED_SHELL_INIT_MIGRATION));
+        assert!(plan.iter().all(|p| p.id != RETIRED_SHELL_INIT_MIGRATION));
+        assert!(open.iter().all(|i| i.id != RETIRED_SHELL_INIT_MIGRATION));
+        assert!(rows(&h).contains(&"migrations/applied/0007-shell-init-rc-line=1".to_string()));
+    }
+
+    #[test]
     fn applying_a_migration_with_an_old_number_writes_both_rows() {
         // Arrange: a home from 0.35 that never ran the budget migration.
         let h = home("both-rows");
@@ -2322,7 +2328,10 @@ mod tests {
             command("statusline-rust-command"),
             Some("playbook setup --statusline")
         );
-        assert_eq!(command("shell-init-rc-line"), None, "retired by ADR 0044");
+        assert!(
+            open.iter().all(|i| i.id != RETIRED_SHELL_INIT_MIGRATION),
+            "retired by ADR 0044"
+        );
         assert_eq!(command(RC_LINE_MIGRATION), Some("playbook setup"));
         assert_eq!(
             command(DEAD_HOOKS_MIGRATION),
@@ -2538,7 +2547,7 @@ mod tests {
         let now = ids(env!("CARGO_PKG_VERSION"));
 
         // Assert
-        assert_eq!(at_034.len(), 14, "{at_034:?}");
+        assert_eq!(at_034.len(), 13, "{at_034:?}");
         assert!(!at_034.contains(&AUTO_BUDGET_MIGRATION));
         assert!(at_037.contains(&PROMPT_DEFAULT_MIGRATION));
         let unreleased: Vec<&str> = registry()
