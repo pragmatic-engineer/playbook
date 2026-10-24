@@ -245,6 +245,28 @@ fn a_stale_loader_is_rewritten_and_the_rc_line_stays() {
     assert_eq!(sb.read(&sb.home.join(ZSHRC)), rc);
 }
 
+/// The loader the previous release wrote, before the compinit call went silent.
+const PREVIOUS_LOADER_BODY: &str = "(( $+commands[playbook] )) || return 0\n\
+(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -C; }\n\
+_playbook() { unfunction _playbook; source <(playbook completions zsh 2>/dev/null); _playbook \"$@\"; }\n\
+compdef _playbook playbook\n\
+[[ ${commands[pb]} -ef ${commands[playbook]} ]] && compdef _playbook pb\n";
+
+#[test]
+fn a_loader_written_by_the_previous_release_is_migrated() {
+    let sb = Sandbox::new("zsh-previous-loader");
+    sb.only(ZSH_SHELL);
+    let loader = loader_path(&sb.home);
+    fs::write(&loader, format!("{LOADER_HEADER}\n{PREVIOUS_LOADER_BODY}")).expect("age the loader");
+    let rc = sb.read(&sb.home.join(ZSHRC));
+
+    sb.only(ZSH_SHELL);
+
+    assert_eq!(sb.read(&loader), loader_text());
+    assert!(!sb.read(&loader).contains("compinit -C; }\n"));
+    assert_eq!(sb.read(&sb.home.join(ZSHRC)), rc);
+}
+
 #[test]
 fn setup_migrates_the_pre_loader_stub_and_block() {
     let sb = Sandbox::new("zsh-migrate");
