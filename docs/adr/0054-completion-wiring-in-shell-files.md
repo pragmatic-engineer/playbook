@@ -84,7 +84,7 @@ A stub or the loader runs `playbook` from PATH, as the user. If a `playbook` ear
 
 ## Consequences
 
-- `retired_rc_entries` (migration 0018 and doctor `layer3`) must ignore any rc line that ends with the marker `# playbook completions`. That line must not match `shim::BLOCK_COMMENTS`, `SOURCE_LINE`, `BARE_EVALS` or a legacy `source` path, so doctor `layer3` stays PASS. A test pins this rule.
+- `retired_rc_entries` (migration 0018 and doctor `layer3`) must ignore any rc line that ends with the marker `# playbook completions`. That line must not match `rcfile::BLOCK_COMMENTS`, `SOURCE_LINE`, `BARE_EVALS` or a legacy `source` path, so doctor `layer3` stays PASS. A test pins this rule.
 - Setup and uninstall each get a completions step. Doctor gets a completions row.
 - Because setup edits `~/.zshrc` again, the docs for setup say what is written and where.
 - A change to the loader logic needs no rc edit. Setup and update rewrite the file. Only a change to the rc line itself would need a migration.
