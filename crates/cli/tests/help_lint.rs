@@ -1075,3 +1075,45 @@ fn a_file_outside_the_fixed_set_fails() {
     names.pop();
     assert!(check_file_set(&names).is_err());
 }
+
+// ---- style guide ----------------------------------------------------------
+
+const STYLE_GUIDE: &str = "docs/reference/cli-help-style.md";
+
+/// Banned texts the page does not list in backticks (H12).
+fn unlisted_variants(page: &str) -> Vec<&'static str> {
+    BANNED
+        .iter()
+        .filter(|b| !page.contains(&format!("`{}`", b.text)))
+        .map(|b| b.text)
+        .collect()
+}
+
+#[test]
+fn the_style_guide_lists_every_banned_variant() {
+    // Arrange
+    let path = PathBuf::from(env!("PLAYBOOK_REPO_ROOT")).join(STYLE_GUIDE);
+    let page = std::fs::read_to_string(&path).unwrap_or_default();
+    // Act
+    let missing = unlisted_variants(&page);
+    // Assert
+    assert!(
+        missing.is_empty(),
+        "{STYLE_GUIDE} must list these banned variants in backticks: {missing:?}"
+    );
+}
+
+#[test]
+fn a_variant_missing_from_the_page_is_reported() {
+    // Arrange
+    let page = BANNED
+        .iter()
+        .filter(|b| b.text != "WUs")
+        .map(|b| format!("`{}`", b.text))
+        .collect::<Vec<_>>()
+        .join(" ");
+    // Act
+    let missing = unlisted_variants(&page);
+    // Assert
+    assert_eq!(missing, vec!["WUs"]);
+}
