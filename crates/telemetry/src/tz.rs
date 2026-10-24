@@ -177,22 +177,22 @@ mod state {
     static FIXED: AtomicI64 = AtomicI64::new(0);
     static INITIALISED: AtomicBool = AtomicBool::new(false);
 
-    pub fn mode() -> u8 {
+    pub(super) fn mode() -> u8 {
         MODE.load(Ordering::Relaxed)
     }
-    pub fn set_mode(v: u8) {
+    pub(super) fn set_mode(v: u8) {
         MODE.store(v, Ordering::Relaxed);
     }
-    pub fn fixed() -> i64 {
+    pub(super) fn fixed() -> i64 {
         FIXED.load(Ordering::Relaxed)
     }
-    pub fn set_fixed(v: i64) {
+    pub(super) fn set_fixed(v: i64) {
         FIXED.store(v, Ordering::Relaxed);
     }
-    pub fn initialised() -> bool {
+    pub(super) fn initialised() -> bool {
         INITIALISED.load(Ordering::Relaxed)
     }
-    pub fn set_initialised() {
+    pub(super) fn set_initialised() {
         INITIALISED.store(true, Ordering::Relaxed);
     }
 }
@@ -207,22 +207,22 @@ mod state {
         static INITIALISED: Cell<bool> = const { Cell::new(false) };
     }
 
-    pub fn mode() -> u8 {
+    pub(super) fn mode() -> u8 {
         MODE.with(Cell::get)
     }
-    pub fn set_mode(v: u8) {
+    pub(super) fn set_mode(v: u8) {
         MODE.with(|c| c.set(v));
     }
-    pub fn fixed() -> i64 {
+    pub(super) fn fixed() -> i64 {
         FIXED.with(Cell::get)
     }
-    pub fn set_fixed(v: i64) {
+    pub(super) fn set_fixed(v: i64) {
         FIXED.with(|c| c.set(v));
     }
-    pub fn initialised() -> bool {
+    pub(super) fn initialised() -> bool {
         INITIALISED.with(Cell::get)
     }
-    pub fn set_initialised() {
+    pub(super) fn set_initialised() {
         INITIALISED.with(|c| c.set(true));
     }
 }
