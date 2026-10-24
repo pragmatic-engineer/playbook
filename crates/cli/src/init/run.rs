@@ -55,6 +55,8 @@ pub struct InitPaths {
     pub short_name: crate::init::pb_link::Choice,
     /// Whether to turn the policy guard on (`hooks.policyGuard.enabled`).
     pub policy_guard: bool,
+    /// The shell to install completion for. `None` skips the `completions` step.
+    pub completions: Option<crate::init::completion::Setup>,
     /// Where the `pb` link may go. `None` when the binary's location is unknown.
     pub pb_target: Option<crate::init::pb_link::Target>,
     /// What the attribution part does: skip, OFF (add the missing
@@ -205,6 +207,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
 
     let telemetry_step = telemetry_step(paths, epoch);
     let short_name_step = short_name_step(paths);
+    let completions_step = completions_step(&paths.home, paths.completions.as_ref());
     let path_step = path_step(&paths.home, paths.path_setup.as_ref());
 
     let trust_step = trust_config_dir_step(&paths.home);
@@ -216,6 +219,7 @@ pub fn run(paths: &InitPaths) -> InitOutcome {
         telemetry_step,
         attribution_step,
         short_name_step,
+        completions_step,
         policy_guard_step,
         path_step,
     ];
@@ -256,6 +260,9 @@ fn run_only(paths: &InitPaths, epoch: u64) -> InitOutcome {
     }
     if paths.short_name != crate::init::pb_link::Choice::Skip {
         steps.push(short_name_step(paths));
+    }
+    if paths.completions.is_some() {
+        steps.push(completions_step(&paths.home, paths.completions.as_ref()));
     }
     if paths.policy_guard {
         steps.push(policy_guard_step(paths));
@@ -415,6 +422,62 @@ pub(crate) fn path_step(home: &Path, setup: Option<&path::Setup>) -> StepReport 
         ),
         Err(err) => StepReport::failed("path", err.to_string()),
     }
+}
+
+/// Installs the completion files for one shell. A failure is reported,
+/// never fatal: the binary works without completion.
+pub(crate) fn completions_step(
+    home: &Path,
+    setup: Option<&crate::init::completion::Setup>,
+) -> StepReport {
+    use crate::init::completion;
+    let Some(setup) = setup else {
+        return StepReport::skipped("completions", "not requested");
+    };
+    let out = match completion::ensure(home, setup.shell) {
+        Ok(out) => out,
+        Err(err) => return StepReport::failed("completions", err.to_string()),
+    };
+    let names = |files: &[std::path::PathBuf]| {
+        files
+            .iter()
+            .map(|f| f.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let written: Vec<_> = out.created.iter().chain(&out.changed).cloned().collect();
+    let mut notes: Vec<String> = out
+        .skipped
+        .iter()
+        .map(|(file, why)| match why.as_str() {
+            completion::SKIP_NOT_OURS => format!("kept {} (not ours)", file.display()),
+            _ => format!("{}: skipped, {why}", file.display()),
+        })
+        .collect();
+    notes.extend(
+        out.removed
+            .iter()
+            .map(|file| format!("removed {} (replaced by the loader)", file.display())),
+    );
+    notes.extend(
+        out.kept
+            .iter()
+            .map(|file| format!("kept {} (edited)", file.display())),
+    );
+    if !written.is_empty() {
+        let mut detail = format!(
+            "wrote {}. Open a new terminal to pick it up.",
+            names(&written)
+        );
+        for note in &notes {
+            detail.push_str(&format!(" {note}."));
+        }
+        return StepReport::wired("completions", detail);
+    }
+    if !notes.is_empty() {
+        return StepReport::skipped("completions", notes.join(". "));
+    }
+    StepReport::already_correct("completions", "shell completion is already installed")
 }
 
 /// Marks `~/.config/playbook` as trusted in `~/.claude.json`, so a session

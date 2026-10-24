@@ -77,6 +77,12 @@ pub struct Flags {
     /// Do not add the `pb` short name
     #[arg(long, overrides_with = "short_name")]
     pub no_short_name: bool,
+    /// Install tab completion for `playbook` and `pb` in the shell named by `$SHELL`
+    #[arg(long, overrides_with = "no_completions")]
+    pub completions: bool,
+    /// Do not install shell completion
+    #[arg(long, overrides_with = "completions")]
+    pub no_completions: bool,
     /// Turn the policy guard on (`hooks.policyGuard.enabled`): it denies skipped git hooks, a hand-run gh pr create, Claude Code memory writes and settings.json edits
     #[arg(long, overrides_with = "no_policy_guard")]
     pub policy_guard: bool,
@@ -106,7 +112,7 @@ pub struct Flags {
         value_name = "PART",
         value_delimiter = ',',
         num_args = 1..,
-        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
+        help = "Run only these parts (comma separated: hooks, statusline, security, path, system-prompt, telemetry, short-name, completions, policy-guard, attribution), ask nothing and leave everything else untouched. `playbook setup --only telemetry` turns telemetry on, and `--only attribution` applies attribution OFF unless you chose ON"
     )]
     pub only: Vec<String>,
     /// Never ask: use the default for every part you did not answer with a flag
@@ -130,6 +136,7 @@ pub struct Choices {
     pub system_prompt: bool,
     pub telemetry: bool,
     pub short_name: bool,
+    pub completions: bool,
     /// Whether to turn the policy guard on. Off unless chosen.
     pub policy_guard: bool,
     /// Attribution OFF (the default), ON, or left as it is.
@@ -155,6 +162,7 @@ pub(crate) fn part_pair(flags: &Flags, id: &str) -> Option<(bool, bool)> {
         "system-prompt" => (flags.system_prompt, flags.no_system_prompt),
         "telemetry" => (flags.telemetry, flags.no_telemetry),
         "short-name" => (flags.short_name, flags.no_short_name),
+        "completions" => (flags.completions, flags.no_completions),
         "policy-guard" => (flags.policy_guard, flags.no_policy_guard),
         "attribution" => (flags.attribution, flags.no_attribution),
         _ => return None,
@@ -326,6 +334,7 @@ pub fn only_choices(flags: &Flags) -> Result<Option<Choices>, String> {
         system_prompt: has("system-prompt"),
         telemetry: has("telemetry"),
         short_name: has("short-name"),
+        completions: has("completions"),
         policy_guard: has("policy-guard"),
         attribution: match has(attribution::PART) {
             true => attribution_from_flags(flags).unwrap_or(attribution::Choice::Default),
@@ -526,6 +535,12 @@ pub fn resolve_with(
             catalog::question("short-name"),
             settings_default,
         ),
+        completions: decide(
+            flags.completions,
+            flags.no_completions,
+            catalog::question("completions"),
+            settings_default,
+        ),
         // It denies tool calls, so it stays off unless a flag or an answer
         // says yes, `--yes` included.
         policy_guard: decide(
@@ -572,6 +587,7 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
         (flags.system_prompt, flags.no_system_prompt),
         (flags.telemetry, flags.no_telemetry),
         (flags.short_name, flags.no_short_name),
+        (flags.completions, flags.no_completions),
         (flags.policy_guard, flags.no_policy_guard),
         (flags.attribution, flags.no_attribution),
     ]
@@ -579,7 +595,7 @@ pub fn defaults_notice(stdin_tty: bool, stdout_tty: bool, flags: &Flags) -> Opti
     .any(|&(on, off)| pick(on, off).is_none());
     (undecided && stdin_tty && !stdout_tty && !flags.yes && !flags.dry_run).then_some(
         "setup: output is not a terminal, so no questions were asked; the hooks, status line, \
-         system-prompt, telemetry, short-name and policy-guard parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
+         system-prompt, telemetry, short-name, completions and policy-guard parts stay off, attribution is left as it is and the other defaults apply; pass --yes to accept all defaults or the \
          --x/--no-x flags (see --explain) to choose",
     )
 }
@@ -605,6 +621,7 @@ mod tests {
             system_prompt: true,
             no_telemetry: true,
             no_short_name: true,
+            no_completions: true,
             no_policy_guard: true,
             no_attribution: true,
             ..Flags::default()
@@ -656,6 +673,7 @@ mod tests {
                 system_prompt: false,
                 telemetry: false,
                 short_name: false,
+                completions: false,
                 policy_guard: false,
                 attribution: attribution::Choice::Skip
             }
@@ -677,7 +695,7 @@ mod tests {
         });
         assert!(!c.hooks);
         assert!(c.path);
-        assert_eq!(asked.len(), 6, "{asked:?}");
+        assert_eq!(asked.len(), 7, "{asked:?}");
         assert!(asked
             .iter()
             .all(|q| !q.contains("hooks") && q != catalog::question("path")));
@@ -902,6 +920,7 @@ mod tests {
                 system_prompt: true,
                 telemetry: true,
                 short_name: true,
+                completions: true,
                 policy_guard: false,
                 attribution: attribution::Choice::Default
             }
@@ -996,6 +1015,7 @@ mod tests {
                 system_prompt: false,
                 telemetry: true,
                 short_name: false,
+                completions: false,
                 policy_guard: false,
                 attribution: attribution::Choice::Skip
             }
@@ -1190,6 +1210,7 @@ mod tests {
             system_prompt: false,
             telemetry: false,
             short_name: false,
+            completions: false,
             policy_guard: false,
             attribution: attribution::Choice::Skip,
         }

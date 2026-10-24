@@ -246,6 +246,18 @@ fn only_telemetry_and_short_name_match_under_both_names() {
 }
 
 #[test]
+fn only_completions_matches_under_both_names() {
+    let run = assert_same(&["--only", "completions"]);
+
+    assert_eq!(run.code, Some(0));
+    assert!(run.files[".local/share/playbook/completions.zsh"].contains("playbook completions zsh"));
+    assert_eq!(
+        run.files[".zshrc"],
+        format!("{}\n", playbook::init::completion::RC_LINE)
+    );
+}
+
+#[test]
 fn errors_exit_with_the_same_code_under_both_names() {
     assert_eq!(assert_same(&["--only", "no-such-part"]).code, Some(2));
     assert_eq!(assert_same(&["--explain", "no-such-part"]).code, Some(2));
