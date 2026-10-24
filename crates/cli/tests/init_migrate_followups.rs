@@ -213,7 +213,7 @@ fn init_adopts_a_config_json_written_after_the_sqlite_import() {
     playbook::config::write::set(
         playbook::config::write::Tier::Global,
         "mode",
-        serde_json::json!("ask"),
+        &serde_json::json!("ask"),
         &home,
         None,
     )

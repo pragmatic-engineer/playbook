@@ -664,7 +664,7 @@ fn import_legacy_once(conn: &Connection, root: &Path) -> Result<(), ConfigError>
             let parsed: Value = serde_json::from_str(&raw)
                 .map_err(|_| ConfigError::Malformed(file.path.clone()))?;
             if !parsed.is_object() {
-                return Err(ConfigError::Malformed(file.path.clone()));
+                return Err(ConfigError::Malformed(file.path));
             }
             let mut leaves = Vec::new();
             flatten_leaves(&parsed, "", &mut leaves);

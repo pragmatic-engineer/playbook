@@ -47,6 +47,7 @@ fn is_function_value(node: Node) -> bool {
 
 /// What one declaration contributes: where its name is, which node supplies
 /// the range, and where the signature ends.
+#[derive(Clone, Copy)]
 struct Decl<'t> {
     name: Node<'t>,
     /// Supplies the line and byte range. The `export` keyword is included.

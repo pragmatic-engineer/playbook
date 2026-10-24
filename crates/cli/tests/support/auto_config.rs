@@ -52,7 +52,7 @@ pub fn seed_global_config(home: &Path, doc: &serde_json::Value) {
             None => playbook::config::write::set(
                 playbook::config::write::Tier::Global,
                 prefix,
-                node.clone(),
+                node,
                 home,
                 None,
             )
