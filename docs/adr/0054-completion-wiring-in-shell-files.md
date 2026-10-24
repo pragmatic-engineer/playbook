@@ -1,6 +1,6 @@
 # ADR-0054: Setup Wires Shell Completion Into Shell Files
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date created:** 2026-10-23
 - **Date modified:** 2026-10-24
 - **Amends:** [ADR 0044](0044-drop-the-shell-launcher.md), decision 1 (no shell line), only for the completion line below. It adds one row to the decision 5 table.
