@@ -108,6 +108,12 @@ pub const KNOWN_KEYS: &[&str] = &[
     "update.plugin",
 ];
 
+/// Known keys that no code reads. `launcher.claudeOverride` was written by
+/// releases up to 0.36.0 when a user chose the `claude` shell function (ADR
+/// 0044). It stays settable and readable so a stored value does not turn into
+/// an error on upgrade. Remove it in 1.0.0 by moving it to [`RETIRED_KEYS`].
+pub const NO_EFFECT_KEYS: &[&str] = &["launcher.claudeOverride"];
+
 /// Keys that were removed. A stored value stays in the store, is never read,
 /// and `config import` skips it (one release of grace).
 pub const RETIRED_KEYS: &[&str] = &["hooks.rmGuard.allowedRoots"];
@@ -290,6 +296,13 @@ mod tests {
         for key in RETIRED_KEYS {
             assert!(!KNOWN_KEYS.contains(key), "{key}");
             assert_eq!(default_value(key), None, "{key}");
+        }
+    }
+
+    #[test]
+    fn a_no_effect_key_is_still_a_known_key() {
+        for key in NO_EFFECT_KEYS {
+            assert!(KNOWN_KEYS.contains(key), "{key}");
         }
     }
 
