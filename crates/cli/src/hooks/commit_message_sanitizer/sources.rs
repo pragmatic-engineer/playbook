@@ -24,7 +24,7 @@ const MAX_MESSAGE_BYTES: u64 = 1 << 20;
 const STDIN_PATHS: [&str; 4] = ["-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"];
 
 /// How the sanitised text is written back.
-pub enum Target {
+pub(super) enum Target {
     /// A shell word, or the value inside one: the range becomes a quoted
     /// literal. When nothing is left of the text, the range of `whole` (the
     /// option that held it) is replaced by what is left of that option, which
@@ -51,7 +51,7 @@ pub enum Target {
 }
 
 /// Where the body of a fed heredoc goes.
-pub struct Slot {
+pub(super) struct Slot {
     /// An empty range, after the line break that ends the command's line.
     at: Range<usize>,
     /// What goes before the body: a line break when the script ends there.
@@ -61,7 +61,7 @@ pub struct Slot {
     avoid: Option<String>,
 }
 
-pub struct Source {
+pub(super) struct Source {
     pub label: String,
     pub text: String,
     pub target: Target,
@@ -69,7 +69,7 @@ pub struct Source {
 
 /// Which rule judges the text.
 #[derive(Clone, Copy)]
-pub enum Rule {
+pub(super) enum Rule {
     /// A commit message, with its trailer block.
     Commit,
     /// A PR title or body, which has no trailer block.
@@ -83,7 +83,7 @@ fn is_stdin_path(path: &str) -> bool {
 }
 
 /// `path` as an absolute path: `~` expands, a relative path joins `base`.
-pub fn resolve(path: &str, base: &Path) -> PathBuf {
+pub(super) fn resolve(path: &str, base: &Path) -> PathBuf {
     let expanded = match path.strip_prefix("~/") {
         Some(rest) => home_dir().join(rest),
         None => PathBuf::from(path),
@@ -121,7 +121,7 @@ fn expand_vars(text: &str) -> Option<String> {
 /// The message in the word at `at` in the command, or in the part of it after
 /// `inline_at` characters. A word the shell expands is read through the
 /// `$(...)` or backticks it holds, since only those can be rewritten.
-pub fn from_word(
+pub(super) fn from_word(
     call: &Call,
     at: usize,
     inline_at: Option<usize>,
@@ -163,7 +163,7 @@ pub fn from_word(
 
 /// Where the value of the option in the word at `at` sits in the script, past
 /// its first `inline_at` characters, when those are written without quotes.
-pub fn value_span(call: &Call, at: usize, inline_at: Option<usize>) -> Option<Range<usize>> {
+pub(super) fn value_span(call: &Call, at: usize, inline_at: Option<usize>) -> Option<Range<usize>> {
     let span = call.span(at);
     let skip = inline_at.unwrap_or(0);
     let start = span.start + skip;
@@ -343,7 +343,7 @@ fn shift(range: &Range<usize>, base: usize) -> Range<usize> {
 
 /// A message read from standard input: the command's own heredoc, a here
 /// string, a file redirected in, or what the command before a pipe prints.
-pub fn from_stdin(call: &Call, label: &str, findings: &mut Findings) -> Vec<Source> {
+pub(super) fn from_stdin(call: &Call, label: &str, findings: &mut Findings) -> Vec<Source> {
     let cmd = call.cmd();
     if !cmd.heredocs.is_empty() {
         return cmd
@@ -406,7 +406,7 @@ pub fn from_stdin(call: &Call, label: &str, findings: &mut Findings) -> Vec<Sour
 
 /// A file named in the command, and where its name sits so a heredoc can
 /// stand in for it.
-pub struct Named<'a> {
+pub(super) struct Named<'a> {
     pub path: &'a str,
     pub dynamic: bool,
     /// What stands for the file now, which is replaced when the message is
@@ -420,7 +420,12 @@ pub struct Named<'a> {
 /// A message in a file: standard input for `-`, the heredoc that an earlier
 /// command in the script wrote the file from, or the file on disk, whose text
 /// is read from a heredoc in its place.
-pub fn from_path(call: &Call, named: &Named, label: &str, findings: &mut Findings) -> Vec<Source> {
+pub(super) fn from_path(
+    call: &Call,
+    named: &Named,
+    label: &str,
+    findings: &mut Findings,
+) -> Vec<Source> {
     let path = named.path;
     if is_stdin_path(path) {
         return from_stdin(call, label, findings);
@@ -471,7 +476,7 @@ fn fed_from(call: &Call, file: &Path, named: &Named) -> Result<String, &'static 
 
 /// A source whose text is read from a heredoc placed after the command's line.
 /// A non-empty `opener` makes the heredoc the command's standard input.
-pub fn feed(
+pub(super) fn feed(
     call: &Call,
     label: String,
     text: String,
@@ -605,7 +610,7 @@ fn writes_to(cmd: &Command, path: &str) -> bool {
 }
 
 /// The text of a regular, UTF-8 file within the size cap.
-pub fn read_message(path: &Path) -> Result<String, &'static str> {
+pub(super) fn read_message(path: &Path) -> Result<String, &'static str> {
     let meta = std::fs::symlink_metadata(path).map_err(|_| "it cannot be read")?;
     if meta.file_type().is_symlink() {
         return Err("it is a symbolic link");
@@ -621,7 +626,7 @@ pub fn read_message(path: &Path) -> Result<String, &'static str> {
 }
 
 /// The text of `sources` as one message, the way git joins repeated `-m`.
-pub fn joined(sources: &[Source]) -> String {
+pub(super) fn joined(sources: &[Source]) -> String {
     sources
         .iter()
         .map(|s| s.text.trim_end_matches('\n'))
@@ -631,7 +636,7 @@ pub fn joined(sources: &[Source]) -> String {
 
 /// Sanitises `sources` and queues the rewrite of each one that changes. With
 /// `joined`, the sources are one message, the way git joins repeated `-m`.
-pub fn apply(
+pub(super) fn apply(
     sources: &[Source],
     rule: Rule,
     joined: bool,

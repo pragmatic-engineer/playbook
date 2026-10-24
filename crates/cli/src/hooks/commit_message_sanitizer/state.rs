@@ -16,7 +16,7 @@ const FILE: &str = "commit-sanitizer-heads";
 
 /// Remembers the HEAD of the repository `dir` is in. Nothing is kept when the
 /// call has no session or `dir` is not in a repository.
-pub fn record_head(payload: &Payload, dir: &Path) {
+pub(super) fn record_head(payload: &Payload, dir: &Path) {
     let (Some(file), Some(root)) = (state_file(payload), repo_root(dir)) else {
         return;
     };
@@ -30,7 +30,7 @@ pub fn record_head(payload: &Payload, dir: &Path) {
 
 /// The HEAD recorded for the repository `dir` is in, which is then forgotten
 /// so a later call cannot take it for its own.
-pub fn take_head(payload: &Payload, dir: &Path) -> Option<String> {
+pub(super) fn take_head(payload: &Payload, dir: &Path) -> Option<String> {
     let (file, root) = (state_file(payload)?, repo_root(dir)?);
     let mut heads = read(&file);
     let head = heads.remove(&root)?;
