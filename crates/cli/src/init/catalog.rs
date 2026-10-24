@@ -105,6 +105,16 @@ pub const PARTS: &[Part] = &[
         undo: "Delete `pb` from the install folder and run `playbook config set launcher.shortName false`. `playbook uninstall --remove-binary` also removes the link.",
     },
     Part {
+        id: "completions",
+        asked: true,
+        default_on: true,
+        flags: "--completions, --no-completions",
+        question: "Install tab completion for `playbook` and `pb` in your shell? It adds small files (bash: ~/.local/share/bash-completion/completions, fish: ~/.config/fish/completions, zsh: ~/.local/share/playbook/completions.zsh) and, for zsh, one marked line in ~/.zshrc, created when missing.",
+        does: "Writes a small file for the shell in $SHELL, for `playbook` and `pb`. It asks the installed binary for the real script, so an upgrade needs no rewrite and a missing binary breaks nothing. For zsh the file is a loader that does its work on the first Tab press, and setup adds one marked line to ~/.zshrc that sources it, creating the file when it is missing. Setup rewrites a loader it wrote, keeps a file it did not write, and does not touch an edited line. Asked once per run for one shell: run `playbook setup --only completions` from each shell you use. Without a terminal and without `--yes` it stays off.",
+        changes: "bash: ~/.local/share/bash-completion/completions/playbook and pb; fish: ~/.config/fish/completions/playbook.fish and pb.fish; zsh: ~/.local/share/playbook/completions.zsh and one line in ~/.zshrc",
+        undo: "`playbook uninstall` removes the files and the zsh line it wrote, after a backup of ~/.zshrc.",
+    },
+    Part {
         id: "policy-guard",
         asked: true,
         default_on: false,

@@ -49,6 +49,7 @@ fn paths(home: &Path, root: &Path, repo: Option<(PathBuf, PathBuf)>) -> InitPath
         short_name: playbook::init::pb_link::Choice::Skip,
         policy_guard: false,
         pb_target: None,
+        completions: None,
         attribution: playbook::init::attribution::Choice::Skip,
         path_setup: None,
         repo,
