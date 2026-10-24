@@ -237,19 +237,12 @@ impl Walker<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{extract as extract_any, parse, Import, Lang, Symbol};
+    use super::super::{extract as extract_any, find, parse, Import, Lang, Symbol};
 
     fn run(src: &str) -> (Vec<Symbol>, Vec<Import>) {
         let parsed = parse(Lang::Rust, src.as_bytes()).expect("parse");
         let out = extract_any(Lang::Rust, &parsed, src.as_bytes());
         (out.symbols, out.imports)
-    }
-
-    fn find<'a>(symbols: &'a [Symbol], qualified: &str) -> &'a Symbol {
-        symbols
-            .iter()
-            .find(|s| s.qualified_name == qualified)
-            .unwrap_or_else(|| panic!("no symbol {qualified} in {symbols:#?}"))
     }
 
     #[test]

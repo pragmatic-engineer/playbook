@@ -1326,6 +1326,7 @@ dependencies = [
  "chrono",
  "clap",
  "libc",
+ "playbook-common",
  "playbook-data",
  "ratatui",
  "rusqlite",

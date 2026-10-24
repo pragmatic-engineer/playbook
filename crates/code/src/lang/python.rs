@@ -3,7 +3,7 @@
 
 //! Python symbol and import extraction.
 
-use super::{clean_signature, Extracted, Import, Symbol, MAX_SIGNATURE_CHARS};
+use super::{clean_signature, join_dotted, Extracted, Import, Symbol, MAX_SIGNATURE_CHARS};
 use std::borrow::Cow;
 use tree_sitter::Node;
 
@@ -35,14 +35,6 @@ enum Owner {
     Module,
     Class,
     Function,
-}
-
-fn join(prefix: &str, name: &str) -> String {
-    if prefix.is_empty() {
-        name.to_string()
-    } else {
-        format!("{prefix}.{name}")
-    }
 }
 
 /// Compound statements whose bodies stay in the enclosing scope.
@@ -268,7 +260,7 @@ impl Walker<'_> {
         signature_cut |= end < wanted;
         let exported = !name.starts_with('_');
         self.out.symbols.push(Symbol {
-            qualified_name: join(prefix, &name),
+            qualified_name: join_dotted(prefix, &name),
             name,
             kind,
             signature: Some(signature),
@@ -360,19 +352,12 @@ impl Walker<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{extract as extract_any, parse, Import, Lang, Symbol};
+    use super::super::{extract as extract_any, find, parse, Import, Lang, Symbol};
 
     fn run(src: &str) -> (Vec<Symbol>, Vec<Import>) {
         let parsed = parse(Lang::Python, src.as_bytes()).expect("parse");
         let out = extract_any(Lang::Python, &parsed, src.as_bytes());
         (out.symbols, out.imports)
-    }
-
-    fn find<'a>(symbols: &'a [Symbol], qualified: &str) -> &'a Symbol {
-        symbols
-            .iter()
-            .find(|s| s.qualified_name == qualified)
-            .unwrap_or_else(|| panic!("no symbol {qualified} in {symbols:#?}"))
     }
 
     #[test]
