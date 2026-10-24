@@ -104,6 +104,8 @@ A migration is named by a slug and the release that ships it ([ADR-0046](docs/ad
 
 A test walks the whole tree and fails when a visible command has no line, a line names a command that is gone, or a purpose has the wrong length. Hidden commands, such as a deprecated name, need no line. Then regenerate the reference page with `UPDATE_REFERENCE=1 cargo test -p playbook --test reference_docs`.
 
+Write help text as the [CLI help text style guide](docs/reference/cli-help-style.md) says; a lint checks most of it. A PR that fixes an allowlisted item deletes its line in `crates/cli/tests/help_lint_allowlist/`.
+
 Renaming a command is a deprecation. Keep the old name as a hidden alias that runs the same code, prints one line on stderr in a terminal that names the new command, and keeps its exit codes. Since the old name keeps working, the commit is not marked breaking. Remove the alias no earlier than the next major release, and mark that removal as breaking. The rename to `playbook setup` is the example ([ADR-0040](docs/adr/0040-rename-init-to-setup.md)).
 
 ## Changing the plugin
