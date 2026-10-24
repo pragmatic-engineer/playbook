@@ -7,8 +7,11 @@
 
 #[path = "support/auto_parity.rs"]
 mod ap;
+#[path = "support/auto_parity_auto.rs"]
+mod ap_auto;
 
 use ap::*;
+use ap_auto::*;
 use regex::Regex;
 use std::fs;
 

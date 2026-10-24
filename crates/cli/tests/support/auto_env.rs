@@ -7,13 +7,14 @@
 //! roots) from the child only and pins `$HOME` to a scratch directory, so
 //! neither a developer's exported variables nor their real config can flip a
 //! case, and the parent process env is never mutated.
-
-#![allow(dead_code)]
+//!
+//! The rest of the helpers are in `auto_run.rs`, `auto_config.rs`,
+//! `auto_warm_up.rs`, `auto_git_shim.rs` and `auto_feature_repo.rs`, so a test
+//! file includes only what it uses.
 
 use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::PathBuf;
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -55,80 +56,6 @@ pub fn scratch(tag: &str) -> Scratch {
     Scratch { home, cwd }
 }
 
-impl Scratch {
-    /// Plant `{"mode": <mode>}` as the global config under the scratch HOME.
-    pub fn seed_mode_config(&self, mode: &str) {
-        seed_global_config(&self.home, &serde_json::json!({ "mode": mode }));
-    }
-}
-
-/// Run a freshly written executable once, outside any timeout under test.
-/// Some machines scan a new executable on its first run, which can take
-/// longer than the hook's own 5 second wait for `git`. Without this the hook
-/// gives up, reads an empty slug, and the test fails for reasons unrelated to
-/// what it checks. Later runs of the same file take milliseconds.
-#[cfg(unix)]
-pub fn warm_up(executable: &std::path::Path) {
-    let _ = Command::new(executable)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-/// A `git` shim that logs each call to a file and answers every call with the
-/// `acme/widgets` origin URL, plus the PATH that puts it first.
-#[cfg(unix)]
-pub struct GitShim {
-    pub path: String,
-    pub log: PathBuf,
-}
-
-#[cfg(unix)]
-impl GitShim {
-    pub fn calls(&self) -> usize {
-        fs::read_to_string(&self.log).map_or(0, |log| log.lines().count())
-    }
-}
-
-#[cfg(unix)]
-pub fn git_shim(scratch: &Scratch) -> GitShim {
-    use std::os::unix::fs::PermissionsExt;
-    let bin = scratch.home.join("shim-bin");
-    fs::create_dir_all(&bin).expect("shim dir should be creatable");
-    let log = scratch.home.join("git-calls.log");
-    let script = format!(
-        "#!/bin/sh\necho \"$@\" >> '{}'\necho git@github.com:acme/widgets.git\n",
-        log.display()
-    );
-    let shim = bin.join("git");
-    fs::write(&shim, script).expect("shim should be writable");
-    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).expect("shim should be exec");
-    warm_up(&shim);
-    let _ = fs::remove_file(&log);
-    let path = format!(
-        "{}:{}",
-        bin.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-    GitShim { path, log }
-}
-
-impl Scratch {
-    /// Plant `{"mode": <mode>}` as the repo tier config for `owner/repo`.
-    pub fn seed_repo_mode_config(&self, owner: &str, repo: &str, mode: &str) {
-        let dir = self
-            .home
-            .join(".config/playbook/repos")
-            .join(owner)
-            .join(repo)
-            .join(".config");
-        fs::create_dir_all(&dir).expect("repo config dir should be creatable");
-        fs::write(dir.join("config.json"), format!(r#"{{"mode":"{mode}"}}"#))
-            .expect("repo config should be writable");
-    }
-}
-
 /// `playbook hook <hook>` with the environment isolated; callers add the
 /// per-case variables (for example `PLAYBOOK_MODE`) afterwards.
 pub fn hook_command(scratch: &Scratch, hook: &str) -> Command {
@@ -146,116 +73,4 @@ pub fn hook_command(scratch: &Scratch, hook: &str) -> Command {
         }
     }
     command
-}
-
-/// Run the hook with `stdin` and the extra `env` pairs, returning stdout and
-/// the exit code.
-pub fn run_hook(scratch: &Scratch, hook: &str, stdin: &str, env: &[(&str, &str)]) -> (String, i32) {
-    let mut command = hook_command(scratch, hook);
-    command
-        .envs(env.iter().copied())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = command.spawn().expect("playbook spawns");
-    child
-        .stdin
-        .take()
-        .expect("stdin is piped")
-        .write_all(stdin.as_bytes())
-        .expect("stdin accepts the payload");
-    let out = child.wait_with_output().expect("playbook exits");
-    (
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        out.status.code().unwrap_or(-1),
-    )
-}
-
-/// Replace the global config under `home` with the leaves of `doc` (a nested
-/// object such as `{"auto": {"warnPct": 70}}`), through the config store.
-#[allow(dead_code)]
-pub fn seed_global_config(home: &Path, doc: &serde_json::Value) {
-    clear_config(home);
-    fn walk(prefix: &str, node: &serde_json::Value, home: &Path) {
-        match node.as_object() {
-            Some(obj) => {
-                for (k, v) in obj {
-                    let key = if prefix.is_empty() {
-                        k.clone()
-                    } else {
-                        format!("{prefix}.{k}")
-                    };
-                    walk(&key, v, home);
-                }
-            }
-            None => playbook::config::write::set(
-                playbook::config::write::Tier::Global,
-                prefix,
-                node.clone(),
-                home,
-                None,
-            )
-            .expect("seeded config value should be valid"),
-        }
-    }
-    walk("", doc, home);
-}
-
-/// Remove every stored config value under `home`.
-#[allow(dead_code)]
-pub fn clear_config(home: &Path) {
-    let dir = home.join(".config").join("playbook");
-    for name in [
-        "playbook.db",
-        "playbook.db-wal",
-        "playbook.db-shm",
-        "config.json",
-        "data/config.db",
-        "data/config.db-wal",
-        "data/config.db-shm",
-    ] {
-        let _ = fs::remove_file(dir.join(name));
-    }
-}
-
-/// Replace the global config with `text` written as a legacy `config.json`,
-/// which the store imports on its next open. For values `config set` refuses
-/// (an invalid budget) or a file that is not JSON at all.
-#[allow(dead_code)]
-pub fn seed_raw_global_config(home: &Path, text: &str) {
-    clear_config(home);
-    let dir = home.join(".config").join("playbook");
-    fs::create_dir_all(&dir).expect("config dir should be creatable");
-    fs::write(dir.join("config.json"), text).expect("config file should be writable");
-}
-
-/// A git repo under the scratch cwd on branch `feat/x` with one commit, made
-/// once, for tests whose tool calls need a real checkout to run in.
-#[allow(dead_code)]
-pub fn feature_repo(s: &Scratch) -> std::path::PathBuf {
-    let dir = s.cwd.join("feature-repo");
-    if dir.join(".git").exists() {
-        return dir;
-    }
-    std::fs::create_dir_all(&dir).expect("repo dir");
-    for args in [
-        vec!["init", "-q", "-b", "feat/x"],
-        vec!["commit", "-q", "--allow-empty", "-m", "seed"],
-    ] {
-        let status = std::process::Command::new("git")
-            .args(&args)
-            .current_dir(&dir)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@t")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@t")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .expect("git");
-        assert!(status.success(), "git {args:?}");
-    }
-    dir
 }

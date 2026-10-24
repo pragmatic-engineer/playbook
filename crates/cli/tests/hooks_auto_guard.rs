@@ -6,10 +6,19 @@
 //! other case it prints nothing. Payloads are real Claude Code captures under
 //! `tests/fixtures/hooks/`.
 
+#[path = "support/auto_config.rs"]
+mod auto_config;
 #[path = "support/auto_env.rs"]
 mod auto_env;
+#[path = "support/auto_git_shim.rs"]
+mod auto_git_shim;
+#[path = "support/auto_run.rs"]
+mod auto_run;
+#[path = "support/auto_warm_up.rs"]
+mod auto_warm_up;
 
-use auto_env::{hook_command, run_hook, scratch, CLEARED_VARS};
+use auto_env::{hook_command, scratch, CLEARED_VARS};
+use auto_run::run_hook;
 use serde_json::Value;
 use std::ffi::OsStr;
 
@@ -307,7 +316,7 @@ fn helper_isolates_the_child_env_without_touching_the_parent() {
 fn default_mode_with_no_scoped_config_never_spawns_git() {
     // Arrange
     let s = scratch("no-spawn");
-    let shim = auto_env::git_shim(&s);
+    let shim = auto_git_shim::git_shim(&s);
 
     // Act
     let (out, code) = run_hook(
@@ -333,7 +342,7 @@ fn a_repo_tier_mode_is_still_honoured_through_the_slug_lookup() {
     // Arrange
     let s = scratch("repo-tier");
     s.seed_repo_mode_config("acme", "widgets", "auto");
-    let shim = auto_env::git_shim(&s);
+    let shim = auto_git_shim::git_shim(&s);
 
     // Act
     let (out, code) = run_hook(&s, HOOK, ASK_USER_QUESTION, &[("PATH", &shim.path)]);
