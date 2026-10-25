@@ -351,7 +351,7 @@ pub(crate) fn policy_guard_step(paths: &InitPaths) -> StepReport {
     match crate::config::write::set(
         crate::config::write::Tier::Global,
         ENABLED_KEY,
-        serde_json::Value::Bool(true),
+        &serde_json::Value::Bool(true),
         &paths.home,
         None,
     ) {

@@ -739,11 +739,7 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
         .map(String::from);
     let refspec = format!("HEAD:{remote_ref}");
     // Force only over commits we already had before our own rebase.
-    let lease_base = if rebased {
-        before.clone()
-    } else {
-        "HEAD".to_string()
-    };
+    let lease_base = if rebased { before } else { "HEAD".to_string() };
     let push_args: Option<Vec<String>> = match &remote {
         None => Some(vec!["push".into(), "-u".into(), "origin".into(), refspec]),
         Some(r) if *r == head => None,
@@ -826,7 +822,7 @@ pub fn run(opts: &Options) -> Result<Report, Failure> {
 
     match &existing {
         None => {
-            let (title, body) = planned.create.clone().unwrap_or_default();
+            let (title, body) = planned.create.unwrap_or_default();
             report.actions.push(format!(
                 "open a {} PR",
                 if draft_wanted { "draft" } else { "ready" }

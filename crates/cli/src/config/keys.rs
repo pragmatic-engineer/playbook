@@ -316,7 +316,7 @@ mod tests {
         let set = super::super::write::set(
             super::super::write::Tier::Global,
             "hooks.rmGuard.allowedRoots",
-            Value::Array(Vec::new()),
+            &Value::Array(Vec::new()),
             &home,
             None,
         );

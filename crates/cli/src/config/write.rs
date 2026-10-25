@@ -25,15 +25,15 @@ pub enum Tier {
 pub fn set(
     tier: Tier,
     key: &str,
-    value: Value,
+    value: &Value,
     home: &Path,
     repo_slug: Option<&str>,
 ) -> Result<(), ConfigError> {
-    validate_key_and_value(key, &value)?;
+    validate_key_and_value(key, value)?;
     require_global_for_user_key(key, tier == Tier::Global)?;
-    check_cap_order(tier, key, &value, home, repo_slug)?;
+    check_cap_order(tier, key, value, home, repo_slug)?;
     let root = crate::common::paths::playbook_root_from(home);
-    super::store::put(&root, tier, repo_slug, key, &value)
+    super::store::put(&root, tier, repo_slug, key, value)
 }
 
 /// Reject a per-user key bound for the org or repo tier.

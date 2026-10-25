@@ -191,8 +191,8 @@ fn is_corrupt(err: &rusqlite::Error) -> bool {
     )
 }
 
-fn step(path: &Path, what: &str, err: rusqlite::Error) -> DbError {
-    if is_corrupt(&err) {
+fn step(path: &Path, what: &str, err: &rusqlite::Error) -> DbError {
+    if is_corrupt(err) {
         DbError::NeedsRebuild(rebuild_hint(path, "is not a valid index database"))
     } else {
         DbError::Failed(format!(
@@ -214,18 +214,18 @@ fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
         }
         host::make_file_private(path).map_err(DbError::Failed)?;
     }
-    let conn = Connection::open(path).map_err(|e| step(path, "open the database", e))?;
+    let conn = Connection::open(path).map_err(|e| step(path, "open the database", &e))?;
     conn.busy_timeout(BUSY_TIMEOUT)
-        .map_err(|e| step(path, "set busy_timeout", e))?;
+        .map_err(|e| step(path, "set busy_timeout", &e))?;
     retry_busy(
         || conn.pragma_update(None, "journal_mode", "WAL"),
         OPEN_BUDGET,
     )
-    .map_err(|e| step(path, "set journal_mode=WAL", e))?;
+    .map_err(|e| step(path, "set journal_mode=WAL", &e))?;
     conn.pragma_update(None, "foreign_keys", "ON")
-        .map_err(|e| step(path, "set foreign_keys", e))?;
+        .map_err(|e| step(path, "set foreign_keys", &e))?;
     conn.pragma_update(None, "synchronous", "NORMAL")
-        .map_err(|e| step(path, "set synchronous", e))?;
+        .map_err(|e| step(path, "set synchronous", &e))?;
     if !fts5_available(&conn) {
         return Err(DbError::Failed(
             "this build has no SQLite FTS5; rebuild with FTS5 enabled".to_string(),
@@ -233,7 +233,7 @@ fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
     }
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(|e| step(path, "read user_version", e))?;
+        .map_err(|e| step(path, "read user_version", &e))?;
     if version == SCHEMA_VERSION {
         return Ok(conn);
     }
@@ -247,9 +247,9 @@ fn try_open(path: &Path, mode: OpenMode) -> Result<Connection, DbError> {
         return Err(DbError::NeedsRebuild(rebuild_hint(path, "is empty")));
     }
     retry_busy(|| conn.execute_batch(SCHEMA_SQL), OPEN_BUDGET)
-        .map_err(|e| step(path, "create the schema", e))?;
+        .map_err(|e| step(path, "create the schema", &e))?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
-        .map_err(|e| step(path, "set user_version", e))?;
+        .map_err(|e| step(path, "set user_version", &e))?;
     Ok(conn)
 }
 

@@ -295,7 +295,7 @@ fn fires(f: &Fire, name: &str) -> bool {
             playbook::config::write::set(
                 playbook::config::write::Tier::Global,
                 "docs.convert",
-                serde_json::json!("auto"),
+                &serde_json::json!("auto"),
                 &home,
                 None,
             )

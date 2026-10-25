@@ -709,7 +709,7 @@ mod tests {
     }
 
     fn set_mode(h: &Path, v: &str) {
-        crate::config::write::set(crate::config::write::Tier::Global, KEY, json!(v), h, None)
+        crate::config::write::set(crate::config::write::Tier::Global, KEY, &json!(v), h, None)
             .unwrap();
     }
 
