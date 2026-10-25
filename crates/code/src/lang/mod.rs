@@ -102,6 +102,25 @@ pub fn parse(lang: Lang, bytes: &[u8]) -> Result<Parsed, String> {
     Ok(Parsed { tree, partial })
 }
 
+/// `prefix.name`, or just `name` at the top level. The qualified-name rule for
+/// languages whose scopes join with a dot; Rust joins with `::` in its own `join`.
+pub(crate) fn join_dotted(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        name.to_string()
+    } else {
+        format!("{prefix}.{name}")
+    }
+}
+
+/// The symbol with this qualified name; panics with the list when absent.
+#[cfg(test)]
+pub(crate) fn find<'a>(symbols: &'a [Symbol], qualified: &str) -> &'a Symbol {
+    symbols
+        .iter()
+        .find(|s| s.qualified_name == qualified)
+        .unwrap_or_else(|| panic!("no symbol {qualified} in {symbols:#?}"))
+}
+
 /// One declaration found in a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
