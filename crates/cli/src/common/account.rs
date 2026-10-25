@@ -3,7 +3,9 @@
 
 //! The current user's id and the home the account database lists for it.
 
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 
 /// The current user id.
 #[cfg(unix)]

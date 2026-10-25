@@ -997,30 +997,19 @@ fn new_root_self_heal_fires_even_when_the_copy_step_itself_fails() {
     let _ = fs::remove_dir_all(&home);
 }
 
-// `mode_t` is 16-bit on Darwin and 32-bit on Linux/glibc, so the umask FFI
-// binding below is cfg-gated per target rather than hardcoded to one width.
-#[cfg(target_os = "macos")]
-type RawMode = u16;
-#[cfg(not(target_os = "macos"))]
-type RawMode = u32;
 #[cfg(unix)]
-extern "C" {
-    fn umask(mask: RawMode) -> RawMode;
-}
+use rustix::fs::Mode;
 
 /// Restores the process umask on drop, so a panicking assertion mid-test
 /// still leaves the umask as this process found it rather than bleeding a
 /// changed value into whichever test the shared binary schedules next.
 #[cfg(unix)]
-struct UmaskGuard(RawMode);
+struct UmaskGuard(Mode);
 
 #[cfg(unix)]
 impl Drop for UmaskGuard {
     fn drop(&mut self) {
-        // SAFETY: umask only reads and replaces the process mask, no memory is touched.
-        unsafe {
-            umask(self.0);
-        }
+        rustix::process::umask(self.0);
     }
 }
 
@@ -1029,9 +1018,8 @@ impl Drop for UmaskGuard {
 /// thread-local, so every caller must also hold `lock_env()` for the guard's
 /// full lifetime.
 #[cfg(unix)]
-fn pin_umask(new_mask: RawMode) -> UmaskGuard {
-    // SAFETY: umask only reads and replaces the process mask, no memory is touched.
-    let original = unsafe { umask(new_mask) };
+fn pin_umask(new_mask: Mode) -> UmaskGuard {
+    let original = rustix::process::umask(new_mask);
     UmaskGuard(original)
 }
 
@@ -1047,7 +1035,7 @@ fn rename_fast_path_creates_new_root_parent_with_mode_0700_under_a_permissive_um
     // The freshly created parent chain is therefore the meaningful mode to
     // assert on for this path, not `new_root` itself.
     let _guard = lock_env();
-    let _umask_guard = pin_umask(0o022 as RawMode);
+    let _umask_guard = pin_umask(Mode::from_bits_truncate(0o022));
     let home = scratch_home("rename-mode-0700");
     let claude_home = claude_home_of(&home);
     let old_root = mem_dir_of(&claude_home);
@@ -1078,7 +1066,7 @@ fn copy_fallback_path_creates_nested_directories_with_mode_0700_under_a_permissi
     // `copy_verify_and_finish`. A nested subdirectory the source holds but
     // the destination does not yet have forces `copy_all` to create it fresh.
     let _guard = lock_env();
-    let _umask_guard = pin_umask(0o022 as RawMode);
+    let _umask_guard = pin_umask(Mode::from_bits_truncate(0o022));
     let home = scratch_home("copy-mode-0700");
     let claude_home = claude_home_of(&home);
     let old_root = mem_dir_of(&claude_home);

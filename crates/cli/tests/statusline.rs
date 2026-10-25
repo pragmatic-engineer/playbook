@@ -341,8 +341,7 @@ fn an_unwritable_session_dir_still_renders() {
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
     let out = rust(&s.0, &s.0, &session_payload(&s.0, "ro", 80), &[]);
     assert!(!out.is_empty());
-    // SAFETY: geteuid has no preconditions and cannot fail.
-    let is_root = unsafe { libc::geteuid() } == 0;
+    let is_root = rustix::process::geteuid().is_root();
     assert!(!dir.join("telemetry.jsonl").exists() || is_root);
 }
 
