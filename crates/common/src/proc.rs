@@ -36,7 +36,9 @@ fn poll_pause(age: Duration) -> Duration {
     }
 }
 
-/// How long a child gets to exit after SIGTERM before it is killed.
+/// How long a child gets to exit after SIGTERM before it is killed. Windows
+/// has no SIGTERM, so it kills at once and does not need this.
+#[cfg(unix)]
 const TERM_GRACE: Duration = Duration::from_secs(1);
 
 /// Reads a pipe to the end on its own thread, so a child that writes more

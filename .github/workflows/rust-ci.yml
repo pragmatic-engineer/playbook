@@ -627,7 +627,11 @@ jobs:
           restore-keys: |
             cargo-windows-check-v2-${{ runner.os }}-
 
+      # Warnings are errors here: an item only unix code uses shows up on
+      # this platform as dead code, and a plain check lets that pass.
       - name: cargo check (lib and bin)
+        env:
+          RUSTFLAGS: -D warnings
         run: cargo check --workspace --bins --lib
 
       - name: Save cargo registry and build output (windows-check)
