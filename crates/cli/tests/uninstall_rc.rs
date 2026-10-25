@@ -4,7 +4,7 @@
 //! `strip_rc_files`: the launcher block comes out of the rc files, in every
 //! form an install of any generation wrote, and nothing else does.
 
-use playbook::init::shim::strip_rc_files;
+use playbook::init::rcfile::strip_rc_files;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -294,11 +294,16 @@ fn layer2(env: &Env) -> Row {
     }
 }
 
+/// Reports the shell-launcher lines that releases up to 0.36.0 wrote into the
+/// rc files (ADR 0044). It stays because those lines are still on disk for any
+/// user who upgrades from such a release, and each one now prints an error or
+/// does nothing in every new shell. Remove it in 1.0.0, together with
+/// migration `retired-launcher-rc-line`.
 fn layer3(env: &Env) -> Row {
-    let (writable, stuck): (Vec<_>, Vec<_>) = crate::init::shim::retired_rc_entries(&env.home)
+    let (writable, stuck): (Vec<_>, Vec<_>) = crate::init::rcfile::retired_rc_entries(&env.home)
         .into_iter()
         .partition(|r| r.writable);
-    let names = |list: &[crate::init::shim::RetiredRc]| {
+    let names = |list: &[crate::init::rcfile::RetiredRc]| {
         list.iter()
             .map(|r| r.rc_file.display().to_string())
             .collect::<Vec<_>>()
