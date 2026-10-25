@@ -5,7 +5,7 @@
 //! remaining reads then run concurrently, each under its own timeout.
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct GitInfo {
+pub(super) struct GitInfo {
     /// Current branch, `detached` when HEAD is not on one.
     pub branch: String,
     /// `origin`'s URL, empty when there is none.
@@ -42,7 +42,7 @@ fn clean(out: Option<std::process::Output>) -> bool {
 /// The branch and the origin URL come from `.git` on disk. Dirtiness is the
 /// one fact only git can answer, so a single `git status` stays. Any layout
 /// the disk reader does not model takes the all-git path.
-pub fn inspect(cwd: &str) -> Option<GitInfo> {
+pub(super) fn inspect(cwd: &str) -> Option<GitInfo> {
     let path = std::path::Path::new(cwd);
     let from_disk =
         crate::common::gitfacts::head(path).zip(crate::common::gitfacts::config_origin_url(path));
