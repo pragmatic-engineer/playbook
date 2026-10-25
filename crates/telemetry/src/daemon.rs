@@ -425,6 +425,7 @@ mod unix {
     use crate::collector::{pid_alive, probe_stream, read_state, state_path, Probe, State};
     use crate::receiver::SHUTDOWN_PATH;
     use crate::util::within;
+    use rustix::process::{Pid, Signal};
     use std::io::Write;
     use std::net::{Ipv4Addr, SocketAddr, TcpStream};
     use std::path::{Path, PathBuf};
@@ -479,12 +480,12 @@ mod unix {
     pub trait ProcessCheck: Sync {
         fn is_playbook(&self, pid: u32) -> bool;
 
-        fn signal(&self, pid: u32, signal: libc::c_int) -> bool {
-            let Ok(pid) = libc::pid_t::try_from(pid) else {
-                return false;
-            };
-            // SAFETY: plain kill(2) on a pid the caller checked.
-            pid > 0 && unsafe { libc::kill(pid, signal) } == 0
+        fn signal(&self, pid: u32, signal: Signal) -> bool {
+            // `Pid` rejects 0 and negative ids, which `kill` would take as groups.
+            i32::try_from(pid)
+                .ok()
+                .and_then(Pid::from_raw)
+                .is_some_and(|pid| rustix::process::kill_process(pid, signal).is_ok())
         }
     }
 
@@ -527,15 +528,17 @@ mod unix {
 
     #[cfg(target_os = "macos")]
     fn exe_path(pid: u32) -> Option<PathBuf> {
-        use std::os::unix::ffi::OsStringExt;
-        let pid = libc::c_int::try_from(pid).ok()?;
-        let size = usize::try_from(libc::PROC_PIDPATHINFO_MAXSIZE).ok()?;
-        let mut buf = vec![0u8; size];
-        let len = u32::try_from(size).ok()?;
-        // SAFETY: the buffer is `len` bytes long and outlives the call.
-        let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), len) };
-        buf.truncate(usize::try_from(n).ok().filter(|n| *n > 0)?);
-        Some(PathBuf::from(std::ffi::OsString::from_vec(buf)))
+        // macOS has no /proc and std has no proc_pidpath, so ask ps, which
+        // prints the full path of the executable for `comm`.
+        let out = std::process::Command::new("/bin/ps")
+            .args(["-o", "comm=", "-p", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        let text = String::from_utf8(out.stdout).ok()?;
+        let path = text.trim();
+        (out.status.success() && !path.is_empty()).then(|| PathBuf::from(path))
     }
 
     #[cfg(target_os = "linux")]
@@ -558,7 +561,7 @@ mod unix {
         Some(name)
     }
 
-    /// Spawns `exe usage collect --idle-seconds 0` in its own session.
+    /// Spawns `exe usage collect --idle-seconds 0` in its own process group.
     pub struct RealSpawner;
 
     impl Spawner for RealSpawner {
@@ -570,8 +573,8 @@ mod unix {
     }
 
     /// The detached collector command: no terminal, stderr appended to
-    /// `collector.log`, the test-only variables removed, and `setsid`, so a
-    /// hook timeout that kills the hook's process group or session spares it.
+    /// `collector.log`, the test-only variables removed, and its own process group, so a
+    /// hook timeout that kills the hook's process group spares it.
     pub(super) fn collector_command(
         exe: &Path,
         paths: &Paths,
@@ -594,16 +597,7 @@ mod unix {
         for var in TEST_VARS {
             cmd.env_remove(var);
         }
-        // SAFETY: setsid is async-signal-safe and touches no memory.
-        unsafe {
-            cmd.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    Err(std::io::Error::last_os_error())
-                } else {
-                    Ok(())
-                }
-            });
-        }
+        cmd.process_group(0);
         Ok(cmd)
     }
 
@@ -722,7 +716,7 @@ mod unix {
             && deps.process.is_playbook(state.pid)
             // A collector that took the lock since is not lockless.
             && lock_state(paths) == LockState::Free;
-        if lockless && deps.process.signal(state.pid, libc::SIGTERM) {
+        if lockless && deps.process.signal(state.pid, Signal::TERM) {
             within(budget, || !answers(deps, state.port));
         }
     }
@@ -744,7 +738,7 @@ mod unix {
         let Some(pid) = holder.pid.filter(|_| may_kill) else {
             return Stopped::StillRunning;
         };
-        if !may_kill_pid(paths, pid, deps) || !deps.process.signal(pid, libc::SIGKILL) {
+        if !may_kill_pid(paths, pid, deps) || !deps.process.signal(pid, Signal::KILL) {
             return Stopped::StillRunning;
         }
         if lock_frees_within(paths, KILL_WAIT) {
@@ -1019,6 +1013,7 @@ mod tests {
         use crate::util::scratch_dir;
         use crate::util::scratch_paths as paths;
         use crate::util::within;
+        use rustix::process::Signal;
         use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
         use std::process::{Child, Command, Stdio};
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1084,7 +1079,7 @@ mod tests {
         #[derive(Default)]
         struct Process {
             yes: Option<bool>,
-            sent: std::sync::Mutex<Vec<libc::c_int>>,
+            sent: std::sync::Mutex<Vec<Signal>>,
         }
 
         impl Process {
@@ -1095,7 +1090,7 @@ mod tests {
                 }
             }
 
-            fn sent(&self) -> Vec<libc::c_int> {
+            fn sent(&self) -> Vec<Signal> {
                 self.sent.lock().unwrap().clone()
             }
         }
@@ -1105,7 +1100,7 @@ mod tests {
                 self.yes.unwrap_or_else(|| RealProcess.is_playbook(pid))
             }
 
-            fn signal(&self, pid: u32, signal: libc::c_int) -> bool {
+            fn signal(&self, pid: u32, signal: Signal) -> bool {
                 self.sent.lock().unwrap().push(signal);
                 RealProcess.signal(pid, signal)
             }
@@ -1399,7 +1394,7 @@ mod tests {
 
             assert_eq!(ensure_now(&p, opts(true, true), &fakes), Ensured::Replaced);
             assert!(started.elapsed() < HUNG_BOUND, "{:?}", started.elapsed());
-            assert_eq!(fakes.process.sent(), [libc::SIGKILL]);
+            assert_eq!(fakes.process.sent(), [Signal::KILL]);
             assert_eq!(fakes.spawns(), 1);
             assert!(helper.exited_within(SLACK));
         }
@@ -1418,7 +1413,7 @@ mod tests {
 
             let yes = Fakes::new(Process::saying(true));
             assert_eq!(ensure_now(&p, opts(false, true), &yes), Ensured::Replaced);
-            assert_eq!(yes.process.sent(), [libc::SIGKILL]);
+            assert_eq!(yes.process.sent(), [Signal::KILL]);
             assert!(helper.exited_within(SLACK));
         }
 
@@ -1499,7 +1494,7 @@ mod tests {
             let exe = std::env::current_exe().unwrap();
             let mut helper = Helper::start(&exe, &p, "midtx", &[]);
 
-            assert!(RealProcess.signal(helper.pid(), libc::SIGTERM));
+            assert!(RealProcess.signal(helper.pid(), Signal::TERM));
             assert!(helper.exited_within(START_BOUND));
 
             let conn = crate::db::open_db(&p.db).unwrap();
@@ -1577,7 +1572,7 @@ mod tests {
             let fakes = Fakes::new(Process::saying(true));
 
             assert_eq!(ensure_now(&p, opts(false, false), &fakes), Ensured::Started);
-            assert_eq!(fakes.process.sent(), [libc::SIGTERM]);
+            assert_eq!(fakes.process.sent(), [Signal::TERM]);
             assert_eq!(fakes.spawns(), 1);
             assert!(helper.exited_within(SLACK));
         }
@@ -1659,7 +1654,7 @@ mod tests {
                 std::fs::canonicalize(words[4]).unwrap(),
                 std::fs::canonicalize(&dir).unwrap()
             );
-            // setsid makes the child the leader of its own group.
+            // process_group(0) makes the child the leader of its own group.
             assert_eq!(words[5], words[6], "{text}");
             let mode = std::fs::metadata(&log).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
