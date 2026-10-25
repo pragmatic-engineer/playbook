@@ -46,7 +46,9 @@ pub const RETIRED_COLLECTOR_LABEL_MIGRATION: &str = "collector-service-label";
 pub const COLLECTOR_REMOVAL_MIGRATION: &str = "collector-service-removed";
 /// The `Owned` move of stored auto budgets off the old $5 default (ADR 0028).
 pub const AUTO_BUDGET_MIGRATION: &str = "auto-budget-defaults";
-/// The `Consent` removal of the retired launcher rc lines (ADR 0044).
+/// The `Consent` removal of the retired launcher rc lines (ADR 0044). Releases
+/// up to 0.36.0 wrote them, so an upgrade from one still needs this. Remove it
+/// in 1.0.0 with doctor layer 3 and the launcher half of `init::rcfile`.
 pub const RC_LINE_MIGRATION: &str = "retired-launcher-rc-line";
 /// The `Consent` question about the system prompt now on by default (ADR 0044).
 pub const PROMPT_DEFAULT_MIGRATION: &str = "system-prompt-default-on";
@@ -649,7 +651,7 @@ fn system_prompt_default_by_setup(_: &Ctx) -> Outcome {
 
 /// Writable rc files that still hold a line the retired launcher wrote.
 fn retired_rc_line_pending(ctx: &Ctx) -> Option<String> {
-    let files = crate::init::shim::retired_rc_files(&ctx.home);
+    let files = crate::init::rcfile::retired_rc_files(&ctx.home);
     (!files.is_empty()).then(|| {
         format!(
             "{} still loads the retired playbook launcher; setup removes those lines after a backup",
@@ -660,7 +662,7 @@ fn retired_rc_line_pending(ctx: &Ctx) -> Option<String> {
 
 /// Removes the retired launcher lines after a backup (ADR 0044 decision 6).
 fn retired_rc_line(ctx: &Ctx) -> Outcome {
-    let changed = crate::init::shim::strip_retired_rc_lines(&ctx.home, ctx.epoch);
+    let changed = crate::init::rcfile::strip_retired_rc_lines(&ctx.home, ctx.epoch);
     let backups: Vec<PathBuf> = changed.iter().filter_map(|c| c.backup.clone()).collect();
     let failed: Vec<String> = changed
         .iter()
