@@ -5,10 +5,32 @@
 //! a bounded `git` call, and the home directory.
 
 use std::path::PathBuf;
+#[cfg(any(unix, test))]
+use std::time::Duration;
 
 /// The user's home directory, empty when it cannot be found.
 pub fn home_dir() -> PathBuf {
     std::env::home_dir().unwrap_or_default()
+}
+
+/// How often [`within`] checks its condition.
+#[cfg(any(unix, test))]
+const POLL: Duration = Duration::from_millis(50);
+
+/// Polls `done` every `POLL` until `bound`, checking it before the deadline so
+/// a condition met on the last poll still counts.
+#[cfg(any(unix, test))]
+pub(crate) fn within(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + bound;
+    loop {
+        if done() {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(POLL);
+    }
 }
 
 /// The wall clock as plain numbers.
@@ -42,17 +64,7 @@ pub mod atomic {
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    /// Creates `dir` (and any missing parents) and makes the leaf owner-only on
-    /// unix.
-    pub fn ensure_private_dir(dir: &Path) -> std::io::Result<()> {
-        fs::create_dir_all(dir)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
-        }
-        Ok(())
-    }
+    pub use playbook_common::atomic::ensure_private_dir;
 
     static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -243,4 +255,13 @@ pub(crate) fn scratch_dir(tag: &str) -> PathBuf {
         "playbook-telemetry-test-{}-{tag}-{n}",
         std::process::id()
     ))
+}
+
+/// Paths under a fresh scratch home, with the database inside it.
+#[cfg(test)]
+pub(crate) fn scratch_paths(name: &str) -> crate::run::Paths {
+    let dir = scratch_dir(name);
+    let mut p = crate::run::Paths::from_home(&dir);
+    p.db = dir.join("usage").join("usage.db");
+    p
 }
