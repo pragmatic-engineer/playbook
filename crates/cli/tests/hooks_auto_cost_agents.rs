@@ -8,10 +8,17 @@
 //! `agent_id` field of the hook input, and the closing steps stay allowed at
 //! every cap.
 
+#[path = "support/auto_config.rs"]
+mod auto_config;
 #[path = "support/auto_env.rs"]
 mod auto_env;
+#[path = "support/auto_feature_repo.rs"]
+mod auto_feature_repo;
+#[path = "support/auto_run.rs"]
+mod auto_run;
 
-use auto_env::{run_hook, scratch, Scratch};
+use auto_env::{scratch, Scratch};
+use auto_run::run_hook;
 use playbook::usage::pricing::{cost_usd, Tokens};
 use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
@@ -69,7 +76,7 @@ impl Tree {
 
     fn with_config(tag: &str, config: Value) -> Self {
         let s = scratch(tag);
-        auto_env::seed_raw_global_config(&s.home, &config.to_string());
+        auto_config::seed_raw_global_config(&s.home, &config.to_string());
         let tree = Tree {
             s,
             sid: format!("sid-{tag}"),
@@ -121,7 +128,7 @@ impl Tree {
         value["transcript_path"] = json!(self.main().to_string_lossy());
         value["tool_name"] = json!(tool);
         value["tool_input"] = input;
-        value["cwd"] = json!(auto_env::feature_repo(&self.s).to_string_lossy());
+        value["cwd"] = json!(auto_feature_repo::feature_repo(&self.s).to_string_lossy());
         if let Some(id) = agent {
             value["agent_id"] = json!(id);
             value["agent_type"] = json!("general-purpose");
@@ -600,7 +607,7 @@ fn an_invalid_agent_budget_falls_back_to_fifty_with_a_one_time_note() {
     // Arrange: the config turns invalid after the baseline call
     let tree = Tree::with_defaults("bad-agent-budget");
     let config = json!({"mode": "auto", "auto": {"agentBudgetUsd": "banana"}});
-    auto_env::seed_raw_global_config(&tree.s.home, &config.to_string());
+    auto_config::seed_raw_global_config(&tree.s.home, &config.to_string());
     tree.spend_agent("a1", 49.99);
 
     // Act

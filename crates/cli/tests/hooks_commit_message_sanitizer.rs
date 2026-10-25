@@ -15,12 +15,67 @@ mod sanitizer_lab;
 
 use auto_env::hook_command;
 use playbook::common::par;
-use sanitizer_lab::{assert_no_attribution, sh, updated_command, write, write_executable, Lab};
-use sanitizer_lab::{COAUTHOR, FOOTER, HOOK, SESSION};
+use sanitizer_lab::{assert_no_attribution, sh, write, write_executable, Lab};
+use sanitizer_lab::{COAUTHOR, HOOK};
 use serde_json::Value;
 use std::fs;
 use std::io::Write;
 use std::process::Stdio;
+
+const SESSION: &str = "Claude-Session: https://claude.ai/code/session_01AbCdEfGhIjKlMnOpQr";
+const FOOTER: &str = "Generated with [Claude Code](https://claude.com/claude-code)";
+
+fn updated_command(out: &str) -> Option<String> {
+    let value: Value =
+        serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("not JSON ({e}): {out:?}"));
+    let inner = &value["hookSpecificOutput"];
+    assert_eq!(inner["hookEventName"], "PreToolUse", "{out}");
+    assert!(
+        inner.get("permissionDecision").is_none(),
+        "a rewrite must not decide permission: {out}"
+    );
+    let input = inner.get("updatedInput")?;
+    assert_eq!(
+        input["description"], "d",
+        "other tool input fields survive: {out}"
+    );
+    assert_eq!(
+        input["timeout"], 5000,
+        "other tool input fields survive: {out}"
+    );
+    input["command"].as_str().map(str::to_string)
+}
+
+impl Lab {
+    /// The command to run: the rewrite when the hook returns one, else the
+    /// original. Asserts the output is a well-formed rewrite when present.
+    pub fn rewritten(&self, command: &str) -> String {
+        let out = self.hook(command);
+        if out.is_empty() {
+            return command.to_string();
+        }
+        updated_command(&out).unwrap_or_else(|| command.to_string())
+    }
+
+    /// Hook, then run what it returns. The run must succeed.
+    pub fn commit_through_hook(&self, command: &str) -> String {
+        let command = self.rewritten(command);
+        let (ok, text) = self.run(&command);
+        assert!(ok, "{command}\n{text}");
+        self.head_without_sign_off()
+    }
+
+    /// The stored message without the sign-off of this repository's own
+    /// identity, which the hook adds to a commit that has none.
+    pub fn head_without_sign_off(&self) -> String {
+        let head = self.head();
+        let kept: Vec<&str> = head
+            .lines()
+            .filter(|line| *line != "Signed-off-by: Test <test@example.com>")
+            .collect();
+        format!("{}\n\n", kept.join("\n").trim_end())
+    }
+}
 
 #[test]
 fn every_commit_message_form_is_stored_clean() {
