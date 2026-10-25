@@ -155,18 +155,9 @@ impl Pending {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
-    use std::fs;
-    use std::path::PathBuf;
+    use crate::testing::scratch_playbook_root as root;
 
     const RUNNING: &str = env!("CARGO_PKG_VERSION");
-
-    fn root(tag: &str) -> PathBuf {
-        let home = scratch_dir(tag);
-        let root = crate::common::paths::playbook_root_from(&home);
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
 
     fn line(root: &Path, recorded: Option<&str>, older: bool) -> Option<String> {
         prepare(root, recorded, older).commit(root).line

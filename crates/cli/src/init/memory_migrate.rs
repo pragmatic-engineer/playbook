@@ -513,6 +513,7 @@ mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
     use crate::init::run::StepStatus;
+    use crate::testing::write_file;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, SystemTime};
@@ -537,13 +538,6 @@ mod tests {
             report.detail
         );
         assert!(new_root.join(SENTINEL_NAME).is_file());
-    }
-
-    fn write_file(path: &Path, content: &str) {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(path, content).unwrap();
     }
 
     /// Sets an explicit, deterministic mtime, never relying on ordering from

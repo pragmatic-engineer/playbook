@@ -703,14 +703,8 @@ fn import_legacy_once(conn: &Connection, root: &Path) -> Result<(), ConfigError>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use crate::testing::scratch_root as root;
     use serde_json::json;
-
-    fn root(tag: &str) -> PathBuf {
-        let dir = scratch_dir(tag);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
 
     fn write_json(path: &Path, body: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();

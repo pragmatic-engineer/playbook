@@ -552,6 +552,7 @@ fn write_marks(root: &Path, items: &[Item], showing: &[&Item], now: u64, ack: bo
 mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
+    use crate::testing::scratch_playbook_root as root;
     use std::fs;
 
     fn item(slug: &str, kind: Kind, what: &str) -> Item {
@@ -625,13 +626,6 @@ mod tests {
             session_notice_all(&root, &[setup, stale], 1_300, true),
             None
         );
-    }
-
-    fn root(tag: &str) -> PathBuf {
-        let home = scratch_dir(tag);
-        let root = crate::common::paths::playbook_root_from(&home);
-        fs::create_dir_all(&root).unwrap();
-        root
     }
 
     fn plugin(home: &Path, version: &str, min: &str) -> PathBuf {

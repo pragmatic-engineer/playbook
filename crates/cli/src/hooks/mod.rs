@@ -36,6 +36,33 @@ pub mod worktree_create;
 pub mod worktree_remove;
 pub mod worktree_setup;
 
+/// `git rev-parse --show-toplevel`, trimmed. Empty outside a repo or on any
+/// failure. Never panics.
+pub(crate) fn git_toplevel() -> String {
+    if let Some(top) = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| crate::common::gitfacts::toplevel(&cwd))
+    {
+        return top.to_string_lossy().into_owned();
+    }
+    let args = ["--no-optional-locks", "rev-parse", "--show-toplevel"];
+    crate::common::git::trimmed(crate::common::git::run(
+        None,
+        &args,
+        crate::common::git::TIMEOUT,
+    ))
+    .unwrap_or_default()
+}
+
+/// True when the token begins a command: first overall, or preceded by a
+/// separator. Without this, `tsc` appearing as an argument would match.
+pub(crate) fn starts_a_command(tokens: &[&str], i: usize) -> bool {
+    match i.checked_sub(1).and_then(|p| tokens.get(p)) {
+        None => true,
+        Some(prev) => prev.ends_with([';', '&', '|', '(']),
+    }
+}
+
 /// Dispatch a parsed hook payload to the named hook's entry point.
 /// Exhaustive over `HookName`, so adding a new variant fails the build here
 /// instead of silently doing nothing at runtime.
