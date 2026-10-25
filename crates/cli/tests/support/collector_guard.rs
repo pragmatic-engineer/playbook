@@ -33,14 +33,15 @@ pub(crate) fn within(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
 pub(crate) fn kill_holder(paths: &Paths) -> bool {
     match lock_state(paths) {
         LockState::Held(h) => {
-            if let Some(pid) = h.pid.and_then(|p| libc::pid_t::try_from(p).ok()) {
+            if let Some(pid) = h.pid.and_then(|p| i32::try_from(p).ok()) {
                 // A test that plays the collector holds the lock in its own
                 // name. Another test thread's fork can copy that lock's
                 // descriptor for a moment after the test dropped it, so the
                 // lock reads held by this very process: never signal it.
                 if pid.unsigned_abs() != std::process::id() {
-                    // SAFETY: plain kill(2) on the pid the lock names.
-                    unsafe { libc::kill(pid, libc::SIGKILL) };
+                    if let Some(pid) = rustix::process::Pid::from_raw(pid) {
+                        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+                    }
                 }
             }
             true

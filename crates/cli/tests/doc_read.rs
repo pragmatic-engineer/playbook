@@ -415,14 +415,18 @@ fn sigterm_stops_the_converter_and_removes_the_temp_dir() {
     assert!(env.started().exists(), "the converter never started");
 
     // Act
-    // SAFETY: sends a signal to the child process this test just spawned.
-    unsafe {
-        libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
-    }
+    let pid = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+        .unwrap();
+    rustix::process::kill_process(pid, rustix::process::Signal::TERM).unwrap();
     let status = child.wait().unwrap();
 
     // Assert
-    assert_eq!(status.code(), Some(128 + libc::SIGTERM));
+    assert_eq!(
+        status.code(),
+        Some(128 + rustix::process::Signal::TERM.as_raw())
+    );
     assert!(env.leftovers().is_empty());
 }
 
