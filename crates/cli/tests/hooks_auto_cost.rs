@@ -32,8 +32,18 @@
 //! `deny` and a `permissionDecisionReason`. The warn tier leaves a `warned`
 //! marker file in the session dir.
 
+#[path = "support/auto_config.rs"]
+mod auto_config;
 #[path = "support/auto_env.rs"]
 mod auto_env;
+#[path = "support/auto_feature_repo.rs"]
+mod auto_feature_repo;
+#[path = "support/auto_git_shim.rs"]
+mod auto_git_shim;
+#[path = "support/auto_run.rs"]
+mod auto_run;
+#[path = "support/auto_warm_up.rs"]
+mod auto_warm_up;
 
 use auto_env::{hook_command, scratch, Scratch};
 use playbook::usage::pricing::{cost_usd, Tokens};
@@ -89,7 +99,7 @@ impl Session {
         let mode = if self.env.is_empty() { "auto" } else { "ask" };
         let config =
             json!({"mode": mode, "auto": {"budgetUsd": budget_usd, "warnPct": warn_pct.into()}});
-        auto_env::seed_raw_global_config(&self.s.home, &config.to_string());
+        auto_config::seed_raw_global_config(&self.s.home, &config.to_string());
     }
 
     fn park_note(&self) -> String {
@@ -104,7 +114,7 @@ impl Session {
         let mut value: Value = serde_json::from_str(&self.payload()).expect("payload is JSON");
         value["tool_name"] = json!(tool);
         value["tool_input"] = input;
-        value["cwd"] = json!(auto_env::feature_repo(&self.s).to_string_lossy());
+        value["cwd"] = json!(auto_feature_repo::feature_repo(&self.s).to_string_lossy());
         value.to_string()
     }
 
@@ -1064,7 +1074,7 @@ fn ask_mode_writes_nothing_in_the_runtime_root() {
         match config {
             Some(mode) => session.s.seed_mode_config(mode),
             None => {
-                auto_env::clear_config(&session.s.home);
+                auto_config::clear_config(&session.s.home);
             }
         }
         session.append_telemetry("4.0");
@@ -1783,7 +1793,7 @@ fn a_config_that_turns_unreadable_mid_session_keeps_the_cap_on() {
     // Arrange: a session at its cap whose config file then becomes garbage,
     // so the default cap of 200 applies, and the spend reaches it
     let session = Session::at_budget("config-broken", AutoFrom::Config);
-    auto_env::seed_raw_global_config(&session.s.home, "{not json");
+    auto_config::seed_raw_global_config(&session.s.home, "{not json");
     session.append_telemetry("200.00");
 
     // Act
@@ -1798,7 +1808,7 @@ fn a_config_that_turns_unreadable_mid_session_keeps_the_cap_on() {
 fn an_unreadable_config_does_not_start_enforcing_in_a_session_it_never_tracked() {
     // Arrange: no state file exists for this session
     let session = Session::auto("config-broken-fresh");
-    auto_env::seed_raw_global_config(&session.s.home, "{not json");
+    auto_config::seed_raw_global_config(&session.s.home, "{not json");
 
     // Act
     let (out, code) = session.run();
@@ -2208,10 +2218,10 @@ fn bash_call(s: &Scratch) -> String {
 fn default_mode_with_no_scoped_config_never_spawns_git() {
     // Arrange
     let s = scratch("no-spawn");
-    let shim = auto_env::git_shim(&s);
+    let shim = auto_git_shim::git_shim(&s);
 
     // Act
-    let (out, code) = auto_env::run_hook(&s, "auto-cost", &bash_call(&s), &[("PATH", &shim.path)]);
+    let (out, code) = auto_run::run_hook(&s, "auto-cost", &bash_call(&s), &[("PATH", &shim.path)]);
 
     // Assert
     assert_eq!(code, 0);
@@ -2229,10 +2239,10 @@ fn a_repo_tier_auto_mode_still_looks_up_the_slug_and_tracks_the_session() {
     // Arrange
     let s = scratch("repo-tier");
     s.seed_repo_mode_config("acme", "widgets", "auto");
-    let shim = auto_env::git_shim(&s);
+    let shim = auto_git_shim::git_shim(&s);
 
     // Act
-    let (_, code) = auto_env::run_hook(&s, "auto-cost", &bash_call(&s), &[("PATH", &shim.path)]);
+    let (_, code) = auto_run::run_hook(&s, "auto-cost", &bash_call(&s), &[("PATH", &shim.path)]);
 
     // Assert
     assert_eq!(code, 0);
@@ -2437,7 +2447,7 @@ fn a_subagent_at_the_session_ceiling_can_still_close_its_work_and_is_told_what_t
     // Arrange: the whole tree has spent the ceiling, so every caller is parked
     let session = Session::auto("ceiling-agent");
     let config = json!({"mode": "auto", "auto": {"budgetUsd": 50, "sessionCeilingUsd": 5}});
-    auto_env::seed_raw_global_config(&session.s.home, &config.to_string());
+    auto_config::seed_raw_global_config(&session.s.home, &config.to_string());
     session.baseline_then_report("5.00");
     let as_agent = |tool: &str, input: Value| {
         let mut value: Value =
@@ -2482,7 +2492,7 @@ fn a_parked_main_session_leaves_a_marker_that_clears_once_it_is_under_the_cap() 
 fn a_parked_subagent_does_not_set_the_main_session_marker() {
     let session = Session::auto("parked-agent");
     let config = json!({"mode": "auto", "auto": {"budgetUsd": 50, "agentBudgetUsd": 1}});
-    auto_env::seed_raw_global_config(&session.s.home, &config.to_string());
+    auto_config::seed_raw_global_config(&session.s.home, &config.to_string());
     session.baseline_then_report("0.00");
     let mut value: Value =
         serde_json::from_str(&session.tool_payload("Bash", json!({"command": "npm test"})))
