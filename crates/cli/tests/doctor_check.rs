@@ -2017,7 +2017,7 @@ mod completion_row {
         let b = Box::new("compl-layer3-marker");
         let legacy = format!(
             "source \"$HOME/.config/playbook/shell/zsh/cc.zsh\"  {MARKER}\n{}  {MARKER}\n",
-            playbook::init::shim::SOURCE_LINE
+            playbook::init::rcfile::SOURCE_LINE
         );
         fs::write(zshrc(&b), legacy).unwrap();
 

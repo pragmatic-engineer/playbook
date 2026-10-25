@@ -14,7 +14,7 @@
 pub mod style;
 
 use crate::init::completion::{self, Shell};
-use crate::init::{migrate, shim, wire};
+use crate::init::{migrate, rcfile, wire};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -393,7 +393,7 @@ fn keep_zshrc_backups(home: &Path, stamp: u64, report: &mut Report) {
 }
 
 fn rc_step(opts: &Options, stamp: u64, report: &mut Report) {
-    let mut changes = shim::strip_rc_files(&opts.home, stamp, opts.remove_binary, opts.dry_run);
+    let mut changes = rcfile::strip_rc_files(&opts.home, stamp, opts.remove_binary, opts.dry_run);
     if opts.remove_binary {
         changes.extend(crate::init::path::strip(&opts.home, stamp, opts.dry_run));
     }
@@ -847,7 +847,7 @@ mod tests {
         fn run_keeps_the_original_rc_when_launcher_and_completion_strips_share_a_stamp() {
             // Arrange
             let home = home("uninstall-run-shared-backup");
-            let original = format!("{BEFORE}{}\n{}{AFTER}", shim::SOURCE_LINE, block());
+            let original = format!("{BEFORE}{}\n{}{AFTER}", rcfile::SOURCE_LINE, block());
             write_zshrc(&home, &original);
             let opts = Options {
                 home: home.clone(),
