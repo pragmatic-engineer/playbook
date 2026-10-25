@@ -408,7 +408,7 @@ mod tests {
         for i in 0..n {
             let dir = root.join(format!("proj{}", i % 3));
             fs::create_dir_all(&dir).unwrap();
-            let ts = crate::util::time::iso_utc(now - 3_600 * 24 + i as i64);
+            let ts = playbook_common::time::iso_utc(now - 3_600 * 24 + i as i64);
             let line = format!(
                 r#"{{"type":"assistant","timestamp":"{ts}","sessionId":"s{i}","cwd":"/fake/p","message":{{"id":"msg_{i}","model":"claude-sonnet-5","usage":{{"input_tokens":10,"output_tokens":5}}}}}}"#
             );

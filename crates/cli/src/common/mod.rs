@@ -15,7 +15,7 @@ pub mod headless;
 pub mod mode;
 pub mod par;
 pub mod paths;
-pub use playbook_common::{atomic, git, gitfacts, payload, proc, repo, session, sqlite};
+pub use playbook_common::{atomic, git, gitfacts, hash, payload, proc, repo, session, sqlite};
 pub use playbook_data as data;
 pub mod plugin_state;
 pub mod prose;
@@ -23,6 +23,7 @@ pub mod prose_lint;
 pub mod re;
 pub mod real_home;
 pub mod shell;
+pub mod slug;
 pub mod stdin;
 pub mod time;
 
