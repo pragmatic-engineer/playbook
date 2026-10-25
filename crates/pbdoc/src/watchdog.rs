@@ -11,7 +11,7 @@ use crate::alloc::exit_over_memory_limit;
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// Starts the watchdog thread for a cap of `cap_bytes`.
-pub fn spawn(cap_bytes: usize) -> io::Result<()> {
+pub(crate) fn spawn(cap_bytes: usize) -> io::Result<()> {
     thread::Builder::new()
         .name("pbdoc-watchdog".into())
         .spawn(move || loop {
