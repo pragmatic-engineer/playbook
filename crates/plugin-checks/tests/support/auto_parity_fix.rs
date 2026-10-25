@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 impl CommandFile {
     /// Comment text inside shell code fences (a whole `#` line or a trailing
     /// ` # note`) and inside HTML comments, with its line index.
-    pub fn comments(&self) -> Vec<(usize, String)> {
+    pub(super) fn comments(&self) -> Vec<(usize, String)> {
         static HTML: OnceLock<Regex> = OnceLock::new();
         let html = HTML.get_or_init(|| Regex::new(r"<!--.*?-->").expect("html comment pattern"));
         let mut out = Vec::new();
@@ -37,11 +37,11 @@ impl CommandFile {
 }
 
 /// The phrase that marks a branch taken only when the user can be asked.
-pub const ASK_BRANCH: &str = "if mode is ask";
+pub(super) const ASK_BRANCH: &str = "if mode is ask";
 
 /// Per line: true for a fence delimiter and for every line inside a fenced
 /// code block.
-pub fn fence_flags(lines: &[String]) -> Vec<bool> {
+pub(super) fn fence_flags(lines: &[String]) -> Vec<bool> {
     let mut in_fence = false;
     lines
         .iter()
@@ -56,11 +56,11 @@ pub fn fence_flags(lines: &[String]) -> Vec<bool> {
         .collect()
 }
 
-pub fn indent_of(line: &str) -> usize {
+fn indent_of(line: &str) -> usize {
     line.len() - line.trim_start().len()
 }
 
-pub fn is_bullet(line: &str) -> bool {
+fn is_bullet(line: &str) -> bool {
     static BULLET: OnceLock<Regex> = OnceLock::new();
     BULLET
         .get_or_init(|| Regex::new(r"^\s*([-*+]|\d+[.)])\s+").expect("bullet pattern"))
@@ -71,7 +71,7 @@ pub fn is_bullet(line: &str) -> bool {
 /// the title of its nearest enclosing heading, or the first line of its own
 /// bullet or of any bullet enclosing it, contains the phrase. Lines before
 /// `first` (the frontmatter) are never read.
-pub fn is_behind_ask_branch(lines: &[String], first: usize, idx: usize) -> bool {
+pub(super) fn is_behind_ask_branch(lines: &[String], first: usize, idx: usize) -> bool {
     let fenced = fence_flags(lines);
     let mut indent = indent_of(&lines[idx]);
     for i in (first..=idx).rev().filter(|&i| !fenced[i]) {
@@ -90,7 +90,7 @@ pub fn is_behind_ask_branch(lines: &[String], first: usize, idx: usize) -> bool 
 }
 
 /// The `escalat` section of `fix.md`, where the hand-off rules live.
-pub fn escalation_section(file: &CommandFile) -> Section {
+pub(super) fn escalation_section(file: &CommandFile) -> Section {
     require_section(
         file,
         file.section(|t| t.to_lowercase().contains("escalat")),
@@ -100,7 +100,7 @@ pub fn escalation_section(file: &CommandFile) -> Section {
 
 /// True when `text` points at internal planning: a work-unit label, a
 /// numbered ticket or a planning term that means nothing to a later reader.
-pub fn references_planning(text: &str) -> bool {
+pub(super) fn references_planning(text: &str) -> bool {
     static PLANNING: OnceLock<Regex> = OnceLock::new();
     PLANNING
         .get_or_init(|| {

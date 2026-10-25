@@ -9,12 +9,12 @@ use std::sync::OnceLock;
 
 impl CommandFile {
     /// The `Step 0` section, at whatever heading level the file uses.
-    pub fn step0(&self) -> Option<Section> {
+    pub(super) fn step0(&self) -> Option<Section> {
         self.section(|t| t.starts_with("Step 0"))
     }
 
     /// The section that documents Step `n`, e.g. `Step 6: Present the design`.
-    pub fn step(&self, n: &str) -> Option<Section> {
+    pub(super) fn step(&self, n: &str) -> Option<Section> {
         let prefix = format!("Step {n}");
         self.section(|t| {
             t.strip_prefix(&prefix)
@@ -25,14 +25,14 @@ impl CommandFile {
     /// The named auto-path subsection: a heading titled `Auto path`,
     /// optionally followed by a qualifier. It holds every instruction that
     /// applies only when the command runs unattended.
-    pub fn auto_path(&self) -> Option<Section> {
+    pub(super) fn auto_path(&self) -> Option<Section> {
         self.section(|t| t.to_lowercase().starts_with("auto path"))
     }
 
     /// Blank-line separated blocks inside `s`, each with its first line
     /// index. A sentence wrapped over several lines stays in one block, so
     /// checks on a block do not depend on where the prose was wrapped.
-    pub fn paragraphs(&self, s: &Section) -> Vec<(usize, String)> {
+    pub(super) fn paragraphs(&self, s: &Section) -> Vec<(usize, String)> {
         let mut out: Vec<(usize, String)> = Vec::new();
         let mut open = false;
         for i in s.start..s.end {
@@ -52,7 +52,7 @@ impl CommandFile {
     }
 
     /// First body line outside `skip` that the ask detector matches.
-    pub fn first_ask_outside(&self, skip: Option<&Section>) -> Option<(usize, &str)> {
+    pub(super) fn first_ask_outside(&self, skip: Option<&Section>) -> Option<(usize, &str)> {
         self.lines
             .iter()
             .enumerate()
@@ -65,7 +65,7 @@ impl CommandFile {
 
 /// Step 0 reads the run mode through the `run-mode` or `mode-status` intent,
 /// (the older call forms still count).
-pub fn reads_mode(text: &str) -> bool {
+pub(super) fn reads_mode(text: &str) -> bool {
     text.contains("playbook mode status")
         || text.contains("playbook run-context")
         || text.contains("Intent: run-mode")
@@ -74,7 +74,7 @@ pub fn reads_mode(text: &str) -> bool {
 }
 
 /// The section that creates and submits the GitHub review.
-pub fn posting_section(file: &CommandFile) -> Section {
+pub(super) fn posting_section(file: &CommandFile) -> Section {
     require_section(
         file,
         file.section(|t| t.to_lowercase().contains("orchestrate posting")),
@@ -83,7 +83,7 @@ pub fn posting_section(file: &CommandFile) -> Section {
 }
 
 /// A shell line that calls the GitHub API to create or submit a review.
-pub fn is_post_call(line: &str) -> bool {
+pub(super) fn is_post_call(line: &str) -> bool {
     static POST: OnceLock<Regex> = OnceLock::new();
     POST.get_or_init(|| Regex::new(r"gh api[^\n]*(-X POST|/reviews)").expect("post pattern"))
         .is_match(line)

@@ -49,7 +49,7 @@ fn updated_command(out: &str) -> Option<String> {
 impl Lab {
     /// The command to run: the rewrite when the hook returns one, else the
     /// original. Asserts the output is a well-formed rewrite when present.
-    pub fn rewritten(&self, command: &str) -> String {
+    fn rewritten(&self, command: &str) -> String {
         let out = self.hook(command);
         if out.is_empty() {
             return command.to_string();
@@ -58,7 +58,7 @@ impl Lab {
     }
 
     /// Hook, then run what it returns. The run must succeed.
-    pub fn commit_through_hook(&self, command: &str) -> String {
+    fn commit_through_hook(&self, command: &str) -> String {
         let command = self.rewritten(command);
         let (ok, text) = self.run(&command);
         assert!(ok, "{command}\n{text}");
@@ -67,7 +67,7 @@ impl Lab {
 
     /// The stored message without the sign-off of this repository's own
     /// identity, which the hook adds to a commit that has none.
-    pub fn head_without_sign_off(&self) -> String {
+    fn head_without_sign_off(&self) -> String {
         let head = self.head();
         let kept: Vec<&str> = head
             .lines()
