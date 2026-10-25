@@ -88,6 +88,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "usage.ui.state",
     "sessions.staleAfterDays",
     "sessions.recentDays",
+    "sessions.autoClose",
     "hygiene.enabled",
     "hygiene.thresholdTokens",
     "docs.convert",
@@ -213,6 +214,7 @@ pub fn default_value(key: &str) -> Option<Value> {
         "usage.ui.layout" | "usage.ui.state" => Some(Value::String(String::new())),
         "sessions.staleAfterDays" => Some(Value::Number(3.into())),
         "sessions.recentDays" => Some(Value::Number(7.into())),
+        "sessions.autoClose" => Some(Value::String("off".to_string())),
         "hygiene.enabled" => Some(Value::Bool(true)),
         "hygiene.thresholdTokens" => Some(Value::Number(250_000.into())),
         "docs.convert" => Some(Value::String("auto".to_string())),
@@ -252,6 +254,7 @@ pub fn allowed_enum_values(key: &str) -> Option<&'static [&'static str]> {
         "usage.weekStart" => Some(&["monday", "sunday", "saturday"]),
         "usage.telemetry" => Some(&["auto", "off"]),
         "docs.convert" => Some(&["auto", "off"]),
+        "sessions.autoClose" => Some(&["off", "propose"]),
         "hooks.proseLint.mode" => Some(&["warn", "block", "off"]),
         "update.mode" => Some(&["notify", "auto", "off"]),
         "update.plugin" => Some(&["auto", "ask", "off"]),
@@ -547,5 +550,18 @@ mod tests {
             assert!(known, "{key} must be listed in KNOWN_KEYS");
             assert_eq!(allowed, None, "{key}");
         }
+    }
+
+    #[test]
+    fn session_auto_close_is_off_by_default_and_has_no_auto_level() {
+        assert!(KNOWN_KEYS.contains(&"sessions.autoClose"));
+        assert_eq!(
+            default_value("sessions.autoClose"),
+            Some(Value::String("off".to_string()))
+        );
+        assert_eq!(
+            allowed_enum_values("sessions.autoClose"),
+            Some(&["off", "propose"][..])
+        );
     }
 }
