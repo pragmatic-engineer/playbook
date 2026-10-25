@@ -7,8 +7,12 @@
 //! a subprocess, exactly as Claude Code would, against a scratch `$HOME`
 //! and a scratch git repo, never the real `~/.claude`.
 
+#[path = "support/auto_config.rs"]
+mod auto_config;
 #[path = "support/auto_env.rs"]
 mod auto_env;
+#[path = "support/auto_run.rs"]
+mod auto_run;
 
 use playbook::hooks::session_init::worktree_sweep_marker_key;
 use std::env;
@@ -2091,7 +2095,7 @@ fn auto_session_context(tag: &str, config_mode: Option<&str>, env: &[(&str, &str
     if let Some(mode) = config_mode {
         s.seed_mode_config(mode);
     }
-    let (out, code) = auto_env::run_hook(&s, "session-init", SESSION_START, env);
+    let (out, code) = auto_run::run_hook(&s, "session-init", SESSION_START, env);
     assert_eq!(code, 0, "session-init should exit 0");
     additional_context(&out)
 }
