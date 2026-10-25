@@ -369,7 +369,7 @@ pub enum Due {
 
 /// The rules of the due check, in order. Skips come first so a skipped run
 /// never writes the marker.
-pub fn due_from(i: DueInputs<'_>, now: u64) -> Due {
+pub fn due_from(i: &DueInputs<'_>, now: u64) -> Due {
     if i.mode == Mode::Off {
         return Due::NotDue("update.plugin is off");
     }
@@ -434,7 +434,7 @@ pub fn due(home: &Path, seen_marker: Option<&str>) -> Due {
         .and_then(|id| installed_version(&claude_home, id));
     let skip_env = std::env::var(SKIP_ENV).ok();
     due_from(
-        DueInputs {
+        &DueInputs {
             marker: seen_marker.and_then(Marker::parse),
             running: env!("CARGO_PKG_VERSION"),
             installed: installed.as_deref(),
@@ -868,7 +868,7 @@ mod tests {
             version: Some("0.36.0".to_string()),
         };
         let updated = Outcome::Updated {
-            id: id.clone(),
+            id,
             from: Some("0.35.0".to_string()),
             to: Some("0.36.0".to_string()),
         };
@@ -1404,7 +1404,7 @@ mod tests {
         ];
         for (name, inputs, now, expected) in cases {
             // Act
-            let got = due_from(inputs, now);
+            let got = due_from(&inputs, now);
 
             // Assert
             assert_eq!(got, expected, "{name}");
@@ -1446,7 +1446,7 @@ mod tests {
         };
 
         // Act
-        let got = due_from(inputs, T0);
+        let got = due_from(&inputs, T0);
 
         // Assert
         assert_eq!(got, Due::Run(Mode::Auto));

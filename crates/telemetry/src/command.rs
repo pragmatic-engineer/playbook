@@ -6,7 +6,7 @@
 use clap::Subcommand;
 
 /// `playbook usage` subcommands.
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone, Copy)]
 pub enum UsageCommand {
     /// Warm the usage store in the background (run by the `usage-warm` hook)
     #[command(hide = true)]

@@ -532,7 +532,7 @@ mod tests {
     }
 
     fn set(home: &Path, key: &str, value: &str) {
-        write::set(Tier::Global, key, Value::String(value.into()), home, None).unwrap();
+        write::set(Tier::Global, key, &Value::String(value.into()), home, None).unwrap();
     }
 
     #[test]
@@ -615,7 +615,7 @@ mod tests {
         write::set(
             Tier::Global,
             "maxEffortLevel",
-            Value::String("medium".into()),
+            &Value::String("medium".into()),
             &home,
             None,
         )

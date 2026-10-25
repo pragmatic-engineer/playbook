@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 const CORE_END: &str = "## Loading the references";
 
 /// Where a cut ends.
+#[derive(Clone, Copy)]
 enum End<'a> {
     /// The line before the first later line starting with this text.
     Before(&'a str),

@@ -355,7 +355,7 @@ fn dispatch(cwd: &mut PathBuf, args: &[String]) -> i32 {
         "fresh" | "--fresh" => {
             println!("-> cc: fresh session (no resume; settings.json applied)");
             config_drift::stamp(&cwd_str);
-            claude(cwd, [&flags[..], &["-n".into(), name], tail].concat())
+            claude(cwd, &[&flags[..], &["-n".into(), name], tail].concat())
         }
         "raw" | "--raw" => raw(cwd, &project_dir, &name, &flags, tail),
         "list" | "ls" | "--list" => {
@@ -376,7 +376,7 @@ fn clean(cwd: &Path, project_dir: &Path, name: &str, flags: &[String], tail: &[S
         println!("-> cc clean: no matching session for '{name}'; starting fresh");
         return claude(
             cwd,
-            [&["-n".into(), name.to_string()], flags, tail].concat(),
+            &[&["-n".into(), name.to_string()], flags, tail].concat(),
         );
     };
     match clean_resume::prepare(project_dir, &old) {
@@ -390,7 +390,7 @@ fn clean(cwd: &Path, project_dir: &Path, name: &str, flags: &[String], tail: &[S
             println!("-> cc clean: settings.json + plugins + hooks reload from current config");
             config_drift::stamp(&cwd.to_string_lossy());
             let head = ["--resume".into(), done.new_sid, "-n".into(), name.into()];
-            claude(cwd, [&head[..], flags, tail].concat())
+            claude(cwd, &[&head[..], flags, tail].concat())
         }
         Err(clean_resume::CleanError::TranscriptMissing(path)) => {
             println!("-> cc clean: transcript missing at {}", path.display());
@@ -412,12 +412,12 @@ fn raw(cwd: &Path, project_dir: &Path, name: &str, flags: &[String], tail: &[Str
     match sid {
         None => {
             println!("-> cc raw: no matching session; starting fresh");
-            claude(cwd, [flags, &name_args[..], tail].concat())
+            claude(cwd, &[flags, &name_args[..], tail].concat())
         }
         Some(sid) => {
             println!("-> cc raw: resuming {sid} (no fork, overrides preserved)");
             let head = ["--resume".to_string(), sid];
-            claude(cwd, [flags, &head[..], &name_args[..], tail].concat())
+            claude(cwd, &[flags, &head[..], &name_args[..], tail].concat())
         }
     }
 }
@@ -428,7 +428,7 @@ fn resume(cwd: &Path, project_dir: &Path, name: &str, flags: &[String], rest: &[
     let name_args = ["-n".to_string(), name.to_string()];
     let Some(sid) = sessions::find_by_title(project_dir, name) else {
         config_drift::stamp(&cwd_str);
-        return claude(cwd, [flags, &name_args[..], rest].concat());
+        return claude(cwd, &[flags, &name_args[..], rest].concat());
     };
     let mut head = vec!["--resume".to_string(), sid.clone()];
     if config_drift::drifted(&cwd_str) {
@@ -445,7 +445,7 @@ fn resume(cwd: &Path, project_dir: &Path, name: &str, flags: &[String], rest: &[
             "-> cc: session {}... not found; starting fresh",
             short(&sid)
         );
-        return claude(cwd, [flags, &name_args[..], rest].concat());
+        return claude(cwd, &[flags, &name_args[..], rest].concat());
     }
     eprint!("{err}");
     rc
@@ -513,8 +513,8 @@ fn private_err_file() -> (PathBuf, Option<Stdio>) {
     (path, file.map(Stdio::from))
 }
 
-fn claude(cwd: &Path, args: Vec<String>) -> i32 {
-    spawn(cwd, &args, None)
+fn claude(cwd: &Path, args: &[String]) -> i32 {
+    spawn(cwd, args, None)
 }
 
 fn spawn(cwd: &Path, args: &[String], stderr: Option<Stdio>) -> i32 {

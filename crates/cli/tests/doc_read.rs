@@ -117,7 +117,7 @@ impl Env {
     }
 
     fn config(&self, key: &str, value: Value) {
-        set(Tier::Global, key, value, &self.home, None).unwrap();
+        set(Tier::Global, key, &value, &self.home, None).unwrap();
     }
 
     /// Runs an isolated copy of the binary, so the `pbdoc` built beside the
@@ -1799,7 +1799,7 @@ fn config_rejects_display_chars_outside_1000_to_120000() {
         let result = set(
             Tier::Global,
             "docs.displayChars",
-            Value::from(bad),
+            &Value::from(bad),
             &env.home,
             None,
         );
@@ -1819,7 +1819,7 @@ fn config_accepts_display_chars_inside_1000_to_120000() {
         let result = set(
             Tier::Global,
             "docs.displayChars",
-            Value::from(good),
+            &Value::from(good),
             &env.home,
             None,
         );
