@@ -4,11 +4,20 @@
 //! The PR body, title and commit scope rules of `pr create`, run against real
 //! scratch repos and a fake `GhClient`.
 
-mod pr_support;
+#[path = "pr_support/cwd.rs"]
+mod cwd;
+#[path = "pr_support/fake_gh.rs"]
+mod fake_gh;
+#[path = "pr_support/fixture.rs"]
+mod fixture;
+#[path = "pr_support/layout.rs"]
+mod layout;
 
+use cwd::in_dir;
+use fake_gh::FakeGh;
+use fixture::{git, Fixture};
 use playbook::pr::body_rules::{Level, Rules};
 use playbook::pr::create::{run_with_rules, Args};
-use pr_support::{git, in_dir, FakeGh, Fixture};
 use std::fs;
 
 const URL: &str = "https://example.test/pr/42";
@@ -46,8 +55,8 @@ fn run_case(c: &Case) {
     );
     let mut gh = FakeGh::creating(URL);
     gh.default_branch = Some(if c.base_is_default { "main" } else { "develop" }.to_string());
-    let path = fx.state.join("body.md");
-    fs::create_dir_all(&fx.state).expect("state dir");
+    let path = fx.state().join("body.md");
+    fs::create_dir_all(fx.state()).expect("state dir");
     fs::write(&path, c.body).expect("body");
     let body_file = path.to_str().expect("utf8").to_string();
     let rules = Rules {
@@ -69,7 +78,7 @@ fn run_case(c: &Case) {
         (Some(text), Err(err)) => {
             assert!(err.contains(text), "{}: got {err}", c.name);
             assert_eq!(gh.count("pr_create"), 0, "{}: nothing is created", c.name);
-            let pushed = git(&fx.bare, &["branch", "--list", c.branch]);
+            let pushed = git(&fx.bare(), &["branch", "--list", c.branch]);
             assert!(pushed.is_empty(), "{}: nothing is pushed", c.name);
         }
         (None, Ok(out)) => {
