@@ -6,11 +6,17 @@
 //! older binary or a failure warns and never fails the install. The `playbook`
 //! on PATH is a stub that records its trust calls, or runs the real binary.
 
+#[path = "support/shell_exec.rs"]
+mod shell_exec;
 #[path = "support/shell_fixture.rs"]
-mod fx;
+mod shell_fixture;
+#[path = "support/shell_run.rs"]
+mod shell_run;
 
-use fx::{repo_root, stderr, stdout, write_exec, Work};
 use serde_json::Value;
+use shell_exec::write_exec;
+use shell_fixture::Work;
+use shell_run::{repo_root, stderr, stdout};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

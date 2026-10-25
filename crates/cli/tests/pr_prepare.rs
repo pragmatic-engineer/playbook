@@ -5,12 +5,31 @@
 //! and a fake `GhClient` so no test needs GitHub. `prepare` runs git in the
 //! process cwd, so every test serialises on it like `tests/gate_record.rs`.
 
-mod pr_support;
+#[path = "pr_support/cwd.rs"]
+mod cwd;
+#[path = "pr_support/fake_gh.rs"]
+mod fake_gh;
+#[path = "pr_support/fixture.rs"]
+mod fixture;
+#[path = "pr_support/layout.rs"]
+mod layout;
 
+use cwd::in_dir;
+use fake_gh::FakeGh;
+use fixture::{git, Fixture};
 use playbook::pr::prepare::prepare;
 use playbook::pr::shared::ExistingPr;
-use pr_support::{git, in_dir, FakeGh, Fixture};
 use std::fs;
+
+trait Branch {
+    fn branch(&self) -> String;
+}
+
+impl Branch for Fixture {
+    fn branch(&self) -> String {
+        git(&self.work, &["branch", "--show-current"])
+    }
+}
 
 trait RunPrepare {
     fn run(&self, gh: &FakeGh, base: Option<&str>, ticket: Option<&str>) -> Result<String, String>;
@@ -20,7 +39,7 @@ impl RunPrepare for Fixture {
     fn run(&self, gh: &FakeGh, base: Option<&str>, ticket: Option<&str>) -> Result<String, String> {
         let branch = self.branch();
         in_dir(&self.work, || {
-            prepare(&self.state, &branch, gh, base, ticket)
+            prepare(&self.state(), &branch, gh, base, ticket)
         })
     }
 }
@@ -89,7 +108,7 @@ fn it_fetches_the_base_itself_so_a_stale_local_ref_cannot_hide_that_nothing_is_a
     fx.commit_lines("a.txt", 3);
     git(&fx.work, &["push", "--quiet", "origin", "feat/x"]);
     git(
-        &fx.bare,
+        &fx.bare(),
         &["update-ref", "refs/heads/main", "refs/heads/feat/x"],
     );
 
@@ -356,7 +375,7 @@ fn the_diff_is_written_to_the_state_dir_and_its_path_is_printed() {
     let got = fx.run(&FakeGh::default(), None, None).expect("prepares");
 
     // Assert
-    let expected_path = fx.state.join("pr-diff.txt");
+    let expected_path = fx.state().join("pr-diff.txt");
     assert!(
         has_line(&got, &format!("diff_file={}", expected_path.display())),
         "got {got}"
@@ -385,7 +404,7 @@ fn a_failed_fetch_adds_a_warn_line_and_the_run_continues() {
     // Arrange: origin/main exists locally, then origin becomes unreachable.
     let fx = Fixture::new("offline", "feat/x");
     fx.commit_lines("a.txt", 2);
-    let gone = fx.bare.with_file_name("gone.git");
+    let gone = fx.bare().with_file_name("gone.git");
     git(
         &fx.work,
         &["remote", "set-url", "origin", gone.to_str().expect("utf8")],
@@ -446,7 +465,7 @@ fn a_branch_starting_with_a_dash_is_refused() {
 
     // Act
     let err =
-        in_dir(&fx.work, || prepare(&fx.state, "-weird", &gh, None, None)).expect_err("refused");
+        in_dir(&fx.work, || prepare(&fx.state(), "-weird", &gh, None, None)).expect_err("refused");
 
     // Assert
     assert!(err.contains("starts with '-'"), "got {err}");

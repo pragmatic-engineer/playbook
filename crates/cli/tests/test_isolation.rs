@@ -22,7 +22,7 @@ const SPAWNS: [&str; 2] = [
 /// the real home from a cargo test anyway.
 const EXEMPT: [&str; 1] = [
     // Copies the binary for shell scripts; each caller sets HOME.
-    "cli/tests/support/shell_fixture.rs",
+    "cli/tests/support/shell_bin_dir.rs",
 ];
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
