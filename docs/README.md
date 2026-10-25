@@ -122,3 +122,4 @@ Architecture decision records in [`docs/adr/`](adr/). A decision can have a blue
 | [0049](adr/0049-spend-limit-credential-access.md) | Read the Claude Code login token to fetch the server spend limit | Superseded by 0050 | 2026-10-20 |
 | [0050](adr/0050-limits-from-claude-data-not-the-login-token.md) | Derive usage limits from Claude Code's own data, not the login token | Accepted | 2026-10-20 |
 | [0051](adr/0051-bundle-anydoc-as-pbdoc-helper.md) | Bundle the anydoc converter as the pbdoc helper | Accepted | 2026-10-21 |
+| [0055](adr/0055-watch-mode-for-github-events.md) | A polling watch mode for GitHub events, with rules, autonomy levels and a durable queue | Proposed | 2026-10-25 |
