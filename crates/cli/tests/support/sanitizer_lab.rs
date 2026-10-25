@@ -5,10 +5,8 @@
 //! the `commit-message-sanitizer` hook against them, shared by the tests of
 //! its PreToolUse rewrite and its PostToolUse backstop.
 
-#![allow(dead_code)]
-
 use super::auto_env::{hook_command, scratch, Scratch};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -16,9 +14,6 @@ use std::process::{Command, Stdio};
 
 pub const HOOK: &str = "commit-message-sanitizer";
 pub const COAUTHOR: &str = "Co-Authored-By: Claude <noreply@anthropic.com>";
-pub const SESSION: &str = "Claude-Session: https://claude.ai/code/session_01AbCdEfGhIjKlMnOpQr";
-pub const FOOTER: &str = "Generated with [Claude Code](https://claude.com/claude-code)";
-
 pub struct Lab {
     pub scratch: Scratch,
     pub repo: PathBuf,
@@ -101,7 +96,7 @@ impl Lab {
         .to_string()
     }
 
-    fn run_hook(&self, payload: &str) -> String {
+    pub fn run_hook(&self, payload: &str) -> String {
         let mut child = hook_command(&self.scratch, HOOK)
             .current_dir(&self.repo)
             .env("PATH", self.path())
@@ -126,44 +121,12 @@ impl Lab {
         self.run_hook(&self.payload("PreToolUse", command, ""))
     }
 
-    /// The PostToolUse output after `command` printed `stdout`.
-    pub fn post(&self, command: &str, stdout: &str) -> String {
-        self.run_hook(&self.payload("PostToolUse", command, stdout))
-    }
-
-    /// A call as Claude Code runs it: the PreToolUse hook sees `command`, `ran`
-    /// does what the shell did, and the PostToolUse hook sees the call after.
-    pub fn through_hooks(&self, command: &str, ran: impl FnOnce(&Lab)) -> String {
-        self.hook(command);
-        ran(self);
-        self.post(command, "")
-    }
-
-    /// [`Lab::through_hooks`] with `command` itself as what ran, not the
-    /// PreToolUse rewrite, so the backstop sees what the rewrite missed. The
-    /// command may fail, as a real commit can.
-    pub fn run_through_hooks(&self, command: &str) -> String {
-        self.through_hooks(command, |lab| {
-            lab.run(command);
-        })
-    }
-
     fn path(&self) -> String {
         format!(
             "{}:{}",
             self.bin.display(),
             std::env::var("PATH").unwrap_or_default()
         )
-    }
-
-    /// The command to run: the rewrite when the hook returns one, else the
-    /// original. Asserts the output is a well-formed rewrite when present.
-    pub fn rewritten(&self, command: &str) -> String {
-        let out = self.hook(command);
-        if out.is_empty() {
-            return command.to_string();
-        }
-        updated_command(&out).unwrap_or_else(|| command.to_string())
     }
 
     pub fn run(&self, command: &str) -> (bool, String) {
@@ -179,46 +142,6 @@ impl Lab {
         );
         (out.status.success(), text)
     }
-
-    /// Hook, then run what it returns. The run must succeed.
-    pub fn commit_through_hook(&self, command: &str) -> String {
-        let command = self.rewritten(command);
-        let (ok, text) = self.run(&command);
-        assert!(ok, "{command}\n{text}");
-        self.head_without_sign_off()
-    }
-
-    /// The stored message without the sign-off of this repository's own
-    /// identity, which the hook adds to a commit that has none.
-    pub fn head_without_sign_off(&self) -> String {
-        let head = self.head();
-        let kept: Vec<&str> = head
-            .lines()
-            .filter(|line| *line != "Signed-off-by: Test <test@example.com>")
-            .collect();
-        format!("{}\n\n", kept.join("\n").trim_end())
-    }
-}
-
-pub fn updated_command(out: &str) -> Option<String> {
-    let value: Value =
-        serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("not JSON ({e}): {out:?}"));
-    let inner = &value["hookSpecificOutput"];
-    assert_eq!(inner["hookEventName"], "PreToolUse", "{out}");
-    assert!(
-        inner.get("permissionDecision").is_none(),
-        "a rewrite must not decide permission: {out}"
-    );
-    let input = inner.get("updatedInput")?;
-    assert_eq!(
-        input["description"], "d",
-        "other tool input fields survive: {out}"
-    );
-    assert_eq!(
-        input["timeout"], 5000,
-        "other tool input fields survive: {out}"
-    );
-    input["command"].as_str().map(str::to_string)
 }
 
 pub fn assert_no_attribution(message: &str) {
