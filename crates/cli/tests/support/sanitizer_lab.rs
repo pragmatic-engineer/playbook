@@ -12,16 +12,16 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-pub const HOOK: &str = "commit-message-sanitizer";
-pub const COAUTHOR: &str = "Co-Authored-By: Claude <noreply@anthropic.com>";
-pub struct Lab {
+pub(crate) const HOOK: &str = "commit-message-sanitizer";
+pub(crate) const COAUTHOR: &str = "Co-Authored-By: Claude <noreply@anthropic.com>";
+pub(crate) struct Lab {
     pub scratch: Scratch,
     pub repo: PathBuf,
     pub bin: PathBuf,
 }
 
 impl Lab {
-    pub fn new(tag: &str) -> Lab {
+    pub(crate) fn new(tag: &str) -> Lab {
         let scratch = scratch(tag);
         let repo = scratch.cwd.join("repo");
         let bin = scratch.cwd.join("bin");
@@ -42,13 +42,13 @@ impl Lab {
         lab
     }
 
-    pub fn write_global_config(&self, json: &str) {
+    pub(crate) fn write_global_config(&self, json: &str) {
         let dir = self.scratch.home.join(".config").join("playbook");
         fs::create_dir_all(&dir).expect("config dir");
         fs::write(dir.join("config.json"), json).expect("config file");
     }
 
-    pub fn write_stub(&self, name: &str, body: &str) {
+    pub(crate) fn write_stub(&self, name: &str, body: &str) {
         let path = self.bin.join(name);
         fs::write(&path, body).expect("stub");
         #[cfg(unix)]
@@ -58,7 +58,7 @@ impl Lab {
         }
     }
 
-    pub fn base(&self, program: &str) -> Command {
+    pub(crate) fn base(&self, program: &str) -> Command {
         let mut command = Command::new(program);
         command
             .current_dir(&self.repo)
@@ -70,7 +70,7 @@ impl Lab {
         command
     }
 
-    pub fn git(&self, args: &[&str]) -> String {
+    pub(crate) fn git(&self, args: &[&str]) -> String {
         let out = self.base("git").args(args).output().expect("git runs");
         assert!(
             out.status.success(),
@@ -80,11 +80,11 @@ impl Lab {
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
-    pub fn head(&self) -> String {
+    pub(crate) fn head(&self) -> String {
         self.git(&["log", "-1", "--format=%B"])
     }
 
-    pub fn payload(&self, event: &str, command: &str, stdout: &str) -> String {
+    pub(crate) fn payload(&self, event: &str, command: &str, stdout: &str) -> String {
         json!({
             "hook_event_name": event,
             "tool_name": "Bash",
@@ -96,7 +96,7 @@ impl Lab {
         .to_string()
     }
 
-    pub fn run_hook(&self, payload: &str) -> String {
+    pub(crate) fn run_hook(&self, payload: &str) -> String {
         let mut child = hook_command(&self.scratch, HOOK)
             .current_dir(&self.repo)
             .env("PATH", self.path())
@@ -117,7 +117,7 @@ impl Lab {
     }
 
     /// The PreToolUse output for `command`.
-    pub fn hook(&self, command: &str) -> String {
+    pub(crate) fn hook(&self, command: &str) -> String {
         self.run_hook(&self.payload("PreToolUse", command, ""))
     }
 
@@ -129,7 +129,7 @@ impl Lab {
         )
     }
 
-    pub fn run(&self, command: &str) -> (bool, String) {
+    pub(crate) fn run(&self, command: &str) -> (bool, String) {
         let out = self
             .base("bash")
             .args(["-c", command])
@@ -144,7 +144,7 @@ impl Lab {
     }
 }
 
-pub fn assert_no_attribution(message: &str) {
+pub(crate) fn assert_no_attribution(message: &str) {
     for needle in ["Claude", "claude.ai", "anthropic", "Generated with"] {
         assert!(
             !message.contains(needle),
@@ -153,13 +153,13 @@ pub fn assert_no_attribution(message: &str) {
     }
 }
 
-pub fn write(dir: &Path, name: &str, text: &str) -> PathBuf {
+pub(crate) fn write(dir: &Path, name: &str, text: &str) -> PathBuf {
     let path = dir.join(name);
     fs::write(&path, text).expect("file");
     path
 }
 
-pub fn write_executable(dir: &Path, name: &str, text: &str) {
+pub(crate) fn write_executable(dir: &Path, name: &str, text: &str) {
     let path = write(dir, name, text);
     #[cfg(unix)]
     {
@@ -169,6 +169,6 @@ pub fn write_executable(dir: &Path, name: &str, text: &str) {
 }
 
 /// `text` as one single-quoted shell word.
-pub fn sh(text: &str) -> String {
+pub(crate) fn sh(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }

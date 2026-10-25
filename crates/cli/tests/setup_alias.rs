@@ -281,7 +281,7 @@ mod terminal {
 
     /// Runs `cmd` and returns its output. The text the terminal received is
     /// returned as stderr, with the `\r` the terminal adds removed.
-    pub fn output(mut cmd: Command) -> Output {
+    pub(crate) fn output(mut cmd: Command) -> Output {
         let (mut master, mut slave) = (0, 0);
         // SAFETY: openpty writes two new descriptors into the pointers; the
         // name, termios and window size arguments may be null.

@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static N: AtomicU64 = AtomicU64::new(0);
 
 /// A fresh, empty scratch home.
-pub fn fresh_home() -> PathBuf {
+pub(crate) fn fresh_home() -> PathBuf {
     let n = N.fetch_add(1, Ordering::Relaxed);
     let home = std::env::temp_dir().join(format!("pb-it-home-{}-{n}", playbook::testing::run_id()));
     std::fs::create_dir_all(&home).expect("scratch home");
@@ -25,12 +25,12 @@ pub fn fresh_home() -> PathBuf {
 // The root of this chain: tests that pass their own home call `playbook_in` or
 // `isolate` directly, so the helpers it reaches are dead in those binaries.
 #[allow(dead_code)]
-pub fn playbook() -> Command {
+pub(crate) fn playbook() -> Command {
     playbook_in(&fresh_home())
 }
 
 /// The built `playbook` with `home` as its home.
-pub fn playbook_in(home: &Path) -> Command {
+pub(crate) fn playbook_in(home: &Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_playbook"));
     isolate(&mut cmd, home);
     cmd
@@ -39,7 +39,7 @@ pub fn playbook_in(home: &Path) -> Command {
 /// Points every home `cmd` could read at `home` and drops the caller's
 /// `PLAYBOOK_*`, `CLAUDE_*` and `XDG_*` variables. Set a variable after this
 /// call to give it to the child.
-pub fn isolate(cmd: &mut Command, home: &Path) {
+pub(crate) fn isolate(cmd: &mut Command, home: &Path) {
     for (key, _) in std::env::vars_os() {
         let drop = key.to_str().is_some_and(|k| {
             ["PLAYBOOK_", "CLAUDE_", "XDG_"]

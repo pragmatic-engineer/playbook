@@ -21,7 +21,7 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Variables removed from the child on top of any `PLAYBOOK_HEADLESS_*` found
 /// in the parent env.
-pub const CLEARED_VARS: [&str; 13] = [
+pub(crate) const CLEARED_VARS: [&str; 13] = [
     "PLAYBOOK_MODE",
     "PLAYBOOK_AUTO_COST_INTERVAL_MS",
     "CI",
@@ -38,12 +38,12 @@ pub const CLEARED_VARS: [&str; 13] = [
 ];
 
 /// A scratch `$HOME` and a working directory outside any git repo.
-pub struct Scratch {
+pub(crate) struct Scratch {
     pub home: PathBuf,
     pub cwd: PathBuf,
 }
 
-pub fn scratch(tag: &str) -> Scratch {
+pub(crate) fn scratch(tag: &str) -> Scratch {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir().join(format!(
         "auto-env-{}-{tag}-{n}",
@@ -58,7 +58,7 @@ pub fn scratch(tag: &str) -> Scratch {
 
 /// `playbook hook <hook>` with the environment isolated; callers add the
 /// per-case variables (for example `PLAYBOOK_MODE`) afterwards.
-pub fn hook_command(scratch: &Scratch, hook: &str) -> Command {
+pub(crate) fn hook_command(scratch: &Scratch, hook: &str) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_playbook"));
     command
         .args(["hook", hook])
