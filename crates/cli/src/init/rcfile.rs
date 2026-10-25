@@ -378,12 +378,7 @@ fn names_path(args: &[u8], path: &[u8]) -> bool {
 /// temp file and rename in the directory of its real target.
 #[cfg(unix)]
 pub(crate) fn can_rewrite(path: &Path) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-    let writable = |p: &Path| {
-        std::ffi::CString::new(p.as_os_str().as_bytes())
-            // SAFETY: access(2) only reads the NUL-terminated path.
-            .is_ok_and(|c| unsafe { libc::access(c.as_ptr(), libc::W_OK) } == 0)
-    };
+    let writable = crate::common::paths::is_writable;
     let Ok(target) = fs::canonicalize(path) else {
         return false;
     };
