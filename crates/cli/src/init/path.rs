@@ -11,7 +11,7 @@
 //! gets its own `conf.d` file. Each block starts with the `# playbook binary`
 //! marker, which `playbook uninstall --remove-binary` keys on.
 
-use crate::init::shim::{self, RcStrip};
+use crate::init::rcfile::{self, RcStrip};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Write};
@@ -150,7 +150,7 @@ pub fn ensure(home: &Path, setup: &Setup) -> io::Result<Outcome> {
             out.already.push(file);
             continue;
         }
-        if existing.is_some() && !shim::owner_can_write(&file) {
+        if existing.is_some() && !rcfile::owner_can_write(&file) {
             out.skipped.push((file, "not writable".to_string()));
             continue;
         }
@@ -179,7 +179,7 @@ pub(crate) fn names_dir(content: &[u8], dir: &str) -> bool {
 /// `playbook uninstall --remove-binary`. The fish file is deleted when it is
 /// ours (it holds the marker). Every other file keeps its remaining content.
 pub fn strip(home: &Path, stamp: u64, dry_run: bool) -> Vec<RcStrip> {
-    let mut changed = shim::strip_binary_path_files(
+    let mut changed = rcfile::strip_binary_path_files(
         &[
             home.join(".zshenv"),
             home.join(".bash_profile"),
