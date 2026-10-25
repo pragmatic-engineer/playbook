@@ -185,17 +185,67 @@ pub struct TierValues {
     pub global: Option<Value>,
 }
 
+/// A connection for reading a store that is already set up: the file is
+/// there and owner-only, no old `playbook.db` waits to be merged, and the
+/// legacy import ran. Nothing then needs creating, moving, tightening or
+/// importing, so the read skips the write-lock pragmas and the schema batch
+/// of `open`. `None` sends the caller to `open`, which does all of that.
+fn open_ready(root: &Path) -> Option<Connection> {
+    let path = db_path(root);
+    if legacy_db_path(root).exists() || !owner_only(&path) {
+        return None;
+    }
+    let conn = crate::state::open_read_only(&path).ok()?;
+    conn.query_row(
+        "SELECT 1 FROM meta WHERE key = ?1",
+        params![IMPORTED_FLAG],
+        |_| Ok(()),
+    )
+    .optional()
+    .ok()??;
+    Some(conn)
+}
+
+/// Whether `path` is a file only its owner can touch, the mode `open` sets.
+fn owner_only(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o077 == 0)
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
+}
+
 /// Look `key` up in the repo, org and global tiers with one query.
 pub fn lookup(root: &Path, key: &str, repo_slug: Option<&str>) -> Result<TierValues, ConfigError> {
+    if !has_data(root) {
+        return Ok(TierValues {
+            repo: None,
+            org: None,
+            global: None,
+        });
+    }
+    if let Some(found) = open_ready(root).and_then(|c| tier_values(&c, root, key, repo_slug).ok()) {
+        return Ok(found);
+    }
+    tier_values(&open(root)?, root, key, repo_slug)
+}
+
+/// The rows of `key` per tier, read from `conn`.
+fn tier_values(
+    conn: &Connection,
+    root: &Path,
+    key: &str,
+    repo_slug: Option<&str>,
+) -> Result<TierValues, ConfigError> {
     let mut out = TierValues {
         repo: None,
         org: None,
         global: None,
     };
-    if !has_data(root) {
-        return Ok(out);
-    }
-    let conn = open(root)?;
     let (repo_scope, org_scope) = match repo_slug.and_then(|s| s.split_once('/')) {
         Some((owner, _)) => (repo_slug.unwrap_or_default(), owner),
         None => ("\u{0}", "\u{0}"),
@@ -230,17 +280,19 @@ pub fn lookup(root: &Path, key: &str, repo_slug: Option<&str>) -> Result<TierVal
 /// lookup (a `git` spawn).
 pub fn any_scoped(root: &Path) -> bool {
     if db_path(root).exists() || legacy_db_path(root).exists() {
-        let Ok(conn) = open(root) else { return false };
-        return conn
-            .query_row(
+        let scoped = |conn: &Connection| {
+            conn.query_row(
                 "SELECT 1 FROM config WHERE tier != 'global' LIMIT 1",
                 [],
                 |_| Ok(()),
             )
             .optional()
-            .ok()
-            .flatten()
-            .is_some();
+        };
+        if let Some(found) = open_ready(root).and_then(|c| scoped(&c).ok()) {
+            return found.is_some();
+        }
+        let Ok(conn) = open(root) else { return false };
+        return scoped(&conn).ok().flatten().is_some();
     }
     super::any_scoped_config(root)
 }
@@ -1131,6 +1183,53 @@ mod tests {
         put(&r, Tier::Org, Some("acme/w"), "pr.draft", &json!(false)).unwrap();
         assert_eq!(global_read_only(&r, "update.mode"), Some(json!("auto")));
         assert_eq!(global_read_only(&r, "pr.draft"), None);
+    }
+
+    /// Every file under the data folder with its size and bytes.
+    fn data_snapshot(r: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut files: Vec<(String, Vec<u8>)> = fs::read_dir(r.join("data"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .map(|p| {
+                (
+                    p.file_name().unwrap().to_string_lossy().into_owned(),
+                    fs::read(&p).unwrap_or_default(),
+                )
+            })
+            .collect();
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn a_lookup_in_a_ready_store_changes_no_file() {
+        let r = root("store-ready-read");
+        put(&r, Tier::Global, None, "mode", &json!("auto")).unwrap();
+        put(&r, Tier::Org, Some("acme/w"), "mode", &json!("ask")).unwrap();
+        let before = data_snapshot(&r);
+
+        let got = lookup(&r, "mode", Some("acme/w")).unwrap();
+        let scoped = any_scoped(&r);
+
+        assert_eq!(got.global, Some(json!("auto")));
+        assert_eq!(got.org, Some(json!("ask")));
+        assert!(scoped);
+        assert_eq!(data_snapshot(&r), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_lookup_still_tightens_a_database_left_world_readable() {
+        use std::os::unix::fs::PermissionsExt;
+        let r = root("store-wide-mode");
+        put(&r, Tier::Global, None, "mode", &json!("auto")).unwrap();
+        fs::set_permissions(db_path(&r), fs::Permissions::from_mode(0o644)).unwrap();
+
+        let got = lookup(&r, "mode", None).unwrap();
+
+        assert_eq!(got.global, Some(json!("auto")));
+        let mode = fs::metadata(db_path(&r)).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]
