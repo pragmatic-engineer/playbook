@@ -5,8 +5,8 @@
 //! same policy as install.sh (lenient by default, strict with
 //! `PLAYBOOK_REQUIRE_ATTESTATION=1`).
 
+use crate::common::hash::sha256_hex;
 use crate::common::proc::run_with_timeout;
-use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -17,14 +17,6 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub const REPO: &str = "pragmatic-engineer/playbook";
-
-/// Lowercase hex SHA256 of `bytes`.
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
 
 /// Checks `bytes` against the `<hash>  <asset>` line of a SHA256SUMS file.
 pub fn verify_checksum(bytes: &[u8], sums: &str, asset: &str) -> Result<(), String> {
@@ -140,14 +132,6 @@ pub mod fake {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sha256_matches_the_known_empty_digest() {
-        assert_eq!(
-            sha256_hex(b""),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
-    }
 
     #[test]
     fn a_matching_checksum_passes_and_a_mismatch_aborts() {

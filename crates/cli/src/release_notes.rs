@@ -225,8 +225,8 @@ fn print_notes_in(root: &std::path::Path, file: &std::path::Path, from: Option<&
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::hash::sha256_hex;
     use crate::update::download::fake::FakeFetcher;
-    use crate::update::verify::sha256_hex;
 
     const BASE: &str = "https://dl.test/v0.28.0";
 
