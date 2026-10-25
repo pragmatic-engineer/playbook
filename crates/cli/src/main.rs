@@ -22,10 +22,12 @@ use std::io::{IsTerminal, Read, Write};
 /// instead of panicking on a closed pipe (Rust ignores SIGPIPE by default).
 #[cfg(unix)]
 fn restore_sigpipe() {
-    // SAFETY: resetting a signal disposition at startup, before any thread exists.
-    unsafe {
-        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-    }
+    // The always-true flag makes signal-hook run the default action, which
+    // ends the process, whenever SIGPIPE arrives.
+    let _ = signal_hook::flag::register_conditional_default(
+        signal_hook::consts::SIGPIPE,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+    );
 }
 
 #[cfg(not(unix))]
