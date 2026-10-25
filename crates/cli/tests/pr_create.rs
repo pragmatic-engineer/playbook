@@ -4,17 +4,39 @@
 //! `pr create` against real scratch git repos with a local bare `origin` and
 //! a fake `GhClient` that records the calls it receives.
 
-mod pr_support;
+#[path = "pr_support/cwd.rs"]
+mod cwd;
+#[path = "pr_support/fake_gh.rs"]
+mod fake_gh;
+#[path = "pr_support/fixture.rs"]
+mod fixture;
+#[path = "pr_support/layout.rs"]
+mod layout;
 
+use cwd::in_dir;
+use fake_gh::FakeGh;
+use fixture::{git, Fixture};
 use playbook::pr::create::run;
-use pr_support::{git, in_dir, FakeGh, Fixture};
 use std::fs;
+
+/// Checks out a branch whose name starts with `-`, which `git branch`
+/// refuses to create but `update-ref` can.
+fn checkout_dash_branch(fx: &Fixture, name: &str) {
+    git(
+        &fx.work,
+        &["update-ref", &format!("refs/heads/{name}"), "HEAD"],
+    );
+    git(
+        &fx.work,
+        &["symbolic-ref", "HEAD", &format!("refs/heads/{name}")],
+    );
+}
 
 const URL: &str = "https://example.test/pr/42";
 
 fn body(fx: &Fixture) -> String {
-    let path = fx.state.join("pr-body.md");
-    fs::create_dir_all(&fx.state).expect("state dir");
+    let path = fx.state().join("pr-body.md");
+    fs::create_dir_all(fx.state()).expect("state dir");
     fs::write(&path, "## Summary\n\nbody\n").expect("body");
     path.to_str().expect("utf8").to_string()
 }
@@ -27,7 +49,7 @@ fn create(fx: &Fixture, gh: &FakeGh, title: &str, base: Option<&str>) -> Result<
 fn remote_has_branch(fx: &Fixture, branch: &str) -> bool {
     let reference = format!("refs/heads/{branch}");
     !git(
-        &fx.bare,
+        &fx.bare(),
         &["for-each-ref", "--format=%(refname)", &reference],
     )
     .is_empty()
@@ -197,7 +219,7 @@ fn running_on_the_base_branch_never_pushes_to_it() {
     let fx = Fixture::new("onbase", "feat/x");
     git(&fx.work, &["checkout", "--quiet", "main"]);
     fx.commit_lines("local-only.txt", 2);
-    let before = git(&fx.bare, &["rev-parse", "refs/heads/main"]);
+    let before = git(&fx.bare(), &["rev-parse", "refs/heads/main"]);
     let gh = FakeGh::creating(URL);
 
     // Act
@@ -207,7 +229,7 @@ fn running_on_the_base_branch_never_pushes_to_it() {
     let err = got.expect_err("main is the base");
     assert!(err.contains("on the base branch (main)"), "got {err}");
     assert_eq!(
-        git(&fx.bare, &["rev-parse", "refs/heads/main"]),
+        git(&fx.bare(), &["rev-parse", "refs/heads/main"]),
         before,
         "origin/main must not move"
     );
@@ -271,7 +293,7 @@ fn a_branch_name_starting_with_a_dash_is_refused_before_anything_is_pushed() {
     // Arrange
     let fx = Fixture::new("dashbranch", "feat/x");
     fx.commit_lines("a.txt", 2);
-    fx.checkout_dash_branch("-weird");
+    checkout_dash_branch(&fx, "-weird");
     let gh = FakeGh::creating(URL);
 
     // Act
@@ -301,8 +323,8 @@ fn a_base_starting_with_a_dash_is_refused_before_anything_is_pushed() {
 }
 
 fn create_with_body(fx: &Fixture, gh: &FakeGh, title: &str, text: &str) -> Result<String, String> {
-    let path = fx.state.join("guard-body.md");
-    fs::create_dir_all(&fx.state).expect("state dir");
+    let path = fx.state().join("guard-body.md");
+    fs::create_dir_all(fx.state()).expect("state dir");
     fs::write(&path, text).expect("body");
     let body_file = path.to_str().expect("utf8").to_string();
     in_dir(&fx.work, || run(gh, title, &body_file, None, true))
