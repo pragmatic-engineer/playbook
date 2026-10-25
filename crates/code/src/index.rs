@@ -870,8 +870,7 @@ mod tests {
         write(&f.root, "a.rs", b"fn keepme2() {}\n");
         std::fs::set_permissions(f.root.join("a.rs"), std::fs::Permissions::from_mode(0o000))
             .expect("chmod");
-        // SAFETY: geteuid has no preconditions and cannot fail.
-        let is_root = unsafe { libc::geteuid() } == 0;
+        let is_root = rustix::process::geteuid().is_root();
 
         // Act
         let report = f.run();
