@@ -74,14 +74,14 @@ esac
 /// as a tarball, and `STUB_INSTALLER_FILE` serves install.sh from
 /// raw.githubusercontent.com) and fails on anything else, `uname` is fixed by
 /// `STUB_UNAME_S` and `STUB_UNAME_M`, and `gh` plays the attestation check.
-pub fn install_stubs(dir: &Path) {
+pub(crate) fn install_stubs(dir: &Path) {
     write_exec(&dir.join("curl"), CURL_STUB);
     write_exec(&dir.join("uname"), UNAME_STUB);
     write_exec(&dir.join("gh"), GH_STUB);
 }
 
 /// Lowercase hex SHA-256 of `data`.
-pub fn sha256_hex(data: &[u8]) -> String {
+pub(crate) fn sha256_hex(data: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(data)
         .iter()
