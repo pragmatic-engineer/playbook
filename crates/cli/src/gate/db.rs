@@ -467,6 +467,7 @@ fn remove_legacy_item(path: &Path) {
 mod tests {
     use super::*;
     use crate::common::test_support::scratch_dir;
+    use crate::testing::write_file;
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -781,13 +782,6 @@ mod tests {
         assert!(result.is_ok(), "expected Ok, got {:?}", result.err());
 
         let _ = fs::remove_dir_all(&dir);
-    }
-
-    fn write_file(path: &Path, content: &str) {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(path, content).unwrap();
     }
 
     #[cfg(unix)]

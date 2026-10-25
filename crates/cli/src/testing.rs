@@ -15,6 +15,32 @@ pub fn write_graph_fixture(mem_dir: &std::path::Path, json: &str) {
     }
 }
 
+/// Writes `content` to `path`, creating the parent folders. Panics on failure.
+#[cfg(test)]
+pub fn write_file(path: &std::path::Path, content: &str) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(path, content).unwrap();
+}
+
+/// A fresh, created scratch folder named after `tag`.
+#[cfg(test)]
+pub fn scratch_root(tag: &str) -> std::path::PathBuf {
+    let dir = crate::common::test_support::scratch_dir(tag);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// The created playbook root inside a fresh scratch home named after `tag`.
+#[cfg(test)]
+pub fn scratch_playbook_root(tag: &str) -> std::path::PathBuf {
+    let home = crate::common::test_support::scratch_dir(tag);
+    let root = crate::common::paths::playbook_root_from(&home);
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
 /// Set in a child process that [`in_scratch_home`] started, so the child
 /// knows to run the test body instead of starting another child.
 #[cfg(test)]

@@ -13,6 +13,7 @@
 
 use crate::common::emit_pre_context;
 use crate::common::payload::Payload;
+use crate::hooks::starts_a_command;
 
 /// House rule is small single-concern commits. Matches the shell thresholds.
 const MAX_FILES: usize = 20;
@@ -105,13 +106,6 @@ fn is_commit(cmd: &str) -> bool {
                 .find(|t| !t.starts_with('-'))
                 .is_some_and(|verb| *verb == "commit")
     })
-}
-
-fn starts_a_command(tokens: &[&str], i: usize) -> bool {
-    match i.checked_sub(1).and_then(|p| tokens.get(p)) {
-        None => true,
-        Some(prev) => prev.ends_with([';', '&', '|', '(']),
-    }
 }
 
 fn looks_secret(path: &str) -> bool {

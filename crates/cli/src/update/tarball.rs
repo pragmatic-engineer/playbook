@@ -80,7 +80,6 @@ pub fn extract_regular_file(tar: &[u8], name: &str) -> Result<Vec<u8>, String> {
 #[cfg(all(test, unix))]
 pub(crate) mod pbdoc_fixture {
     use crate::update::download::fake::FakeFetcher;
-    use crate::update::verify;
 
     pub const ASSET: &str = "pbdoc-0.17.0-x86_64-unknown-linux-musl.tar.gz";
 
@@ -141,7 +140,10 @@ pub(crate) mod pbdoc_fixture {
         f.0.insert(format!("{base}/{ASSET}"), tarball.to_vec());
         let url = format!("{base}/SHA256SUMS");
         let mut sums = String::from_utf8(f.0[&url].clone()).unwrap();
-        sums.push_str(&format!("{}  {ASSET}\n", verify::sha256_hex(hashed)));
+        sums.push_str(&format!(
+            "{}  {ASSET}\n",
+            crate::common::hash::sha256_hex(hashed)
+        ));
         f.0.insert(url, sums.into_bytes());
     }
 }

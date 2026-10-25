@@ -14,6 +14,7 @@
 
 use crate::common::emit_pre_context;
 use crate::common::payload::Payload;
+use crate::hooks::starts_a_command;
 
 /// Package managers whose install output a later step almost always needs.
 const PACKAGE_MANAGERS: [&str; 4] = ["npm", "pnpm", "yarn", "bun"];
@@ -104,15 +105,6 @@ fn is_await_sensitive(cmd: &str) -> bool {
     }
 
     wipes_node_modules(&tokens)
-}
-
-/// True when the token begins a command: first overall, or preceded by a
-/// separator. Without this, `tsc` appearing as an argument would match.
-fn starts_a_command(tokens: &[&str], i: usize) -> bool {
-    match i.checked_sub(1).and_then(|p| tokens.get(p)) {
-        None => true,
-        Some(prev) => prev.ends_with([';', '&', '|', '(']),
-    }
 }
 
 /// `rm -rf node_modules` and friends: the reinstall that follows is always

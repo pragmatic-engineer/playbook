@@ -10,6 +10,7 @@
 //! imports the old files in one transaction and renames each to `.migrated`;
 //! nothing is deleted.
 
+use crate::common::slug::slugify;
 use crate::config::store;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
@@ -147,20 +148,6 @@ pub fn list(root: &Path, prefix: &str) -> Result<Vec<(String, String)>, StateErr
 /// claims another's rate-limit slot.
 pub fn sweep_key(repo_root: &Path) -> String {
     format!("{SWEEP_PREFIX}{}", slugify(&repo_root.to_string_lossy()))
-}
-
-/// Every character outside `[A-Za-z0-9_.-]` becomes `_`, matching the retired
-/// shell `slugify` and the old marker file names.
-pub fn slugify(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 /// The legacy files the import reads: `migrations.state` and every
@@ -344,13 +331,7 @@ pub fn dump(root: &Path) -> Result<Vec<(String, String)>, StateError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
-
-    fn root(tag: &str) -> PathBuf {
-        let dir = scratch_dir(tag);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::testing::scratch_root as root;
 
     #[test]
     fn set_get_delete_and_list_by_prefix() {
