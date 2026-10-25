@@ -271,8 +271,7 @@ fn device(_: &Path) -> Option<u64> {
 #[cfg(unix)]
 fn owned_by_me(path: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
-    // SAFETY: geteuid has no preconditions and cannot fail.
-    let me = unsafe { libc::geteuid() };
+    let me = rustix::process::geteuid().as_raw();
     fs::symlink_metadata(path).is_ok_and(|m| m.uid() == me)
 }
 
