@@ -159,34 +159,9 @@ fn log_compaction(payload: &Payload, sid: &str, trigger: &str) {
     }
 }
 
-/// Current local time as `%Y-%m-%d %H:%M:%S`, formatted in process with
-/// `localtime_r`. Empty on any failure; never panics.
-#[cfg(unix)]
+/// Current local time as `%Y-%m-%d %H:%M:%S`.
 pub fn current_timestamp() -> String {
-    // SAFETY: `time` and `localtime_r` write only to the locals passed in, and
-    // `strftime` stays within the buffer length it is given.
-    unsafe {
-        let now = libc::time(std::ptr::null_mut());
-        let mut tm: libc::tm = std::mem::zeroed();
-        if libc::localtime_r(&now, &mut tm).is_null() {
-            return String::new();
-        }
-        let mut buf = [0 as libc::c_char; 32];
-        let n = libc::strftime(
-            buf.as_mut_ptr(),
-            buf.len(),
-            c"%Y-%m-%d %H:%M:%S".as_ptr(),
-            &tm,
-        );
-        let bytes: Vec<u8> = buf[..n].iter().map(|&c| c as u8).collect();
-        String::from_utf8_lossy(&bytes).into_owned()
-    }
-}
-
-/// No `localtime_r` off unix, so the log line carries an empty timestamp.
-#[cfg(not(unix))]
-pub fn current_timestamp() -> String {
-    String::new()
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 /// Append `line` plus a trailing newline to `path`, with no locking of its
