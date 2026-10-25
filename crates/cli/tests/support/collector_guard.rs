@@ -4,8 +4,6 @@
 //! Kills the collector that holds a test home's lock, so no test leaves one
 //! running. Shared by the tests that can start a collector.
 
-#![allow(dead_code)]
-
 use playbook::usage::daemon::{lock_state, LockState};
 use playbook::usage::run::Paths;
 use std::time::{Duration, Instant};
