@@ -7,7 +7,7 @@
 
 use crate::common::atomic::write_atomic_durable;
 use crate::init::path::PathShell;
-use crate::init::shim::{self, RcStrip};
+use crate::init::rcfile::{self, RcStrip};
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -315,7 +315,7 @@ fn rewrite_loader(path: &Path, text: &str, ctx: &Ctx, out: &mut Outcome) -> io::
         out.already.push(path.to_path_buf());
         return Ok(true);
     }
-    let result = if shim::can_rewrite(path) {
+    let result = if rcfile::can_rewrite(path) {
         write_atomic_durable(&target, text.as_bytes())
     } else {
         Err(ErrorKind::PermissionDenied.into())
@@ -384,7 +384,7 @@ fn create_file(path: &Path, content: &[u8]) -> io::Result<()> {
 }
 
 fn has_line(content: &[u8], wanted: &str) -> bool {
-    shim::split_lines(content)
+    rcfile::split_lines(content)
         .iter()
         .any(|l| l.trim_ascii_end() == wanted.as_bytes())
 }
@@ -437,12 +437,12 @@ fn rc_lines(content: &[u8]) -> RcLines {
         edited: 0,
         legacy: 0,
     };
-    let lines = shim::split_lines(content);
+    let lines = rcfile::split_lines(content);
     for (at, line) in lines.iter().enumerate() {
         let line = line.trim_ascii_end();
         if line == RC_LINE.as_bytes() {
             found.exact += 1;
-        } else if shim::is_marked_block(&lines, at, MARKER, &LEGACY_BLOCK_REST) {
+        } else if rcfile::is_marked_block(&lines, at, MARKER, &LEGACY_BLOCK_REST) {
             found.legacy += 1;
         } else if line.ends_with(MARKER.as_bytes()) {
             found.edited += 1;
@@ -495,10 +495,10 @@ fn ensure_zshrc(home: &Path, home_owned: bool, ctx: &Ctx, out: &mut Outcome) -> 
 /// Replaces every pre-loader block with the new line, appended when the file
 /// has none, after a backup of the original.
 fn migrate_legacy(rc: &Path, target: &Path, original: &[u8], add_line: bool) -> io::Result<()> {
-    if !shim::can_rewrite(rc) {
+    if !rcfile::can_rewrite(rc) {
         return Err(ErrorKind::PermissionDenied.into());
     }
-    let mut migrated = shim::strip_marked_block(original, MARKER, &LEGACY_BLOCK_REST)
+    let mut migrated = rcfile::strip_marked_block(original, MARKER, &LEGACY_BLOCK_REST)
         .unwrap_or_else(|| original.to_vec());
     if add_line {
         if !migrated.is_empty() && !migrated.ends_with(b"\n") {
@@ -515,7 +515,7 @@ fn migrate_legacy(rc: &Path, target: &Path, original: &[u8], add_line: bool) -> 
 /// symlinked rc stays a symlink. The replace would succeed on a read-only
 /// file in a writable directory, so writability is checked first.
 fn append_line(rc: &Path, target: &Path, original: &[u8]) -> io::Result<()> {
-    if !shim::can_rewrite(rc) {
+    if !rcfile::can_rewrite(rc) {
         return Err(ErrorKind::PermissionDenied.into());
     }
     let mut appended = original.to_vec();
@@ -582,9 +582,9 @@ fn zsh_status(home: &Path) -> Status {
 /// `content` without every exact rc line and every pre-loader block; `None`
 /// when there was nothing to remove.
 pub fn strip_ours(content: &[u8]) -> Option<Vec<u8>> {
-    let no_legacy = shim::strip_marked_block(content, MARKER, &LEGACY_BLOCK_REST);
+    let no_legacy = rcfile::strip_marked_block(content, MARKER, &LEGACY_BLOCK_REST);
     let rest = no_legacy.as_deref().unwrap_or(content);
-    shim::strip_marked_block(rest, RC_LINE, &[]).or(no_legacy)
+    rcfile::strip_marked_block(rest, RC_LINE, &[]).or(no_legacy)
 }
 
 /// Removes every exact line and pre-loader block from `~/.zshrc` after a backup, for uninstall.
@@ -604,7 +604,7 @@ pub fn strip(home: &Path, uid: u32, stamp: u64, dry_run: bool) -> Vec<RcStrip> {
     let mut entry = RcStrip {
         rc_file: rc.clone(),
         backup: None,
-        unwritable: !shim::can_rewrite(&rc),
+        unwritable: !rcfile::can_rewrite(&rc),
         error: None,
     };
     if !fs::metadata(&target).is_ok_and(|meta| owned_by(&meta, uid)) {
@@ -1361,7 +1361,7 @@ mod tests {
         let home = home("completion-layer3");
         fs::write(zshrc(&home), USER_LINES).unwrap();
         let retired = [
-            format!("{}  {MARKER}", shim::SOURCE_LINE),
+            format!("{}  {MARKER}", rcfile::SOURCE_LINE),
             format!("source \"$HOME/.config/playbook/shell/zsh/cc.zsh\"  {MARKER}"),
             format!("eval \"$(playbook shell-init)\"  {MARKER}"),
             format!("# playbook launchers (ccc/ccd)  {MARKER}"),
@@ -1372,20 +1372,20 @@ mod tests {
 
         // Assert
         assert!(
-            shim::retired_rc_entries(&home).is_empty(),
+            rcfile::retired_rc_entries(&home).is_empty(),
             "{:?}",
-            shim::retired_rc_entries(&home)
+            rcfile::retired_rc_entries(&home)
         );
         for line in retired {
             fs::write(zshrc(&home), format!("{line}\n")).unwrap();
             assert!(
-                shim::retired_rc_entries(&home).is_empty(),
+                rcfile::retired_rc_entries(&home).is_empty(),
                 "a line ending with the marker was flagged: {line}"
             );
         }
         for shell in [Shell::Bash, Shell::Fish] {
             assert!(
-                !stub_text(shell).contains(shim::SOURCE_LINE),
+                !stub_text(shell).contains(rcfile::SOURCE_LINE),
                 "{shell:?} stub names the retired launcher line"
             );
         }
