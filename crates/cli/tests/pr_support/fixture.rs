@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-pub fn git(dir: &Path, args: &[&str]) -> String {
+pub(crate) fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -30,12 +30,12 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
 }
 
 /// A work repo on a feature branch whose `origin` is a local bare repo.
-pub struct Fixture {
+pub(crate) struct Fixture {
     pub work: PathBuf,
 }
 
 impl Fixture {
-    pub fn new(tag: &str, branch: &str) -> Self {
+    pub(crate) fn new(tag: &str, branch: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
             "playbook-pr-{tag}-{}-{n}",
@@ -74,7 +74,7 @@ impl Fixture {
         Self { work }
     }
 
-    pub fn commit_file(&self, path: &str, content: &str) {
+    pub(crate) fn commit_file(&self, path: &str, content: &str) {
         let full = self.work.join(path);
         fs::create_dir_all(full.parent().expect("parent")).expect("mkdir");
         fs::write(&full, content).expect("write");
@@ -85,7 +85,7 @@ impl Fixture {
         );
     }
 
-    pub fn commit_lines(&self, path: &str, n: usize) {
+    pub(crate) fn commit_lines(&self, path: &str, n: usize) {
         self.commit_file(path, &"line\n".repeat(n));
     }
 
@@ -93,7 +93,7 @@ impl Fixture {
     /// remote-tracking refs, so `origin/<name>` resolves.
     // Only the `pr create` and `pr prepare` tests call it; the rules test does not.
     #[allow(dead_code)]
-    pub fn publish_base_as(&self, name: &str) {
+    pub(crate) fn publish_base_as(&self, name: &str) {
         git(
             &self.work,
             &[

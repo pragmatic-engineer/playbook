@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 /// Every file under `dir` (or `dir` itself, when it is a file) whose
 /// extension is one of `exts`. A missing path adds nothing.
-pub fn files_under(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
+pub(crate) fn files_under(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
     if dir.is_file() {
         if dir
             .extension()
