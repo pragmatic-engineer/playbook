@@ -154,7 +154,7 @@ pub fn parse_range(spec: &str) -> Result<(usize, usize), String> {
 }
 
 /// Cuts `s` to at most `max` bytes, never inside a character.
-fn cut_at_boundary(s: &str, max: usize) -> &str {
+pub(crate) fn cut_at_boundary(s: &str, max: usize) -> &str {
     let mut end = max.min(s.len());
     while !s.is_char_boundary(end) {
         end -= 1;

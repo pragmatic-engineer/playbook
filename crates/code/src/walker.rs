@@ -256,17 +256,7 @@ pub(crate) mod test_repo {
 mod tests {
     use super::test_repo::{git_in, init, write};
     use super::*;
-    use std::sync::Mutex;
-
-    /// Discovery reads global git config, so tests pin it and serialise.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn pinned() -> std::sync::MutexGuard<'static, ()> {
-        let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
-        std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
-        guard
-    }
+    use crate::testkit::pinned;
 
     fn names(found: &Discovered) -> Vec<&str> {
         found.files.iter().map(String::as_str).collect()
