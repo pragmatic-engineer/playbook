@@ -621,6 +621,7 @@ fn handle(shared: &Shared, mut stream: TcpStream) {
 mod tests {
     use super::*;
     use crate::telemetry_db::{count_requests, migrate_up};
+    use crate::util::within;
     use std::io::Cursor;
 
     /// A file database (the writer owns one connection) and a second
@@ -1002,7 +1003,6 @@ mod tests {
     const PROMPT: Duration = Duration::from_secs(1);
     /// Slack past `READ_DEADLINE` before a silent client must be closed.
     const GRACE: Duration = Duration::from_secs(3);
-    const POLL: Duration = Duration::from_millis(50);
     const AUTH: &str = "Authorization: Bearer tok";
 
     fn token_cfg(idle: Option<Duration>) -> Config {
@@ -1010,21 +1010,6 @@ mod tests {
             token: Some("tok".into()),
             idle,
             prune: None,
-        }
-    }
-
-    /// Polls `done` every `POLL` until `bound`, checking it before the
-    /// deadline so a condition met on the last poll still passes.
-    fn within(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
-        let deadline = Instant::now() + bound;
-        loop {
-            if done() {
-                return true;
-            }
-            if Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(POLL);
         }
     }
 
