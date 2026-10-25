@@ -424,13 +424,12 @@ mod unix {
     use crate::collector::PROBE_DEADLINE;
     use crate::collector::{pid_alive, probe_stream, read_state, state_path, Probe, State};
     use crate::receiver::SHUTDOWN_PATH;
+    use crate::util::within;
     use std::io::Write;
     use std::net::{Ipv4Addr, SocketAddr, TcpStream};
     use std::path::{Path, PathBuf};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
-    /// How often a waiting starter checks the lock or the port.
-    const POLL: Duration = Duration::from_millis(50);
     /// How long the lock may take to free after a `SIGKILL`.
     const KILL_WAIT: Duration = Duration::from_secs(1);
     /// Connect deadline for the shutdown request and the liveness checks;
@@ -630,21 +629,6 @@ mod unix {
         }
     }
 
-    /// Polls `done` every `POLL` until `bound`, checking it before the
-    /// deadline so a condition met on the last poll still counts.
-    pub(super) fn within(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
-        let deadline = Instant::now() + bound;
-        loop {
-            if done() {
-                return true;
-            }
-            if Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(POLL);
-        }
-    }
-
     fn lock_frees_within(paths: &Paths, bound: Duration) -> bool {
         within(bound, || lock_state(paths) == LockState::Free)
     }
@@ -798,14 +782,7 @@ mod unix {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::scratch_dir;
-
-    fn paths(name: &str) -> Paths {
-        let dir = scratch_dir(name);
-        let mut p = Paths::from_home(&dir);
-        p.db = dir.join("usage").join("usage.db");
-        p
-    }
+    use crate::util::scratch_paths as paths;
 
     fn shared_probe(p: &Paths, hold: Duration) -> std::thread::JoinHandle<()> {
         let path = lock_path(p);
@@ -1035,13 +1012,13 @@ mod tests {
 
     #[cfg(unix)]
     mod starter {
-        use super::super::unix::within;
         use super::super::*;
-        use super::paths;
         use crate::collector::tests::Running;
         use crate::collector::{read_state, State};
         use crate::receiver::bind;
         use crate::util::scratch_dir;
+        use crate::util::scratch_paths as paths;
+        use crate::util::within;
         use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
         use std::process::{Child, Command, Stdio};
         use std::sync::atomic::{AtomicUsize, Ordering};
