@@ -1285,7 +1285,6 @@ dependencies = [
  "playbook-data",
  "rusqlite",
  "serde_json",
- "sha2",
  "tree-sitter",
  "tree-sitter-go",
  "tree-sitter-javascript",
@@ -1301,6 +1300,7 @@ dependencies = [
  "libc",
  "rusqlite",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -1325,6 +1325,7 @@ dependencies = [
  "chrono",
  "clap",
  "libc",
+ "playbook-common",
  "playbook-data",
  "ratatui",
  "rusqlite",

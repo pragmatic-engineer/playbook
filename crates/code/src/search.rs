@@ -5,8 +5,8 @@
 //! wrapped as an FTS5 string with quotes doubled, and passed as a bound
 //! parameter, so operator text in the input is only ever text.
 
-use super::index::sha256_hex;
 use super::walker::Limits;
+use playbook_common::hash::sha256_hex;
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::Path;
