@@ -7,8 +7,6 @@
 //! the first-run heal against the real home. `test_isolation.rs` fails when
 //! a test file starts the binary without this helper or its own `HOME`.
 
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,6 +22,9 @@ pub fn fresh_home() -> PathBuf {
 }
 
 /// The built `playbook` in a fresh scratch home.
+// The root of this chain: tests that pass their own home call `playbook_in` or
+// `isolate` directly, so the helpers it reaches are dead in those binaries.
+#[allow(dead_code)]
 pub fn playbook() -> Command {
     playbook_in(&fresh_home())
 }
