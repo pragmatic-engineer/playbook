@@ -13,13 +13,13 @@ const MEMORY_LIMIT_MESSAGE: &[u8] = b"memory limit reached\n";
 const STDERR_FD: i32 = 2;
 
 /// A byte budget shared by every thread. `used` never passes `cap`.
-pub struct Budget {
+pub(crate) struct Budget {
     used: AtomicUsize,
     cap: AtomicUsize,
 }
 
 impl Budget {
-    pub const fn new(cap: usize) -> Self {
+    pub(crate) const fn new(cap: usize) -> Self {
         Self {
             used: AtomicUsize::new(0),
             cap: AtomicUsize::new(cap),
@@ -27,16 +27,16 @@ impl Budget {
     }
 
     #[cfg(test)]
-    pub fn used(&self) -> usize {
+    pub(crate) fn used(&self) -> usize {
         self.used.load(Ordering::SeqCst)
     }
 
-    pub fn set_cap(&self, cap: usize) {
+    pub(crate) fn set_cap(&self, cap: usize) {
         self.cap.store(cap, Ordering::SeqCst);
     }
 
     /// Reserves `bytes`, or returns false and leaves the counter unchanged.
-    pub fn try_reserve(&self, bytes: usize) -> bool {
+    pub(crate) fn try_reserve(&self, bytes: usize) -> bool {
         let previous = self.used.fetch_add(bytes, Ordering::SeqCst);
         let within = previous
             .checked_add(bytes)
@@ -47,12 +47,12 @@ impl Budget {
         within
     }
 
-    pub fn release(&self, bytes: usize) {
+    pub(crate) fn release(&self, bytes: usize) {
         self.used.fetch_sub(bytes, Ordering::SeqCst);
     }
 
     /// Adjusts a reservation from `old` to `new` bytes, with the same cap check on growth.
-    pub fn try_resize(&self, old: usize, new: usize) -> bool {
+    pub(crate) fn try_resize(&self, old: usize, new: usize) -> bool {
         if new > old {
             self.try_reserve(new - old)
         } else {
@@ -70,7 +70,7 @@ thread_local! {
 /// Writes the limit message and exits 4. Allocation free, so it is safe to
 /// call from inside the allocator.
 #[cfg(unix)]
-pub fn exit_over_memory_limit() -> ! {
+pub(crate) fn exit_over_memory_limit() -> ! {
     if IN_LIMIT_EXIT.with(|flag| flag.replace(true)) {
         // SAFETY: _exit takes no pointers and never returns.
         unsafe { libc::_exit(i32::from(crate::EXIT_RESOURCE_LIMIT)) }
@@ -100,12 +100,12 @@ pub fn exit_over_memory_limit() -> ! {
 static BUDGET: Budget = Budget::new(usize::MAX);
 
 /// Sets the heap cap, in bytes, for the whole process.
-pub fn set_heap_cap(cap_bytes: usize) {
+pub(crate) fn set_heap_cap(cap_bytes: usize) {
     BUDGET.set_cap(cap_bytes);
 }
 
 /// Wraps the system allocator and exits 4 when an allocation would pass the cap.
-pub struct CountingAllocator;
+pub(crate) struct CountingAllocator;
 
 // SAFETY: every call forwards to `System` with the caller's layout and
 // pointer, so System's guarantees carry over. The accounting only adds counter
