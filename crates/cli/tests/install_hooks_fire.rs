@@ -7,11 +7,17 @@
 //! checks the observable effect, so a hook that is wired but dead, or wired
 //! with no case, fails here.
 
+#[path = "support/shell_bin_dir.rs"]
+mod shell_bin_dir;
 #[path = "support/shell_fixture.rs"]
-mod fx;
+mod shell_fixture;
+#[path = "support/shell_run.rs"]
+mod shell_run;
 
-use fx::{bin_dir_with_playbook, both, repo_root, Work};
 use serde_json::Value;
+use shell_bin_dir::bin_dir_with_playbook;
+use shell_fixture::Work;
+use shell_run::{both, repo_root};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
