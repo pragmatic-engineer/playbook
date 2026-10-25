@@ -50,11 +50,10 @@ const PROMPT: &[u8] =
     br#"{"session_id":"s1","prompt":"hello","hook_event_name":"UserPromptSubmit"}"#;
 
 fn pid_alive(pid: u32) -> bool {
-    let Ok(pid) = libc::pid_t::try_from(pid) else {
-        return false;
-    };
-    // SAFETY: signal 0 only checks that the pid exists.
-    unsafe { libc::kill(pid, 0) == 0 }
+    i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+        .is_some_and(|pid| rustix::process::test_kill_process(pid).is_ok())
 }
 
 /// Sets a test-only variable on `cmd`. A release build never reads one, so a

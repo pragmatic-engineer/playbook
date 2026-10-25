@@ -397,17 +397,22 @@ fn skills_only_is_refused_with_the_plugin_commands() {
     );
 }
 
-/// Runs `cmd` with no controlling terminal, as `curl | bash` does under cron
-/// or in CI, so a prompt has nobody to ask.
-fn without_terminal(cmd: &mut Command) -> &mut Command {
-    use std::os::unix::process::CommandExt;
-    // SAFETY: setsid(2) in the forked child before exec touches no memory.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        })
+/// Returns `cmd` run with no controlling terminal, as `curl | bash` does
+/// under cron or in CI, so a prompt has nobody to ask. std has no safe setsid,
+/// so perl, which macOS and Linux both ship, starts a session and then execs.
+fn without_terminal(cmd: &Command) -> Command {
+    let mut wrapped = Command::new("perl");
+    wrapped
+        .args(["-MPOSIX", "-e", "POSIX::setsid(); exec @ARGV or die $!"])
+        .arg(cmd.get_program())
+        .args(cmd.get_args());
+    for (key, value) in cmd.get_envs() {
+        match value {
+            Some(value) => wrapped.env(key, value),
+            None => wrapped.env_remove(key),
+        };
     }
+    wrapped
 }
 
 fn installer(work: &Work, stub: &Path, flags: &[&str], tag: &str) -> Command {
@@ -427,8 +432,8 @@ fn with_no_yes_and_no_terminal_init_is_not_run_and_its_command_is_printed() {
     let work = Work::new("bp-noconsent");
     let (stub, argv) = recording_stub(&work);
 
-    let mut cmd = installer(&work, &stub, &[], "nc");
-    let out = without_terminal(&mut cmd).output().unwrap();
+    let cmd = installer(&work, &stub, &[], "nc");
+    let out = without_terminal(&cmd).output().unwrap();
 
     let text = both(&out);
     assert!(out.status.success(), "{text}");
@@ -441,8 +446,8 @@ fn a_requested_system_prompt_is_kept_in_the_printed_init_command() {
     let work = Work::new("bp-noconsent-flags");
     let (stub, argv) = recording_stub(&work);
 
-    let mut cmd = installer(&work, &stub, &["--system-prompt"], "ncf");
-    let out = without_terminal(&mut cmd).output().unwrap();
+    let cmd = installer(&work, &stub, &["--system-prompt"], "ncf");
+    let out = without_terminal(&cmd).output().unwrap();
 
     let text = both(&out);
     assert!(out.status.success(), "{text}");

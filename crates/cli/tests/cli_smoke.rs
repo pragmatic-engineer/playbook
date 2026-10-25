@@ -181,9 +181,12 @@ impl Env {
             }
             if start.elapsed() >= TIMEOUT {
                 // Kill the whole group so a grandchild cannot keep the pipes open.
-                // SAFETY: kill(2) on our own child's process group, no memory involved.
-                unsafe {
-                    libc::kill(-(child.id() as i32), libc::SIGKILL);
+                if let Some(pgid) = i32::try_from(child.id())
+                    .ok()
+                    .and_then(rustix::process::Pid::from_raw)
+                {
+                    let _ =
+                        rustix::process::kill_process_group(pgid, rustix::process::Signal::KILL);
                 }
                 let _ = child.kill();
                 let _ = child.wait();

@@ -274,36 +274,30 @@ fn a_flag_conflict_exits_two_under_both_names() {
 
 /// Spawns a command with stderr on a pseudo terminal and stdout on a pipe.
 mod terminal {
-    use std::fs::File;
+    use rustix::pty::{grantpt, openpt, ptsname, unlockpt, OpenptFlags};
+    use std::fs::{File, OpenOptions};
     use std::io::Read;
-    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
     use std::process::{Command, Output, Stdio};
 
     /// Runs `cmd` and returns its output. The text the terminal received is
     /// returned as stderr, with the `\r` the terminal adds removed.
     pub(crate) fn output(mut cmd: Command) -> Output {
-        let (mut master, mut slave) = (0, 0);
-        // SAFETY: openpty writes two new descriptors into the pointers; the
-        // name, termios and window size arguments may be null.
-        let rc = unsafe {
-            libc::openpty(
-                &mut master,
-                &mut slave,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            )
-        };
-        assert_eq!(rc, 0, "openpty failed");
-        for fd in [master, slave] {
-            // SAFETY: fd is a descriptor openpty just opened. Close on exec
-            // keeps it out of processes other tests spawn meanwhile; the
-            // child still gets the slave as its stderr.
-            let rc = unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
-            assert_eq!(rc, 0, "fcntl failed");
-        }
-        // SAFETY: both descriptors are new, open and owned only here.
-        let (master, slave) = unsafe { (File::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
+        // Close on exec keeps the master out of processes other tests spawn
+        // meanwhile; the child still gets the slave as its stderr.
+        let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).expect("openpt failed");
+        rustix::io::fcntl_setfd(&master, rustix::io::FdFlags::CLOEXEC).expect("fcntl failed");
+        grantpt(&master).expect("grantpt failed");
+        unlockpt(&master).expect("unlockpt failed");
+        let name = ptsname(&master, Vec::new()).expect("ptsname failed");
+        let slave = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(rustix::fs::OFlags::NOCTTY.bits() as i32)
+            .open(std::ffi::OsStr::from_bytes(name.to_bytes()))
+            .expect("open the pty slave");
+        let master = File::from(master);
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::from(slave));
