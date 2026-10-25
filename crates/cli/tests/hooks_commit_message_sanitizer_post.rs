@@ -8,12 +8,38 @@
 
 #[path = "support/auto_env.rs"]
 mod auto_env;
+#[path = "support/auto_warm_up.rs"]
+mod auto_warm_up;
 #[path = "support/sanitizer_lab.rs"]
 mod sanitizer_lab;
 
 use sanitizer_lab::{assert_no_attribution, sh, write_executable, Lab, COAUTHOR};
 use serde_json::Value;
 use std::fs;
+
+impl Lab {
+    /// The PostToolUse output after `command` printed `stdout`.
+    pub fn post(&self, command: &str, stdout: &str) -> String {
+        self.run_hook(&self.payload("PostToolUse", command, stdout))
+    }
+
+    /// A call as Claude Code runs it: the PreToolUse hook sees `command`, `ran`
+    /// does what the shell did, and the PostToolUse hook sees the call after.
+    pub fn through_hooks(&self, command: &str, ran: impl FnOnce(&Lab)) -> String {
+        self.hook(command);
+        ran(self);
+        self.post(command, "")
+    }
+
+    /// [`Lab::through_hooks`] with `command` itself as what ran, not the
+    /// PreToolUse rewrite, so the backstop sees what the rewrite missed. The
+    /// command may fail, as a real commit can.
+    pub fn run_through_hooks(&self, command: &str) -> String {
+        self.through_hooks(command, |lab| {
+            lab.run(command);
+        })
+    }
+}
 
 const DIRTY: &str =
     "feat: x\n\nbody line\n\nRefs: 1\nCo-Authored-By: Claude <noreply@anthropic.com>";
@@ -410,7 +436,7 @@ fn git_spy(lab: &Lab, when: &str, before: &str) {
     // Run the new shim once before the hook does, outside the hook's own
     // wait for git (see `warm_up`), then drop the call that warm-up logged.
     #[cfg(unix)]
-    auto_env::warm_up(&lab.bin.join("git"));
+    auto_warm_up::warm_up(&lab.bin.join("git"));
     let _ = fs::remove_file(&log);
 }
 
