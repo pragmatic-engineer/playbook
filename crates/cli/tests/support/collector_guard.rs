@@ -34,8 +34,14 @@ pub(crate) fn kill_holder(paths: &Paths) -> bool {
     match lock_state(paths) {
         LockState::Held(h) => {
             if let Some(pid) = h.pid.and_then(|p| libc::pid_t::try_from(p).ok()) {
-                // SAFETY: plain kill(2) on the pid the lock names.
-                unsafe { libc::kill(pid, libc::SIGKILL) };
+                // A test that plays the collector holds the lock in its own
+                // name. Another test thread's fork can copy that lock's
+                // descriptor for a moment after the test dropped it, so the
+                // lock reads held by this very process: never signal it.
+                if pid.unsigned_abs() != std::process::id() {
+                    // SAFETY: plain kill(2) on the pid the lock names.
+                    unsafe { libc::kill(pid, libc::SIGKILL) };
+                }
             }
             true
         }
