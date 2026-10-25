@@ -88,6 +88,6 @@ The PDF bar is met (41 percent fewer tokens, no loss of correctness), and Office
 
 The release build fails when the binary passes 8 MiB or the tarball passes 4.5 MiB.
 
-## TODO: re-run with pbdoc
+## Not re-run with pbdoc
 
-The token and correctness table above has not been re-run with `pbdoc` in place of the npm package. The engine is the same, so no change is expected, but nothing here proves it. Owner: the playbook maintainer, before the next `anydoc` version bump. There is no benchmark harness in the repo yet, so the run is manual with the method above.
+The token and correctness table above comes from the npm package. `pbdoc` is built from the same engine, so no change is expected, but the table was not measured with `pbdoc`.
