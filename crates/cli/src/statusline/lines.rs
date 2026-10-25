@@ -9,7 +9,7 @@ use crate::json::statusline::value_text;
 
 /// The session fields the segments read, as the script's shell variables.
 #[derive(Debug, Default, Clone)]
-pub struct Session {
+pub(super) struct Session {
     pub cwd: String,
     pub session_id: String,
     pub model: String,
@@ -28,7 +28,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn parse(input: &str, pwd: &str) -> Self {
+    pub(super) fn parse(input: &str, pwd: &str) -> Self {
         let mut s = Session::default();
         for (key, value) in crate::json::statusline::session_values(input, pwd) {
             let text = value_text(&value);
@@ -56,7 +56,7 @@ impl Session {
 }
 
 /// Everything the segments need beyond the session itself.
-pub struct Opts {
+pub(super) struct Opts {
     pub show_model: bool,
     pub show_context: bool,
     pub show_session_age: bool,
@@ -204,12 +204,12 @@ fn join(segments: Vec<Option<String>>) -> Option<String> {
 }
 
 /// Line 2: model and context.
-pub fn line_2(s: &Session, o: &Opts) -> Option<String> {
+pub(super) fn line_2(s: &Session, o: &Opts) -> Option<String> {
     join(vec![render_model(s, o), render_context(s, o)])
 }
 
 /// Line 3: cost, cache, 5h quota, session age, 7d rate.
-pub fn line_3(s: &Session, o: &Opts) -> Option<String> {
+pub(super) fn line_3(s: &Session, o: &Opts) -> Option<String> {
     join(vec![
         render_cost(s),
         render_cache_ratio(s, o),
