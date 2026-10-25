@@ -76,7 +76,7 @@ Set a key with `playbook config set <key> <value>` and read it with `playbook co
 | `docs.maxMemoryMb` | `1024` | a number, see the config keys page for the range |
 | `docs.displayChars` | `24000` | a number, see the config keys page for the range |
 | `docs.anydocPath` | empty | see the config keys page |
-| `launcher.claudeOverride` | `false` | `true`, `false` |
+| `launcher.claudeOverride` | `false` | `true`, `false` (retired, no effect) |
 | `launcher.shortName` | `false` | `true`, `false` |
 | `systemPrompt.enabled` | `true` | `true`, `false` |
 | `attribution.enabled` | `false` | `true`, `false` |
