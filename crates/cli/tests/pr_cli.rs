@@ -105,7 +105,8 @@ fn pr_create_with_an_overlong_title_exits_non_zero_without_touching_anything() {
     );
 }
 
-mod pr_support;
+#[path = "pr_support/fixture.rs"]
+mod fixture;
 
 /// A directory holding a `gh` that exits 1 at once, put first on PATH so the
 /// run never reaches the real `gh` (its auth lookup and network calls are slow
@@ -143,7 +144,7 @@ fn run_in(cwd: &PathBuf, home: &PathBuf, args: &[&str]) -> Output {
 #[test]
 fn pr_prepare_with_dir_reads_the_repo_it_points_at_not_the_cwd() {
     // Arrange: a repo two commits ahead of main, and an unrelated cwd and HOME.
-    let fx = pr_support::Fixture::new("dir", "feat/dir-demo");
+    let fx = fixture::Fixture::new("dir", "feat/dir-demo");
     fx.commit_lines("a.txt", 3);
     fx.commit_lines("b.txt", 2);
     let elsewhere = scratch();
