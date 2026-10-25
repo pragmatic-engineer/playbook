@@ -15,20 +15,20 @@ use std::path::PathBuf;
 /// A `git` shim that logs each call to a file and answers every call with the
 /// `acme/widgets` origin URL, plus the PATH that puts it first.
 #[cfg(unix)]
-pub struct GitShim {
+pub(crate) struct GitShim {
     pub path: String,
     pub log: PathBuf,
 }
 
 #[cfg(unix)]
 impl GitShim {
-    pub fn calls(&self) -> usize {
+    pub(crate) fn calls(&self) -> usize {
         fs::read_to_string(&self.log).map_or(0, |log| log.lines().count())
     }
 }
 
 #[cfg(unix)]
-pub fn git_shim(scratch: &Scratch) -> GitShim {
+pub(crate) fn git_shim(scratch: &Scratch) -> GitShim {
     use std::os::unix::fs::PermissionsExt;
     let bin = scratch.home.join("shim-bin");
     fs::create_dir_all(&bin).expect("shim dir should be creatable");

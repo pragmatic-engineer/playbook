@@ -7,7 +7,7 @@ use super::auto_env::Scratch;
 
 /// A git repo under the scratch cwd on branch `feat/x` with one commit, made
 /// once, for tests whose tool calls need a real checkout to run in.
-pub fn feature_repo(s: &Scratch) -> std::path::PathBuf {
+pub(crate) fn feature_repo(s: &Scratch) -> std::path::PathBuf {
     let dir = s.cwd.join("feature-repo");
     if dir.join(".git").exists() {
         return dir;

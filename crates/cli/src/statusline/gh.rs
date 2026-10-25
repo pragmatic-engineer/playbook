@@ -44,7 +44,7 @@ fn split_remote(url: &str) -> Option<(String, String)> {
 
 /// Parses a git remote URL into `(host, owner/repo)` for github.com and
 /// `*.ghe.com`; `None` for anything else.
-pub fn remote_parse(url: &str) -> Option<(String, String)> {
+pub(crate) fn remote_parse(url: &str) -> Option<(String, String)> {
     let (host, path) = split_remote(url)?;
     if host.is_empty() || path.is_empty() {
         return None;
@@ -57,7 +57,7 @@ pub fn remote_parse(url: &str) -> Option<(String, String)> {
 }
 
 /// Epoch seconds for a strict `YYYY-MM-DDTHH:MM:SSZ` UTC timestamp.
-pub fn iso_to_epoch(s: &str) -> Option<i64> {
+pub(crate) fn iso_to_epoch(s: &str) -> Option<i64> {
     let b = s.as_bytes();
     if b.len() != 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[19] != b'Z' {
         return None;
@@ -87,7 +87,7 @@ pub fn iso_to_epoch(s: &str) -> Option<i64> {
 }
 
 /// First executable named `name` on `path`.
-pub fn find_in_path(name: &str, path: &str) -> Option<PathBuf> {
+pub(crate) fn find_in_path(name: &str, path: &str) -> Option<PathBuf> {
     path.split(':').filter(|d| !d.is_empty()).find_map(|dir| {
         let cand = Path::new(dir).join(name);
         let meta = std::fs::metadata(&cand).ok()?;
@@ -116,7 +116,7 @@ fn file_mtime(p: &Path) -> i64 {
 }
 
 /// Age of `p` in seconds, or `missing` when the file does not exist.
-pub fn age_of(p: &Path, now: i64, missing: i64) -> i64 {
+pub(crate) fn age_of(p: &Path, now: i64, missing: i64) -> i64 {
     if p.is_file() {
         now - file_mtime(p)
     } else {
@@ -162,7 +162,7 @@ fn fire(gh: &Path, cache: &Path, now: i64, args: &[String]) {
 }
 
 /// Detached refresh of the cached `gh pr view` JSON.
-pub fn refresh_pr(gh: &Path, cache: &Path, now: i64) {
+pub(crate) fn refresh_pr(gh: &Path, cache: &Path, now: i64) {
     let args = [
         "pr",
         "view",
@@ -173,7 +173,7 @@ pub fn refresh_pr(gh: &Path, cache: &Path, now: i64) {
 }
 
 /// Detached refresh of the cached branch-head CI rollup.
-pub fn refresh_ci(gh: &Path, cache: &Path, now: i64, owner: &str, repo: &str, branch: &str) {
+pub(crate) fn refresh_ci(gh: &Path, cache: &Path, now: i64, owner: &str, repo: &str, branch: &str) {
     let args = [
         "api".to_string(),
         "graphql".to_string(),

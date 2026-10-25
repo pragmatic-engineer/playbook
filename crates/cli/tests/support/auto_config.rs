@@ -11,7 +11,7 @@ impl Scratch {
     /// Plant `{"mode": <mode>}` as the global config under the scratch HOME.
     // Not every hook test seeds a mode.
     #[allow(dead_code)]
-    pub fn seed_mode_config(&self, mode: &str) {
+    pub(crate) fn seed_mode_config(&self, mode: &str) {
         seed_global_config(&self.home, &serde_json::json!({ "mode": mode }));
     }
 }
@@ -20,7 +20,7 @@ impl Scratch {
     /// Plant `{"mode": <mode>}` as the repo tier config for `owner/repo`.
     // Not every hook test seeds a repo tier.
     #[allow(dead_code)]
-    pub fn seed_repo_mode_config(&self, owner: &str, repo: &str, mode: &str) {
+    pub(crate) fn seed_repo_mode_config(&self, owner: &str, repo: &str, mode: &str) {
         let dir = self
             .home
             .join(".config/playbook/repos")
@@ -35,7 +35,7 @@ impl Scratch {
 
 /// Replace the global config under `home` with the leaves of `doc` (a nested
 /// object such as `{"auto": {"warnPct": 70}}`), through the config store.
-pub fn seed_global_config(home: &Path, doc: &serde_json::Value) {
+fn seed_global_config(home: &Path, doc: &serde_json::Value) {
     clear_config(home);
     fn walk(prefix: &str, node: &serde_json::Value, home: &Path) {
         match node.as_object() {
@@ -63,7 +63,7 @@ pub fn seed_global_config(home: &Path, doc: &serde_json::Value) {
 }
 
 /// Remove every stored config value under `home`.
-pub fn clear_config(home: &Path) {
+pub(crate) fn clear_config(home: &Path) {
     let dir = home.join(".config").join("playbook");
     for name in [
         "playbook.db",
@@ -83,7 +83,7 @@ pub fn clear_config(home: &Path) {
 /// (an invalid budget) or a file that is not JSON at all.
 // Not every hook test seeds raw text.
 #[allow(dead_code)]
-pub fn seed_raw_global_config(home: &Path, text: &str) {
+pub(crate) fn seed_raw_global_config(home: &Path, text: &str) {
     clear_config(home);
     let dir = home.join(".config").join("playbook");
     fs::create_dir_all(&dir).expect("config dir should be creatable");

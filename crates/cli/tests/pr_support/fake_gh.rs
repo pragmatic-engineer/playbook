@@ -8,7 +8,7 @@ use std::cell::RefCell;
 
 /// A scripted `GhClient` that records every call it receives.
 #[derive(Default)]
-pub struct FakeGh {
+pub(crate) struct FakeGh {
     pub existing: Option<ExistingPr>,
     pub default_branch: Option<String>,
     pub created_url: String,
@@ -25,14 +25,14 @@ pub struct FakeGh {
 impl FakeGh {
     // Only the `pr create` tests build a fake that creates; `pr prepare` never does.
     #[allow(dead_code)]
-    pub fn creating(url: &str) -> Self {
+    pub(crate) fn creating(url: &str) -> Self {
         Self {
             created_url: url.to_string(),
             ..Self::default()
         }
     }
 
-    pub fn count(&self, prefix: &str) -> usize {
+    pub(crate) fn count(&self, prefix: &str) -> usize {
         self.calls
             .borrow()
             .iter()

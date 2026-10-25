@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 /// gives up, reads an empty slug, and the test fails for reasons unrelated to
 /// what it checks. Later runs of the same file take milliseconds.
 #[cfg(unix)]
-pub fn warm_up(executable: &std::path::Path) {
+pub(crate) fn warm_up(executable: &std::path::Path) {
     let _ = Command::new(executable)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

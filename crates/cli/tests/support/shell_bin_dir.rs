@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 /// A directory holding a copy of the built `playbook` binary, for runs of
 /// `install.sh` that need a real one at `PLAYBOOK_BIN_DIR`.
-pub fn bin_dir_with_playbook(work: &Work) -> PathBuf {
+pub(crate) fn bin_dir_with_playbook(work: &Work) -> PathBuf {
     let dir = work.dir("bin");
     let dest = dir.join("playbook");
     fs::copy(env!("CARGO_BIN_EXE_playbook"), &dest).expect("copy playbook");
