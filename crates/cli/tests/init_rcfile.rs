@@ -5,7 +5,7 @@
 //! 0044): which lines the retired launcher wrote, and how they are removed,
 //! in a scratch `$HOME`.
 
-use playbook::init::shim::{retired_rc_files, strip_retired_rc_lines, SOURCE_LINE};
+use playbook::init::rcfile::{retired_rc_files, strip_retired_rc_lines, SOURCE_LINE};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,7 +17,7 @@ static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn temp_home(tag: &str) -> PathBuf {
     let n = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
     let home = env::temp_dir().join(format!(
-        "playbook-init-shim-{}-{tag}-{n}",
+        "playbook-init-rcfile-{}-{tag}-{n}",
         playbook::testing::run_id()
     ));
     fs::create_dir_all(&home).expect("temp home should be creatable");
