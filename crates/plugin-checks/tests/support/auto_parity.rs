@@ -16,8 +16,9 @@
 //! `SkipsSelfReview` kinds name their files, so a new command of those kinds
 //! needs its own test. Model behaviour is not testable here: these checks
 //! cover prose structure only.
-
-#![allow(dead_code)]
+//!
+//! The parts only one test file uses are in `auto_parity_auto.rs` and
+//! `auto_parity_fix.rs`, so each test file includes only what it uses.
 
 use regex::Regex;
 use std::fs;
@@ -60,6 +61,8 @@ pub struct CommandSpec {
     /// nothing cannot let the ordering checks pass vacuously. Rows that never
     /// ask leave it false: their prose only mentions asking in order to
     /// forbid it, so ordering against a detected ask would be meaningless.
+    // Only the ordering checks read it; the `fix` checks do not.
+    #[allow(dead_code)]
     pub asks: bool,
     pub auto: Auto,
 }
@@ -267,89 +270,8 @@ impl CommandFile {
         })
     }
 
-    /// The `Step 0` section, at whatever heading level the file uses.
-    pub fn step0(&self) -> Option<Section> {
-        self.section(|t| t.starts_with("Step 0"))
-    }
-
-    /// The section that documents Step `n`, e.g. `Step 6: Present the design`.
-    pub fn step(&self, n: &str) -> Option<Section> {
-        let prefix = format!("Step {n}");
-        self.section(|t| {
-            t.strip_prefix(&prefix)
-                .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_digit() || c == '.'))
-        })
-    }
-
-    /// The named auto-path subsection: a heading titled `Auto path`,
-    /// optionally followed by a qualifier. It holds every instruction that
-    /// applies only when the command runs unattended.
-    pub fn auto_path(&self) -> Option<Section> {
-        self.section(|t| t.to_lowercase().starts_with("auto path"))
-    }
-
     pub fn text_of(&self, s: &Section) -> String {
         self.lines[s.start..s.end].join("\n")
-    }
-
-    /// Blank-line separated blocks inside `s`, each with its first line
-    /// index. A sentence wrapped over several lines stays in one block, so
-    /// checks on a block do not depend on where the prose was wrapped.
-    pub fn paragraphs(&self, s: &Section) -> Vec<(usize, String)> {
-        let mut out: Vec<(usize, String)> = Vec::new();
-        let mut open = false;
-        for i in s.start..s.end {
-            let line = &self.lines[i];
-            if line.trim().is_empty() {
-                open = false;
-            } else if open {
-                let last = out.last_mut().expect("an open block exists");
-                last.1.push('\n');
-                last.1.push_str(line);
-            } else {
-                out.push((i, line.clone()));
-                open = true;
-            }
-        }
-        out
-    }
-
-    /// Comment text inside shell code fences (a whole `#` line or a trailing
-    /// ` # note`) and inside HTML comments, with its line index.
-    pub fn comments(&self) -> Vec<(usize, String)> {
-        static HTML: OnceLock<Regex> = OnceLock::new();
-        let html = HTML.get_or_init(|| Regex::new(r"<!--.*?-->").expect("html comment pattern"));
-        let mut out = Vec::new();
-        let mut shell_fence = false;
-        let mut in_fence = false;
-        for (i, line) in self.lines.iter().enumerate().skip(self.body_start) {
-            let trimmed = line.trim_start();
-            if let Some(info) = trimmed.strip_prefix("```") {
-                in_fence = !in_fence;
-                shell_fence = in_fence && matches!(info.trim(), "bash" | "sh" | "shell" | "zsh");
-                continue;
-            }
-            if shell_fence {
-                if trimmed.starts_with('#') && !trimmed.starts_with("#!") {
-                    out.push((i, trimmed.to_owned()));
-                } else if let Some(at) = line.find(" # ") {
-                    out.push((i, line[at..].to_owned()));
-                }
-            }
-            out.extend(html.find_iter(line).map(|m| (i, m.as_str().to_owned())));
-        }
-        out
-    }
-
-    /// First body line outside `skip` that the ask detector matches.
-    pub fn first_ask_outside(&self, skip: Option<&Section>) -> Option<(usize, &str)> {
-        self.lines
-            .iter()
-            .enumerate()
-            .skip(self.body_start)
-            .filter(|(i, _)| skip.is_none_or(|s| !(s.start..s.end).contains(i)))
-            .find(|(_, l)| is_ask(l))
-            .map(|(i, l)| (i, l.as_str()))
     }
 }
 
@@ -369,157 +291,11 @@ pub fn is_ask(line: &str) -> bool {
     .is_match(line)
 }
 
-pub fn require_section(file: &CommandFile, found: Option<Section>, what: &str) -> Section {
-    found.unwrap_or_else(|| panic!("commands/{}.md has no {what} section", file.name))
-}
-
-/// The phrase that marks a branch taken only when the user can be asked.
-pub const ASK_BRANCH: &str = "if mode is ask";
-
-/// Per line: true for a fence delimiter and for every line inside a fenced
-/// code block.
-pub fn fence_flags(lines: &[String]) -> Vec<bool> {
-    let mut in_fence = false;
-    lines
-        .iter()
-        .map(|l| {
-            if l.trim_start().starts_with("```") {
-                in_fence = !in_fence;
-                true
-            } else {
-                in_fence
-            }
-        })
-        .collect()
-}
-
-pub fn indent_of(line: &str) -> usize {
-    line.len() - line.trim_start().len()
-}
-
 pub fn heading_title(line: &str) -> Option<&str> {
     let level = line.chars().take_while(|&c| c == '#').count();
     ((1..=6).contains(&level) && line[level..].starts_with(' ')).then(|| line[level..].trim())
 }
 
-pub fn is_bullet(line: &str) -> bool {
-    static BULLET: OnceLock<Regex> = OnceLock::new();
-    BULLET
-        .get_or_init(|| Regex::new(r"^\s*([-*+]|\d+[.)])\s+").expect("bullet pattern"))
-        .is_match(line)
-}
-
-/// Whether the ask on `lines[idx]` sits behind an `if mode is ask` branch:
-/// the title of its nearest enclosing heading, or the first line of its own
-/// bullet or of any bullet enclosing it, contains the phrase. Lines before
-/// `first` (the frontmatter) are never read.
-pub fn is_behind_ask_branch(lines: &[String], first: usize, idx: usize) -> bool {
-    let fenced = fence_flags(lines);
-    let mut indent = indent_of(&lines[idx]);
-    for i in (first..=idx).rev().filter(|&i| !fenced[i]) {
-        if let Some(title) = heading_title(&lines[i]) {
-            return title.to_lowercase().contains(ASK_BRANCH);
-        }
-        let encloses = i == idx || indent_of(&lines[i]) < indent;
-        if is_bullet(&lines[i]) && encloses {
-            if lines[i].to_lowercase().contains(ASK_BRANCH) {
-                return true;
-            }
-            indent = indent_of(&lines[i]);
-        }
-    }
-    false
-}
-
-// ---------------------------------------------------------------------------
-// Step 0 reads the mode before anything asks
-// ---------------------------------------------------------------------------
-
-/// Step 0 reads the run mode through the `run-mode` or `mode-status` intent,
-/// (the older call forms still count).
-pub fn reads_mode(text: &str) -> bool {
-    text.contains("playbook mode status")
-        || text.contains("playbook run-context")
-        || text.contains("Intent: run-mode")
-        || text.contains("Intent: mode-status")
-        || text.contains("references/run-context.md")
-}
-
-// ---------------------------------------------------------------------------
-// implement
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// plan
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Commands that refuse to run unattended: setup, adr, address-pr-comments
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// quick-review and deep-review: auto never posts to GitHub
-// ---------------------------------------------------------------------------
-
-/// The section that creates and submits the GitHub review.
-pub fn posting_section(file: &CommandFile) -> Section {
-    require_section(
-        file,
-        file.section(|t| t.to_lowercase().contains("orchestrate posting")),
-        "`Orchestrate posting`",
-    )
-}
-
-/// A shell line that calls the GitHub API to create or submit a review.
-pub fn is_post_call(line: &str) -> bool {
-    static POST: OnceLock<Regex> = OnceLock::new();
-    POST.get_or_init(|| Regex::new(r"gh api[^\n]*(-X POST|/reviews)").expect("post pattern"))
-        .is_match(line)
-}
-
-// ---------------------------------------------------------------------------
-// commit-and-push
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// learn-project
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// create-pull-request
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// repo-audit, doctor, session-start: no mode block at all
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// fix
-// ---------------------------------------------------------------------------
-
-/// The `escalat` section of `fix.md`, where the hand-off rules live.
-pub fn escalation_section(file: &CommandFile) -> Section {
-    require_section(
-        file,
-        file.section(|t| t.to_lowercase().contains("escalat")),
-        "escalation",
-    )
-}
-
-// ---------------------------------------------------------------------------
-// Comments describe the code, not the work that produced it
-// ---------------------------------------------------------------------------
-
-/// True when `text` points at internal planning: a work-unit label, a
-/// numbered ticket or a planning term that means nothing to a later reader.
-pub fn references_planning(text: &str) -> bool {
-    static PLANNING: OnceLock<Regex> = OnceLock::new();
-    PLANNING
-        .get_or_init(|| {
-            Regex::new(
-                r"(?i)\bWU-?\d+\b|\bwork units?\b|\bgh-\d+\b|#\d+\b|\bissue\s+\d+\b|\bsegment\s+S\d+\b|\bthe brief\b",
-            )
-            .expect("planning reference pattern")
-        })
-        .is_match(text)
+pub fn require_section(file: &CommandFile, found: Option<Section>, what: &str) -> Section {
+    found.unwrap_or_else(|| panic!("commands/{}.md has no {what} section", file.name))
 }

@@ -6,8 +6,11 @@
 
 #[path = "support/auto_parity.rs"]
 mod ap;
+#[path = "support/auto_parity_fix.rs"]
+mod ap_fix;
 
 use ap::*;
+use ap_fix::*;
 use regex::Regex;
 
 #[test]
@@ -287,6 +290,8 @@ fn comments_in_this_test_and_the_commands_carry_no_planning_references() {
         include_str!("commands_auto_parity.rs"),
         include_str!("commands_fix.rs"),
         include_str!("support/auto_parity.rs"),
+        include_str!("support/auto_parity_auto.rs"),
+        include_str!("support/auto_parity_fix.rs"),
     ]
     .join("\n");
     assert!(
