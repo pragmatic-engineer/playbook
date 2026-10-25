@@ -215,9 +215,11 @@ mod tests {
     fn admit_refuses_a_fifo_as_not_a_file() {
         // Arrange
         let fifo = scratch("fifo").join("pipe");
-        let c_path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
-        // SAFETY: c_path is a valid NUL-terminated path that outlives the call.
-        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(made.success());
         // Act
         let result = admit(&fifo, HARD_MAX_INPUT_BYTES);
         // Assert

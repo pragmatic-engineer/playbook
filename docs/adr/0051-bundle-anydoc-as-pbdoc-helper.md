@@ -63,10 +63,10 @@ The limits are the ADR 0027 caps, now enforced inside the helper and by playbook
 - **Input size.** A file over 100 MiB (104,857,600 bytes) is refused from `stat` alone, before any byte is read, whatever `docs.maxBytes` says. playbook applies `min(docs.maxBytes, 100 MiB)` and `pbdoc` applies the same ceiling.
 - **Zip containers** (docx, xlsx, pptx, odt, ods, odp, epub). The central directory is read first. The file is refused with exit 4 when it declares more than 10,000 entries, more than 256 MiB (268,435,456 bytes) of uncompressed data, or an entry of 1 MiB or more with a compression ratio above 100. anydoc's own limits stay underneath.
 - **Memory,** in layers, all against `docs.maxMemoryMb` (default 1024, clamped to 4096):
-  - Heap cap. A counting global allocator covers Rust heap allocations only. It does not see direct `mmap`, C `malloc` or thread stacks. Over the cap, the helper writes a short message and exits 4 without allocating.
-  - Self watchdog. A thread reads the helper's own resident size every 20 ms and exits 4 when it is over the cap. This covers memory the heap cap cannot see.
+  - Resident size checks. The helper reads its own resident size after the input is read and after the conversion, and exits 4 with a short message when it is over the cap. A counting global allocator used to enforce the heap cap, but `GlobalAlloc` is an unsafe trait and the project forbids unsafe code, so it was removed on 2026-10-25.
+  - Self watchdog. A thread reads the helper's own resident size and exits 4 when it is over the cap: every 20 ms on Linux, every 100 ms on macOS, where the reading is a `ps` call. A spike shorter than that interval can pass between reads.
   - Linux kernel limit. playbook sets `RLIMIT_AS` to the cap plus 512 MiB for the bundled child.
-  - macOS: no kernel limit. A probe on macOS 15.8.1 (2026-10-21) found that `setrlimit` for `RLIMIT_AS` and `RLIMIT_DATA` fails with `EINVAL` and that large `mmap` and `malloc` calls still succeed. On macOS the heap cap, the 20 ms self watchdog and the outer 100 ms RSS watchdog are the binding limits.
+  - macOS: no kernel limit. A probe on macOS 15.8.1 (2026-10-21) found that `setrlimit` for `RLIMIT_AS` and `RLIMIT_DATA` fails with `EINVAL` and that large `mmap` and `malloc` calls still succeed. On macOS the resident size checks, the 100 ms self watchdog and the outer 100 ms RSS watchdog are the binding limits.
   - One rayon thread, so a PDF cannot fan out stacks and parallel allocation spikes.
 - **Outer watchdog.** playbook polls the child's RSS every 100 ms and kills the process group over the cap.
 - **Time.** 30 seconds, then the process group is killed.
@@ -125,5 +125,5 @@ A kernel-refused allocation in Rust aborts the process. So playbook reports a bu
 - Four more release assets, one `pbdoc-<version>-<target>.tar.gz` per unix target, so the release has 14 assets, not 10.
 - The Homebrew formula in the tap needs a change before the first release that ships `pbdoc`.
 - A release that ships `pbdoc` needs the install and update paths merged first, so no user ends up with a stale helper.
-- The memory cap on macOS rests on the heap cap and the self watchdog because the probe found no kernel limit that macOS enforces.
+- The memory cap on macOS rests on the resident size checks and the watchdogs because the probe found no kernel limit that macOS enforces.
 - Document conversion still does not exist on Windows, and scanned PDFs still return a plain message and are not sent to a hosted service.
