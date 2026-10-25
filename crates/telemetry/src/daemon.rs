@@ -280,7 +280,7 @@ impl Stamp {
 }
 
 /// The stamp window a starter uses: `SPAWN_WINDOW`, or the test override.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[cfg(any(unix, test))]
 fn spawn_window() -> Duration {
     test_var(STAMP_SECS_VAR)
         .and_then(|v| v.parse().ok())
@@ -290,7 +290,7 @@ fn spawn_window() -> Duration {
 /// Takes the right to spawn now. False while a stamp is fresh, or while
 /// another starter is deciding: the exclusive `try_lock` on the stamp file
 /// makes the check and the rewrite one step, so concurrent starters spawn once.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[cfg(any(unix, test))]
 fn take_stamp(paths: &Paths, window: Duration, now: i64) -> bool {
     let Ok(file) = open_private(&stamp_path(paths)) else {
         return false;

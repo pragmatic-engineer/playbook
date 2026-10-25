@@ -4,8 +4,6 @@
 //! Walks the files a scan of shipped text reads, shared by the tests that
 //! check what playbook ships.
 
-#![allow(dead_code)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
