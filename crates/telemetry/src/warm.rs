@@ -77,10 +77,7 @@ fn touch_stamp(dir: &Path) {
 
 #[cfg(unix)]
 fn lower_priority() {
-    // SAFETY: setpriority on the calling process takes plain integers.
-    unsafe {
-        libc::setpriority(libc::PRIO_PROCESS, 0, 19);
-    }
+    let _ = rustix::process::setpriority_process(None, 19);
 }
 
 #[cfg(not(unix))]
