@@ -7,6 +7,7 @@
 //! budget. Nothing here calls a model.
 
 use super::search::{fts_hits, load, Loaded, SearchOptions};
+use super::source::cut_at_boundary;
 use rusqlite::{params, Connection};
 use std::collections::HashMap;
 use std::path::Path;
@@ -315,14 +316,6 @@ fn import_cands(
         }
     }
     Ok(out)
-}
-
-fn cut_at_boundary(s: &str, max: usize) -> &str {
-    let mut end = max.min(s.len());
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
 }
 
 /// How much each term tells apart: rare names weigh more than common ones.

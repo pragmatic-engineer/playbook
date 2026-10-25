@@ -4,7 +4,7 @@
 //! TypeScript, TSX and JavaScript symbol and import extraction. One walker
 //! serves all three grammars, because their node kinds overlap.
 
-use super::{clean_signature, Extracted, Import, Symbol, MAX_SIGNATURE_CHARS};
+use super::{clean_signature, join_dotted, Extracted, Import, Symbol, MAX_SIGNATURE_CHARS};
 use std::borrow::Cow;
 use tree_sitter::Node;
 
@@ -36,14 +36,6 @@ pub fn extract(root: Node, source: &[u8]) -> Extracted {
         }
     }
     walker.out
-}
-
-fn join(prefix: &str, name: &str) -> String {
-    if prefix.is_empty() {
-        name.to_string()
-    } else {
-        format!("{prefix}.{name}")
-    }
 }
 
 fn is_function_value(node: Node) -> bool {
@@ -347,7 +339,7 @@ impl Walker<'_> {
         );
         let signature_cut = cut || clipped;
         self.out.symbols.push(Symbol {
-            qualified_name: join(scope.prefix, &name),
+            qualified_name: join_dotted(scope.prefix, &name),
             name,
             kind,
             signature: Some(signature),
@@ -454,19 +446,12 @@ fn export_names(node: Node, source: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{extract as extract_any, parse, Import, Lang, Symbol};
+    use super::super::{extract as extract_any, find, parse, Import, Lang, Symbol};
 
     fn run(lang: Lang, src: &str) -> (Vec<Symbol>, Vec<Import>) {
         let parsed = parse(lang, src.as_bytes()).expect("parse");
         let out = extract_any(lang, &parsed, src.as_bytes());
         (out.symbols, out.imports)
-    }
-
-    fn find<'a>(symbols: &'a [Symbol], qualified: &str) -> &'a Symbol {
-        symbols
-            .iter()
-            .find(|s| s.qualified_name == qualified)
-            .unwrap_or_else(|| panic!("no symbol {qualified} in {symbols:#?}"))
     }
 
     #[test]
