@@ -8,20 +8,20 @@ use std::path::Path;
 
 use zip::ZipArchive;
 
-pub const HARD_MAX_INPUT_BYTES: u64 = 104_857_600;
-pub const MAX_ZIP_ENTRIES: usize = 10_000;
-pub const MAX_ZIP_UNCOMPRESSED: u64 = 268_435_456;
-pub const MAX_ZIP_RATIO: u64 = 100;
+pub(crate) const HARD_MAX_INPUT_BYTES: u64 = 104_857_600;
+pub(crate) const MAX_ZIP_ENTRIES: usize = 10_000;
+pub(crate) const MAX_ZIP_UNCOMPRESSED: u64 = 268_435_456;
+pub(crate) const MAX_ZIP_RATIO: u64 = 100;
 /// Entries below this size skip the ratio check, so tiny files that compress well pass.
-pub const ZIP_RATIO_FLOOR: u64 = 1 << 20;
+pub(crate) const ZIP_RATIO_FLOOR: u64 = 1 << 20;
 
 /// A refused input, with the plain-language reason.
 #[derive(Debug)]
-pub struct Refusal(pub String);
+pub(crate) struct Refusal(pub String);
 
 /// Why [`admit`] rejected an input.
 #[derive(Debug)]
-pub enum AdmitError {
+pub(crate) enum AdmitError {
     /// The input is missing, unreadable or not a regular file: a failed conversion.
     Unreadable(String),
     /// The input is over a size limit.
@@ -30,7 +30,7 @@ pub enum AdmitError {
 
 /// Stats `path` and rejects a non-file or one over `min(max_bytes, HARD_MAX_INPUT_BYTES)`.
 /// Only metadata is read, never the content.
-pub fn admit(path: &Path, max_bytes: u64) -> Result<(), AdmitError> {
+pub(crate) fn admit(path: &Path, max_bytes: u64) -> Result<(), AdmitError> {
     let meta = fs::metadata(path)
         .map_err(|err| AdmitError::Unreadable(format!("cannot read input: {}", err.kind())))?;
     if !meta.is_file() {
@@ -47,7 +47,7 @@ pub fn admit(path: &Path, max_bytes: u64) -> Result<(), AdmitError> {
 }
 
 /// Checks the declared (compressed, uncompressed) sizes of a zip's entries.
-pub fn scan(entries: &[(u64, u64)]) -> Result<(), Refusal> {
+pub(crate) fn scan(entries: &[(u64, u64)]) -> Result<(), Refusal> {
     if entries.len() > MAX_ZIP_ENTRIES {
         return Err(too_many_entries(entries.len()));
     }
@@ -78,7 +78,7 @@ fn too_many_entries(count: usize) -> Refusal {
 
 /// Reads only the zip central directory of `path` and applies [`scan`].
 /// A file that is not a readable zip passes: the converter reports it.
-pub fn prescan_zip(path: &Path) -> Result<(), Refusal> {
+pub(crate) fn prescan_zip(path: &Path) -> Result<(), Refusal> {
     let Ok(file) = File::open(path) else {
         return Ok(());
     };
