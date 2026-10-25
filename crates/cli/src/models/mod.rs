@@ -386,7 +386,7 @@ mod tests {
         config::write::set(
             config::write::Tier::Global,
             "models.sonnet",
-            Value::String("claude-sonnet-5".into()),
+            &Value::String("claude-sonnet-5".into()),
             &home,
             None,
         )
@@ -399,7 +399,7 @@ mod tests {
         assert!(config::write::set(
             config::write::Tier::Global,
             "models.sonnet",
-            Value::String("claude-opus-5".into()),
+            &Value::String("claude-opus-5".into()),
             &home,
             None,
         )

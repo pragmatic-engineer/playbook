@@ -1712,7 +1712,7 @@ mod tests {
         crate::config::write::set(
             crate::config::write::Tier::Global,
             "auto.budgetUsd",
-            serde_json::Value::from(usd),
+            &serde_json::Value::from(usd),
             home,
             None,
         )
@@ -1956,7 +1956,7 @@ mod tests {
         crate::config::write::set(
             crate::config::write::Tier::Global,
             "systemPrompt.enabled",
-            serde_json::Value::Bool(false),
+            &serde_json::Value::Bool(false),
             &h,
             None,
         )
@@ -2384,7 +2384,7 @@ mod tests {
             crate::config::write::set(
                 crate::config::write::Tier::Global,
                 crate::hooks::policy_guard::ENABLED_KEY,
-                serde_json::Value::Bool(value),
+                &serde_json::Value::Bool(value),
                 &h,
                 None,
             )

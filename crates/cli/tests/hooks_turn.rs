@@ -1629,7 +1629,7 @@ mod memory_capture {
         let original_mode = fs::metadata(&data_dir).unwrap().permissions().mode() & 0o777;
         fs::set_permissions(&data_dir, fs::Permissions::from_mode(0o000)).unwrap();
         let _guard = RestorePerms {
-            path: data_dir.clone(),
+            path: data_dir,
             mode: original_mode,
         };
 

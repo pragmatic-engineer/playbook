@@ -34,7 +34,7 @@ pub fn run_set(mode: Mode) -> Result<String, String> {
     write::set(
         write::Tier::Repo,
         "mode",
-        Value::String(label.to_string()),
+        &Value::String(label.to_string()),
         &home_dir(),
         (!slug.is_empty()).then_some(slug.as_str()),
     )

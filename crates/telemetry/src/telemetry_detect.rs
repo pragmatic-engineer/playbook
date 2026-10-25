@@ -252,7 +252,7 @@ mod tests {
         std::fs::write(&broken, "{").unwrap();
         let missing = dir.join("missing.json");
         assert!(!configured_in_files(&[good.clone(), missing]));
-        assert!(configured_in_files(&[good.clone(), pinned.clone()]));
+        assert!(configured_in_files(&[good, pinned.clone()]));
         assert!(configured_in_files(&[broken]));
         assert_eq!(
             std::fs::read_to_string(&pinned).unwrap(),

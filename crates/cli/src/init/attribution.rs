@@ -91,7 +91,7 @@ fn record(home: &Path, on: bool) -> Result<(), String> {
     crate::config::write::set(
         crate::config::write::Tier::Global,
         KEY,
-        Value::Bool(on),
+        &Value::Bool(on),
         home,
         None,
     )

@@ -1072,10 +1072,10 @@ mod tests {
                 .collect()
         };
         let clap_text = cmd.clone().render_help().to_string();
-        let grouped = cmd.clone().help_template(grouped_template(&cmd));
+        let mut grouped = cmd.clone().help_template(grouped_template(&cmd));
 
         // Act
-        let grouped_text = grouped.clone().render_help().to_string();
+        let grouped_text = grouped.render_help().to_string();
 
         // Assert
         assert_eq!(command_lines(&grouped_text), command_lines(&clap_text));

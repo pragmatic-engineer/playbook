@@ -58,7 +58,7 @@ fn writing_to_an_absent_tier_creates_the_database_and_the_row() {
     let result = set(
         Tier::Repo,
         "autoReview.enabled",
-        json!(false),
+        &json!(false),
         &home,
         Some("owner/repo"),
     );
@@ -80,7 +80,7 @@ fn set_keeps_the_other_keys_of_the_same_tier() {
     set(
         Tier::Repo,
         "autoReview.type",
-        json!("quick"),
+        &json!("quick"),
         &home,
         Some("owner/repo"),
     )
@@ -90,7 +90,7 @@ fn set_keeps_the_other_keys_of_the_same_tier() {
     let result = set(
         Tier::Repo,
         "autoReview.enabled",
-        json!(true),
+        &json!(true),
         &home,
         Some("owner/repo"),
     );
@@ -114,7 +114,7 @@ fn an_unknown_key_is_rejected_and_writes_nothing() {
     let result = set(
         Tier::Repo,
         "notAKnownKey",
-        json!(true),
+        &json!(true),
         &home,
         Some("owner/repo"),
     );
@@ -135,7 +135,7 @@ fn a_wrong_typed_value_is_rejected_and_writes_nothing() {
     let result = set(
         Tier::Repo,
         "autoReview.enabled",
-        json!("not-a-bool"),
+        &json!("not-a-bool"),
         &home,
         Some("owner/repo"),
     );
@@ -154,7 +154,7 @@ fn an_out_of_enum_value_is_rejected_and_writes_nothing() {
     let result = set(
         Tier::Repo,
         "autoReview.type",
-        json!("medium"),
+        &json!("medium"),
         &home,
         Some("owner/repo"),
     );
@@ -173,7 +173,7 @@ fn repo_tier_with_no_repo_slug_is_rejected_and_writes_nothing() {
     let home = scratch_home("no-repo-slug");
 
     // Act
-    let result = set(Tier::Repo, "autoReview.enabled", json!(true), &home, None);
+    let result = set(Tier::Repo, "autoReview.enabled", &json!(true), &home, None);
 
     // Assert
     assert!(matches!(
@@ -197,7 +197,7 @@ fn an_uncreatable_directory_is_rejected_with_a_path_naming_error() {
     let result = set(
         Tier::Repo,
         "autoReview.enabled",
-        json!(true),
+        &json!(true),
         &home,
         Some("owner/repo"),
     );
@@ -225,7 +225,7 @@ fn a_non_object_existing_tier_file_is_rejected_rather_than_overwritten() {
     let result = set(
         Tier::Repo,
         "autoReview.enabled",
-        json!(true),
+        &json!(true),
         &home,
         Some("owner/repo"),
     );
@@ -255,7 +255,7 @@ fn twenty_concurrent_writers_keep_every_key() {
                     set(
                         Tier::Repo,
                         "autoReview.enabled",
-                        json!(enabled),
+                        &json!(enabled),
                         &home,
                         Some("owner/repo"),
                     )
@@ -264,7 +264,7 @@ fn twenty_concurrent_writers_keep_every_key() {
                     set(
                         Tier::Repo,
                         "autoReview.type",
-                        json!(kind),
+                        &json!(kind),
                         &home,
                         Some("owner/repo"),
                     )
@@ -297,7 +297,7 @@ fn assert_rejected(key: &str, value: &Value, constraint: &str) {
     let home = scratch_home("range-rejected");
 
     // Act
-    let result = set(Tier::Global, key, value.clone(), &home, None);
+    let result = set(Tier::Global, key, &value.clone(), &home, None);
 
     // Assert
     let err = result.expect_err(&format!("{key} = {value} must be rejected"));
@@ -321,7 +321,7 @@ fn assert_written(key: &str, value: &Value) {
     let home = scratch_home("range-accepted");
 
     // Act
-    let result = set(Tier::Global, key, value.clone(), &home, None);
+    let result = set(Tier::Global, key, &value.clone(), &home, None);
 
     // Assert
     result.unwrap_or_else(|e| panic!("{key} = {value} must be accepted: {e}"));
@@ -417,7 +417,7 @@ fn a_non_number_for_a_numeric_auto_or_fix_key_is_rejected_and_writes_nothing() {
         let home = scratch_home("non-number");
 
         // Act
-        let result = set(Tier::Global, key, json!("banana"), &home, None);
+        let result = set(Tier::Global, key, &json!("banana"), &home, None);
 
         // Assert
         let err = result.expect_err(&format!("{key} = banana must be rejected"));
@@ -448,7 +448,7 @@ fn a_non_bool_for_the_pr_and_commit_settings_is_rejected_and_writes_nothing() {
             let home = scratch_home("non-bool");
 
             // Act
-            let result = set(Tier::Global, key, value.clone(), &home, None);
+            let result = set(Tier::Global, key, &value.clone(), &home, None);
 
             // Assert
             let err = result.expect_err(&format!("{key} = {value} must be rejected"));
@@ -486,21 +486,21 @@ fn docs_max_memory_mb_accepts_up_to_the_ceiling_and_refuses_more() {
     let at_cap = set(
         Tier::Global,
         "docs.maxMemoryMb",
-        Value::from(4096),
+        &Value::from(4096),
         &home,
         None,
     );
     let over_cap = set(
         Tier::Global,
         "docs.maxMemoryMb",
-        Value::from(4097),
+        &Value::from(4097),
         &home,
         None,
     );
     let huge = set(
         Tier::Global,
         "docs.maxMemoryMb",
-        Value::from(i64::MAX),
+        &Value::from(i64::MAX),
         &home,
         None,
     );

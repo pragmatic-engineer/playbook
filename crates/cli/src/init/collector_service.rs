@@ -48,7 +48,7 @@ impl Foreign {
         format!("{} was not written by playbook, so it stays", self.describe)
     }
 
-    fn new(describe: String, unload: String, file: &Path) -> Self {
+    fn new(describe: String, unload: &str, file: &Path) -> Self {
         let fix = format!(
             "{unload}; rm {}",
             crate::common::shell::word(&file.to_string_lossy())
@@ -69,11 +69,11 @@ pub fn foreign_files(home: &Path) -> Vec<Foreign> {
                 Kind::Launchd => format!("launchctl bootout gui/{}/{}", uid(), found.kind.id()),
                 Kind::Systemd => format!("systemctl --user disable --now {}", found.kind.id()),
             };
-            Foreign::new(found.describe(), unload, &found.file)
+            Foreign::new(found.describe(), &unload, &found.file)
         });
     let old = service::find_old(home).filter(|o| !o.ours).map(|old| {
         let unload = format!("launchctl bootout gui/{}/{}", uid(), service::OLD_LABEL);
-        Foreign::new(old.describe(), unload, &old.file)
+        Foreign::new(old.describe(), &unload, &old.file)
     });
     kinds.chain(old).collect()
 }

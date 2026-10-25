@@ -380,7 +380,7 @@ fn enable_in(home: &std::path::Path, value: bool) {
     playbook::config::write::set(
         playbook::config::write::Tier::Global,
         "hooks.policyGuard.enabled",
-        json!(value),
+        &json!(value),
         home,
         None,
     )

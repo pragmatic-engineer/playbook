@@ -66,7 +66,7 @@ pub fn record(home: &Path, on: bool) -> Result<(), String> {
     crate::config::write::set(
         crate::config::write::Tier::Global,
         KEY,
-        serde_json::Value::Bool(on),
+        &serde_json::Value::Bool(on),
         home,
         None,
     )
