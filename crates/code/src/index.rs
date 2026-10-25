@@ -178,13 +178,22 @@ pub fn identifier_pieces(word: &str) -> Vec<String> {
     pieces
 }
 
+/// Whether `word` is ASCII with no capital and no `_`, so `identifier_pieces`
+/// would return the word itself as its only piece.
+fn is_plain_lowercase(word: &str) -> bool {
+    word.bytes()
+        .all(|b| b.is_ascii() && b != b'_' && !b.is_ascii_uppercase())
+}
+
 /// The FTS body for a chunk: its text, then the pieces of every identifier
 /// whose pieces differ from the identifier itself, each once.
 fn fts_body(text: &str) -> String {
     let mut seen: HashSet<String> = HashSet::new();
     let mut extra = String::new();
     for word in text.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
-        if word.is_empty() {
+        // Most words are plain lowercase ASCII: one piece equal to the word,
+        // so there is nothing to split or add.
+        if word.is_empty() || is_plain_lowercase(word) {
             continue;
         }
         let pieces = identifier_pieces(word);
@@ -192,9 +201,10 @@ fn fts_body(text: &str) -> String {
             continue;
         }
         for piece in pieces {
-            if seen.insert(piece.clone()) {
+            if !seen.contains(&piece) {
                 extra.push(' ');
                 extra.push_str(&piece);
+                seen.insert(piece);
             }
         }
     }
@@ -1148,6 +1158,23 @@ mod tests {
         for (word, want) in cases {
             assert_eq!(identifier_pieces(word), want, "{word}");
         }
+    }
+
+    #[test]
+    fn fts_body_appends_each_distinct_identifier_piece_once() {
+        // Arrange: plain words add nothing, repeats add nothing, and a capital
+        // sigma lowercases differently as a char than at the end of a word.
+        let text = "fn processPayment() { create_payment(); processPayment(); let userId = \
+                    HTTPServer; plain v2Api \u{3a3}\u{3af}\u{3c3}\u{3c5}\u{3c6}\u{3bf}\u{3c2} \
+                    \u{3a3}\u{391}\u{3a3} }";
+
+        // Act
+        let body = fts_body(text);
+
+        // Assert
+        let want_extra = " process payment create user id http server v2 api \u{3c3}\u{3b1}\u{3c3}";
+        assert_eq!(body, format!("{text}\n{want_extra}"));
+        assert_eq!(fts_body("plain words only"), "plain words only\n");
     }
 
     #[test]
