@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 /// Every `.md` file under `dir`, at any depth. Panics when `dir` cannot be
 /// read, so a moved folder fails the check instead of passing it empty.
-pub fn markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
+pub(super) fn markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).expect("dir").flatten() {
         let path = entry.path();
         if path.is_dir() {
