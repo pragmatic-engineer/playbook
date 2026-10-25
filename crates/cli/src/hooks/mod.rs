@@ -28,6 +28,7 @@ pub mod preread_size_check;
 pub mod rebuild_memory_graph;
 pub mod rm_workspace_guard;
 pub mod search_counter;
+pub mod session_activity;
 pub mod session_clean_exit;
 pub mod session_init;
 pub mod staleness;
@@ -77,6 +78,7 @@ pub fn dispatch(name: HookName, payload: &Payload) {
         HookName::RebuildMemoryGraph => rebuild_memory_graph::run(payload),
         HookName::AutoModelDetect => auto_model_detect::run(payload),
         HookName::PrecompactWarn => precompact_warn::run(payload),
+        HookName::SessionActivity => session_activity::run(payload),
         HookName::SessionCleanExit => session_clean_exit::run(payload),
         HookName::MemoryCapture => memory_capture::run(payload),
         HookName::RmWorkspaceGuard => rm_workspace_guard::run(payload),

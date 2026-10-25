@@ -350,6 +350,21 @@ fn fires(f: &Fire, name: &str) -> bool {
             .1
             .contains("(auto)")
         }
+        "session-activity" => {
+            let home = scratch(f, "h-activity");
+            let (_, out) = run_hook(
+                &f.playbook,
+                name,
+                r#"{"session_id":"fire-activity","hook_event_name":"Notification","notification_type":"permission_prompt","message":"secret text"}"#,
+                &home,
+                &home,
+                &[],
+                &[],
+            );
+            let file = fs::read_to_string(runtime(&home, "fire-activity").join("activity.json"));
+            out.is_empty()
+                && file.is_ok_and(|t| t.contains("permission_prompt") && !t.contains("secret"))
+        }
         "session-clean-exit" => {
             let home = scratch(f, "h-exit");
             run_hook(
