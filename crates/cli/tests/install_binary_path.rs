@@ -5,10 +5,19 @@
 //! right flags to `playbook init`, and copes with a release binary older than
 //! the script. Removal is `playbook uninstall`, covered by tests/uninstall.rs.
 
+#[path = "support/install_stubs.rs"]
+mod install_stubs;
+#[path = "support/shell_exec.rs"]
+mod shell_exec;
 #[path = "support/shell_fixture.rs"]
-mod fx;
+mod shell_fixture;
+#[path = "support/shell_run.rs"]
+mod shell_run;
 
-use fx::{both, install_stubs, repo_root, sha256_hex, write_exec, Work};
+use install_stubs::{install_stubs, sha256_hex};
+use shell_exec::write_exec;
+use shell_fixture::Work;
+use shell_run::{both, repo_root};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
