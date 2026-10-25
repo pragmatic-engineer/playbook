@@ -169,26 +169,32 @@ fn has_word(line: &str, tok: &str) -> bool {
 /// else the first line. Whole words win over substrings. 1 based.
 fn match_line(lines: &[String], start: usize, end: usize, toks: &[String]) -> usize {
     let lower: Vec<String> = toks.iter().map(|t| t.to_lowercase()).collect();
-    let window = || (start..=end.min(lines.len())).filter(|n| *n >= 1);
-    let holds = |n: usize, all: bool, word: bool| {
-        let line = lines[n - 1].to_lowercase();
-        let one = |t: &String| {
-            if word {
-                has_word(&line, t)
+    let first = start.max(1);
+    let last = end.min(lines.len());
+    // Each line is lowercased the first time a pass reaches it, then kept for
+    // the next three passes.
+    let mut lowered: Vec<Option<String>> = vec![None; (last + 1).saturating_sub(first)];
+    for (all, word) in [(true, true), (false, true), (true, false), (false, false)] {
+        for n in first..=last {
+            let line = lowered[n - first].get_or_insert_with(|| lines[n - 1].to_lowercase());
+            let one = |t: &String| {
+                if word {
+                    has_word(line, t)
+                } else {
+                    line.contains(t.as_str())
+                }
+            };
+            let holds = if all {
+                lower.iter().all(one)
             } else {
-                line.contains(t.as_str())
+                lower.iter().any(one)
+            };
+            if holds {
+                return n;
             }
-        };
-        if all {
-            lower.iter().all(one)
-        } else {
-            lower.iter().any(one)
         }
-    };
-    [(true, true), (false, true), (true, false), (false, false)]
-        .iter()
-        .find_map(|(all, word)| window().find(|n| holds(*n, *all, *word)))
-        .unwrap_or(start)
+    }
+    start
 }
 
 /// First line of the excerpt for a match on `line`.
@@ -625,6 +631,27 @@ mod tests {
         // Act, Assert
         assert_eq!(match_line(&lines, 1, 5, &toks), 4);
         assert_eq!(match_line(&lines, 1, 3, &["id".to_string()]), 2);
+    }
+
+    #[test]
+    fn the_match_line_falls_back_through_every_pass_and_ignores_case() {
+        // Arrange
+        let lines: Vec<String> = ["Let ID = 3", "retry only", "xx", "RetryPolicy"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let both = vec!["id".to_string(), "retry".to_string()];
+
+        // Act, Assert: no line holds both tokens, so any whole word wins.
+        assert_eq!(match_line(&lines, 1, 4, &both), 1);
+        // Only a substring matches, and only in the last two lines of the window.
+        assert_eq!(match_line(&lines, 3, 4, &["policy".to_string()]), 4);
+        // A mixed-case token is lowercased before the compare.
+        assert_eq!(match_line(&lines, 1, 4, &["RETRY".to_string()]), 2);
+        // Nothing matches: the first line of the window.
+        assert_eq!(match_line(&lines, 2, 3, &["zzz".to_string()]), 2);
+        // A window past the end of the file keeps the start line.
+        assert_eq!(match_line(&lines, 9, 12, &["id".to_string()]), 9);
     }
 
     #[cfg(unix)]

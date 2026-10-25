@@ -76,15 +76,8 @@ impl Caps {
 
 #[cfg(unix)]
 fn terminal_columns() -> Option<usize> {
-    let mut size = libc::winsize {
-        ws_row: 0,
-        ws_col: 0,
-        ws_xpixel: 0,
-        ws_ypixel: 0,
-    };
-    // SAFETY: TIOCGWINSZ writes one `winsize` through the pointer, which is valid for the call.
-    let rc = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) };
-    (rc == 0 && size.ws_col > 0).then_some(usize::from(size.ws_col))
+    let size = rustix::termios::tcgetwinsize(std::io::stdout()).ok()?;
+    (size.ws_col > 0).then_some(usize::from(size.ws_col))
 }
 
 #[cfg(not(unix))]

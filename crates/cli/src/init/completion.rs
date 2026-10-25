@@ -134,8 +134,7 @@ pub fn ensure(home: &Path, shell: Shell) -> io::Result<Outcome> {
 
 #[cfg(unix)]
 pub fn effective_uid() -> u32 {
-    // SAFETY: geteuid has no preconditions and cannot fail.
-    unsafe { libc::geteuid() }
+    rustix::process::geteuid().as_raw()
 }
 
 /// Windows has no uid, and files there are not owner-checked.

@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 /// What a command does differently when the run mode is auto. Each variant
 /// selects the structural checks that apply to the row.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Auto {
+pub(super) enum Auto {
     /// Checked by its own dedicated tests further down.
     Dedicated,
     /// Stops at Step 0 with a one-line refusal naming the command and why.
@@ -54,8 +54,8 @@ pub enum Auto {
 }
 
 /// One command file and which structural rules apply to it.
-pub struct CommandSpec {
-    pub name: &'static str,
+pub(super) struct CommandSpec {
+    pub(super) name: &'static str,
     /// The command asks the user something outside Step 0. The positive
     /// control asserts this really is detected, so a detector that matches
     /// nothing cannot let the ordering checks pass vacuously. Rows that never
@@ -63,11 +63,11 @@ pub struct CommandSpec {
     /// forbid it, so ordering against a detected ask would be meaningless.
     // Only the ordering checks read it; the `fix` checks do not.
     #[allow(dead_code)]
-    pub asks: bool,
-    pub auto: Auto,
+    pub(super) asks: bool,
+    pub(super) auto: Auto,
 }
 
-pub const COMMANDS: &[CommandSpec] = &[
+pub(super) const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "plan",
         asks: true,
@@ -150,7 +150,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
 ];
 
-pub fn rows(auto: Auto) -> impl Iterator<Item = &'static CommandSpec> {
+pub(super) fn rows(auto: Auto) -> impl Iterator<Item = &'static CommandSpec> {
     COMMANDS.iter().filter(move |c| c.auto == auto)
 }
 
@@ -158,32 +158,32 @@ pub fn rows(auto: Auto) -> impl Iterator<Item = &'static CommandSpec> {
 // Parsing helpers
 // ---------------------------------------------------------------------------
 
-pub struct CommandFile {
-    pub name: String,
-    pub lines: Vec<String>,
+pub(super) struct CommandFile {
+    pub(super) name: String,
+    pub(super) lines: Vec<String>,
     /// Index of the first line after the closing frontmatter fence.
-    pub body_start: usize,
+    pub(super) body_start: usize,
 }
 
-pub struct Heading {
-    pub level: usize,
-    pub title: String,
-    pub line: usize,
+struct Heading {
+    level: usize,
+    title: String,
+    line: usize,
 }
 
 /// A heading and the lines it owns, `start..end` (end exclusive). A section
 /// ends at the next heading of the same or a shallower level.
-pub struct Section {
-    pub title: String,
-    pub start: usize,
-    pub end: usize,
+pub(super) struct Section {
+    pub(super) title: String,
+    pub(super) start: usize,
+    pub(super) end: usize,
 }
 
-pub fn commands_dir() -> PathBuf {
+pub(super) fn commands_dir() -> PathBuf {
     PathBuf::from(env!("PLAYBOOK_PLUGIN_ROOT")).join("commands")
 }
 
-pub fn load(name: &str) -> CommandFile {
+pub(super) fn load(name: &str) -> CommandFile {
     let path = commands_dir().join(format!("{name}.md"));
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("could not read {}: {e}", path.display()));
@@ -198,7 +198,7 @@ pub fn load(name: &str) -> CommandFile {
 }
 
 /// Index just past the closing `---` of a leading frontmatter block.
-pub fn frontmatter_end(lines: &[String]) -> Option<usize> {
+fn frontmatter_end(lines: &[String]) -> Option<usize> {
     if lines.first().map(String::as_str) != Some("---") {
         return None;
     }
@@ -206,12 +206,12 @@ pub fn frontmatter_end(lines: &[String]) -> Option<usize> {
 }
 
 impl CommandFile {
-    pub fn frontmatter(&self) -> &[String] {
+    fn frontmatter(&self) -> &[String] {
         &self.lines[1..self.body_start - 1]
     }
 
     /// The comma-separated `allowed-tools` frontmatter value as a list.
-    pub fn allowed_tools(&self) -> Vec<String> {
+    pub(super) fn allowed_tools(&self) -> Vec<String> {
         self.frontmatter()
             .iter()
             .find_map(|l| l.strip_prefix("allowed-tools:"))
@@ -223,7 +223,7 @@ impl CommandFile {
     }
 
     /// The raw value of a top-level frontmatter key, quotes included.
-    pub fn frontmatter_value(&self, key: &str) -> Option<String> {
+    pub(super) fn frontmatter_value(&self, key: &str) -> Option<String> {
         let prefix = format!("{key}:");
         self.frontmatter()
             .iter()
@@ -233,7 +233,7 @@ impl CommandFile {
 
     /// Markdown headings outside fenced code blocks, so a `# comment` inside
     /// a shell example is not mistaken for a section.
-    pub fn headings(&self) -> Vec<Heading> {
+    fn headings(&self) -> Vec<Heading> {
         let mut out = Vec::new();
         let mut in_fence = false;
         for (line, text) in self.lines.iter().enumerate().skip(self.body_start) {
@@ -256,7 +256,7 @@ impl CommandFile {
     }
 
     /// The first section whose heading title satisfies `matches`.
-    pub fn section(&self, matches: impl Fn(&str) -> bool) -> Option<Section> {
+    pub(super) fn section(&self, matches: impl Fn(&str) -> bool) -> Option<Section> {
         let headings = self.headings();
         let idx = headings.iter().position(|h| matches(&h.title))?;
         let end = headings[idx + 1..]
@@ -270,7 +270,7 @@ impl CommandFile {
         })
     }
 
-    pub fn text_of(&self, s: &Section) -> String {
+    pub(super) fn text_of(&self, s: &Section) -> String {
         self.lines[s.start..s.end].join("\n")
     }
 }
@@ -280,7 +280,7 @@ impl CommandFile {
 /// "ask" would match prose that only forbids asking. The `Q<n>` form is a
 /// labelled prompt whose quoted text holds a question mark, the shape the
 /// review commands use for their posting questions.
-pub fn is_ask(line: &str) -> bool {
+pub(super) fn is_ask(line: &str) -> bool {
     static ASK: OnceLock<Regex> = OnceLock::new();
     ASK.get_or_init(|| {
         Regex::new(
@@ -291,11 +291,11 @@ pub fn is_ask(line: &str) -> bool {
     .is_match(line)
 }
 
-pub fn heading_title(line: &str) -> Option<&str> {
+pub(super) fn heading_title(line: &str) -> Option<&str> {
     let level = line.chars().take_while(|&c| c == '#').count();
     ((1..=6).contains(&level) && line[level..].starts_with(' ')).then(|| line[level..].trim())
 }
 
-pub fn require_section(file: &CommandFile, found: Option<Section>, what: &str) -> Section {
+pub(super) fn require_section(file: &CommandFile, found: Option<Section>, what: &str) -> Section {
     found.unwrap_or_else(|| panic!("commands/{}.md has no {what} section", file.name))
 }

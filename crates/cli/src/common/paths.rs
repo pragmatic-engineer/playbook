@@ -16,12 +16,7 @@ pub fn usage_db_dir() -> std::path::PathBuf {
 /// `[[ -w dir ]]`: true when the effective user may write into `dir`.
 #[cfg(unix)]
 pub fn is_writable(dir: &std::path::Path) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-    let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
-        return false;
-    };
-    // SAFETY: `c` is a valid NUL-terminated path for the duration of the call.
-    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
+    rustix::fs::access(dir, rustix::fs::Access::WRITE_OK).is_ok()
 }
 
 #[cfg(not(unix))]

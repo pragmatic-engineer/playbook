@@ -294,19 +294,29 @@ pub fn run(skip_permissions: bool, args: &[String]) -> i32 {
     rc
 }
 
-#[cfg(unix)]
-extern "C" fn noop(_: libc::c_int) {}
-
-/// Runs `f` with a no-op SIGINT handler: Ctrl-C reaches the whole foreground
-/// group, and the launcher must outlive the session to prune and report. A
-/// handler (not SIG_IGN) resets on exec, so claude keeps its own behaviour.
+/// Runs `f` with SIGINT swallowed: Ctrl-C reaches the whole foreground
+/// group, and the launcher must outlive the session to prune and report. The
+/// handler resets on exec, so claude keeps its own behaviour. Afterwards the
+/// default action is back on.
 #[cfg(unix)]
 fn with_sigint_held<T>(f: impl FnOnce() -> T) -> T {
-    // SAFETY: installing an empty handler is async-signal-safe.
-    let previous = unsafe { libc::signal(libc::SIGINT, noop as *const () as libc::sighandler_t) };
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, OnceLock};
+    // While false the handler does nothing; once true it ends the process.
+    static DEFAULT_ACTION: OnceLock<Option<Arc<AtomicBool>>> = OnceLock::new();
+    let flag = DEFAULT_ACTION.get_or_init(|| {
+        let flag = Arc::new(AtomicBool::new(false));
+        signal_hook::flag::register_conditional_default(signal_hook::consts::SIGINT, flag.clone())
+            .ok()
+            .map(|_| flag)
+    });
+    if let Some(flag) = flag {
+        flag.store(false, Ordering::SeqCst);
+    }
     let out = f();
-    // SAFETY: restores the handler captured above.
-    unsafe { libc::signal(libc::SIGINT, previous) };
+    if let Some(flag) = flag {
+        flag.store(true, Ordering::SeqCst);
+    }
     out
 }
 

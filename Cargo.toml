@@ -18,6 +18,10 @@ uninlined_format_args = "warn"
 manual_let_else = "warn"
 undocumented_unsafe_blocks = "warn"
 
+# Items that no other crate can reach stay pub(crate), so dead_code sees them.
+[workspace.lints.rust]
+unreachable_pub = "warn"
+
 
 # Measured 2026-10-09 on macOS arm64: 10.0 MB without a profile, 8.2 MB with
 # strip and thin LTO at opt-level 3, 5.8 MB with opt-level s and fat LTO, with no
