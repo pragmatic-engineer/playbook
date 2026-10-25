@@ -53,7 +53,7 @@ pub struct Flags {
     /// Do not write telemetry variables into settings.json
     #[arg(long, overrides_with = "telemetry")]
     pub no_telemetry: bool,
-    /// Retired: playbook starts the collector itself, so no service is installed. Accepted with a notice for one release
+    /// Retired: playbook starts the collector itself, so no service is installed. Accepted and ignored until 1.0
     #[arg(long, hide = true, overrides_with = "no_collector_service")]
     pub collector_service: bool,
     /// Retired with `--collector-service`
@@ -177,6 +177,10 @@ pub const COLLECTOR_SERVICE_PART: &str = "collector-service";
 pub const COLLECTOR_SERVICE_RETIRED: &str =
     "the collector service is no longer needed; playbook starts the collector itself";
 
+/// Removal: the retired flags and part names below are dropped in 1.0.0. The
+/// flags came from releases up to 0.38.0, and a script or an old install guide
+/// may still pass them, so clap keeps accepting them until then.
+///
 /// The part names setup took once and now ignores: the launchers ADR 0044
 /// dropped, the disk ballast and the collector service.
 pub const RETIRED_PARTS: [&str; 4] = [
