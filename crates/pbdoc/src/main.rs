@@ -12,12 +12,8 @@ use std::{fs, io};
 
 use anydoc::{ConvertError, Format};
 
-mod alloc;
 mod limits;
 mod watchdog;
-
-#[global_allocator]
-static ALLOCATOR: alloc::CountingAllocator = alloc::CountingAllocator;
 
 const DEFAULT_MAX_MEMORY_MB: u64 = 1024;
 const MAX_MEMORY_MB_CLAMP: u64 = 4096;
@@ -199,7 +195,6 @@ fn number_flag(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<u6
 fn convert(input: &str, output: &str, limits: &Limits) -> Result<(), Failure> {
     let cap_bytes = usize::try_from(limits.max_memory_mb * BYTES_PER_MB).unwrap_or(usize::MAX);
     watchdog::spawn(cap_bytes).map_err(|_| Failure::failed("cannot start the memory watchdog"))?;
-    alloc::set_heap_cap(cap_bytes);
     // lopdf parallelises through rayon's global pool, so one thread bounds PDF memory.
     rayon::ThreadPoolBuilder::new()
         .num_threads(CONVERT_THREADS)
@@ -210,7 +205,9 @@ fn convert(input: &str, output: &str, limits: &Limits) -> Result<(), Failure> {
     limits::admit(path, limits.max_input_bytes)?;
     limits::prescan_zip(path)?;
     let bytes = fs::read(path).map_err(|err| io_failure("cannot read input", &err))?;
+    watchdog::exit_if_over(cap_bytes);
     let markdown = anydoc::to_markdown_bytes(&bytes, Format::from_path(path))?;
+    watchdog::exit_if_over(cap_bytes);
     fs::write(output, markdown).map_err(|err| io_failure("cannot write output", &err))
 }
 
