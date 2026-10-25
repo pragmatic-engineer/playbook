@@ -79,15 +79,18 @@ fn write_state(path: &Path, state: &State) -> Result<(), String> {
 
 #[cfg(unix)]
 pub(super) fn pid_alive(pid: u32) -> bool {
-    let Ok(pid) = libc::pid_t::try_from(pid) else {
+    // `Pid` rejects 0 and negative ids, which `kill` would take as groups.
+    let Some(pid) = i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    else {
         return false;
     };
-    if pid <= 0 {
-        return false;
+    // Signal 0 only checks that the process exists.
+    match rustix::process::test_kill_process(pid) {
+        Ok(()) => true,
+        Err(err) => err == rustix::io::Errno::PERM,
     }
-    // SAFETY: signal 0 only checks that the process exists.
-    let r = unsafe { libc::kill(pid, 0) };
-    r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 #[cfg(not(unix))]

@@ -100,9 +100,11 @@ pub fn succeeds_in(program: &str, args: &[&str], dir: &Path, timeout: Duration) 
 fn stop(child: &mut Child) {
     #[cfg(unix)]
     {
-        // SAFETY: `kill` only reads its two integer arguments.
-        unsafe {
-            libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+        if let Some(pid) = i32::try_from(child.id())
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        {
+            let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
         }
         let until = Instant::now() + TERM_GRACE;
         while Instant::now() < until {
