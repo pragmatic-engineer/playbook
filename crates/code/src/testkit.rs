@@ -16,7 +16,7 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 /// Pins git config so a developer's global excludes cannot change a listing,
 /// and serialises tests that depend on it.
-pub fn pinned() -> MutexGuard<'static, ()> {
+pub(crate) fn pinned() -> MutexGuard<'static, ()> {
     let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
     std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
@@ -24,12 +24,12 @@ pub fn pinned() -> MutexGuard<'static, ()> {
 }
 
 /// A scratch repo with its own index path.
-pub struct Fx {
+pub(crate) struct Fx {
     pub root: PathBuf,
     pub index: PathBuf,
 }
 
-pub fn fx(tag: &str) -> Fx {
+pub(crate) fn fx(tag: &str) -> Fx {
     let root = init(tag);
     let index = playbook_common::test_support::scratch_dir(&format!("{tag}-idx"))
         .join("code")
@@ -38,27 +38,27 @@ pub fn fx(tag: &str) -> Fx {
 }
 
 impl Fx {
-    pub fn write(&self, rel: &str, text: &str) {
+    pub(crate) fn write(&self, rel: &str, text: &str) {
         write(&self.root, rel, text.as_bytes());
     }
 
-    pub fn git_add_all(&self) {
+    pub(crate) fn git_add_all(&self) {
         git_in(&self.root, &["add", "."]);
     }
 
-    pub fn run(&self) -> Report {
+    pub(crate) fn run(&self) -> Report {
         self.run_with(&Options::default())
     }
 
-    pub fn run_with(&self, opts: &Options) -> Report {
+    pub(crate) fn run_with(&self, opts: &Options) -> Report {
         index::run(&self.root, &self.index, false, opts).expect("index run")
     }
 
-    pub fn conn(&self) -> Connection {
+    pub(crate) fn conn(&self) -> Connection {
         db::open_index(&self.index, OpenMode::Query).expect("query open")
     }
 
-    pub fn set_mtime(&self, rel: &str, secs: u64) {
+    pub(crate) fn set_mtime(&self, rel: &str, secs: u64) {
         let file = File::options()
             .write(true)
             .open(self.root.join(rel))
