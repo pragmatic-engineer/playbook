@@ -10,6 +10,8 @@
 
 #[path = "support/isolated.rs"]
 mod isolated;
+#[path = "support/shell_exec.rs"]
+mod shell_exec;
 #[path = "support/shell_fixture.rs"]
 mod shell_fixture;
 
@@ -460,7 +462,7 @@ fn a_stub_is_silent_when_completions_fails_or_the_binary_is_missing() {
             let work = Work::new("stub-silence");
             let bin = work.dir("bin");
             if playbook_fails {
-                shell_fixture::write_exec(&bin.join(BINARY), FAILING_PLAYBOOK);
+                shell_exec::write_exec(&bin.join(BINARY), FAILING_PLAYBOOK);
             }
             let stub = work.path("stub");
             let script = match kind {

@@ -10,14 +10,23 @@
 
 #![cfg(unix)]
 
+#[path = "support/install_stubs.rs"]
+mod install_stubs;
+#[path = "support/shell_exec.rs"]
+mod shell_exec;
 #[path = "support/shell_fixture.rs"]
-mod fx;
+mod shell_fixture;
+#[path = "support/shell_run.rs"]
+mod shell_run;
 
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use fx::{both, install_stubs, repo_root, sha256_hex, write_exec, Work};
+use install_stubs::{install_stubs, sha256_hex};
+use shell_exec::write_exec;
+use shell_fixture::Work;
+use shell_run::{both, repo_root};
 
 /// A 0.17.0 binary that knows `update --print-notes`. Every call except
 /// `--version` and `version` logs its arguments.

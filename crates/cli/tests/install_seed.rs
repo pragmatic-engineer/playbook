@@ -4,11 +4,17 @@
 //! `install.sh --yes` seeds `settings.json` from the shipped template through
 //! the real `playbook setup`: a fresh install, and a user hook that survives.
 
+#[path = "support/shell_bin_dir.rs"]
+mod shell_bin_dir;
 #[path = "support/shell_fixture.rs"]
-mod fx;
+mod shell_fixture;
+#[path = "support/shell_run.rs"]
+mod shell_run;
 
-use fx::{bin_dir_with_playbook, repo_root, stderr, stdout, Work};
 use serde_json::Value;
+use shell_bin_dir::bin_dir_with_playbook;
+use shell_fixture::Work;
+use shell_run::{repo_root, stderr, stdout};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
