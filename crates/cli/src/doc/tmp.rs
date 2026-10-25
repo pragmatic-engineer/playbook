@@ -32,8 +32,7 @@ impl TempDir {
         if !meta.is_dir() {
             return Err(std::io::Error::other("scratch root is not a directory"));
         }
-        // SAFETY: `geteuid` takes no arguments and cannot fail.
-        if meta.uid() != unsafe { libc::geteuid() } {
+        if meta.uid() != rustix::process::geteuid().as_raw() {
             return Err(std::io::Error::other("scratch root is not owned by you"));
         }
         fs::set_permissions(root, fs::Permissions::from_mode(0o700))?;

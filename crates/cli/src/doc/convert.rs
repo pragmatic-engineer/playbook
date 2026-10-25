@@ -11,13 +11,16 @@ use super::converter::{
     Converter, Kind, Missing, HARD_MAX_INPUT_BYTES, INSTALL_HINT, OUT_OF_DATE_MESSAGE,
 };
 use super::tmp::TempDir;
+use rustix::process::{Pid, Signal};
+use signal_hook::consts::{SIGINT, SIGTERM};
 use std::ffi::OsString;
 use std::fs;
 use std::io::Read;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Formats the converter supports, by lowercase extension.
@@ -162,6 +165,8 @@ const FLAG_MAX_INPUT_BYTES: &str = "--max-input-bytes";
 const FLAG_MAX_MEMORY_MB: &str = "--max-memory-mb";
 const KB_PER_MB: u64 = 1024;
 const BYTES_PER_KB: u64 = 1024;
+/// The unit of `ulimit -f`.
+const FILE_BLOCK_BYTES: u64 = 512;
 /// A converter exits with this code when it rejects its arguments.
 const EXIT_USAGE: i32 = 2;
 const EXIT_NEEDS_OCR: i32 = 3;
@@ -175,7 +180,9 @@ const REASON_CRASH: &str = "memory limit or crash";
 
 /// The signals a child gets when it runs out of address space or memory.
 fn is_memory_crash(sig: i32) -> bool {
-    matches!(sig, libc::SIGABRT | libc::SIGSEGV | libc::SIGKILL)
+    [Signal::ABORT, Signal::SEGV, Signal::KILL]
+        .iter()
+        .any(|s| s.as_raw() == sig)
 }
 
 /// The arguments passed to the converter. Output goes to a file in the
@@ -242,22 +249,35 @@ fn detect_isolation() -> Isolation {
     Isolation::EnvironmentOnly
 }
 
-static SIGNAL: AtomicI32 = AtomicI32::new(0);
-
-extern "C" fn on_signal(sig: libc::c_int) {
-    SIGNAL.store(sig, Ordering::SeqCst);
-}
+/// Set by the SIGINT and SIGTERM handlers.
+static INTERRUPTED: OnceLock<[(i32, Arc<AtomicBool>); 2]> = OnceLock::new();
 
 /// Make SIGINT and SIGTERM set a flag the wait loop sees, so the child is
 /// stopped and the scratch directory removed before the process exits.
 pub fn install_signal_handlers() {
-    SIGNAL.store(0, Ordering::SeqCst);
-    for sig in [libc::SIGINT, libc::SIGTERM] {
-        // SAFETY: the handler only stores into an atomic, which is signal safe.
-        unsafe {
-            libc::signal(sig, on_signal as *const () as libc::sighandler_t);
-        }
+    let flags = INTERRUPTED.get_or_init(|| {
+        [SIGINT, SIGTERM].map(|sig| {
+            let flag = Arc::new(AtomicBool::new(false));
+            let _ = signal_hook::flag::register(sig, flag.clone());
+            (sig, flag)
+        })
+    });
+    for (_, flag) in flags {
+        flag.store(false, Ordering::SeqCst);
     }
+}
+
+/// The signal that arrived since the handlers were installed, or 0.
+fn pending_signal() -> i32 {
+    INTERRUPTED
+        .get()
+        .and_then(|flags| {
+            flags
+                .iter()
+                .find(|(_, flag)| flag.load(Ordering::SeqCst))
+                .map(|(sig, _)| *sig)
+        })
+        .unwrap_or(0)
 }
 
 /// Resident memory in KB of every process in group `pgid`.
@@ -279,11 +299,15 @@ fn group_rss_kb(pgid: u32) -> u64 {
         .sum()
 }
 
-fn kill_group(child: &mut std::process::Child) {
-    // SAFETY: `killpg` only reads its integer arguments.
-    unsafe {
-        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+/// SIGKILL to every process in the group `pgid` that `process_group(0)` made.
+fn kill_process_group(pgid: u32) {
+    if let Some(pgid) = i32::try_from(pgid).ok().and_then(Pid::from_raw) {
+        let _ = rustix::process::kill_process_group(pgid, Signal::KILL);
     }
+}
+
+fn kill_group(child: &mut std::process::Child) {
+    kill_process_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -293,6 +317,42 @@ const FLAG_VERSION: &str = "--version";
 /// The converter's version, or an empty string when it will not say.
 pub fn version_of(anydoc: &Path, scratch: &Path) -> String {
     output_of(anydoc, FLAG_VERSION, scratch)
+}
+
+/// Only the bundled helper gets an address space cap, because Node reserves a
+/// large virtual range and would never start under one. macOS accepts neither
+/// RLIMIT_AS nor RLIMIT_DATA, so there the helper's own watchdog and the
+/// resident size watchdog below are the memory limits.
+fn address_space_cap(kind: Kind, limits: &Limits) -> Option<u64> {
+    (cfg!(target_os = "linux") && kind == Kind::Bundled).then(|| {
+        limits
+            .max_rss_kb
+            .saturating_mul(BYTES_PER_KB)
+            .saturating_add(ADDRESS_SPACE_HEADROOM)
+    })
+}
+
+/// Wraps `cmd` in `sh` so the limits are set before it runs, since std has no
+/// safe way to call `setrlimit` between fork and exec. The shell caps the
+/// size of any file the child writes, turns off core dumps and applies the
+/// address space cap when there is one, then replaces itself with the command.
+/// A limit the shell cannot set is skipped, as a failed `setrlimit` was.
+fn with_limits(cmd: Command, address_space: Option<u64>) -> Command {
+    // `ulimit -f` counts 512-byte blocks in POSIX mode, `-v` counts KiB.
+    let mut script = format!(
+        "ulimit -c 0 2>/dev/null; ulimit -f {} 2>/dev/null; ",
+        FILE_SIZE_LIMIT / FILE_BLOCK_BYTES
+    );
+    if let Some(bytes) = address_space {
+        script.push_str(&format!("ulimit -v {} 2>/dev/null; ", bytes / BYTES_PER_KB));
+    }
+    script.push_str("exec \"$@\"");
+    let mut wrapped = Command::new("/bin/sh");
+    wrapped
+        .args(["-c", &script, "sh"])
+        .arg(cmd.get_program())
+        .args(cmd.get_args());
+    wrapped
 }
 
 /// What the converter prints for `flag`, trimmed and short, or an empty
@@ -358,8 +418,9 @@ pub fn convert(
         }
         Isolation::EnvironmentOnly => Command::new(anydoc),
     };
-    cmd.args(argv(converter.kind, limits, &out, &input))
-        .env_clear();
+    cmd.args(argv(converter.kind, limits, &out, &input));
+    let mut cmd = with_limits(cmd, address_space_cap(converter.kind, limits));
+    cmd.env_clear();
     for (k, v) in child_env(scratch.path()) {
         cmd.env(k, v);
     }
@@ -369,51 +430,12 @@ pub fn convert(
         .stderr(Stdio::from(stderr))
         .current_dir(scratch.path())
         .process_group(0);
-    // Only the bundled helper gets an address space cap, because Node reserves
-    // a large virtual range and would never start under one. macOS accepts
-    // neither RLIMIT_AS nor RLIMIT_DATA, so there the helper's own heap cap and
-    // watchdog plus the resident size watchdog below are the memory limits.
-    let address_space_cap =
-        (cfg!(target_os = "linux") && converter.kind == Kind::Bundled).then(|| {
-            limits
-                .max_rss_kb
-                .saturating_mul(BYTES_PER_KB)
-                .saturating_add(ADDRESS_SPACE_HEADROOM) as libc::rlim_t
-        });
-    // SAFETY: only `setrlimit` runs between fork and exec, which is async
-    // signal safe. It caps the size of any file the child writes, turns off
-    // core dumps and applies the address space cap when there is one.
-    unsafe {
-        cmd.pre_exec(move || {
-            #[cfg(target_os = "linux")]
-            if let Some(bytes) = address_space_cap {
-                let cap = libc::rlimit {
-                    rlim_cur: bytes,
-                    rlim_max: bytes,
-                };
-                libc::setrlimit(libc::RLIMIT_AS, &cap);
-            }
-            #[cfg(not(target_os = "linux"))]
-            let _ = address_space_cap;
-            let cap = libc::rlimit {
-                rlim_cur: FILE_SIZE_LIMIT as libc::rlim_t,
-                rlim_max: FILE_SIZE_LIMIT as libc::rlim_t,
-            };
-            libc::setrlimit(libc::RLIMIT_FSIZE, &cap);
-            let none = libc::rlimit {
-                rlim_cur: 0,
-                rlim_max: 0,
-            };
-            libc::setrlimit(libc::RLIMIT_CORE, &none);
-            Ok(())
-        });
-    }
     let mut child = cmd.spawn().map_err(|e| DocError::Io(e.to_string()))?;
 
     let start = Instant::now();
     let mut last_rss = Instant::now();
     let status = loop {
-        let sig = SIGNAL.load(Ordering::SeqCst);
+        let sig = pending_signal();
         if sig != 0 {
             kill_group(&mut child);
             return Err(DocError::Interrupted(sig));
@@ -444,10 +466,7 @@ pub fn convert(
         std::thread::sleep(POLL);
     };
     // Anything the converter left running in its group goes too.
-    // SAFETY: `killpg` only reads its integer arguments.
-    unsafe {
-        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
-    }
+    kill_process_group(child.id());
 
     if !status.success() {
         match status.code() {
