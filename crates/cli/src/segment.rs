@@ -11,10 +11,6 @@
 use crate::review::size::parse_numstat;
 use std::path::Path;
 
-/// Changed lines at which a Segment must be split. Segments target well under
-/// this; it is the hard limit a pull request never crosses.
-pub const HARD_LIMIT_LINES: u64 = 1500;
-
 /// Longest the title part of a branch name gets.
 const SLUG_MAX: usize = 40;
 

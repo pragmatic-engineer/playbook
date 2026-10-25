@@ -155,7 +155,7 @@ pub fn run_set(home: &Path, level: &str) -> Result<String, String> {
     write::set(
         write::Tier::Global,
         KEY,
-        Value::String(level.to_string()),
+        &Value::String(level.to_string()),
         home,
         None,
     )

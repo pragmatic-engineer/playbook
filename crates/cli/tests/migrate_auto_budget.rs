@@ -51,7 +51,7 @@ fn stored(home: &Path) -> Value {
 /// Seeds the store the way an older binary left it, without running this one.
 fn seed(home: &Path, rows: &[(Tier, &str, Value)]) {
     for (tier, key, value) in rows {
-        set(*tier, key, value.clone(), home, Some(SLUG)).unwrap();
+        set(*tier, key, &value.clone(), home, Some(SLUG)).unwrap();
     }
 }
 

@@ -33,7 +33,6 @@ pub const OUT_OF_DATE_MESSAGE: &str =
     "the bundled converter pbdoc is out of date for this playbook. Run `playbook update`.";
 
 pub const STATUS_BUNDLED_PREFIX: &str = "converter: pbdoc (bundled) at ";
-pub const STATUS_EXTERNAL_PREFIX: &str = "converter: anydoc (external) at ";
 pub const STATUS_VERSION_PREFIX: &str = "version: pbdoc ";
 pub const STATUS_ANYDOC_PREFIX: &str = "anydoc: ";
 pub const STATUS_EXTERNAL_FOUND_PREFIX: &str = "anydoc: found at ";

@@ -53,7 +53,7 @@ fn record(home: &Path, yes: bool) -> Result<(), String> {
     crate::config::write::set(
         crate::config::write::Tier::Global,
         KEY,
-        serde_json::Value::Bool(yes),
+        &serde_json::Value::Bool(yes),
         home,
         None,
     )
@@ -230,7 +230,7 @@ mod tests {
         let theirs = script(&bin, "pb");
         let target = Target {
             exe,
-            install_dir: bin.clone(),
+            install_dir: bin,
             path_var: Default::default(),
         };
 
@@ -264,7 +264,7 @@ mod tests {
         let bin = home.join(".local/bin");
         let exe = exe_in(&bin);
         let target = Target {
-            exe: exe.clone(),
+            exe,
             install_dir: bin.clone(),
             path_var: Default::default(),
         };
@@ -317,7 +317,7 @@ mod tests {
         let target = Target {
             exe,
             install_dir: bin.clone(),
-            path_var: other.clone().into_os_string(),
+            path_var: other.into_os_string(),
         };
 
         let got = step(&home, Choice::Link, Some(&target));
@@ -336,7 +336,7 @@ mod tests {
         let target = Target {
             exe,
             install_dir: home.join(".local/bin"),
-            path_var: brew.clone().into_os_string(),
+            path_var: brew.into_os_string(),
         };
 
         let got = step(&home, Choice::Link, Some(&target));

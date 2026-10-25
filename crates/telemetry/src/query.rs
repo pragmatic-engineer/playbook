@@ -962,7 +962,7 @@ mod tests {
     fn live_view_reports_active_sessions_and_burn() {
         let recent = event(NOW - 60, "live", 0.5);
         let stale = event(NOW - 3 * 3600, "idle", 9.0);
-        let window = vec![stale.clone(), recent.clone()];
+        let window = vec![stale, recent.clone()];
         let sessions = vec![recent.clone()];
         let v = live_view(&window, &sessions, &[recent], NOW);
         assert_eq!(v.active.len(), 1);

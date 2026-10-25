@@ -1487,6 +1487,7 @@ fn with_lock_retry(home: &Path, retries: u32, f: impl FnOnce()) -> bool {
 }
 
 /// Runs the shipped registry.
+#[cfg(test)]
 pub fn run_pending(ctx: &Ctx) -> Report {
     run_pending_for(ctx, true, true)
 }
@@ -1711,7 +1712,7 @@ mod tests {
         crate::config::write::set(
             crate::config::write::Tier::Global,
             "auto.budgetUsd",
-            serde_json::Value::from(usd),
+            &serde_json::Value::from(usd),
             home,
             None,
         )
@@ -1955,7 +1956,7 @@ mod tests {
         crate::config::write::set(
             crate::config::write::Tier::Global,
             "systemPrompt.enabled",
-            serde_json::Value::Bool(false),
+            &serde_json::Value::Bool(false),
             &h,
             None,
         )
@@ -2383,7 +2384,7 @@ mod tests {
             crate::config::write::set(
                 crate::config::write::Tier::Global,
                 crate::hooks::policy_guard::ENABLED_KEY,
-                serde_json::Value::Bool(value),
+                &serde_json::Value::Bool(value),
                 &h,
                 None,
             )

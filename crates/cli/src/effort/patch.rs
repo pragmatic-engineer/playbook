@@ -187,7 +187,7 @@ fn global_value(home: &Path, key: &str) -> Result<Option<Value>, String> {
 }
 
 fn set_global(home: &Path, key: &str, value: Value) -> Result<(), String> {
-    write::set(write::Tier::Global, key, value, home, None).map_err(|e| e.to_string())
+    write::set(write::Tier::Global, key, &value, home, None).map_err(|e| e.to_string())
 }
 
 /// A ledger that cannot be read is treated as empty, so a damaged file never

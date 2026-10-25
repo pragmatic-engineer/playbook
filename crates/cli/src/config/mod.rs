@@ -435,7 +435,7 @@ mod tests {
         write::set(
             Tier::Repo,
             "worktreeCleanup.staleAfterDays",
-            Value::Number(14.into()),
+            &Value::Number(14.into()),
             &home,
             Some("owner/repo"),
         )
@@ -477,7 +477,7 @@ mod tests {
             let result = write::set(
                 Tier::Repo,
                 "worktreeCleanup.staleAfterDays",
-                value,
+                &value,
                 &home,
                 Some("owner/repo"),
             );
@@ -506,7 +506,7 @@ mod tests {
         let result = write::set(
             Tier::Repo,
             "worktreeCleanup.staleAfterDays",
-            Value::Number(0.into()),
+            &Value::Number(0.into()),
             &home,
             Some("owner/repo"),
         );

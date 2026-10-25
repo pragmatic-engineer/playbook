@@ -1397,7 +1397,7 @@ fn the_charted_burnup_is_the_most_used_limit_else_the_spend_alone() {
     let (high, _) = burn_case("exceeded");
     let (spend, _) = burn_case("nolimit");
     let view = crate::tui::data::LimitsView {
-        burnups: vec![Some(low.clone()), Some(high.clone())],
+        burnups: vec![Some(low), Some(high.clone())],
         spend_only: Some(spend.clone()),
         ..Default::default()
     };
