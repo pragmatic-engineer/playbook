@@ -16,7 +16,9 @@
 //! events are told apart from inside one script.
 
 use crate::common::atomic::with_dir_lock;
+use crate::common::slug::slugify;
 use crate::common::{session_dir, session_id, Payload};
+use crate::hooks::git_toplevel;
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -124,24 +126,6 @@ struct AutoLearnFlag<'a> {
     ts: u64,
 }
 
-/// `git rev-parse --show-toplevel`, trimmed. Empty outside a repo or on any
-/// failure. Never panics.
-fn git_toplevel() -> String {
-    if let Some(top) = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| crate::common::gitfacts::toplevel(&cwd))
-    {
-        return top.to_string_lossy().into_owned();
-    }
-    let args = ["--no-optional-locks", "rev-parse", "--show-toplevel"];
-    crate::common::git::trimmed(crate::common::git::run(
-        None,
-        &args,
-        crate::common::git::TIMEOUT,
-    ))
-    .unwrap_or_default()
-}
-
 /// Parse the digits in `path`'s contents as an integer, ignoring any other
 /// characters. `0` on any read or parse failure. Matches
 /// the retired shell original.
@@ -151,18 +135,4 @@ fn read_int(path: &Path) -> i64 {
     };
     let digits: String = contents.chars().filter(char::is_ascii_digit).collect();
     digits.parse::<i64>().unwrap_or(0)
-}
-
-/// Replace every character outside `[A-Za-z0-9_.-]` with `_`. Matches the
-/// slug regex the retired shell original applies inline.
-fn slugify(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
