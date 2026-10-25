@@ -1213,7 +1213,6 @@ name = "pbdoc"
 version = "0.39.0"
 dependencies = [
  "anydoc",
- "libc",
  "rayon",
  "serde_json",
  "zip",
