@@ -5,7 +5,6 @@
 //! Nothing here may write, create, rename, copy or delete: `tests/memory_isolation.rs`
 //! fails if a write API appears in this file.
 
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -41,10 +40,7 @@ pub fn read_facts(dir: &Path) -> io::Result<Vec<ClaudeFact>> {
         let Ok(content) = fs::read_to_string(&path) else {
             continue;
         };
-        let hash: String = Sha256::digest(content.as_bytes())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let hash = crate::common::hash::sha256_hex(content.as_bytes());
         facts.push(ClaudeFact {
             file_name: name.to_string(),
             content,
