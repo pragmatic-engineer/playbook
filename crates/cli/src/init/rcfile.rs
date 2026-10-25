@@ -1,8 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Igor Santos
 // SPDX-License-Identifier: Apache-2.0
 
-//! Finds and removes the rc-file lines older playbook versions wrote for the
-//! retired shell launcher (ADR 0044), and the installer's `PATH` block.
+//! Reads and rewrites the shell rc files playbook owns lines in: the
+//! completion block, the installer's `PATH` block, and the lines older
+//! versions wrote for the retired shell launcher (ADR 0044).
+//!
+//! The launcher half (`retired_rc_entries`, `strip_retired_rc_lines`) exists
+//! for upgrades from releases up to 0.36.0, which wrote those lines. It is
+//! removed in 1.0.0 with migration `retired-launcher-rc-line` and doctor
+//! layer 3. The line editing helpers stay, since completion and `PATH` use them.
 
 use crate::init::completion::MARKER as COMPLETION_MARKER;
 use std::fs;

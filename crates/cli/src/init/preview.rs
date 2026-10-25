@@ -461,7 +461,7 @@ fn always_lines(paths: &InitPaths) -> Vec<String> {
         };
         lines.push(format!("{}: {text}", part.id));
     }
-    let retired = crate::init::shim::retired_rc_files(&paths.home);
+    let retired = crate::init::rcfile::retired_rc_files(&paths.home);
     if !retired.is_empty() {
         let names: Vec<String> = retired.iter().map(|f| f.display().to_string()).collect();
         lines.push(format!(

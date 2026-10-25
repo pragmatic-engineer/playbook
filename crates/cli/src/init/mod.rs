@@ -8,7 +8,7 @@
 //! - `wire` writes the ported hook entries into `settings.json`, backing it up
 //!   first.
 //! - `path` puts the binary's directory on PATH for every shell start.
-//! - `shim` installs the bash and zsh launcher shim idempotently.
+//! - `rcfile` edits the lines playbook owns in the shell rc files.
 //! - `attribution` sets the commit and PR attribution OFF (the default) or ON.
 //! - `collector_service` removes the files of the retired collector service.
 //! - `statusline` moves a legacy `statusLine.command` to `playbook statusline`.
@@ -40,10 +40,10 @@ pub mod migrate;
 pub mod path;
 pub mod pb_link;
 pub mod preview;
+pub mod rcfile;
 pub mod retired_hooks;
 pub mod run;
 pub mod self_root;
-pub mod shim;
 pub mod statusline;
 pub mod system_prompt;
 pub mod telemetry;
