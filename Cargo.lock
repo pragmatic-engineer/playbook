@@ -1263,7 +1263,6 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete",
- "libc",
  "playbook-code",
  "playbook-common",
  "playbook-data",
