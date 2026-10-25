@@ -256,7 +256,7 @@ const MAX_SCRIPT_BYTES: u64 = 1 << 20;
 
 /// What a script does with git that the backstop cares about.
 #[derive(Default)]
-pub struct GitUse {
+pub(super) struct GitUse {
     /// It runs `git commit`.
     pub commit: bool,
     /// A commit takes its message from the command (`-m`, `-F`, `-C`,
@@ -274,7 +274,7 @@ pub struct GitUse {
 /// The `git commit`, `tag` and `push` calls in `command`, which starts in
 /// `dir`, as far as they can be recognised: through wrappers such as `env` and
 /// `rtk`, not through a shell's `-c` string.
-pub fn git_use(command: &str, dir: &Path) -> GitUse {
+pub(super) fn git_use(command: &str, dir: &Path) -> GitUse {
     let mut used = GitUse::default();
     for cmd in commands(command) {
         let Some((at, _)) = locate(&cmd.words)
@@ -334,7 +334,7 @@ struct Run<'a> {
     rest: usize,
 }
 
-pub fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
+pub(super) fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
     drop_identity_env(call, plan, findings);
     let Some((sub_at, dir)) = skip_globals(call, plan, findings) else {
         return;
@@ -533,7 +533,7 @@ fn sign_off(
 
 /// Whether `commit.signOff` allows adding a sign-off. A config that cannot be
 /// read keeps the default, on, so the DCO check still passes.
-pub fn sign_off_enabled() -> bool {
+pub(super) fn sign_off_enabled() -> bool {
     let slug = repo_slug();
     let slug = (!slug.is_empty()).then_some(slug.as_str());
     config::resolve("commit.signOff", &home_dir(), slug)

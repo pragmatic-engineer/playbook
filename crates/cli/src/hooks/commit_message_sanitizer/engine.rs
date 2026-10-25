@@ -30,7 +30,7 @@ const CARRIERS: [&str; 12] = [
 const STDIN_CARRIERS: [&str; 4] = ["xargs", "parallel", "find", "watch"];
 /// What the walk found, in words that never carry a message's text.
 #[derive(Default)]
-pub struct Findings {
+pub(super) struct Findings {
     /// One entry per removal: where, the line and the shape of attribution.
     pub notes: Vec<String>,
     /// Message sources the walk could not read, so were not checked.
@@ -46,7 +46,7 @@ pub struct Findings {
 
 /// Where text a handler writes into a script ends up.
 #[derive(Clone, Copy)]
-pub enum Inline<'a> {
+pub(super) enum Inline<'a> {
     /// A script, or a quoted word, which keeps text exactly as written.
     Anywhere,
     /// The body of this heredoc, which its shell can expand or end early.
@@ -55,13 +55,13 @@ pub enum Inline<'a> {
     Nowhere,
 }
 
-pub struct Rewritten {
+pub(super) struct Rewritten {
     pub command: String,
     pub findings: Findings,
 }
 
 /// `command` with the AI attribution removed from every message it writes.
-pub fn rewrite(command: &str, dir: &Path) -> Rewritten {
+pub(super) fn rewrite(command: &str, dir: &Path) -> Rewritten {
     let mut findings = Findings::default();
     let command = walk(command, dir, 0, Inline::Anywhere, &mut findings);
     Rewritten { command, findings }
@@ -69,7 +69,7 @@ pub fn rewrite(command: &str, dir: &Path) -> Rewritten {
 
 /// One simple command in its script, with what a handler needs around it.
 #[derive(Clone, Copy)]
-pub struct Call<'a> {
+pub(super) struct Call<'a> {
     pub chars: &'a [char],
     pub cmds: &'a [Command],
     pub index: usize,
@@ -82,22 +82,22 @@ pub struct Call<'a> {
 }
 
 impl Call<'_> {
-    pub fn cmd(&self) -> &Command {
+    pub(super) fn cmd(&self) -> &Command {
         &self.cmds[self.index]
     }
 
-    pub fn span(&self, word: usize) -> &Span {
+    pub(super) fn span(&self, word: usize) -> &Span {
         &self.cmd().spans[word]
     }
 
     /// The source text of the characters `range` covers.
-    pub fn raw(&self, range: Range<usize>) -> String {
+    pub(super) fn raw(&self, range: Range<usize>) -> String {
         self.chars[range].iter().collect()
     }
 
     /// Whether a carrier such as `xargs` runs the program, so a heredoc given
     /// to the command would reach the carrier instead.
-    pub fn under_stdin_carrier(&self) -> bool {
+    pub(super) fn under_stdin_carrier(&self) -> bool {
         let words = &self.cmd().words;
         let from = program_index(words).unwrap_or(self.at).min(self.at);
         words[from..self.at]
@@ -108,7 +108,7 @@ impl Call<'_> {
 
 /// The edits the handlers make to the script, in characters of its text.
 #[derive(Default)]
-pub struct Plan {
+pub(super) struct Plan {
     pub edits: Vec<(Range<usize>, String)>,
 }
 
@@ -170,7 +170,7 @@ fn follow_cd(words: &[String], dir: &mut PathBuf) {
 /// The programs a command runs and the index of each word: past wrappers such
 /// as `env`, and through the carriers that run a `git`, `gh` or a shell given
 /// among their own words.
-pub fn locate(words: &[String]) -> Vec<(usize, String)> {
+pub(super) fn locate(words: &[String]) -> Vec<(usize, String)> {
     let Some(at) = program_index(words) else {
         return Vec::new();
     };
@@ -236,7 +236,7 @@ fn eval_scripts(call: &Call, plan: &mut Plan, findings: &mut Findings) {
 /// Rewrites the word at `at`, past its first `skip` characters, as a script.
 /// A word the shell expands first is left alone, since requoting it would
 /// change what it expands to.
-pub fn nested_word(
+pub(super) fn nested_word(
     call: &Call,
     at: usize,
     skip: Option<usize>,

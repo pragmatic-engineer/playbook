@@ -81,7 +81,7 @@ const PR_MERGE: Spec = Spec {
     abbreviate: false,
 };
 
-pub fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
+pub(super) fn handle(call: &Call, plan: &mut Plan, findings: &mut Findings) {
     let words = &call.cmd().words;
     let (Some(group), Some(verb)) = (words.get(call.at + 1), words.get(call.at + 2)) else {
         return;

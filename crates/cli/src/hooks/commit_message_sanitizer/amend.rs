@@ -18,7 +18,7 @@ const SIGN_TIMEOUT: Duration = Duration::from_secs(30);
 const REFLOG_MESSAGE: &str = "playbook: clean commit message";
 
 /// The commit being replaced.
-pub struct Old<'a> {
+pub(super) struct Old<'a> {
     pub sha: &'a str,
     pub author: (&'a str, &'a str),
     /// The author is an AI, so the configured identity takes its place. A
@@ -29,7 +29,7 @@ pub struct Old<'a> {
 /// Replaces `old`, which is HEAD, with a commit that has `message`, plus the
 /// configured identity's `Signed-off-by` line when `sign_off` is set and the
 /// message has none. `None` when any step fails or HEAD has moved since.
-pub fn rewrite_head(dir: &Path, old: &Old, message: &str, sign_off: bool) -> Option<()> {
+pub(super) fn rewrite_head(dir: &Path, old: &Old, message: &str, sign_off: bool) -> Option<()> {
     let tree = read(dir, &["rev-parse", &format!("{}^{{tree}}", old.sha)])?;
     let parents = read(dir, &["log", "-1", "--format=%P", old.sha])?;
     let date = read(dir, &["log", "-1", "--format=%ad", "--date=raw", old.sha])?;

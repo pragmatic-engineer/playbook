@@ -40,7 +40,7 @@ const NOTIFIED_FILE: &str = "commit-sanitizer-notified";
 const FIELD: char = '\u{1f}';
 const RECORD: char = '\u{1e}';
 
-pub fn run(payload: &Payload, command: &str, dir: &Path) {
+pub(super) fn run(payload: &Payload, command: &str, dir: &Path) {
     let used = git_use(command, dir);
     let mut notes = Vec::new();
     for repo in &used.commit_dirs {
