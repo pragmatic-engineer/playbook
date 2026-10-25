@@ -557,15 +557,8 @@ fn run_collect_with(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::util::scratch_dir;
+    use crate::util::scratch_paths as paths;
     use std::sync::atomic::Ordering;
-
-    fn paths(name: &str) -> Paths {
-        let dir = scratch_dir(name);
-        let mut p = Paths::from_home(&dir);
-        p.db = dir.join("usage").join("usage.db");
-        p
-    }
 
     #[test]
     fn a_collector_records_the_version_that_started_it() {
