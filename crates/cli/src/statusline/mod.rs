@@ -11,6 +11,7 @@ mod git;
 mod lines;
 mod telemetry;
 
+use crate::common::slug::slugify;
 use crate::json::statusline as pr_json;
 use fmt::*;
 use lines::{Opts, Session};
@@ -193,7 +194,7 @@ fn pr_right(
     }
     let cache = cache_dir.join(format!(
         "pr-{}.json",
-        cache_slug(&format!("{cwd}::{}", repo.branch))
+        slugify(&format!("{cwd}::{}", repo.branch))
     ));
     let ttl = env.int("STATUSLINE_PR_CACHE_TTL", 60);
     let body = read_cache(&cache, now, ttl, || gh::refresh_pr(gh_bin, &cache, now));
@@ -318,7 +319,7 @@ fn standalone_ci(
 ) -> Option<Ci> {
     let cache = cache_dir.join(format!(
         "ci-{}.json",
-        cache_slug(&format!("{cwd}::{}", repo.branch))
+        slugify(&format!("{cwd}::{}", repo.branch))
     ));
     let ttl = env.int("STATUSLINE_CI_CACHE_TTL", 60);
     let body = read_cache(&cache, now, ttl, || {

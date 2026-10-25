@@ -599,7 +599,7 @@ mod tests {
         let mut sums = String::from_utf8(f.0[&url].clone()).unwrap();
         sums.push_str(&format!(
             "{}  {}\n",
-            verify::sha256_hex(notes_hash_of),
+            crate::common::hash::sha256_hex(notes_hash_of),
             crate::release_notes::ASSET
         ));
         f.0.insert(url, sums.into_bytes());
@@ -623,7 +623,10 @@ mod tests {
             r#"{"tag_name":"v0.17.0"}"#.into(),
         );
         f.0.insert(format!("{DL}/v0.17.0/{asset}"), binary.to_vec());
-        let sums = format!("{}  {asset}\n", verify::sha256_hex(sums_hash_of));
+        let sums = format!(
+            "{}  {asset}\n",
+            crate::common::hash::sha256_hex(sums_hash_of)
+        );
         f.0.insert(format!("{DL}/v0.17.0/SHA256SUMS"), sums.into_bytes());
         let pbdoc = pbdoc_fixture::good("0.17.0");
         pbdoc_fixture::serve(&mut f, &format!("{DL}/v0.17.0"), &pbdoc, &pbdoc);
