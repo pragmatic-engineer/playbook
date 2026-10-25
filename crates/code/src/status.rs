@@ -4,9 +4,10 @@
 //! Index freshness. `quick_check` compares size and mtime only and runs
 //! before every query. `status` is the full check that hashes every file.
 
-use super::index::{load_existing, sha256_hex};
+use super::index::load_existing;
 use super::output::IndexState;
 use super::{db, host, walker};
+use playbook_common::hash::sha256_hex;
 use rusqlite::Connection;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;

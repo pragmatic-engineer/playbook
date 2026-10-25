@@ -335,7 +335,7 @@ mod tests {
     use crate::update::download::fake::FakeFetcher;
     use crate::update::pbdoc_fixture;
     use crate::update::swap;
-    use crate::update::verify::{self, fake::FakeAttest};
+    use crate::update::verify::fake::FakeAttest;
 
     const API: &str = "https://api.test/repos/x";
     const DL: &str = "https://dl.test";
@@ -397,7 +397,7 @@ mod tests {
         f.0.insert(format!("{DL}/v0.17.0/{ASSET}"), bin.clone());
         f.0.insert(
             format!("{DL}/v0.17.0/SHA256SUMS"),
-            format!("{}  {ASSET}\n", verify::sha256_hex(&bin)).into_bytes(),
+            format!("{}  {ASSET}\n", crate::common::hash::sha256_hex(&bin)).into_bytes(),
         );
         let pbdoc_tar = pbdoc_fixture::good("0.17.0");
         pbdoc_fixture::serve(&mut f, &format!("{DL}/v0.17.0"), &pbdoc_tar, &pbdoc_tar);
@@ -429,7 +429,7 @@ mod tests {
         let mut sums = String::from_utf8(f.0[&url].clone()).unwrap();
         sums.push_str(&format!(
             "{}  {NOTES_ASSET}\n",
-            verify::sha256_hex(body.as_bytes())
+            crate::common::hash::sha256_hex(body.as_bytes())
         ));
         f.0.insert(
             format!("{DL}/v0.17.0/{NOTES_ASSET}"),
