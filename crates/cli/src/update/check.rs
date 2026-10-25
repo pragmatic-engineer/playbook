@@ -643,7 +643,7 @@ pub fn refresh_then(root: &Path, fetcher: &dyn Fetcher, api_base: &str, next: &d
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_support::scratch_dir;
+    use crate::testing::scratch_root as root;
     use crate::update::download::fake::FakeFetcher;
     use clap::Parser;
     use std::cell::Cell;
@@ -660,12 +660,6 @@ mod tests {
         {"tag_name":"v0.27.0","prerelease":false,"published_at":"2026-10-15T00:37:06Z"},
         {"tag_name":"v0.26.0","prerelease":false}
     ]"#;
-
-    fn root(tag: &str) -> std::path::PathBuf {
-        let dir = scratch_dir(tag);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
 
     fn settings(mode: UpdateMode) -> Settings {
         Settings {

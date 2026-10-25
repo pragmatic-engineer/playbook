@@ -34,6 +34,7 @@
 use crate::common::paths::memory_dir;
 use crate::common::payload::Payload;
 use crate::common::{emit_pre_context, emit_prompt_context, repo_slug, session_dir};
+use crate::hooks::git_toplevel;
 use crate::hooks::memory_signals;
 use crate::hooks::staleness::{self, check_staleness};
 use serde_json::Value;
@@ -802,22 +803,6 @@ fn repo_relative_path(root: &str, raw_path: &str) -> String {
         }
     }
     raw_path.strip_prefix('/').unwrap_or(raw_path).to_string()
-}
-
-fn git_toplevel() -> String {
-    if let Some(top) = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| crate::common::gitfacts::toplevel(&cwd))
-    {
-        return top.to_string_lossy().into_owned();
-    }
-    let args = ["--no-optional-locks", "rev-parse", "--show-toplevel"];
-    crate::common::git::trimmed(crate::common::git::run(
-        None,
-        &args,
-        crate::common::git::TIMEOUT,
-    ))
-    .unwrap_or_default()
 }
 
 /// The anchor index parsed once: rows split into columns, plus a map from

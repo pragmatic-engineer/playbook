@@ -12,7 +12,6 @@ use super::host;
 use super::lang;
 use super::walker::{self, Skipped};
 use rusqlite::{params, Connection, OptionalExtension};
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
@@ -143,13 +142,6 @@ pub(crate) struct Existing {
     pub(crate) mtime_ns: i64,
 }
 
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -262,7 +254,7 @@ fn prepare(root: &Path, path: &str, existing: Option<&Existing>, opts: &Options)
             }
         }
     };
-    let sha = sha256_hex(&bytes);
+    let sha = playbook_common::hash::sha256_hex(&bytes);
     let size = bytes.len() as u64;
     let mtime = walker::mtime_ns(&meta);
     if let Some(old) = existing {

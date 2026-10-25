@@ -131,19 +131,6 @@ pub fn compact_trigger_pct(window: &str, window_size: &str) -> Option<i64> {
     Some(window * 100 / size)
 }
 
-/// Filesystem-safe slug for cache file names.
-pub fn cache_slug(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
 /// Visible width as the script measures it: real `ESC[..m` sequences are
 /// stripped, then characters are counted. The script's own colour text is a
 /// literal backslash form, so it is counted too, exactly as in the shell.
@@ -293,11 +280,6 @@ mod tests {
         assert_eq!(compact_trigger_pct("50000", "200000"), None);
         assert_eq!(compact_trigger_pct("", "200000"), None);
         assert_eq!(compact_trigger_pct("150000", ""), None);
-    }
-
-    #[test]
-    fn slug_replaces_every_unsafe_character() {
-        assert_eq!(cache_slug("a/b c"), "a_b_c");
     }
 
     #[test]
