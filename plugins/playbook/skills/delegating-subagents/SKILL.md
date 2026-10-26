@@ -25,7 +25,7 @@ Read the report even when the work looks fine. The reports that mattered most ca
 
 ## Roster
 
-File delivery needs `Write` or `Bash`. The read-only agents have neither on purpose (the repo's agent checks enforce it, ADR 0003): a reviewer must not be able to modify the code it reviews. Do not grant them `Write` to fix a delivery problem; change the plan, not the guard.
+File delivery needs `Write` or `Bash`. The read-only agents have neither on purpose (the repo's agent checks enforce it, ADR 0003): a reviewer must not be able to modify the code it reviews. Do not grant them `Write` to fix a delivery problem; change the plan, not the guard. The read-only rows cannot run `playbook code`: the orchestrator runs it and pastes the output into their brief.
 
 | Agent | `subagent_type` to pass the `Agent` tool | Delivery |
 |---|---|---|
@@ -41,7 +41,7 @@ File delivery needs `Write` or `Bash`. The read-only agents have neither on purp
 | `cheap-checker` | `playbook:cheap-checker` | **Return value only** (Read, Grep, Glob, Skill) |
 | `review-triage` | `playbook:review-triage` | **Return value only** (Read, Grep, Glob, Skill) |
 
-**Always pass the `playbook:` prefix** from the second column. These are plugin agents, and a bare `subagent_type: critic` resolves to the wrong agent or none (fixed repo-wide in #284). Elsewhere, the bare name is only a label for talking about the agent. `crates/cli/tests/delegating_subagents_roster.rs` keeps this table in sync with `agents/*.md`.
+**Always pass the `playbook:` prefix** from the second column. These are plugin agents, and a bare `subagent_type: critic` resolves to the wrong agent or none (fixed repo-wide in #284). Elsewhere, the bare name is only a label for talking about the agent. `playbook agents check` (run in CI) keeps the read-only rows free of `Edit`, `Write`, `NotebookEdit` and `Bash`. No test compares this table with `agents/*.md`: change both together.
 
 Effort variants such as `reviewer-low` and `reviewer-xhigh` are not files and not in the table. The playbook launchers render them for one session into a throwaway plugin, with the base agent's `tools`, `model` and body and a different `effort`. Their `subagent_type` is `playbook-variants:<name>`: spawn the exact type the ceiling step below returns. A session started without the launcher has the base agents only.
 
@@ -65,6 +65,8 @@ Return: status, findings as file:line, output path; at most about 300 words
 ```
 
 The `Return` line caps the message, not the work: the full report goes in the output file, uncapped. Every agent's prompt carries the same cap. To keep the parent context small, rely on the capped return. Read a finished agent's output file only when the return is not enough, and only the parts you need. Do not poll it while the agent runs.
+
+Built-in `Explore` agents read no CLAUDE.md and none of playbook's prompt, but they have Bash: every `Explore` or `general-purpose` brief carries the code search rule of `playbook:grounding-research` (run `playbook code status`, then `playbook code index` when it says stale or missing, then `playbook code context` before Grep or Glob), or you run the search yourself and paste the result.
 
 Fork only when the child needs the decisions and corrections made earlier in this session and writing them down would cost more than the inheritance. That is rare: the measured forks were research, review, edits and commit text, all of which a brief covers. Classification of every playbook spawn site is in [references/briefs.md](references/briefs.md).
 

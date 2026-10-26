@@ -20,6 +20,16 @@ Every claim about code MUST be grounded in a verifiable source:
 5. If you can't verify a claim, write `[unverified]` next to it.
 6. If you can't find evidence, say "I could not verify this."
 
+## Code search first
+
+For any code question, search the index before Grep or Glob:
+
+1. Run `playbook code status`. When it reports `stale` or `missing`, run `playbook code index` first (a full index of about 1,000 files takes about 1 s).
+2. Run `playbook code context "<question>"` for an open question, `playbook code symbol <name>` or `playbook code refs <name>` for one name, `playbook code search <words>` for text, and `playbook code outline <path>` or `playbook code read <path> <start>:<end>` for one file. Open the file at the line it gives before you cite it (rule 2 above).
+3. Use Grep and Glob only when the binary or the index is unavailable: `playbook` is not installed, or `code status` or `code index` fails (no `origin` remote, or `another index run is in progress` in a sibling worktree).
+
+Agents without Bash get the `playbook code context` output in their brief.
+
 ## Findings Format
 
 Each individual finding should use this shape:

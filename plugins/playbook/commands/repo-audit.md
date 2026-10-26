@@ -29,6 +29,7 @@ Phase 1 / Discovery & Mapping (read before judging)
 
 Explore the repository systematically before forming any opinions:
 
+- Run `playbook code status`, then `playbook code index` when it says stale or missing; map entry points and core modules with `playbook code context` and `playbook code outline` before reading files. Use Grep and Glob only when the binary or the index is unavailable.
 - Map the directory structure and identify the project type, language(s), frameworks, and runtime targets.
 - Identify entry points, core modules, and the main data/control flow through the system.
 - Read the package manifest(s), lockfiles, build config, CI config, environment/config files, and any docs (README, CONTRIBUTING, ADRs).
