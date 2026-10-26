@@ -1138,6 +1138,7 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
         "seen-reads",
         "read-state.jsonl",
         "capture-crossings",
+        "code-hint",
     ] {
         fs::write(session_dir.join(name), "stale-content").unwrap();
     }
@@ -1164,6 +1165,7 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
         "seen-reads",
         "read-state.jsonl",
         "capture-crossings",
+        "code-hint",
     ] {
         let contents = fs::read_to_string(session_dir.join(name)).unwrap();
         assert_eq!(contents, "", "{name} should be zeroed, got '{contents}'");

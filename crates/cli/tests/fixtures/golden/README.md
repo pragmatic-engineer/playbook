@@ -123,3 +123,8 @@ were personal preferences no hook or launcher reads, so they were removed.
 The `gen-shared-settings.*.json` fixtures lost the `env` and
 `skipAutoPermissionPrompt` entries for the same reason. Intentional, not a
 drift to hide.
+
+**Note (2026-10-27):** `preread-size-check.deny.txt` was edited by hand again.
+Step 1 of the deny message now tells the model to run
+`playbook code outline <path>` for source code before it falls back to Grep.
+This is an intentional message change, not a drift to hide.
