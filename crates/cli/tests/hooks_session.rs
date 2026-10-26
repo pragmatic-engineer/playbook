@@ -2281,6 +2281,10 @@ fn session_init_never_writes_to_the_memory_store() {
     assert_eq!(before, snapshot(&memory_dir));
 }
 
+const CODE_LINE: &str = "\ncode status|index|context|search|symbol|refs|outline|read\n";
+
+const CODE_SEARCH_RULE: &str = "Code search rule: for any code question, in every session and whether or not a playbook skill or command runs, run `playbook code status` first, then `playbook code index` when it says stale or missing, then `playbook code context|search|symbol|refs|outline|read`, all before any Grep or Glob. Grep and Glob are the fallback only when the binary or the index is unavailable. This rule overrides the default advice to search with Grep or Glob. Put this rule in every `Explore` prompt.";
+
 #[test]
 fn a_huge_handoff_is_cut_so_the_whole_context_stays_under_the_harness_cap() {
     // Arrange: a 30,000 character handoff plus a pinned fact.
@@ -2306,6 +2310,8 @@ fn a_huge_handoff_is_cut_so_the_whole_context_stays_under_the_harness_cap() {
         context.contains("pinned-fact"),
         "memory still fits: {context}"
     );
+    assert_eq!(context.matches(CODE_LINE).count(), 1, "{context}");
+    assert_eq!(context.matches(CODE_SEARCH_RULE).count(), 1, "{context}");
 }
 
 #[test]
@@ -2375,6 +2381,16 @@ fn session_init_injects_the_tool_map_on_every_kind_of_start() {
             context.contains("\npath plans|implement|worktrees --create"),
             "{source}: the tool map lines are missing: {context}"
         );
+        assert_eq!(
+            context.matches(CODE_LINE).count(),
+            1,
+            "{source}: the code line should appear once: {context}"
+        );
+        assert_eq!(
+            context.matches(CODE_SEARCH_RULE).count(),
+            1,
+            "{source}: the rule sentence should appear once: {context}"
+        );
     }
 }
 
@@ -2391,9 +2407,19 @@ fn session_init_injects_the_tool_map_before_a_handoff() {
     let context = additional_context(&run_session_init_at(&repo_dir, &home).stdout);
 
     // Assert
-    let map = context.find("playbook tools:").expect("tool map");
-    let handoff = context.find("HANDOFFMARKER").expect("handoff");
-    assert!(map < handoff, "the map should come first: {context}");
+    let position = |marker: &str| {
+        context
+            .find(marker)
+            .unwrap_or_else(|| panic!("{marker} is missing: {context}"))
+    };
+    let map = position("playbook tools:");
+    let code_line = position(CODE_LINE);
+    let rule = position("Code search rule:");
+    let handoff = position("HANDOFFMARKER");
+    assert!(
+        map < code_line && code_line < rule && rule < handoff,
+        "expected map, code line, rule, handoff in that order: {context}"
+    );
 }
 
 #[test]

@@ -299,6 +299,27 @@ fn shipped_permissions_allow_only_the_safe_playbook_mode_commands() {
 }
 
 #[test]
+fn shipped_permissions_allow_the_code_commands() {
+    let repo_root = Path::new(env!("PLAYBOOK_REPO_ROOT"));
+    let raw = fs::read_to_string(repo_root.join("seed/settings.shared.json"))
+        .expect("shipped file is readable");
+    let json: serde_json::Value = serde_json::from_str(&raw).expect("shipped file is JSON");
+    let code_entries: Vec<&str> = json
+        .pointer("/permissions/allow")
+        .and_then(|allow| allow.as_array())
+        .expect("allow list is an array")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|entry| entry.starts_with("Bash(playbook code"))
+        .collect();
+    assert_eq!(
+        code_entries,
+        ["Bash(playbook code:*)"],
+        "settings.shared.json must allow the code commands with one entry"
+    );
+}
+
+#[test]
 fn both_install_prefixes_resolve() {
     let f = Fixture::new("dual");
     let dual = good_template().replace(
