@@ -6,10 +6,17 @@
 
 use std::fs;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static CALLS: AtomicUsize = AtomicUsize::new(0);
 
 fn run(args: &[&str]) -> (bool, String) {
-    let home =
-        std::env::temp_dir().join(format!("playbook-sessions-{}", playbook::testing::run_id()));
+    // One home per call: tests run in parallel and each call deletes its home.
+    let n = CALLS.fetch_add(1, Ordering::Relaxed);
+    let home = std::env::temp_dir().join(format!(
+        "playbook-sessions-{}-{n}",
+        playbook::testing::run_id()
+    ));
     let project = home.join(".claude/projects/proj-one");
     fs::create_dir_all(&project).unwrap();
     let fixtures = std::path::Path::new(env!("PLAYBOOK_REPO_ROOT"))
@@ -55,4 +62,21 @@ fn json_has_a_generation_time_and_an_empty_session_list() {
 #[test]
 fn the_list_subcommand_is_the_same_as_the_bare_command() {
     assert_eq!(run(&["sessions", "list"]), run(&["sessions"]));
+}
+
+#[test]
+fn the_sweep_dry_run_reports_and_names_nothing_to_close() {
+    let (ok, text) = run(&["sessions", "sweep", "--dry-run"]);
+    assert!(ok);
+    assert_eq!(
+        text,
+        "Dry run: nothing is removed, stopped or closed.\nNo finished or stale sessions.\n"
+    );
+}
+
+#[test]
+fn the_sweep_refuses_to_run_without_the_dry_run_flag() {
+    let (ok, text) = run(&["sessions", "sweep"]);
+    assert!(!ok);
+    assert!(text.is_empty());
 }

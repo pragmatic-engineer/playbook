@@ -957,9 +957,18 @@ fn real_main() {
             }
         },
         Command::Sessions { sub, json } => {
-            let json = json || matches!(sub, Some(SessionsCommand::List { json: true }));
             let paths = usage::run::Paths::real();
-            match playbook::sessions::run(json, &paths, &common::session::home_dir()) {
+            let home = common::session::home_dir();
+            let result = match sub {
+                Some(SessionsCommand::Sweep { .. }) => {
+                    playbook::sessions::sweep_dry_run(&paths, &home)
+                }
+                Some(SessionsCommand::List { json: list_json }) => {
+                    playbook::sessions::run(json || list_json, &paths, &home)
+                }
+                None => playbook::sessions::run(json, &paths, &home),
+            };
+            match result {
                 Ok(output) => print!("{output}"),
                 Err(err) => {
                     eprintln!("sessions: {err}");

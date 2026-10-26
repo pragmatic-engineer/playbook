@@ -28,6 +28,14 @@ In `playbook usage`, press `p` for a full screen table of the same records, in t
 
 The view reads again every 30 seconds, off the drawing loop, so a slow `gh` never freezes the screen. The selected session's suggestion shows under the table. The view has no key that closes, removes or stops anything.
 
+## Sweep dry run
+
+```
+playbook sessions sweep --dry-run
+```
+
+For each finished session, one line says what a sweep would do with its worktree. The verdict comes from the same guards as `playbook worktree remove`: the branch landed, the tree is clean, no live lock and no process using it. A session with activity in the last 15 minutes is left alone, a stale one is listed but not swept, and one with no worktree is only told to close. The flag is required, because only the dry run exists. It removes nothing, stops no process and closes no tab or pane (ADR-0024, stage 4).
+
 ## What it never does
 
 - It writes nothing, removes nothing and stops nothing.

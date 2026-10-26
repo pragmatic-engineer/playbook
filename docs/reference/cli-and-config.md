@@ -1326,13 +1326,23 @@ Example: `playbook sessions --json`
 
 - `--json`: Print the sessions as JSON
 
-Subcommands: `list`
+Subcommands: `list`, `sweep`
 
 ### `playbook sessions list`
 
 List recent sessions (the default)
 
 - `--json`: Print the sessions as JSON
+
+### `playbook sessions sweep`
+
+Show what a sweep would close for each finished session
+
+Judges each finished session's worktree with the same guards as `playbook worktree remove`: landed, clean, unlocked and not in use. A stale session is listed but not swept. Only the dry run exists: it removes nothing, stops no process and closes no tab or pane.
+
+Example: `playbook sessions sweep --dry-run`
+
+- `--dry-run`: Report only and change nothing (required)
 
 ### `playbook settings`
 

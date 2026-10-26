@@ -14,6 +14,7 @@
 
 pub(crate) mod activity;
 pub mod links;
+mod sweep;
 
 pub use crate::usage::session_view::{
     age, link_label, tokens, worktree_label, Place, Pr, PrKind, Record, State,
@@ -295,6 +296,22 @@ pub fn run(
     } else {
         Ok(render_text(&records, now))
     }
+}
+
+/// `playbook sessions sweep --dry-run`: what a sweep would do with each
+/// finished session's worktree, judged by the worktree sweep guards. Nothing
+/// is removed.
+pub fn sweep_dry_run(
+    paths: &crate::usage::run::Paths,
+    home: &std::path::Path,
+) -> Result<String, String> {
+    let (records, now) = load(paths, home)?;
+    let judge = |path: &std::path::Path| {
+        let slug = crate::common::repo::repo_slug_in(path);
+        let slug = (!slug.is_empty()).then_some(slug.as_str());
+        crate::worktree::would_remove(path, home, slug, path, now)
+    };
+    Ok(sweep::report(&records, now, &judge))
 }
 
 #[cfg(test)]

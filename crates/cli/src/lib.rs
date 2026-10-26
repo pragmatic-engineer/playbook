@@ -2111,6 +2111,19 @@ pub enum SessionsCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Show what a sweep would close for each finished session
+    ///
+    /// Judges each finished session's worktree with the same guards as
+    /// `playbook worktree remove`: landed, clean, unlocked and not in use. A
+    /// stale session is listed but not swept. Only the dry run exists: it
+    /// removes nothing, stops no process and closes no tab or pane.
+    ///
+    /// Example: `playbook sessions sweep --dry-run`
+    Sweep {
+        /// Report only and change nothing (required)
+        #[arg(long, required = true)]
+        dry_run: bool,
+    },
 }
 
 /// `playbook worktree` subcommands.
