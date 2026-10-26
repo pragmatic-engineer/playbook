@@ -102,6 +102,66 @@ fn spend(v: Option<&Value>) -> Option<Spend> {
     })
 }
 
+/// The window percentages a reading changed or confirmed: what the history
+/// records. `None` for a part the reading lacked or that was stale.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+struct Accepted {
+    five_hour: Option<f64>,
+    seven_day: Option<f64>,
+}
+
+/// A part of a [`Snapshot`] that has a usage figure and a reset time.
+trait Part {
+    fn resets_at(&self) -> i64;
+    fn used(&self) -> f64;
+}
+
+impl Part for Window {
+    fn resets_at(&self) -> i64 {
+        self.resets_at
+    }
+    fn used(&self) -> f64 {
+        self.used_percentage
+    }
+}
+
+impl Part for Spend {
+    fn resets_at(&self) -> i64 {
+        self.resets_at
+    }
+    fn used(&self) -> f64 {
+        self.used_percentage
+    }
+}
+
+/// Settles one part: the part held after this reading, the time it was read
+/// and whether the reading was accepted. Reset times are compared as given:
+/// Claude Code passes the same epoch second for every reading of one window,
+/// so no tolerance is needed.
+fn settle<P: Part>(
+    incoming: Option<P>,
+    stored: Option<P>,
+    stored_read: i64,
+    read_at: i64,
+    now: i64,
+) -> (Option<P>, Option<i64>, bool) {
+    let live = stored.filter(|s| s.resets_at() > now);
+    match (incoming, live) {
+        (None, None) => (None, None, false),
+        (None, Some(s)) => (Some(s), Some(stored_read), false),
+        (Some(n), None) => (Some(n), Some(read_at), true),
+        (Some(n), Some(s)) => {
+            let newer = n.resets_at() > s.resets_at();
+            let same_window_not_lower = n.resets_at() == s.resets_at() && n.used() >= s.used();
+            if newer || same_window_not_lower {
+                (Some(n), Some(read_at), true)
+            } else {
+                (Some(s), Some(stored_read), false)
+            }
+        }
+    }
+}
+
 impl Snapshot {
     /// Reads `rate_limits` from the statusline input. `None` when the input is
     /// not JSON or has no usable window (API key accounts, or before the first
@@ -197,42 +257,56 @@ impl Snapshot {
         .unwrap_or(self.captured_at)
     }
 
-    /// This reading laid over the one stored before it. A part this reading
-    /// carries replaces the stored one. A part it lacks is kept as stored, with
-    /// its own read time, unless its reset time has passed. Claude Code sends
-    /// one window at times, so overwriting the file would lose the other.
-    pub fn merged_over(self, stored: Option<Snapshot>, now: i64) -> Snapshot {
-        let Some(old) = stored else {
-            return self;
+    /// This reading laid over the one stored before it, with the percentages of
+    /// the windows it changed or confirmed. Every Claude Code session sends the
+    /// numbers of its own last reply, so an idle session sends old ones. Within
+    /// one window usage only grows, so per part (see [`Part`]): a higher or equal
+    /// figure replaces the stored part and sets its read time, a lower one and
+    /// an earlier reset time are stale and leave the stored part and its read
+    /// time alone, a later reset time is a new window and replaces it. A part
+    /// this reading lacks is kept as stored, with its own read time. A stored
+    /// part whose reset time has passed is replaced or dropped.
+    fn merged_over(self, stored: Option<Snapshot>, now: i64) -> (Snapshot, Accepted) {
+        let old = stored.unwrap_or_default();
+        let read_at = self.captured_at;
+        let stored_read = |at: Option<i64>| at.unwrap_or(old.captured_at);
+        let (five_hour, five_read, took_five) = settle(
+            self.five_hour,
+            old.five_hour.clone(),
+            stored_read(old.read.five_hour),
+            read_at,
+            now,
+        );
+        let (seven_day, seven_read, took_seven) = settle(
+            self.seven_day,
+            old.seven_day.clone(),
+            stored_read(old.read.seven_day),
+            read_at,
+            now,
+        );
+        let (spend_limit, spend_read, _) = settle(
+            self.spend_limit,
+            old.spend_limit.clone(),
+            stored_read(old.read.spend_limit),
+            read_at,
+            now,
+        );
+        let accepted = Accepted {
+            five_hour: five_hour.as_ref().filter(|_| took_five).map(Part::used),
+            seven_day: seven_day.as_ref().filter(|_| took_seven).map(Part::used),
         };
-        let stored_at = |at: Option<i64>| at.unwrap_or(old.captured_at);
-        let live = |at: i64| at > now;
-        let mut out = self;
-        let new_at = out.captured_at;
-        out.read = ReadTimes {
-            five_hour: out.five_hour.as_ref().map(|_| new_at),
-            seven_day: out.seven_day.as_ref().map(|_| new_at),
-            spend_limit: out.spend_limit.as_ref().map(|_| new_at),
+        let merged = Snapshot {
+            captured_at: read_at,
+            five_hour,
+            seven_day,
+            spend_limit,
+            read: ReadTimes {
+                five_hour: five_read,
+                seven_day: seven_read,
+                spend_limit: spend_read,
+            },
         };
-        if out.five_hour.is_none() {
-            if let Some(w) = old.five_hour.clone().filter(|w| live(w.resets_at)) {
-                out.five_hour = Some(w);
-                out.read.five_hour = Some(stored_at(old.read.five_hour));
-            }
-        }
-        if out.seven_day.is_none() {
-            if let Some(w) = old.seven_day.clone().filter(|w| live(w.resets_at)) {
-                out.seven_day = Some(w);
-                out.read.seven_day = Some(stored_at(old.read.seven_day));
-            }
-        }
-        if out.spend_limit.is_none() {
-            if let Some(sp) = old.spend_limit.clone().filter(|sp| live(sp.resets_at)) {
-                out.spend_limit = Some(sp);
-                out.read.spend_limit = Some(stored_at(old.read.spend_limit));
-            }
-        }
-        out
+        (merged, accepted)
     }
 
     /// The measured limits that still apply at `now`. A window whose reset time
@@ -305,12 +379,11 @@ pub fn save(usage_dir: &Path, snap: &Snapshot) {
 /// JSON or has no usable part. Best effort, like [`save`].
 pub fn remember(usage_dir: &Path, input: &str, now: i64) {
     if let Some(new) = Snapshot::from_statusline(input, now) {
-        // The history gets what this reading carried, not the windows kept
-        // from an earlier one: those keep their own read time.
-        let five = new.five_hour.as_ref().map(|w| w.used_percentage);
-        let seven = new.seven_day.as_ref().map(|w| w.used_percentage);
-        save(usage_dir, &new.merged_over(load(usage_dir), now));
-        super::limits_history::record(usage_dir, five, seven, now);
+        // The history gets the windows this reading changed or confirmed, not
+        // the ones kept from an earlier reading and not a stale figure.
+        let (merged, accepted) = new.merged_over(load(usage_dir), now);
+        save(usage_dir, &merged);
+        super::limits_history::record(usage_dir, accepted.five_hour, accepted.seven_day, now);
     }
 }
 
@@ -1896,10 +1969,12 @@ mod tests {
         let base = load(&dir);
         let a = Snapshot::from_statusline(&reading(Some((11.0, NOW + 3600)), None), NOW + 1)
             .unwrap()
-            .merged_over(base.clone(), NOW + 1);
+            .merged_over(base.clone(), NOW + 1)
+            .0;
         let b = Snapshot::from_statusline(&reading(None, Some((21.0, NOW + 86_400))), NOW + 2)
             .unwrap()
-            .merged_over(base, NOW + 2);
+            .merged_over(base, NOW + 2)
+            .0;
 
         save(&dir, &a);
         save(&dir, &b);
@@ -1924,6 +1999,231 @@ mod tests {
         assert_eq!(s.spend_limit.unwrap().limit_usd, Some(10.0));
         assert_eq!(s.read.spend_limit, Some(NOW));
         assert_eq!(s.five_hour.unwrap().used_percentage, 5.0);
+    }
+
+    // Several sessions share the file and an idle one keeps sending the
+    // numbers from its last reply: within one window only a higher figure may
+    // replace the stored one.
+
+    const WINDOW_END: i64 = NOW + 3 * HOUR;
+    const WEEK_END: i64 = NOW + 86_400;
+
+    fn five_hour_after(dir: &Path, readings: &[f64]) -> Vec<f64> {
+        readings
+            .iter()
+            .enumerate()
+            .map(|(i, pct)| {
+                let at = NOW + i as i64 * 60;
+                remember(dir, &reading(Some((*pct, WINDOW_END)), None), at);
+                stored_in(dir).five_hour.unwrap().used_percentage
+            })
+            .collect()
+    }
+
+    fn history_rows(dir: &Path) -> Vec<(Option<f64>, Option<f64>)> {
+        let text =
+            std::fs::read_to_string(crate::limits_history::history_path(dir)).unwrap_or_default();
+        text.lines()
+            .map(|line| {
+                let v: Value = serde_json::from_str(line).unwrap();
+                (v["five_hour"].as_f64(), v["seven_day"].as_f64())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_gateway_spend_limit_follows_the_same_newest_reading_rule() {
+        let dir = merge_dir("spend-stale");
+        let spend_reading = |pct: f64, at: i64| {
+            format!(
+                r#"{{"rate_limits":{{"spend_limit":{{"used_percentage":{pct},"resets_at":{at},"used_usd":{pct},"limit_usd":100.0,"period":"monthly"}}}}}}"#
+            )
+        };
+        let month_end = NOW + 20 * 86_400;
+        remember(&dir, &spend_reading(40.0, month_end), NOW);
+
+        remember(&dir, &spend_reading(10.0, month_end), NOW + 60);
+        assert_eq!(stored_in(&dir).spend_limit.unwrap().used_usd, Some(40.0));
+        assert_eq!(stored_in(&dir).read.spend_limit, Some(NOW));
+
+        remember(&dir, &spend_reading(55.0, month_end), NOW + 120);
+        assert_eq!(stored_in(&dir).spend_limit.unwrap().used_usd, Some(55.0));
+    }
+
+    #[test]
+    fn an_idle_sessions_lower_reading_never_lowers_the_stored_five_hour_value() {
+        let dir = merge_dir("monotonic");
+
+        let stored = five_hour_after(&dir, &[14.0, 5.0, 15.0, 2.0, 17.0]);
+
+        assert_eq!(stored, [14.0, 14.0, 15.0, 15.0, 17.0]);
+    }
+
+    #[test]
+    fn a_weekly_figure_at_the_cap_survives_an_idle_sessions_lower_one() {
+        let dir = merge_dir("weekly");
+        let mut stored = Vec::new();
+        for (i, pct) in [25.0, 100.0, 25.0, 100.0, 25.0].into_iter().enumerate() {
+            remember(
+                &dir,
+                &reading(None, Some((pct, WEEK_END))),
+                NOW + i as i64 * 60,
+            );
+            stored.push(stored_in(&dir).seven_day.unwrap().used_percentage);
+        }
+
+        assert_eq!(stored, [25.0, 100.0, 100.0, 100.0, 100.0]);
+    }
+
+    #[test]
+    fn a_later_reset_time_is_a_new_window_and_replaces_a_higher_value() {
+        let dir = merge_dir("newer-window");
+        remember(&dir, &reading(Some((90.0, WINDOW_END)), None), NOW);
+
+        remember(
+            &dir,
+            &reading(Some((3.0, WINDOW_END + 5 * HOUR)), None),
+            NOW + 60,
+        );
+
+        let w = stored_in(&dir).five_hour.unwrap();
+        assert_eq!(w.used_percentage, 3.0);
+        assert_eq!(w.resets_at, WINDOW_END + 5 * HOUR);
+    }
+
+    #[test]
+    fn an_earlier_reset_time_is_a_stale_reading_and_is_dropped_while_the_stored_part_is_live() {
+        let dir = merge_dir("older-window");
+        remember(&dir, &reading(Some((20.0, WINDOW_END)), None), NOW);
+
+        remember(
+            &dir,
+            &reading(Some((90.0, WINDOW_END - HOUR)), None),
+            NOW + 60,
+        );
+
+        let s = stored_in(&dir);
+        let w = s.five_hour.unwrap();
+        assert_eq!((w.used_percentage, w.resets_at), (20.0, WINDOW_END));
+        assert_eq!(s.read.five_hour, Some(NOW));
+    }
+
+    #[test]
+    fn a_stored_part_past_its_reset_time_is_replaced_by_whatever_comes() {
+        let dir = merge_dir("past-reset");
+        remember(&dir, &reading(Some((90.0, NOW + 60)), None), NOW);
+        let at = NOW + 120;
+
+        remember(&dir, &reading(Some((5.0, NOW + 90)), None), at);
+
+        let s = stored_in(&dir);
+        let w = s.five_hour.unwrap();
+        assert_eq!((w.used_percentage, w.resets_at), (5.0, NOW + 90));
+        assert_eq!(s.read.five_hour, Some(at));
+    }
+
+    #[test]
+    fn a_stale_reading_of_one_window_still_carries_the_other_window_forward() {
+        let dir = merge_dir("carry");
+        remember(
+            &dir,
+            &reading(Some((30.0, WINDOW_END)), Some((40.0, WEEK_END))),
+            NOW,
+        );
+
+        remember(&dir, &reading(Some((10.0, WINDOW_END)), None), NOW + 60);
+
+        let s = stored_in(&dir);
+        assert_eq!(s.five_hour.unwrap().used_percentage, 30.0);
+        assert_eq!(s.seven_day.unwrap().used_percentage, 40.0);
+        assert_eq!(s.read.five_hour, Some(NOW));
+        assert_eq!(s.read.seven_day, Some(NOW));
+    }
+
+    #[test]
+    fn an_equal_figure_refreshes_the_read_time_and_a_lower_one_does_not() {
+        let dir = merge_dir("read-time");
+        remember(&dir, &reading(Some((30.0, WINDOW_END)), None), NOW);
+
+        remember(&dir, &reading(Some((30.0, WINDOW_END)), None), NOW + 60);
+        assert_eq!(stored_in(&dir).read.five_hour, Some(NOW + 60));
+
+        remember(&dir, &reading(Some((12.0, WINDOW_END)), None), NOW + 120);
+        let s = stored_in(&dir);
+        assert_eq!(s.five_hour.unwrap().used_percentage, 30.0);
+        assert_eq!(s.read.five_hour, Some(NOW + 60));
+    }
+
+    #[test]
+    fn a_part_only_stale_readings_touch_goes_stale_on_its_own_clock() {
+        let dir = merge_dir("goes-stale");
+        remember(&dir, &reading(Some((30.0, NOW + 10 * HOUR)), None), NOW);
+        let later = NOW + 7 * HOUR;
+
+        remember(&dir, &reading(Some((10.0, NOW + 10 * HOUR)), None), later);
+
+        assert!(stored_in(&dir).is_stale(later));
+    }
+
+    #[test]
+    fn the_history_gets_only_the_figures_the_reading_changed_or_confirmed() {
+        let dir = merge_dir("history");
+        let gap = crate::limits_history::MIN_GAP_SECONDS;
+        for (i, pct) in [14.0, 5.0, 15.0, 2.0, 17.0].into_iter().enumerate() {
+            remember(
+                &dir,
+                &reading(Some((pct, WINDOW_END)), None),
+                NOW + i as i64 * gap,
+            );
+        }
+
+        assert_eq!(
+            history_rows(&dir),
+            [(Some(14.0), None), (Some(15.0), None), (Some(17.0), None)]
+        );
+    }
+
+    #[test]
+    fn a_reading_with_one_accepted_figure_records_the_other_as_missing() {
+        let dir = merge_dir("history-partial");
+        let gap = crate::limits_history::MIN_GAP_SECONDS;
+        remember(
+            &dir,
+            &reading(Some((30.0, WINDOW_END)), Some((40.0, WEEK_END))),
+            NOW,
+        );
+
+        remember(
+            &dir,
+            &reading(Some((10.0, WINDOW_END)), Some((45.0, WEEK_END))),
+            NOW + gap,
+        );
+
+        assert_eq!(
+            history_rows(&dir),
+            [(Some(30.0), Some(40.0)), (None, Some(45.0))]
+        );
+    }
+
+    #[test]
+    fn a_fully_rejected_reading_adds_nothing_to_the_history() {
+        let dir = merge_dir("history-rejected");
+        let gap = crate::limits_history::MIN_GAP_SECONDS;
+        remember(
+            &dir,
+            &reading(Some((30.0, WINDOW_END)), Some((40.0, WEEK_END))),
+            NOW,
+        );
+        let before = history_rows(&dir);
+
+        remember(
+            &dir,
+            &reading(Some((10.0, WINDOW_END)), Some((20.0, WEEK_END - HOUR))),
+            NOW + gap,
+        );
+
+        assert_eq!(before.len(), 1);
+        assert_eq!(history_rows(&dir), before);
     }
 
     // Why no limit is shown, the crossings and the comparison in the outputs.

@@ -223,6 +223,7 @@ The Budget panel, `--summary` and `--json` (`limits`) show how much of a limit y
 Notes:
 
 - A statusline reading that carries one window keeps the other window as stored, with its own read time, until that window resets. A reading is stale (tagged `stale`) as soon as one part held is over 6 hours old.
+- Every Claude Code session sends the limits from its own last reply, so an idle session sends old, lower numbers. Per part (5 hour, weekly, spend limit), a new reading replaces the stored one only when it is newer: the same reset time and an equal or higher figure (usage only grows inside a window), or a later reset time (a new window). A lower figure or an earlier reset time is dropped and the stored part keeps its read time, so only a reading that confirms a part keeps it fresh. A stored part whose reset time has passed is replaced by any reading.
 - The statusline input has no limit data on an API key account, and a Pro or Max account gets it only after the first response of a session. The plan windows show up once you have used Claude Code with the playbook statusline (`playbook statusline`). Each window can be missing, and Claude Code drops a window after its reset time, so playbook does the same.
 - Playbook reads only what Claude Code already passes to a local command and a few plan and usage fields of the Claude Code config file. It calls no endpoint with your login, reads no credential store, keeps no email, name, id or organization in the limits code (the account tag on each event is described under ingest), and writes nothing into Claude Code settings or memory. The stored file holds percentages, reset times and the gateway dollar limit, and no account, token or session id.
 
@@ -339,10 +340,10 @@ Nothing here is set by hand: the limit and the used figure come from what Claude
 
 ### The reading history
 
-`rate_limits.jsonl` sits next to `rate_limits.json` in the data folder. Each line is one reading: a format version `v` (now 1), the time and the two window percentages, for example `{"v":1,"t":1788400000,"five_hour":55.4,"seven_day":60.0}`, with `null` for a window the reading did not carry. It holds no account, token or session id.
+`rate_limits.jsonl` sits next to `rate_limits.json` in the data folder. Each line is one reading: a format version `v` (now 1), the time and the two window percentages, for example `{"v":1,"t":1788400000,"five_hour":55.4,"seven_day":60.0}`, with `null` for a window the reading did not carry or whose figure was dropped as stale. It holds no account, token or session id.
 
 - **Versions.** A line without `v` (from before the field existed) is read as version 1. A line with a newer `v`, or one that is not valid, is skipped.
-- **Adding.** The statusline adds a line only when a percentage it carries changed and at least 300 seconds have passed since the last line, so a busy session writes at most 288 lines a day.
+- **Adding.** The statusline adds a line only when a percentage it carries and kept changed and at least 300 seconds have passed since the last line, so a busy session writes at most 288 lines a day.
 - **Age.** Lines older than 8 days are dropped when the file is rewritten, which happens once the oldest line is a day past that (so the file can hold up to 9 days). If the clock goes back, lines from the future are dropped.
 - **Size.** The file never grows past 256 KiB. A rewrite removes the oldest lines first, and a file that is bigger anyway is ignored by readers and replaced by the next write.
 - **Readers.** Only the usage views read it, and a window chart uses the lines inside that window. A view keeps the parsed lines until the modified time or size changes, so a refresh of an unchanged file parses nothing.
