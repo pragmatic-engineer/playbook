@@ -343,7 +343,7 @@ Nothing here is set by hand: the limit and the used figure come from what Claude
 `rate_limits.jsonl` sits next to `rate_limits.json` in the data folder. Each line is one reading: a format version `v` (now 1), the time and the two window percentages, for example `{"v":1,"t":1788400000,"five_hour":55.4,"seven_day":60.0}`, with `null` for a window the reading did not carry or whose figure was dropped as stale. It holds no account, token or session id.
 
 - **Versions.** A line without `v` (from before the field existed) is read as version 1. A line with a newer `v`, or one that is not valid, is skipped.
-- **Adding.** The statusline adds a line only when a percentage it carries and kept changed and at least 300 seconds have passed since the last line, so a busy session writes at most 288 lines a day.
+- **Adding.** The statusline adds a line only when a percentage the reading changed or confirmed differs from the last line and at least 300 seconds have passed since it, so a busy session writes at most 288 lines a day.
 - **Age.** Lines older than 8 days are dropped when the file is rewritten, which happens once the oldest line is a day past that (so the file can hold up to 9 days). If the clock goes back, lines from the future are dropped.
 - **Size.** The file never grows past 256 KiB. A rewrite removes the oldest lines first, and a file that is bigger anyway is ignored by readers and replaced by the next write.
 - **Readers.** Only the usage views read it, and a window chart uses the lines inside that window. A view keeps the parsed lines until the modified time or size changes, so a refresh of an unchanged file parses nothing.

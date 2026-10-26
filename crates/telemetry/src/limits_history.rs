@@ -117,11 +117,12 @@ fn edges(path: &Path, len: u64) -> Option<Edges> {
     })
 }
 
-/// Adds a line for the windows a statusline reading carried, read at `now`,
-/// when the last line is at least [`MIN_GAP_SECONDS`] older and one of those
-/// percentages changed. A window the reading did not carry is written as
-/// `null`. Drops old lines and keeps the file under [`MAX_BYTES`]. Does
-/// nothing when both are `None`.
+/// Adds a line for the windows the merge accepted from a statusline reading,
+/// read at `now`, when the last line is at least [`MIN_GAP_SECONDS`] older and
+/// one of those percentages changed. A window the reading lacked, or whose
+/// figure was dropped as stale, is `None` and written as `null`. Drops old
+/// lines and keeps the file under [`MAX_BYTES`]. Does nothing when both are
+/// `None`.
 pub fn record(usage_dir: &Path, five_hour: Option<f64>, seven_day: Option<f64>, now: i64) {
     if five_hour.is_none() && seven_day.is_none() {
         return;

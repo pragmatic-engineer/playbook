@@ -114,6 +114,10 @@ struct Accepted {
 trait Part {
     fn resets_at(&self) -> i64;
     fn used(&self) -> f64;
+    /// Whether this reading, of the same window as `stored`, is not behind it.
+    fn is_not_behind(&self, stored: &Self) -> bool {
+        self.used() >= stored.used()
+    }
 }
 
 impl Part for Window {
@@ -132,6 +136,14 @@ impl Part for Spend {
     fn used(&self) -> f64 {
         self.used_percentage
     }
+    // Spend only grows within a period, but the percentage also moves when the
+    // gateway limit changes, so the dollars decide when both readings have them.
+    fn is_not_behind(&self, stored: &Self) -> bool {
+        match (self.used_usd, stored.used_usd) {
+            (Some(new), Some(old)) => new >= old,
+            _ => self.used_percentage >= stored.used_percentage,
+        }
+    }
 }
 
 /// Settles one part: the part held after this reading, the time it was read
@@ -146,13 +158,15 @@ fn settle<P: Part>(
     now: i64,
 ) -> (Option<P>, Option<i64>, bool) {
     let live = stored.filter(|s| s.resets_at() > now);
+    // A reading whose window has already ended describes nothing current.
+    let incoming = incoming.filter(|n| n.resets_at() > now);
     match (incoming, live) {
         (None, None) => (None, None, false),
         (None, Some(s)) => (Some(s), Some(stored_read), false),
         (Some(n), None) => (Some(n), Some(read_at), true),
         (Some(n), Some(s)) => {
             let newer = n.resets_at() > s.resets_at();
-            let same_window_not_lower = n.resets_at() == s.resets_at() && n.used() >= s.used();
+            let same_window_not_lower = n.resets_at() == s.resets_at() && n.is_not_behind(&s);
             if newer || same_window_not_lower {
                 (Some(n), Some(read_at), true)
             } else {
@@ -265,7 +279,8 @@ impl Snapshot {
     /// an earlier reset time are stale and leave the stored part and its read
     /// time alone, a later reset time is a new window and replaces it. A part
     /// this reading lacks is kept as stored, with its own read time. A stored
-    /// part whose reset time has passed is replaced or dropped.
+    /// part whose reset time has passed is replaced or dropped, and a reading
+    /// whose reset time has passed is ignored.
     fn merged_over(self, stored: Option<Snapshot>, now: i64) -> (Snapshot, Accepted) {
         let old = stored.unwrap_or_default();
         let read_at = self.captured_at;
@@ -2050,6 +2065,60 @@ mod tests {
         assert_eq!(stored_in(&dir).spend_limit.unwrap().used_usd, Some(55.0));
     }
 
+    fn spend_json(pct: f64, used: f64, limit: f64, resets_at: i64) -> String {
+        format!(
+            r#"{{"rate_limits":{{"spend_limit":{{"used_percentage":{pct},"resets_at":{resets_at},"used_usd":{used},"limit_usd":{limit},"period":"monthly"}}}}}}"#
+        )
+    }
+
+    #[test]
+    fn the_spend_limit_compares_dollars_when_both_readings_have_them() {
+        let dir = merge_dir("spend-dollars");
+        let month_end = NOW + 20 * 86_400;
+        remember(&dir, &spend_json(40.0, 40.4, 100.0, month_end), NOW);
+
+        // The same rounded percentage with fewer dollars is a stale reading.
+        remember(&dir, &spend_json(40.0, 40.1, 100.0, month_end), NOW + 60);
+        let s = stored_in(&dir);
+        assert_eq!(s.spend_limit.unwrap().used_usd, Some(40.4));
+        assert_eq!(s.read.spend_limit, Some(NOW));
+
+        remember(&dir, &spend_json(40.0, 40.7, 100.0, month_end), NOW + 120);
+        assert_eq!(stored_in(&dir).spend_limit.unwrap().used_usd, Some(40.7));
+    }
+
+    #[test]
+    fn a_raised_spend_limit_in_the_same_period_replaces_the_stored_one() {
+        let dir = merge_dir("spend-limit-raised");
+        let month_end = NOW + 20 * 86_400;
+        remember(&dir, &spend_json(50.0, 50.0, 100.0, month_end), NOW);
+
+        remember(&dir, &spend_json(25.0, 50.0, 200.0, month_end), NOW + 60);
+
+        let s = stored_in(&dir);
+        let spend = s.spend_limit.unwrap();
+        assert_eq!((spend.used_usd, spend.limit_usd), (Some(50.0), Some(200.0)));
+        assert_eq!(s.read.spend_limit, Some(NOW + 60));
+    }
+
+    #[test]
+    fn the_spend_limit_falls_back_to_the_percentage_without_dollars() {
+        let dir = merge_dir("spend-percent");
+        let month_end = NOW + 20 * 86_400;
+        let percent_only = |pct: f64| {
+            format!(
+                r#"{{"rate_limits":{{"spend_limit":{{"used_percentage":{pct},"resets_at":{month_end}}}}}}}"#
+            )
+        };
+        remember(&dir, &percent_only(30.0), NOW);
+
+        remember(&dir, &percent_only(10.0), NOW + 60);
+        assert_eq!(stored_in(&dir).spend_limit.unwrap().used_percentage, 30.0);
+
+        remember(&dir, &percent_only(35.0), NOW + 120);
+        assert_eq!(stored_in(&dir).spend_limit.unwrap().used_percentage, 35.0);
+    }
+
     #[test]
     fn an_idle_sessions_lower_reading_never_lowers_the_stored_five_hour_value() {
         let dir = merge_dir("monotonic");
@@ -2109,17 +2178,50 @@ mod tests {
     }
 
     #[test]
-    fn a_stored_part_past_its_reset_time_is_replaced_by_whatever_comes() {
+    fn a_stored_part_past_its_reset_time_is_replaced_by_a_live_reading() {
         let dir = merge_dir("past-reset");
         remember(&dir, &reading(Some((90.0, NOW + 60)), None), NOW);
         let at = NOW + 120;
 
-        remember(&dir, &reading(Some((5.0, NOW + 90)), None), at);
+        remember(&dir, &reading(Some((5.0, at + HOUR)), None), at);
 
         let s = stored_in(&dir);
         let w = s.five_hour.unwrap();
-        assert_eq!((w.used_percentage, w.resets_at), (5.0, NOW + 90));
+        assert_eq!((w.used_percentage, w.resets_at), (5.0, at + HOUR));
         assert_eq!(s.read.five_hour, Some(at));
+    }
+
+    #[test]
+    fn a_stored_part_past_its_reset_time_is_dropped_when_the_reading_lacks_it() {
+        let dir = merge_dir("past-reset-dropped");
+        remember(
+            &dir,
+            &reading(Some((90.0, NOW + 60)), Some((40.0, WEEK_END))),
+            NOW,
+        );
+
+        remember(&dir, &reading(None, Some((41.0, WEEK_END))), NOW + 120);
+
+        let s = stored_in(&dir);
+        assert_eq!(s.five_hour, None);
+        assert_eq!(s.seven_day.unwrap().used_percentage, 41.0);
+    }
+
+    #[test]
+    fn a_reading_whose_own_reset_time_has_passed_is_ignored_and_never_recorded() {
+        for (name, incoming_end) in [("same", NOW + 60), ("earlier", NOW + 30)] {
+            let dir = merge_dir(&format!("expired-incoming-{name}"));
+            remember(&dir, &reading(Some((90.0, NOW + 60)), None), NOW);
+            let before = history_rows(&dir);
+            let at = NOW + 120;
+
+            remember(&dir, &reading(Some((100.0, incoming_end)), None), at);
+
+            let s = stored_in(&dir);
+            assert_eq!(s.five_hour, None, "{name}");
+            assert_eq!(s.read.five_hour, None, "{name}");
+            assert_eq!(history_rows(&dir), before, "{name}");
+        }
     }
 
     #[test]
@@ -2181,6 +2283,21 @@ mod tests {
             history_rows(&dir),
             [(Some(14.0), None), (Some(15.0), None), (Some(17.0), None)]
         );
+    }
+
+    #[test]
+    fn a_lower_figure_of_a_new_window_is_recorded() {
+        let dir = merge_dir("history-new-window");
+        let gap = crate::limits_history::MIN_GAP_SECONDS;
+        remember(&dir, &reading(Some((90.0, WINDOW_END)), None), NOW);
+
+        remember(
+            &dir,
+            &reading(Some((3.0, WINDOW_END + 5 * HOUR)), None),
+            NOW + gap,
+        );
+
+        assert_eq!(history_rows(&dir), [(Some(90.0), None), (Some(3.0), None)]);
     }
 
     #[test]
