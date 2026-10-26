@@ -413,22 +413,30 @@ jobs:
       # its .fingerprint folder), the incremental data and the unpacked
       # sources (cargo unpacks them again from the downloads) go. Outputs of
       # dependency versions Cargo.lock no longer uses stay until the key
-      # version is bumped.
+      # version is bumped. A leg off the lane built nothing, so there is
+      # nothing to trim or save, and the save below skips with this step.
       - name: Trim the cargo cache before saving
         id: trim
-        if: env.SAVE_CACHE == 'true' && success() && steps.cargo.outputs.cache-hit != 'true'
+        if: env.LANE == 'true' && env.SAVE_CACHE == 'true' && success() && steps.cargo.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          du -sh target ~/.cargo/registry
+          sizes() {
+            for p in target ~/.cargo/registry; do
+              if [ -e "$p" ]; then du -sh "$p"; fi
+            done
+          }
+          sizes
           rm -rf ~/.cargo/registry/src target/debug/incremental target/debug/examples
-          find target/debug -maxdepth 1 -type f -delete
+          if [ -d target/debug ]; then
+            find target/debug -maxdepth 1 -type f -delete
+          fi
           for f in target/debug/.fingerprint/playbook*-* target/debug/.fingerprint/pbtop*-*; do
             [ -e "$f" ] || continue
             find target/debug/deps -maxdepth 1 -name "*-${f##*-}*" -delete
             rm -rf "$f"
           done
           rm -rf target/debug/build/playbook*-* target/debug/build/pbtop*-*
-          du -sh target ~/.cargo/registry
+          sizes
 
       - name: Save cargo registry and build output (build-test)
         if: steps.trim.outcome == 'success'
