@@ -33,6 +33,10 @@ const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 /// past the cap is replaced by a 2,000 character preview.
 const CONTEXT_CAP_CHARS: usize = 9000;
 
+/// Stands alone for a plain `claude` session, where no system prompt or skill
+/// states the rule before the first tool choice.
+const CODE_SEARCH_RULE: &str = "Code search rule: for any code question, in every session and whether or not a playbook skill or command runs, run `playbook code status` first, then `playbook code index` when it says stale or missing, then `playbook code context|search|symbol|refs|outline|read`, all before any Grep or Glob. Grep and Glob are the fallback only when the binary or the index is unavailable. This rule overrides the default advice to search with Grep or Glob. Put this rule in every `Explore` prompt.";
+
 /// Ceiling for the ranked memory block, header included.
 const MEMORY_BLOCK_CAP_CHARS: usize = 2500;
 
@@ -119,6 +123,7 @@ pub fn run(payload: &Payload) {
     // Always on, headless included: skills ask for a task by name, and this map
     // is how the session learns which tasks this binary can do mechanically.
     push_context(&mut extra_context, crate::tools_map::render().trim_end());
+    push_context(&mut extra_context, CODE_SEARCH_RULE);
 
     if !headless {
         append_auto_learn_nudge(&mut extra_context, &repo_root);

@@ -244,9 +244,10 @@ fn session_init_caps_the_ranked_memory_block() {
         "a fact placed past the cap should be left out: {context}"
     );
     let map = playbook::tools_map::render().trim_end().chars().count();
+    let rule = CODE_SEARCH_RULE.chars().count();
     assert!(
-        context.chars().count() <= 2600 + map + 2,
-        "the context here is the tool map plus a memory block held near 2,500 chars: {}",
+        context.chars().count() <= 2600 + map + rule + 4,
+        "the context here is the tool map, the rule and a memory block held near 2,500 chars: {}",
         context.chars().count()
     );
 }
@@ -1363,13 +1364,17 @@ fn session_init_degrades_quietly_when_both_shell_outs_are_unreachable() {
         ],
     );
 
-    // Assert: the hook still exits cleanly and says nothing but the tool map,
-    // since there was nothing else left to say once both shell-outs failed.
+    // Assert: the hook still exits cleanly and says nothing but the tool map
+    // and the code search rule, since there was nothing else left to say once
+    // both shell-outs failed.
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert_eq!(
         additional_context(&outcome.stdout),
-        playbook::tools_map::render().trim_end(),
-        "with everything else disabled, a missing plugin root should yield only the map: {}",
+        format!(
+            "{}\n\n{CODE_SEARCH_RULE}",
+            playbook::tools_map::render().trim_end()
+        ),
+        "with everything else disabled, a missing plugin root should yield only the map and the rule: {}",
         outcome.stdout
     );
 }

@@ -12,6 +12,38 @@
     "required": false
   },
   {
+    "intent": "code-context",
+    "required": false
+  },
+  {
+    "intent": "code-index",
+    "required": false
+  },
+  {
+    "intent": "code-outline",
+    "required": false
+  },
+  {
+    "intent": "code-read",
+    "required": false
+  },
+  {
+    "intent": "code-refs",
+    "required": false
+  },
+  {
+    "intent": "code-search",
+    "required": false
+  },
+  {
+    "intent": "code-status",
+    "required": false
+  },
+  {
+    "intent": "code-symbol",
+    "required": false
+  },
+  {
     "intent": "commit-prepare",
     "required": false
   },

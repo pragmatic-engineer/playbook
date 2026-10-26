@@ -54,7 +54,8 @@
       "Bash(playbook mode status:*)",
       "Bash(playbook mode ask)",
       "Bash(playbook run-context:*)",
-      "Bash(playbook commands:*)"
+      "Bash(playbook commands:*)",
+      "Bash(playbook code:*)"
     ],
     "deny": [
       "Read(**/.env)",
