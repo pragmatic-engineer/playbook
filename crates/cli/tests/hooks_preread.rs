@@ -948,6 +948,10 @@ mod preread_reread {
         assert!(is_denied(&out), "should deny, got: {out}");
         assert!(out.contains("300 lines"), "should name the count: {out}");
         assert!(out.contains("Grep"), "should hint at Grep: {out}");
+        assert!(
+            out.contains("playbook code outline"),
+            "should name the code outline command: {out}"
+        );
     }
 
     #[test]

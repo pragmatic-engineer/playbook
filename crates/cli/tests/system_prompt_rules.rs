@@ -11,6 +11,10 @@ use std::path::Path;
 /// Characters. Loaded on every turn, so growth should be a deliberate edit.
 const PROMPT_BUDGET_CHARS: usize = 9500;
 
+const CODE_SEARCH_RULE: &str = "**Code search**: for any code question, run `playbook code status` first, and `playbook code index` when it says stale or missing, then use `playbook code context|search|symbol|refs|outline|read`. Use Grep and Glob only when the binary or the index is unavailable. Put this rule in every `Explore` prompt, or search yourself.";
+
+const EXPLORE_CLAUSE: &str = "Put this rule in every `Explore` prompt, or search yourself.";
+
 fn prompt() -> String {
     let path = Path::new(env!("PLAYBOOK_REPO_ROOT")).join("seed/prompts/SYSTEM_PROMPT.md");
     fs::read_to_string(path).expect("shipped system prompt")
@@ -113,4 +117,36 @@ fn the_prompt_requires_a_memory_search_before_claiming_no_knowledge() {
         missing.is_empty(),
         "missing the search-before-no-knowledge rule: {missing:?}"
     );
+}
+
+#[test]
+fn the_prompt_states_the_code_search_rule() {
+    // Arrange
+    let text = prompt();
+
+    // Act
+    let has_rule = text.contains(CODE_SEARCH_RULE);
+    let stale: Vec<&str> = ["LSP", "ToolSearch", "Grep and Glob for search"]
+        .into_iter()
+        .filter(|needle| text.contains(needle))
+        .collect();
+
+    // Assert
+    assert!(has_rule, "missing the code search rule, verbatim");
+    assert!(
+        stale.is_empty(),
+        "still holds the old search advice: {stale:?}"
+    );
+}
+
+#[test]
+fn the_prompt_tells_every_explore_prompt_to_carry_the_rule() {
+    // Arrange
+    let text = prompt();
+
+    // Act
+    let has_clause = text.contains(EXPLORE_CLAUSE);
+
+    // Assert
+    assert!(has_clause, "missing the Explore clause");
 }

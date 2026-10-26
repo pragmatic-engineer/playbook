@@ -242,6 +242,14 @@ pub const TOOLS: &[Tool] = &[
     t("memory-context", "memory", "context", "", "memory context"),
     t("memory-rebuild", "memory", "rebuild", "", "memory rebuild"),
     t("memory-stats", "memory", "stats", "", "memory stats"),
+    t("code-status", "code", "status", "", "code status"),
+    t("code-index", "code", "index", "", "code index"),
+    t("code-context", "code", "context", "", "code context retry"),
+    t("code-search", "code", "search", "", "code search retry"),
+    t("code-symbol", "code", "symbol", "", "code symbol retry"),
+    t("code-refs", "code", "refs", "", "code refs retry"),
+    t("code-outline", "code", "outline", "", "code outline a.rs"),
+    t("code-read", "code", "read", "", "code read a.rs 1:20"),
     t("next-adr-number", "adr", "next", "", "adr next"),
     t(
         "prose-check",
@@ -446,6 +454,20 @@ mod tests {
         );
         assert!(text.contains("\npr prepare|create|rules"), "{text}");
         assert!(text.contains("\nrun-context --command NAME"), "{text}");
+    }
+
+    #[test]
+    fn the_code_line_lists_status_and_index_before_the_queries() {
+        let text = render();
+        let line = "\nmemory context|rebuild|stats\ncode status|index|context|search|symbol|refs|outline|read\nadr next\n";
+        assert_eq!(text.matches(line).count(), 1, "{text}");
+
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&render_json()).unwrap();
+        let status = rows
+            .iter()
+            .find(|row| row["intent"] == "code-status")
+            .expect("code-status is listed");
+        assert_eq!(status["command"], "playbook code status");
     }
 
     #[test]

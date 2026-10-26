@@ -141,6 +141,181 @@ mod search_counter {
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
+    /// The `additionalContext` of a hook's stdout, asserting stdout is exactly
+    /// one PreToolUse JSON object.
+    fn additional_context(stdout: &str) -> String {
+        assert!(
+            !stdout.is_empty(),
+            "expected one PreToolUse context, got silence"
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_str(stdout).expect("stdout should be exactly one JSON object");
+        assert_eq!(
+            parsed["hookSpecificOutput"]["hookEventName"], "PreToolUse",
+            "the hint is a PreToolUse context: {stdout}"
+        );
+        parsed["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .expect("additionalContext should be a string")
+            .to_owned()
+    }
+
+    fn tool_payload(sid: &str, tool: &str, extra: &str) -> String {
+        format!(r#"{{"session_id":"{sid}","tool_name":"{tool}"{extra}}}"#)
+    }
+
+    fn read_payload(sid: &str, path: &str) -> String {
+        tool_payload(
+            sid,
+            "Read",
+            &format!(r#","tool_input":{{"file_path":"{path}"}}"#),
+        )
+    }
+
+    const HINT_SENTENCE: &str = "Put the same rule in any `Explore` prompt";
+
+    #[test]
+    fn first_grep_prints_the_code_hint_once_and_the_second_stays_silent() {
+        // Arrange
+        let home = scratch_dir("hint-grep");
+        let sid = "hint";
+        let payload = tool_payload(sid, "Grep", "");
+
+        // Act
+        let (first, _) = fire("search-counter", &home, &payload);
+        let (second, _) = fire("search-counter", &home, &payload);
+
+        // Assert
+        let context = additional_context(&first);
+        for needle in ["playbook code status", "playbook code index", HINT_SENTENCE] {
+            assert!(
+                context.contains(needle),
+                "hint should hold '{needle}': {context}"
+            );
+        }
+        assert!(
+            read_state_file(&home, sid, "code-hint").is_some(),
+            "the first hint should create the code-hint marker"
+        );
+        assert_eq!(second, "", "the second Grep should stay silent");
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn first_glob_prints_the_hint_and_a_later_grep_stays_silent() {
+        // Arrange
+        let home = scratch_dir("hint-glob");
+        let sid = "hint";
+
+        // Act
+        let (glob, _) = fire("search-counter", &home, &tool_payload(sid, "Glob", ""));
+        let (grep, _) = fire("search-counter", &home, &tool_payload(sid, "Grep", ""));
+
+        // Assert
+        assert!(
+            additional_context(&glob).contains("playbook code status"),
+            "the first Glob should print the hint: {glob}"
+        );
+        assert_eq!(grep, "", "a Grep after the hint should stay silent");
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_read_does_not_use_up_the_hint() {
+        // Arrange
+        let home = scratch_dir("hint-read");
+        let sid = "hint";
+
+        // Act
+        let (read, _) = fire("search-counter", &home, &read_payload(sid, "/etc/hosts"));
+        let marker_after_read = read_state_file(&home, sid, "code-hint");
+        let (grep, _) = fire("search-counter", &home, &tool_payload(sid, "Grep", ""));
+
+        // Assert
+        assert_eq!(read, "", "a Read should print nothing");
+        assert!(
+            marker_after_read.is_none(),
+            "a Read should not create code-hint"
+        );
+        assert!(
+            additional_context(&grep).contains("playbook code status"),
+            "the next Grep should print the hint: {grep}"
+        );
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_subagent_grep_neither_gets_the_hint_nor_uses_it_up() {
+        // Arrange
+        let home = scratch_dir("hint-subagent");
+        let sid = "hint";
+        let subagent = tool_payload(sid, "Grep", r#","agent_id":"a1","agent_type":"Explore""#);
+
+        // Act
+        let (from_subagent, _) = fire("search-counter", &home, &subagent);
+        let marker_after_subagent = read_state_file(&home, sid, "code-hint");
+        let (from_main, _) = fire("search-counter", &home, &tool_payload(sid, "Grep", ""));
+
+        // Assert
+        assert_eq!(from_subagent, "", "a subagent Grep should print nothing");
+        assert!(
+            marker_after_subagent.is_none(),
+            "a subagent Grep should not create code-hint"
+        );
+        assert!(
+            additional_context(&from_main).contains("playbook code status"),
+            "the main conversation should still get its hint: {from_main}"
+        );
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn the_nudge_at_eight_wins_over_the_hint_and_names_the_rule() {
+        // Arrange: seven Reads of distinct files, so the eighth counted call
+        // is the session's first Grep.
+        let home = scratch_dir("hint-nudge");
+        let sid = "hint";
+        for n in 0..7 {
+            fire(
+                "search-counter",
+                &home,
+                &read_payload(sid, &format!("/etc/f{n}")),
+            );
+        }
+
+        // Act
+        let (eighth, _) = fire("search-counter", &home, &tool_payload(sid, "Grep", ""));
+        let marker_after_eighth = read_state_file(&home, sid, "code-hint");
+        let (ninth, _) = fire("search-counter", &home, &tool_payload(sid, "Grep", ""));
+
+        // Assert
+        let nudge = additional_context(&eighth);
+        assert!(nudge.contains("count is 8"), "nudge should fire: {nudge}");
+        assert!(
+            nudge.contains("playbook code status"),
+            "nudge should name the rule: {nudge}"
+        );
+        assert!(
+            !nudge.contains(HINT_SENTENCE),
+            "nudge should not carry the hint's own sentence: {nudge}"
+        );
+        assert!(
+            marker_after_eighth.is_none(),
+            "the nudge call should not create code-hint"
+        );
+        assert!(
+            additional_context(&ninth).contains(HINT_SENTENCE),
+            "the ninth call should print the hint: {ninth}"
+        );
+        assert!(read_state_file(&home, sid, "code-hint").is_some());
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     #[test]
     fn read_of_same_path_counts_once() {
         // Arrange: the seen-reads file is what makes a repeated Read of the

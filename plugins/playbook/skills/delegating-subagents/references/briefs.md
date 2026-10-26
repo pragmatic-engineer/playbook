@@ -10,6 +10,7 @@ Why `SKILL.md` says to pass a `subagent_type` and write a stand-alone brief, and
 - Return cap
 - Review brief builder
 - Implementer brief builder
+- Auditor brief
 - Checks before dispatch
 
 ## Fork cost
@@ -64,13 +65,19 @@ Reviewers (`reviewer`, `cheap-checker`) used to spend about 14 messages per run 
 3. **Test command.** The scoped verify command, and the `CHECK_OUTPUT` the orchestrator already captured. Reviewers read it as context and never re-run it.
 4. **Limit.** The sentence: "Everything needed to judge this change is above: the diff and the numbered excerpts. Read or search beyond it only when a claim cannot be settled from the excerpt (a caller, a definition, a test). Do not browse the repository."
 
+**Callers, when the index answers.** Reviewers have no Bash. When `playbook code status` reports `fresh`, after `playbook code index` when it said stale or missing, add the `playbook code refs <name>` output for each public name the diff changes, under a `Callers` header.
+
 The lens, the output shape and the voice rules stay exactly as the command specifies. The limit narrows where the reviewer looks for evidence, never what it must look for: every lens still covers its whole scope, and a reviewer that needs a caller or a test still reads it.
 
 Measured on the seeded-defect fixture (`crates/cli/tests/fixtures/bench/reviewer-real-diffs.json`, 7 seeded bugs and 3 clean cases, 3 repeats each, Opus medium, tools on, checkout present): recall 21 of 21 before and after, clean cases 9 of 9 before and after, 3.4 to 2.2 turns per run, $0.0447 to $0.0395 per run. The fixture files are small, so the saving on a real diff is larger.
 
 ## Implementer brief builder
 
-An implementer brief is the per-Work-Unit file. Intent: work-unit-briefs. If the session's tool map (printed at session start) lists it, use that command to write it. Otherwise do this: write it by hand from the plan's Work Unit (its files, changes, test scenarios and done-when). Either way it also carries: the excerpts, with line numbers, of the files the step edits and of the one or two neighbours it must match (an interface it implements, the test it extends), the scoped verify command, and the limit: "The excerpts above are the context you need. Read a file only to edit it or when the excerpt cannot settle a question. Do not explore the repository." The Edit tool needs the file read first, so a file the step changes is still read; the saving is the exploratory reads around it.
+An implementer brief is the per-Work-Unit file. Intent: work-unit-briefs. If the session's tool map (printed at session start) lists it, use that command to write it. Otherwise do this: write it by hand from the plan's Work Unit (its files, changes, test scenarios and done-when). Either way it also carries: the excerpts, with line numbers, of the files the step edits and of the one or two neighbours it must match (an interface it implements, the test it extends), the scoped verify command, and the limit: "The excerpts above are the context you need. Read a file only to edit it or when the excerpt cannot settle a question. Do not explore the repository." The Edit tool needs the file read first, so a file the step changes is still read; the saving is the exploratory reads around it. Take the excerpts from `playbook code context "<Work Unit title>"`, trimmed to the step's files, when the code search rule finds an index; else from Read.
+
+## Auditor brief
+
+`repo-audit` runs in the `auditor` agent, which has Bash. Its Phase 1 starts with the code search rule: `playbook code status`, then `playbook code index` when it says stale or missing, then `playbook code context` and `playbook code outline` to map the core modules before reading files. Grep and Glob only when the binary or the index is unavailable.
 
 ## Checks before dispatch
 

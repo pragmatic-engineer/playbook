@@ -552,6 +552,46 @@ fn the_security_flag_applies_the_defaults_and_a_rerun_is_stable() {
 }
 
 #[test]
+fn a_security_rerun_adds_the_code_allow_entry_to_a_block_the_user_never_changed() {
+    // Arrange: an install made before the entry shipped, block equal to its base.
+    const CODE_ENTRY: &str = "Bash(playbook code:*)";
+    let shipped =
+        fs::read_to_string(Path::new(env!("PLAYBOOK_REPO_ROOT")).join("seed/settings.shared.json"))
+            .expect("shipped template is readable");
+    let mut permissions = json(&shipped)["permissions"].clone();
+    let allow = permissions["allow"].as_array_mut().expect("allow list");
+    allow.retain(|entry| entry != CODE_ENTRY);
+    let older_allow = allow.clone();
+    let older = serde_json::json!({ "permissions": permissions }).to_string();
+    let sb = Sandbox::new("sec-code-entry");
+    sb.write(".claude/settings.json", &older);
+    sb.write(".claude/.settings.base.json", &older);
+
+    // Act
+    sb.init("/bin/bash", &["--security"]);
+
+    // Assert
+    let merged = json(&sb.read(".claude/settings.json"));
+    let merged_allow = merged["permissions"]["allow"]
+        .as_array()
+        .expect("allow list");
+    assert_eq!(
+        merged_allow
+            .iter()
+            .filter(|entry| *entry == CODE_ENTRY)
+            .count(),
+        1,
+        "{merged}"
+    );
+    for entry in &older_allow {
+        assert!(
+            merged_allow.contains(entry),
+            "{entry} was dropped: {merged}"
+        );
+    }
+}
+
+#[test]
 fn the_config_key_applies_the_defaults_and_no_security_overrides_it() {
     let sb = Sandbox::new("sec-config");
     sb.config_set("security.defaults", "true");

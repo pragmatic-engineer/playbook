@@ -74,7 +74,8 @@ pub(crate) fn guard(payload: &Payload, file_path: &Path) -> bool {
             }
             emit_pre_deny(&format!(
                 "Already read in full this session and unchanged ({} lines). The text is still in \
-                 context, so use Grep to find a part, or Read with offset and limit for a range. \
+                 context: run `playbook code outline <path>` or use Grep to find a part, or Read \
+                 with offset and limit for a range. \
                  To force a full re-read, call Read again with offset:1 and limit:{}.",
                 current.lines, current.lines
             ));

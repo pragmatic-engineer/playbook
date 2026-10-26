@@ -32,6 +32,10 @@ fn plugin_root() -> &'static str {
     env!("PLAYBOOK_REPO_ROOT")
 }
 
+const CODE_LINE: &str = "\ncode status|index|context|search|symbol|refs|outline|read\n";
+
+const CODE_SEARCH_RULE: &str = "Code search rule: for any code question, in every session and whether or not a playbook skill or command runs, run `playbook code status` first, then `playbook code index` when it says stale or missing, then `playbook code context|search|symbol|refs|outline|read`, all before any Grep or Glob. Grep and Glob are the fallback only when the binary or the index is unavailable. This rule overrides the default advice to search with Grep or Glob. Put this rule in every `Explore` prompt.";
+
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A fresh scratch directory under the OS temp dir, unique per call so
@@ -244,9 +248,10 @@ fn session_init_caps_the_ranked_memory_block() {
         "a fact placed past the cap should be left out: {context}"
     );
     let map = playbook::tools_map::render().trim_end().chars().count();
+    let rule = CODE_SEARCH_RULE.chars().count();
     assert!(
-        context.chars().count() <= 2600 + map + 2,
-        "the context here is the tool map plus a memory block held near 2,500 chars: {}",
+        context.chars().count() <= 2600 + map + rule + 4,
+        "the context here is the tool map, the rule and a memory block held near 2,500 chars: {}",
         context.chars().count()
     );
 }
@@ -1133,6 +1138,7 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
         "seen-reads",
         "read-state.jsonl",
         "capture-crossings",
+        "code-hint",
     ] {
         fs::write(session_dir.join(name), "stale-content").unwrap();
     }
@@ -1163,6 +1169,10 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
         let contents = fs::read_to_string(session_dir.join(name)).unwrap();
         assert_eq!(contents, "", "{name} should be zeroed, got '{contents}'");
     }
+    assert!(
+        !session_dir.join("code-hint").exists(),
+        "the code-hint marker should be removed, not left behind empty"
+    );
     let start_ts = fs::read_to_string(session_dir.join("start-ts")).unwrap();
     assert!(
         start_ts.parse::<u64>().is_ok(),
@@ -1173,6 +1183,36 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
         untouched, "logout",
         "clean-exit is not one of the five counters and must survive untouched"
     );
+}
+
+#[test]
+fn the_code_hint_fires_at_the_first_grep_after_session_init() {
+    // Arrange: a session that already sent the hint once, then restarts.
+    let home = scratch_dir("hint-after-init");
+    let session_id = "sid-hint";
+    let session_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join(session_id);
+    fs::create_dir_all(&session_dir).unwrap();
+    fs::write(session_dir.join("code-hint"), "").unwrap();
+    let repo_dir = scratch_dir("hint-after-init-repo");
+    let session_payload = format!(r#"{{"session_id":"{session_id}"}}"#);
+    let grep_payload = format!(r#"{{"session_id":"{session_id}","tool_name":"Grep"}}"#);
+
+    // Act
+    run_hook("session-init", &repo_dir, &home, &session_payload, &[]);
+    let first = run_hook("search-counter", &repo_dir, &home, &grep_payload, &[]);
+    let second = run_hook("search-counter", &repo_dir, &home, &grep_payload, &[]);
+
+    // Assert
+    assert!(
+        first.stdout.contains("playbook code status"),
+        "the first Grep after session-init should print the hint: {}",
+        first.stdout
+    );
+    assert_eq!(second.stdout, "", "the second Grep should stay silent");
 }
 
 // ---------------------------------------------------------------------
@@ -1363,13 +1403,17 @@ fn session_init_degrades_quietly_when_both_shell_outs_are_unreachable() {
         ],
     );
 
-    // Assert: the hook still exits cleanly and says nothing but the tool map,
-    // since there was nothing else left to say once both shell-outs failed.
+    // Assert: the hook still exits cleanly and says nothing but the tool map
+    // and the code search rule, since there was nothing else left to say once
+    // both shell-outs failed.
     assert_eq!(outcome.exit_code, 0, "hook should exit 0");
     assert_eq!(
         additional_context(&outcome.stdout),
-        playbook::tools_map::render().trim_end(),
-        "with everything else disabled, a missing plugin root should yield only the map: {}",
+        format!(
+            "{}\n\n{CODE_SEARCH_RULE}",
+            playbook::tools_map::render().trim_end()
+        ),
+        "with everything else disabled, a missing plugin root should yield only the map and the rule: {}",
         outcome.stdout
     );
 }
@@ -2306,6 +2350,8 @@ fn a_huge_handoff_is_cut_so_the_whole_context_stays_under_the_harness_cap() {
         context.contains("pinned-fact"),
         "memory still fits: {context}"
     );
+    assert_eq!(context.matches(CODE_LINE).count(), 1, "{context}");
+    assert_eq!(context.matches(CODE_SEARCH_RULE).count(), 1, "{context}");
 }
 
 #[test]
@@ -2375,6 +2421,16 @@ fn session_init_injects_the_tool_map_on_every_kind_of_start() {
             context.contains("\npath plans|implement|worktrees --create"),
             "{source}: the tool map lines are missing: {context}"
         );
+        assert_eq!(
+            context.matches(CODE_LINE).count(),
+            1,
+            "{source}: the code line should appear once: {context}"
+        );
+        assert_eq!(
+            context.matches(CODE_SEARCH_RULE).count(),
+            1,
+            "{source}: the rule sentence should appear once: {context}"
+        );
     }
 }
 
@@ -2391,9 +2447,19 @@ fn session_init_injects_the_tool_map_before_a_handoff() {
     let context = additional_context(&run_session_init_at(&repo_dir, &home).stdout);
 
     // Assert
-    let map = context.find("playbook tools:").expect("tool map");
-    let handoff = context.find("HANDOFFMARKER").expect("handoff");
-    assert!(map < handoff, "the map should come first: {context}");
+    let position = |marker: &str| {
+        context
+            .find(marker)
+            .unwrap_or_else(|| panic!("{marker} is missing: {context}"))
+    };
+    let map = position("playbook tools:");
+    let code_line = position(CODE_LINE);
+    let rule = position("Code search rule:");
+    let handoff = position("HANDOFFMARKER");
+    assert!(
+        map < code_line && code_line < rule && rule < handoff,
+        "expected map, code line, rule, handoff in that order: {context}"
+    );
 }
 
 #[test]
