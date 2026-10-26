@@ -1165,11 +1165,14 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
         "seen-reads",
         "read-state.jsonl",
         "capture-crossings",
-        "code-hint",
     ] {
         let contents = fs::read_to_string(session_dir.join(name)).unwrap();
         assert_eq!(contents, "", "{name} should be zeroed, got '{contents}'");
     }
+    assert!(
+        !session_dir.join("code-hint").exists(),
+        "the code-hint marker should be removed, not left behind empty"
+    );
     let start_ts = fs::read_to_string(session_dir.join("start-ts")).unwrap();
     assert!(
         start_ts.parse::<u64>().is_ok(),
@@ -1180,6 +1183,36 @@ fn session_init_zeroes_exactly_the_six_counter_files() {
         untouched, "logout",
         "clean-exit is not one of the five counters and must survive untouched"
     );
+}
+
+#[test]
+fn the_code_hint_fires_at_the_first_grep_after_session_init() {
+    // Arrange: a session that already sent the hint once, then restarts.
+    let home = scratch_dir("hint-after-init");
+    let session_id = "sid-hint";
+    let session_dir = home
+        .join(".config")
+        .join("playbook")
+        .join("runtime")
+        .join(session_id);
+    fs::create_dir_all(&session_dir).unwrap();
+    fs::write(session_dir.join("code-hint"), "").unwrap();
+    let repo_dir = scratch_dir("hint-after-init-repo");
+    let session_payload = format!(r#"{{"session_id":"{session_id}"}}"#);
+    let grep_payload = format!(r#"{{"session_id":"{session_id}","tool_name":"Grep"}}"#);
+
+    // Act
+    run_hook("session-init", &repo_dir, &home, &session_payload, &[]);
+    let first = run_hook("search-counter", &repo_dir, &home, &grep_payload, &[]);
+    let second = run_hook("search-counter", &repo_dir, &home, &grep_payload, &[]);
+
+    // Assert
+    assert!(
+        first.stdout.contains("playbook code status"),
+        "the first Grep after session-init should print the hint: {}",
+        first.stdout
+    );
+    assert_eq!(second.stdout, "", "the second Grep should stay silent");
 }
 
 // ---------------------------------------------------------------------

@@ -83,7 +83,7 @@ fn nudge(n: i64) {
 }
 
 /// Marker file in the session directory; its existence means the hint went out.
-const HINT_MARKER: &str = "code-hint";
+pub(super) const HINT_MARKER: &str = "code-hint";
 
 const CODE_HINT: &str = "For a code question, run `playbook code status` (then `playbook code index` when it says stale or missing) and `playbook code context \"<task>\"`, `symbol`, `refs`, `search`, `outline` or `read` before more Grep or Glob. Grep and Glob are the fallback when the binary or the index is unavailable. Put the same rule in any `Explore` prompt.";
 

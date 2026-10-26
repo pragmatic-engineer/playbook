@@ -46,7 +46,7 @@ const MEMORY_BLOCK_MIN_CHARS: usize = 300;
 
 /// The per-session counter/state files zeroed at the start of every session.
 /// `capture-crossings` has no python counterpart, so this no longer matches the retired shell original one-for-one.
-const SESSION_COUNTER_FILES: [&str; 9] = [
+const SESSION_COUNTER_FILES: [&str; 8] = [
     "search-count",
     "tool-count",
     "edit-count",
@@ -55,7 +55,6 @@ const SESSION_COUNTER_FILES: [&str; 9] = [
     "read-state.jsonl",
     "capture-crossings",
     "hygiene-level",
-    "code-hint",
 ];
 
 /// Per-session auto mode state: the spend baseline, the warn and budget notes,
@@ -245,7 +244,7 @@ fn prepare_memory_store() {
     let _ = fs::create_dir_all(crate::common::paths::memory_dir());
 }
 
-/// Zeroes the per-session counter files and stamps `start-ts`. A no-op when there is no session directory (no session id in the payload).
+/// Zeroes the per-session counter files, clears the code hint marker and stamps `start-ts`. A no-op when there is no session directory (no session id in the payload).
 fn zero_session_state(dir: &str) {
     if dir.is_empty() {
         return;
@@ -258,6 +257,8 @@ fn zero_session_state(dir: &str) {
             .truncate(true)
             .open(base.join(name));
     }
+    // Removed, not truncated: the hint fires only when it can create the marker.
+    let _ = fs::remove_file(base.join(super::search_counter::HINT_MARKER));
     let now = crate::common::time::now_epoch_secs();
     let _ = fs::write(base.join("start-ts"), now.to_string());
 }
