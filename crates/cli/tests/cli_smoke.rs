@@ -575,6 +575,9 @@ fn table() -> Vec<Case> {
         case("usage stop", &["usage", "stop"]).out("not running"),
         case("sessions", &["sessions"]).writes().out("No recent sessions"),
         case("sessions list", &["sessions", "list"]).out("No recent sessions").writes(),
+        case("sessions sweep", &["sessions", "sweep", "--dry-run"])
+            .out("No finished or stale sessions")
+            .writes(),
         // network or repo-bound tools, failing fast with a message
         case("eval review-triage", &["eval", "review-triage"]).code(1).err("gh is required"),
         case("eval bench", &["eval", "bench"]).code(1).err("No such file"),

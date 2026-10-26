@@ -742,11 +742,52 @@ pub fn remove(
     target_path: &Path,
     now_epoch: i64,
 ) -> Result<String, String> {
+    let (entry, report) = decide_target(repo_root, home, repo_slug, target_path, now_epoch, false)?;
+    let Some(entry) = entry else {
+        return Ok(report);
+    };
+    if report.ends_with(": removed") {
+        remove_data_of(repo_root, home, repo_slug, &entry.path);
+        Ok(report)
+    } else {
+        Err(report.trim_start_matches("worktree ").to_string())
+    }
+}
+
+/// What [`remove`] would do with `target_path`, as one report line, with
+/// nothing removed: "would remove (dry run)", the guard that keeps it, or why
+/// it is not a worktree the sweep manages.
+pub(crate) fn would_remove(
+    repo_root: &Path,
+    home: &Path,
+    repo_slug: Option<&str>,
+    target_path: &Path,
+    now_epoch: i64,
+) -> String {
+    match decide_target(repo_root, home, repo_slug, target_path, now_epoch, true) {
+        Ok((_, report)) => report,
+        Err(err) => err,
+    }
+}
+
+/// The shared core of [`remove`] and [`would_remove`]: finds the entry, then
+/// decides and, unless `dry_run`, acts. `None` for the entry means cleanup is
+/// turned off and the line says so.
+fn decide_target(
+    repo_root: &Path,
+    home: &Path,
+    repo_slug: Option<&str>,
+    target_path: &Path,
+    now_epoch: i64,
+    dry_run: bool,
+) -> Result<(Option<WorktreeEntry>, String), String> {
     let policy = resolve_policy(home, repo_slug).map_err(|err| err.to_string())?;
     if !policy.enabled {
-        return Ok("worktree remove: worktreeCleanup.enabled is false, nothing to do".to_string());
+        return Ok((
+            None,
+            "worktree remove: worktreeCleanup.enabled is false, nothing to do".to_string(),
+        ));
     }
-
     let entries = list_worktrees(repo_root)?;
     let target = target_path
         .canonicalize()
@@ -778,13 +819,8 @@ pub fn remove(
         default: default.as_deref(),
     };
     let landed = is_landed(&entry, convention, &lock, &policy, &repo, now_epoch, 0);
-    let report = decide_and_report(&entry, landed, &lock, repo_root, false);
-    if report.ends_with(": removed") {
-        remove_data_of(repo_root, home, repo_slug, &entry.path);
-        Ok(report)
-    } else {
-        Err(report.trim_start_matches("worktree ").to_string())
-    }
+    let report = decide_and_report(&entry, landed, &lock, repo_root, dry_run);
+    Ok((Some(entry), report))
 }
 
 /// Appends one line per removal to `~/.config/playbook/worktree-sweep.log`

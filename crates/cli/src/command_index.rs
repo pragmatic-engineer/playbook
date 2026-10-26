@@ -331,6 +331,7 @@ pub(crate) const META: &[Meta] = &[
         .purpose("List recent sessions with their branch, PR, state and cost")
         .for_users(),
     ro("sessions list"),
+    ro("sessions sweep"),
     free("settings").for_agents(),
     ro("settings check"),
     free("settings gen"),
