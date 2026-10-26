@@ -149,7 +149,7 @@ const PORTED_HOOK_SPECS: &[HookSpec] = &[
         matcher: Some("Read|Grep|Glob|Edit|Write|NotebookEdit"),
         name: "search-counter",
         group: Group::Usage,
-        purpose: "Counts exploration calls and suggests the Explore subagent once, at the eighth.",
+        purpose: "Counts exploration calls, names the code search rule once per session at the first Grep or Glob, and suggests the Explore subagent once, at the eighth.",
         if_cond: None,
         timeout: None,
         also_replaces: None,
