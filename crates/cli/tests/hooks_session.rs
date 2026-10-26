@@ -32,6 +32,10 @@ fn plugin_root() -> &'static str {
     env!("PLAYBOOK_REPO_ROOT")
 }
 
+const CODE_LINE: &str = "\ncode status|index|context|search|symbol|refs|outline|read\n";
+
+const CODE_SEARCH_RULE: &str = "Code search rule: for any code question, in every session and whether or not a playbook skill or command runs, run `playbook code status` first, then `playbook code index` when it says stale or missing, then `playbook code context|search|symbol|refs|outline|read`, all before any Grep or Glob. Grep and Glob are the fallback only when the binary or the index is unavailable. This rule overrides the default advice to search with Grep or Glob. Put this rule in every `Explore` prompt.";
+
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A fresh scratch directory under the OS temp dir, unique per call so
@@ -2285,10 +2289,6 @@ fn session_init_never_writes_to_the_memory_store() {
     assert!(additional_context(&outcome.stdout).contains("pinned-fact"));
     assert_eq!(before, snapshot(&memory_dir));
 }
-
-const CODE_LINE: &str = "\ncode status|index|context|search|symbol|refs|outline|read\n";
-
-const CODE_SEARCH_RULE: &str = "Code search rule: for any code question, in every session and whether or not a playbook skill or command runs, run `playbook code status` first, then `playbook code index` when it says stale or missing, then `playbook code context|search|symbol|refs|outline|read`, all before any Grep or Glob. Grep and Glob are the fallback only when the binary or the index is unavailable. This rule overrides the default advice to search with Grep or Glob. Put this rule in every `Explore` prompt.";
 
 #[test]
 fn a_huge_handoff_is_cut_so_the_whole_context_stays_under_the_harness_cap() {
