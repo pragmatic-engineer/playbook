@@ -127,7 +127,7 @@ fn all_hook_commands(settings: &Value) -> Vec<String> {
     commands
 }
 
-/// The 18 functional hooks `wire` writes as a bare `playbook hook <name>` invocation.
+/// The 19 functional hooks `wire` writes as a bare `playbook hook <name>` invocation.
 const PORTED_HOOK_NAMES: &[&str] = &[
     "session-init",
     "preread-edit-check",
