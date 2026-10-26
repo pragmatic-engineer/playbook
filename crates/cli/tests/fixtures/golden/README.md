@@ -93,6 +93,12 @@ dependency (every call site moved to `playbook json`, and the installer now
 uses `playbook trust`), so the shared settings and permissions templates no
 longer grant it. This is an intentional behaviour change, not a drift to hide.
 
+**Note (2026-10-26):** the two `init.*.json` fixtures were regenerated from
+the live `playbook setup` output after the `session-activity` hook was wired
+on `UserPromptSubmit`, `Stop` and `Notification`. The only change is those
+three hook entries; the base settings did not change. This is an intentional
+behaviour change, not a drift to hide.
+
 **Note (2026-10-06):** the two `init.*.json` fixtures were regenerated
 again to add what auto mode ships: the `auto-guard` hook on `AskUserQuestion`
 and on `UserPromptSubmit`, the `auto-cost` hook on every `PreToolUse`, and the
