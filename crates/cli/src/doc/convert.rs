@@ -175,7 +175,9 @@ const EXIT_RESOURCE_LIMIT: i32 = 4;
 /// Added to `docs.maxMemoryMb` for the address space cap, so mapped libraries
 /// and thread stacks do not trip it before the memory cap does.
 const ADDRESS_SPACE_HEADROOM: u64 = 512 * 1024 * 1024;
-const REASON_MEMORY: &str = "memory";
+/// The line pbdoc's own watchdog prints. The outer watchdog reports the same
+/// reason, so the message does not depend on which of the two fires first.
+const REASON_MEMORY: &str = "memory limit reached";
 const REASON_CRASH: &str = "memory limit or crash";
 
 /// The signals a child gets when it runs out of address space or memory.
