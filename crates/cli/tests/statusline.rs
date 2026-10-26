@@ -160,6 +160,9 @@ fn payload(cwd: &Path, rest: &str) -> String {
 
 const FULL: &str = r#""session_id":"sess-full","model":{"display_name":"Opus 4.8"},"effort":{"level":"high"},"thinking":{"enabled":true},"context_window":{"used_percentage":72.5,"total_input_tokens":250000,"context_window_size":1000000,"current_usage":{"cache_creation_input_tokens":10,"cache_read_input_tokens":990}},"cost":{"total_cost_usd":1.2345,"total_duration_ms":600000},"rate_limits":{"five_hour":{"used_percentage":55.4,"resets_at":1000},"seven_day":{"used_percentage":60}}"#;
 
+/// A reset time far enough ahead (year 2100) to be open whenever the tests run.
+const WINDOW_STILL_OPEN: i64 = 4_102_444_800;
+
 // ---- golden output ---------------------------------------------------------
 
 #[test]
@@ -869,7 +872,14 @@ fn statusline_status(home: &Path, payload: &str) -> std::process::ExitStatus {
 fn a_reading_adds_one_history_line_and_a_second_one_right_after_adds_none() {
     let s = Scratch::new();
     let data = s.0.join(".config/playbook/data");
-    let body = payload(&s.0, FULL);
+    // The window must still be open, or the merge ignores the reading.
+    let body = payload(
+        &s.0,
+        &FULL.replace(
+            r#""resets_at":1000"#,
+            &format!(r#""resets_at":{WINDOW_STILL_OPEN}"#),
+        ),
+    );
 
     assert!(statusline_status(&s.0, &body).success());
     assert!(statusline_status(&s.0, &body).success());
