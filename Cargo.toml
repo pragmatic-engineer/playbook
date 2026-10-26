@@ -16,10 +16,11 @@ license = "Apache-2.0"
 [workspace.lints.clippy]
 uninlined_format_args = "warn"
 manual_let_else = "warn"
-undocumented_unsafe_blocks = "warn"
 
 # Items that no other crate can reach stay pub(crate), so dead_code sees them.
 [workspace.lints.rust]
+# No unsafe code anywhere. forbid, unlike deny, cannot be lifted by an `#[allow]`.
+unsafe_code = "forbid"
 unreachable_pub = "warn"
 
 

@@ -406,7 +406,7 @@ const SESSION_PAYLOAD: &str = r#"{"session_id":"smoke","hook_event_name":"Sessio
 /// Every hook name, with the JSON Claude Code would send it.
 #[rustfmt::skip]
 fn hook_cases() -> Vec<Case> {
-    let hooks: [(&str, &str); 26] = [
+    let hooks: [(&str, &str); 27] = [
         ("session-init", SESSION_PAYLOAD),
         ("preread-edit-check", EDIT_PAYLOAD),
         ("preread-size-check", EDIT_PAYLOAD),
@@ -431,6 +431,7 @@ fn hook_cases() -> Vec<Case> {
         ("context-hygiene", SESSION_PAYLOAD),
         ("doc-read-hint", EDIT_PAYLOAD),
         ("usage-warm", SESSION_PAYLOAD),
+        ("session-activity", SESSION_PAYLOAD),
         // Retired, kept so an old plugin cache or settings entry stays quiet:
         // no output, no files.
         ("migration-check", SESSION_PAYLOAD),

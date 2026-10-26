@@ -123,7 +123,7 @@ The agent files live in `plugins/playbook/agents`. The binary renders effort var
 
 ## Project-Specific Code Style
 
-No project-specific code style rules beyond the baseline. See [.github/CONTRIBUTING-RULES.md](.github/CONTRIBUTING-RULES.md#code-style-baseline) for SPDX header, dependency policy, and commit signing requirements.
+Unsafe code is not allowed: the workspace sets `unsafe_code = "forbid"`, which an `#[allow]` cannot lift. Use std or the safe `rustix` wrappers. There are no other project-specific code style rules beyond the baseline. See [.github/CONTRIBUTING-RULES.md](.github/CONTRIBUTING-RULES.md#code-style-baseline) for SPDX header, dependency policy, and commit signing requirements.
 
 ## Project-Specific Tests
 

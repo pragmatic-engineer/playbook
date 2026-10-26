@@ -12,6 +12,7 @@
 //! impure part (`gather`) looks up the working directory, the worktree and the
 //! pull request, each bounded by a timeout, and reads `unknown` on failure.
 
+pub(crate) mod activity;
 pub mod links;
 mod sweep;
 

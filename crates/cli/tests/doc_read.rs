@@ -379,11 +379,15 @@ fn a_converter_that_runs_too_long_is_stopped_and_cleaned_up() {
     assert!(env.leftovers().is_empty());
 }
 
+/// Holds 300 MB until it is killed, with no watchdog of its own.
+const MEMORY_HOG_BODY: &str =
+    "python3 -c \"b = b'x' * (300*1024*1024); import time; time.sleep(30)\"";
+
 #[test]
 fn a_converter_that_uses_too_much_memory_is_stopped() {
     // Arrange
     let env = Env::new("mem");
-    env.fake("python3 -c \"b = b'x' * (300*1024*1024); import time; time.sleep(30)\"");
+    env.fake(MEMORY_HOG_BODY);
     env.config("docs.maxMemoryMb", Value::from(64));
     let doc = env.doc("big.pdf", b"%PDF-1.4");
 
@@ -1028,6 +1032,27 @@ fn a_bundled_converter_that_exits_4_is_reported_as_a_safety_limit() {
     // Arrange
     let env = Env::new("bundled-exit4");
     env.fake_bundled(&own_pbdoc_version(), EXIT_RESOURCE_LIMIT_BODY);
+    let doc = env.doc("report.pdf", b"%PDF-1.4");
+
+    // Act
+    let out = env.read_bundled(&doc);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(
+        text(&out).contains(&format!("{SAFETY_LIMIT_PREFIX}{MEMORY_LIMIT_REASON}")),
+        "{}",
+        text(&out)
+    );
+    assert!(env.leftovers().is_empty());
+}
+
+#[test]
+fn a_bundled_converter_stopped_by_the_outer_watchdog_gives_the_helpers_own_reason() {
+    // Arrange
+    let env = Env::new("bundled-outer-mem");
+    env.fake_bundled(&own_pbdoc_version(), MEMORY_HOG_BODY);
+    env.config("docs.maxMemoryMb", Value::from(64));
     let doc = env.doc("report.pdf", b"%PDF-1.4");
 
     // Act
