@@ -38,10 +38,8 @@ pub fn run(payload: &Payload) {
     incr_counter(&tool_count_file);
 
     let is_text_search = tool == "Grep" || tool == "Glob";
-    let mut bump_search = false;
-    if is_text_search {
-        bump_search = true;
-    } else if tool == "Read" {
+    let mut bump_search = is_text_search;
+    if tool == "Read" {
         let path = payload.field(".tool_input.file_path");
         if !path.is_empty() {
             let abs_path = abspath(&path);
