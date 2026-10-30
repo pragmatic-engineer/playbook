@@ -107,6 +107,8 @@ jobs:
           MG_BASE: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
+          # The docs-only pattern below is also kept in shell-ci.yml and in the
+          # paths-ignore list of osv-scan.yml. Change all three together.
           docs_only=false
           case "$EVENT" in
             pull_request) base="$PR_BASE" ;;
