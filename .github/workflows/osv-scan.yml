@@ -16,7 +16,8 @@ on:
     # A docs-only pull request cannot change a dependency, and the scan is
     # not a required check, so it is skipped there. The push to main, the
     # weekly run and a manual run still scan everything. The patterns match
-    # the docs-only rule in rust-ci.yml (`changes` job).
+    # the docs-only rule in rust-ci.yml and shell-ci.yml. Change all three
+    # together.
     paths-ignore:
       - "docs/**/*.md"
       - "README.md"
