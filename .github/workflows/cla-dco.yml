@@ -1,230 +1,32 @@
 # SPDX-License-Identifier: Apache-2.0
 name: CLA & DCO
 
-# SAFETY: no job here uses pull_request_target. The two PR checks run on plain
-# pull_request with read-only permissions and no checkout: they read commits
-# and the base ref's CONTRIBUTORS.md through the REST API. Signing runs on
-# issue_comment, which uses the default-branch workflow; its only write
-# (contents) is scoped to the one signing job. Every untrusted value (comment
-# body, login, commit message) reaches a script through `env`, never through
-# an expression inside the script.
+# Calls the shared checks in dco-cla.yml and the signing job in cla-sign.yml.
+# Other repos copy this file and call
+# `pragmatic-engineer/.github/.github/workflows/<name>.yml@<commit>` instead of
+# the local paths. Pin the commit like any other action and bump it when the
+# shared workflows change. The job id must stay `cla-dco` so the required checks
+# read `cla-dco / dco` and `cla-dco / cla-check` in every repo.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  merge_group:
   issue_comment:
     types: [created]
 
 permissions: {}
 
 jobs:
-  # Job keys are unique across the workflow set so check-run names stay
-  # unambiguous.
-  dco:
-    if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
-    runs-on: ubuntu-latest
-    # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
-    timeout-minutes: 5
+  cla-dco:
+    if: github.event_name != 'issue_comment'
     permissions:
       contents: read
       pull-requests: read
-    steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            github.com:443
-      - name: Check DCO (Signed-off-by on all commits)
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const commits = await github.paginate(github.rest.pulls.listCommits, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
-              per_page: 100,
-            });
-
-            const missing = [];
-            for (const c of commits) {
-              // Skip bot-authored commits. auto-update-pr.yml,
-              // dependabot, and the igorjs App create merge / sync
-              // commits via the GitHub API that can't carry a
-              // Signed-off-by trailer; gating on them would block
-              // every PR the auto-updater touches. Mirrors Probot
-              // DCO behaviour. Check both author and committer
-              // because merge commits have a separate committer.
-              if (c.author?.type === 'Bot' || c.committer?.type === 'Bot') {
-                continue;
-              }
-              // Skip merge commits. A merge made through the GitHub UI
-              // (or `git merge` locally) cannot carry a Signed-off-by
-              // trailer, and it only combines commits that were already
-              // signed off on their own PRs, so gating on it would block
-              // any PR that merges the base branch back in.
-              if ((c.parents?.length || 0) >= 2) {
-                continue;
-              }
-              const msg = c.commit.message || '';
-              if (!msg.includes('Signed-off-by:')) {
-                missing.push(c.sha.substring(0, 7));
-              }
-            }
-
-            if (missing.length > 0) {
-              const text = [
-                '### DCO check failed',
-                '',
-                'These commits are missing a `Signed-off-by` trailer: ' + missing.join(', '),
-                '',
-                'Amend them with `git commit --amend --signoff` (or `git rebase --signoff`) and push again.',
-              ].join('\n');
-              await core.summary.addRaw(text + '\n', true).write();
-              core.setFailed('DCO: missing Signed-off-by on ' + missing.join(', '));
-            } else {
-              core.info('DCO: every commit is signed off');
-            }
-
-  cla-check:
-    if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            github.com:443
-      - name: Check CLA signature (default branch, no checkout)
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          BASE_BRANCH: ${{ github.event.repository.default_branch }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-        with:
-          script: |
-            const author = process.env.PR_AUTHOR.toLowerCase();
-            const { data: file } = await github.rest.repos.getContent({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              path: '.github/CONTRIBUTORS.md',
-              ref: process.env.BASE_BRANCH,
-            });
-            const content = Buffer.from(file.content, 'base64').toString('utf-8');
-
-            // Parse table rows between CLA-BOT markers
-            const match = content.match(/CLA-BOT:START[\s\S]*?CLA-BOT:END/);
-            const hasSigned = match
-              ? match[0].toLowerCase().split('\n').some(l => /^\|\s*@([^\s|]+)\s*\|/.exec(l.trim())?.[1] === author)
-              : false;
-
-            if (!hasSigned) {
-              const text = [
-                '### CLA not signed',
-                '',
-                '@' + author + ', sign the Individual CLA (.github/ICLA.md) before this PR can be merged.',
-                'Reply to this PR with: `I have read the CLA Document and I hereby sign the CLA.`',
-                'Then push a new commit, or ask a maintainer to re-run this check. For an employer, see .github/CCLA.md.',
-              ].join('\n');
-              await core.summary.addRaw(text + '\n', true).write();
-              core.setFailed('CLA: @' + author + ' has not signed');
-            } else {
-              core.info('CLA: @' + author + ' has signed');
-            }
+    uses: pragmatic-engineer/.github/.github/workflows/dco-cla.yml@b2e9519585cfd55743223f5c42d3696c7cfbcb86 # main
 
   cla-sign:
-    if: >
-      github.event_name == 'issue_comment' && github.event.issue.pull_request &&
-      contains(github.event.comment.body, 'I have read the CLA Document and I hereby sign the CLA')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    if: github.event_name == 'issue_comment'
     permissions:
       contents: write
       pull-requests: write
-    concurrency:
-      group: cla-signature-${{ github.event.comment.user.login }}
-      cancel-in-progress: false
-    steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            github.com:443
-      - name: Record CLA signature
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          SIGNER: ${{ github.event.comment.user.login }}
-          SIGNER_TYPE: ${{ github.event.comment.user.type }}
-          BASE_BRANCH: ${{ github.event.repository.default_branch }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        with:
-          script: |
-            const author = process.env.SIGNER;
-            if (process.env.SIGNER_TYPE === 'Bot') {
-              core.info('Bots cannot sign the CLA.');
-              return;
-            }
-            const branch = process.env.BASE_BRANCH;
-            const filePath = '.github/CONTRIBUTORS.md';
-            const date = new Date().toISOString().split('T')[0];
-            const newRow = '| @' + author + ' | ' + date + ' |';
-            const maxRetries = 3;
-
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-              try {
-                const { data: file } = await github.rest.repos.getContent({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  path: filePath,
-                  ref: branch,
-                });
-
-                const content = Buffer.from(file.content, 'base64').toString('utf-8');
-
-                if (content.toLowerCase().split('\n').some(l => /^\|\s*@([^\s|]+)\s*\|/.exec(l.trim())?.[1] === author.toLowerCase())) {
-                  core.info('@' + author + ' already signed (detected on attempt ' + attempt + ').');
-                  break;
-                }
-
-                const updated = content.replace(
-                  '<!-- CLA-BOT:END',
-                  newRow + '\n<!-- CLA-BOT:END',
-                );
-
-                await github.rest.repos.createOrUpdateFileContents({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  path: filePath,
-                  message: 'chore: record CLA signature for @' + author + ' [skip ci]',
-                  content: Buffer.from(updated).toString('base64'),
-                  sha: file.sha,
-                  branch,
-                  committer: {
-                    name: 'github-actions[bot]',
-                    email: '41898282+github-actions[bot]@users.noreply.github.com',
-                  },
-                });
-
-                core.info('CLA signature recorded for @' + author + ' on attempt ' + attempt + '.');
-
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: Number(process.env.ISSUE_NUMBER),
-                  body: 'Thank you @' + author + '! Your CLA signature has been recorded in [CONTRIBUTORS.md](.github/CONTRIBUTORS.md). Push a new commit to this PR, or ask a maintainer to re-run the `cla-check` job, to refresh its status.',
-                });
-
-                break;
-              } catch (err) {
-                if (err.status === 409 && attempt < maxRetries) {
-                  core.warning('Conflict on attempt ' + attempt + ', retrying...');
-                  await new Promise(r => setTimeout(r, 1000 * attempt));
-                  continue;
-                }
-                throw err;
-              }
-            }
+    uses: pragmatic-engineer/.github/.github/workflows/cla-sign.yml@b2e9519585cfd55743223f5c42d3696c7cfbcb86 # main
