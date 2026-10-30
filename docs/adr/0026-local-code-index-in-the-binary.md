@@ -1,8 +1,8 @@
 # ADR-0026: Ship a Local Code Index in the Binary, Accepting About 5 MB of Size
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by [ADR 0056](0056-share-one-code-index-across-worktrees.md) (decision 2, index location)
 - **Date created:** 2026-10-12
-- **Date modified:** 2026-10-12
+- **Date modified:** 2026-10-30
 
 ## Context
 
